@@ -16,6 +16,8 @@ class RoadmapPlannerTests(unittest.TestCase):
             model_provider="openai",
             model="gpt-5",
             api_key_env="OPENAI_API_KEY",
+            model_retry_attempts=3,
+            model_retry_base_delay_seconds=1.0,
         )
         intent = ProjectIntent(
             features=["feature one"],

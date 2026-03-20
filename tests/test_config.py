@@ -26,6 +26,8 @@ class ConfigTests(unittest.TestCase):
                         "api_key_env: CUSTOM_OPENAI_KEY",
                         "model_temperature: 0.2",
                         "model_max_tokens: 2048",
+                        "model_retry_attempts: 5",
+                        "model_retry_base_delay_seconds: 2.5",
                     ]
                 ),
                 encoding="utf-8",
@@ -42,6 +44,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.api_key_env, "CUSTOM_OPENAI_KEY")
             self.assertEqual(config.model_temperature, 0.2)
             self.assertEqual(config.model_max_tokens, 2048)
+            self.assertEqual(config.model_retry_attempts, 5)
+            self.assertEqual(config.model_retry_base_delay_seconds, 2.5)
 
 
 if __name__ == "__main__":

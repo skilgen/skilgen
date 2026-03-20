@@ -15,6 +15,7 @@ class ValidateCliTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertIn("valid", payload)
         self.assertIn("completeness_score", payload)
+        self.assertIn("recommendations", payload)
 
 
 if __name__ == "__main__":

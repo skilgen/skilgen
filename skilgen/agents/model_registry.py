@@ -18,6 +18,8 @@ DEFAULT_KEY_ENV = {
     "openrouter": "OPENROUTER_API_KEY",
 }
 
+SUPPORTED_PROVIDERS = tuple(sorted({"openai", "anthropic", "google_genai", "huggingface", "groq", "openrouter"}))
+
 
 def normalize_provider(provider: str | None) -> str:
     raw = (provider or "openai").strip().lower()
@@ -44,4 +46,10 @@ def resolve_model_settings(config: SkilgenConfig) -> ModelSettings:
         api_key_present=bool(os.getenv(api_key_env)),
         temperature=config.model_temperature,
         max_tokens=config.model_max_tokens,
+        retry_attempts=config.model_retry_attempts,
+        retry_base_delay_seconds=config.model_retry_base_delay_seconds,
     )
+
+
+def provider_supported(provider: str | None) -> bool:
+    return normalize_provider(provider) in SUPPORTED_PROVIDERS

@@ -6,7 +6,7 @@ This script is the public compatibility entrypoint for the requirements runner:
 1. Ingest the requirements source.
 2. Extract domain signals from the document.
 3. Generate project docs and the skill tree.
-4. Materialize project docs and the skill tree.
+4. Materialize starter code scaffolding under `skilgen/`.
 
 ### Usage
 ```bash
@@ -21,6 +21,11 @@ Replace `docs/product-requirements.docx` with your own requirements file path.
 - The script supports `.docx`, `.md`, and `.txt` inputs.
 - Generated `references` always stay relative to the current skill file.
 - The output is designed to be rerun as the requirements evolve.
+
+## Maintainer Workflow
+The forever-running autoresearch-style builder loop is intentionally kept outside the public package surface:
+
+`maintainers/autoresearch_delivery_loop.py`
 
 ### Related commands
 ```bash

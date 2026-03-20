@@ -59,9 +59,12 @@ def build_roadmap_plan(config: SkilgenConfig, intent: ProjectIntent) -> RoadmapP
     payload = run_deep_json(
         "roadmap planning",
         (
-            "Build a phase-based implementation roadmap for Skilgen and return JSON with keys "
-            "model and steps. model should include provider, model, api_key_env, api_key_present. "
-            "steps should be a list of objects with phase, title, description, status.\n\n"
+            "Build a phase-based implementation roadmap for Skilgen. Return JSON with keys model and steps. "
+            "model should include provider, model, api_key_env, api_key_present. steps should be a list of "
+            "objects with phase, title, description, status. Optimize for execution order, dependency awareness, "
+            "and clear agent handoff. Prefer phases that break the work into coherent capability slices rather than "
+            "generic milestones. When endpoints or UI flows exist, reflect them in roadmap steps that strengthen "
+            "coverage, validation, and skill generation quality.\n\n"
             f"Intent features: {intent.features}\n"
             f"Intent domain_concepts: {intent.domain_concepts}\n"
             f"Intent entities: {intent.entities}\n"

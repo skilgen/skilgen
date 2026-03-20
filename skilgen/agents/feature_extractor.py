@@ -114,8 +114,11 @@ def extract_features(requirements_path: Path | None, project_root: Path) -> list
     payload = run_deep_json(
         "feature model synthesis",
         (
-            "Synthesize a feature model for Skilgen and return JSON with key features. "
-            "features must be a list of objects with name, domain, location, description, status, last_modified.\n\n"
+            "Synthesize a feature model for Skilgen from requirements intent and concrete code signals. Return JSON "
+            "with key `features`, where features is a list of objects with name, domain, location, description, "
+            "status, last_modified. Favor features that would materially influence skill generation, implementation "
+            "planning, or agent guidance. Group features into realistic engineering domains, prefer file-backed "
+            "locations when possible, and keep descriptions actionable for coding agents rather than product-marketing summaries.\n\n"
             f"Requirements path: {resolved_requirements}\n"
             f"Intent features: {intent.features}\n"
             f"Intent endpoints: {intent.endpoints}\n"

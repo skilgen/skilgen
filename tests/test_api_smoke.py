@@ -48,6 +48,17 @@ class ApiSmokeTests(unittest.TestCase):
                 health = get_json(f"{base}/health")
                 self.assertEqual(health["status"], "ok")
                 self.assertEqual(health["api_version"], "1.0")
+                self.assertIn("runtime", health)
+
+                doctor = get_json(f"{base}/doctor?{urlencode({'project_root': str(root)})}")
+                self.assertIn("runtime", doctor)
+                self.assertIn("recommendations", doctor)
+                self.assertIn("retry_attempts", doctor)
+                self.assertIn("retry_base_delay_seconds", doctor)
+
+                decision = get_json(f"{base}/decide?{urlencode({'project_root': str(root), 'requirements': str(requirements)})}")
+                self.assertIn("should_refresh", decision)
+                self.assertIn("prioritized_skill_paths", decision)
 
                 fingerprint = post_json(f"{base}/fingerprint", {"project_root": str(root)})
                 self.assertIn("build_tool", fingerprint)
@@ -57,6 +68,7 @@ class ApiSmokeTests(unittest.TestCase):
 
                 analysis = post_json(f"{base}/analyze", {"project_root": str(root), "requirements": str(requirements)})
                 self.assertIn("signals", analysis)
+                self.assertIn("domain_graph", analysis)
                 self.assertEqual(analysis["api_version"], "1.0")
 
                 intent = post_json(f"{base}/intent", {"requirements": str(requirements)})
@@ -64,9 +76,11 @@ class ApiSmokeTests(unittest.TestCase):
 
                 plan = post_json(f"{base}/plan", {"requirements": str(requirements), "project_root": str(root)})
                 self.assertTrue(plan["steps"])
+                self.assertIn("runtime_diagnostics", plan)
 
                 features = post_json(f"{base}/features", {"requirements": str(requirements), "project_root": str(root)})
                 self.assertTrue(features["features"])
+                self.assertIn("runtime_diagnostics", features)
 
                 preview = post_json(f"{base}/preview", {"requirements": str(requirements), "project_root": str(root), "targets": ["docs"]})
                 self.assertTrue(preview["planned_files"])
@@ -74,6 +88,7 @@ class ApiSmokeTests(unittest.TestCase):
 
                 deliver = post_json(f"{base}/deliver", {"requirements": str(requirements), "project_root": str(root)})
                 self.assertTrue(deliver["generated_files"])
+                self.assertIn("runtime_diagnostics", deliver)
 
                 deliver_job = post_json(f"{base}/jobs/deliver", {"requirements": str(requirements), "project_root": str(root)})
                 self.assertIn(deliver_job["status"], {"queued", "running", "completed"})
@@ -101,6 +116,16 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertTrue(status["report_exists"])
                 self.assertTrue(status["traceability_exists"])
                 self.assertGreaterEqual(status["skill_count"], 1)
+                self.assertIn("runtime_diagnostics", status)
+                self.assertIn("freshness", status)
+                self.assertIn("project_memory", status)
+                self.assertIn("current_run_memory", status)
+                self.assertIsNotNone(status["current_run_memory"])
+                self.assertIsNotNone(status["project_memory"])
+                self.assertIn("agent_decision", status)
+                self.assertIn("pending_validations", status["current_run_memory"])
+                self.assertIn("resumable_steps", status["current_run_memory"])
+                self.assertIn(".skilgen/memory/project_memory.json", status["project_memory"]["memory_files"])
 
                 report = get_json(f"{base}/report?{urlencode({'project_root': str(root)})}")
                 self.assertIn("summary", report)
@@ -112,6 +137,7 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertIn("warnings", validate)
                 self.assertIn("coverage", validate)
                 self.assertIn("completeness_score", validate)
+                self.assertIn("recommendations", validate)
             finally:
                 server.shutdown()
                 server.server_close()

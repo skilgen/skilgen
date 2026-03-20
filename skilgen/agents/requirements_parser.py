@@ -19,10 +19,14 @@ def parse_requirements_file(path: Path) -> ProjectIntent:
     payload = run_deep_json(
         "requirements interpretation",
         (
-            "Interpret the following requirements and return JSON with keys: "
-            "features, domain_concepts, entities, endpoints, ui_flows. "
-            "Each key must contain a short list of strings.\n\n"
-        f"Requirements file: {resolved}\n"
+            "Interpret the following requirements for Skilgen's planning layer. Return JSON with keys "
+            "features, domain_concepts, entities, endpoints, ui_flows. Each key must contain a short list of "
+            "implementation-relevant strings. Prefer concrete nouns, capabilities, routes, workflows, and "
+            "business concepts over vague summaries. Extract both explicit requirements and strongly implied "
+            "delivery expectations, but do not invent unsupported details. If the requirements mention a flow, "
+            "translate it into a reusable UI or product flow label. If the requirements imply API or backend "
+            "behavior, extract endpoint-oriented or service-oriented phrases that a coding agent could act on.\n\n"
+            f"Requirements file: {resolved}\n"
             f"Content:\n{text}"
         ),
         lambda: {
@@ -77,9 +81,11 @@ def parse_project_intent(project_root: Path, requirements_path: Path | None = No
     payload = run_deep_json(
         "codebase intent interpretation",
         (
-            "Interpret the repository structure and return JSON with keys: "
-            "features, domain_concepts, entities, endpoints, ui_flows. "
-            "Each key must contain a short list of strings grounded in the detected codebase.\n\n"
+            "Interpret the repository structure for Skilgen's intent layer and return JSON with keys "
+            "features, domain_concepts, entities, endpoints, ui_flows. Each key must contain a short list of "
+            "strings grounded in the detected codebase. Infer likely product and engineering concerns from the "
+            "actual structure: routes, components, services, tests, auth, data models, and design-system files. "
+            "Prefer names that would help a coding agent choose the right skills and plan the next implementation step.\n\n"
             f"Project root: {resolved_root}\n"
             f"Backend routes: {signals.backend_routes}\n"
             f"Frontend routes: {signals.frontend_routes}\n"

@@ -27,6 +27,7 @@ from skilgen.generators.package import (
 )
 from skilgen.generators.skills import planned_skill_paths, write_skills
 from skilgen.deep_agents_core import _close_model, _normalize_json_with_model, deep_agents_unavailable_reason
+from skilgen.deep_agents_core import _classify_model_error, _invoke_with_retry, runtime_diagnostics
 
 try:
     from deepagents import create_deep_agent
@@ -79,15 +80,17 @@ class DeepAgentsRuntime:
 
     @property
     def enabled(self) -> bool:
-        if create_deep_agent is None or init_chat_model is None or tool is None:
-            return False
-        key_env = self.model_settings.api_key_env
-        return bool(key_env and os.getenv(key_env))
+        return create_deep_agent is not None and init_chat_model is not None and tool is not None and deep_agents_unavailable_reason() is None
 
     def _build_model(self) -> Any:
-        model_name = self.model_settings.model or "gpt-4o-mini"
+        model_name = self.model_settings.model or "gpt-4.1-mini"
         provider = self.model_settings.provider or "openai"
-        return init_chat_model(f"{provider}:{model_name}")
+        kwargs: dict[str, object] = {}
+        if self.model_settings.temperature is not None:
+            kwargs["temperature"] = self.model_settings.temperature
+        if self.model_settings.max_tokens is not None:
+            kwargs["max_tokens"] = self.model_settings.max_tokens
+        return init_chat_model(f"{provider}:{model_name}", **kwargs)
 
     def _make_tools(self) -> list[Any]:
         if tool is None:
@@ -213,7 +216,13 @@ class DeepAgentsRuntime:
                 "6. Avoid speculative architecture claims that are not supported by tool results."
             ),
         )
-        result = agent.invoke({"messages": [{"role": "user", "content": f"Task: {task}\n\n{prompt}"}]})
+        result = _invoke_with_retry(
+            lambda: agent.invoke({"messages": [{"role": "user", "content": f"Task: {task}\n\n{prompt}"}]}),
+            attempts=self.model_settings.retry_attempts,
+            delay_seconds=self.model_settings.retry_base_delay_seconds,
+            provider=self.model_settings.provider,
+            api_key_env=self.model_settings.api_key_env,
+        )
         messages = result.get("messages", []) if isinstance(result, dict) else []
         if not messages:
             return fallback()
@@ -232,9 +241,13 @@ class DeepAgentsRuntime:
             if normalized_source:
                 return _normalize_json_with_model(task, normalized_source)
             raise ValueError("Agent response did not contain a usable JSON object")
-        except Exception:
+        except Exception as exc:
             if require_agent:
-                raise
+                error = _classify_model_error(exc, self.model_settings.provider, self.model_settings.api_key_env)
+                raise RuntimeError(
+                    f"{error['message']} Task=`{task}` Category={error['category']} "
+                    f"Recommendations={' | '.join(error['recommendations'])}"
+                ) from exc
             return fallback()
         finally:
             _close_model(model)
@@ -262,6 +275,7 @@ def native_analyze_payload(project_root: str | Path, requirements: str | Path | 
     if requirements is not None:
         context = load_requirements(Path(requirements).resolve())
         codebase_context = build_codebase_context(root, context)
+        payload["domain_graph"] = _serialize(codebase_context.domain_graph)
         payload["detected_domains"] = _serialize(codebase_context.detected_domains)
         payload["skill_tree"] = _serialize(codebase_context.skill_tree)
     return payload
@@ -344,6 +358,7 @@ def native_status_payload(project_root: str | Path) -> dict[str, Any]:
         "skill_files": skill_files,
         "summary_count": len(summary_files),
         "summary_files": summary_files,
+        "runtime_diagnostics": runtime_diagnostics(root),
     }
 
 

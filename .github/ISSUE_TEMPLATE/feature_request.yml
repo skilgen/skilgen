@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a new Skilgen capability or improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing an idea. Help us understand the problem first, then the feature.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      placeholder: Agents working in large repos need...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      placeholder: Skilgen should...
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Example workflow
+      description: Describe how a user would use this feature in practice.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Tell us what you tried or what workarounds exist today.

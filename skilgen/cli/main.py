@@ -6,11 +6,11 @@ import sys
 from pathlib import Path
 
 from skilgen.api.server import run_server
-from skilgen.api.service import analyze_payload, preview_payload, report_payload, status_payload, validate_payload
+from skilgen.api.service import analyze_payload, decision_payload, doctor_payload, preview_payload, report_payload, status_payload, validate_payload
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
-from skilgen.deep_agents_core import current_runtime_mode
+from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
 
@@ -73,6 +73,10 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--project-root", default=".")
     analyze.add_argument("--requirements")
 
+    decide = subparsers.add_parser("decide", help="Recommend whether to refresh skills, which skills to prioritize, and which run memory to load.")
+    decide.add_argument("--project-root", default=".")
+    decide.add_argument("--requirements")
+
     intent = subparsers.add_parser("intent", help="Parse a requirements file into a structured project intent.")
     intent.add_argument("--requirements", required=True)
     features = subparsers.add_parser("features", help="Extract a feature inventory from requirements and project context.")
@@ -90,6 +94,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate = subparsers.add_parser("validate", help="Validate generated outputs and skill references.")
     validate.add_argument("--project-root", default=".")
+
+    doctor = subparsers.add_parser("doctor", help="Diagnose runtime readiness, model configuration, and API-key setup.")
+    doctor.add_argument("--project-root", default=".")
 
     serve = subparsers.add_parser("serve", help="Run the HTTP API server.")
     serve.add_argument("--host", default="127.0.0.1")
@@ -127,6 +134,12 @@ def main() -> None:
         return
     if args.command == "analyze":
         print(json.dumps(analyze_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None), indent=2))
+        return
+    if args.command == "decide":
+        emit_progress(
+            f"Starting agent decision planning with the {current_runtime_mode()} runtime. Skilgen is deciding whether the skill tree should refresh and what the agent should load first."
+        )
+        print(json.dumps(decision_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None), indent=2))
         return
     if args.command == "intent":
         result = parse_requirements_file(Path(args.requirements).resolve())
@@ -180,6 +193,10 @@ def main() -> None:
     if args.command == "report":
         print(json.dumps(report_payload(Path(args.project_root).resolve()), indent=2))
         return
+    if args.command == "doctor":
+        payload = doctor_payload(Path(args.project_root).resolve())
+        print(json.dumps(payload, indent=2))
+        return
     if args.command == "validate":
         print(json.dumps(validate_payload(Path(args.project_root).resolve()), indent=2))
         return
@@ -221,9 +238,12 @@ def main() -> None:
         print(json.dumps({"runtime": current_runtime_mode(), "runs": [[str(path) for path in generated] for generated in runs]}, indent=2))
         return
 
+    diagnostics = runtime_diagnostics(Path(args.project_root).resolve())
     emit_progress(
         f"Starting delivery with the {current_runtime_mode()} runtime. This may take a bit while Skilgen builds project context and generates the final skill tree."
     )
+    if diagnostics["runtime"] != "model_backed":
+        emit_progress(f"Model-backed runtime is not ready: {diagnostics['reason']}")
     generated = run_delivery(
         Path(args.requirements).resolve() if args.requirements else None,
         Path(args.project_root),
@@ -232,7 +252,16 @@ def main() -> None:
         dry_run=args.dry_run,
         progress_callback=emit_progress,
     )
-    print(json.dumps({"runtime": current_runtime_mode(), "generated_files": [str(path) for path in generated]}, indent=2))
+    print(
+        json.dumps(
+            {
+                "runtime": current_runtime_mode(),
+                "runtime_diagnostics": diagnostics,
+                "generated_files": [str(path) for path in generated],
+            },
+            indent=2,
+        )
+    )
 
 
 def console_main() -> None:

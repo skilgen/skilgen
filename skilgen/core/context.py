@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from skilgen.agents.codebase_signals import analyze_codebase
+from skilgen.agents.domain_graph_planner import build_domain_graph
 from skilgen.agents.framework_fingerprint import fingerprint_project
-from skilgen.core.models import CodebaseContext, DomainRecord, RequirementsContext, SkillTreeNode
+from skilgen.core.models import (
+    CodebaseContext,
+    DomainGraph,
+    DomainGraphNode,
+    DomainRecord,
+    RequirementsContext,
+    SkillTreeNode,
+)
 
 
 def _build_file_tree(project_root: Path) -> list[str]:
@@ -15,98 +22,72 @@ def _build_file_tree(project_root: Path) -> list[str]:
     )
 
 
-def _domain_records(requirements: RequirementsContext) -> list[DomainRecord]:
-    records: list[DomainRecord] = [
-        DomainRecord(
-            name="requirements",
-            confidence=0.99,
-            key_files=[requirements.requirements_path.name],
-            key_patterns=["requirements-first generation", "skill scaffolding"],
-            sub_domains=["planning"],
-        )
-    ]
-    if requirements.domains.get("backend"):
+def _domain_records(domain_graph: DomainGraph) -> list[DomainRecord]:
+    records: list[DomainRecord] = []
+    for node in domain_graph.nodes:
         records.append(
             DomainRecord(
-                name="backend",
-                confidence=0.8,
-                key_files=["skilgen/api/server.py", "skills/backend/SKILL.md"],
-                key_patterns=["endpoint quality gate", "service boundaries"],
-                sub_domains=["api", "testing"],
+                name=node.name,
+                confidence=node.confidence,
+                key_files=node.key_files,
+                key_patterns=node.key_patterns,
+                sub_domains=node.child_domains,
             )
         )
-    if requirements.domains.get("frontend"):
-        records.append(
-            DomainRecord(
-                name="frontend",
-                confidence=0.8,
-                key_files=["skills/frontend/SKILL.md"],
-                key_patterns=["route-driven structure", "shared components"],
-                sub_domains=["components"],
-            )
-        )
-    records.append(
-        DomainRecord(
-            name="roadmap",
-            confidence=0.8,
-            key_files=["skills/roadmap/SKILL.md"],
-            key_patterns=["phase-based delivery", "plan persistence"],
-            sub_domains=["phase-0", "phase-1", "phase-2", "phase-3"],
-        )
-    )
     return records
 
 
-def _skill_tree(project_root: Path) -> list[SkillTreeNode]:
-    signals = analyze_codebase(project_root)
-    backend_children = ["skills/backend/api/SKILL.md", "skills/backend/testing/SKILL.md"]
-    if signals.backend_routes:
-        backend_children.append("skills/backend/routes/SKILL.md")
-    if signals.services:
-        backend_children.append("skills/backend/services/SKILL.md")
+def _skill_tree(domain_graph: DomainGraph) -> list[SkillTreeNode]:
+    nodes_by_name: dict[str, DomainGraphNode] = {node.name: node for node in domain_graph.nodes}
+    tree: list[SkillTreeNode] = []
+    for node in domain_graph.nodes:
+        if not node.skill_path:
+            continue
+        parent_skill = None
+        if node.parent_domain:
+            parent = nodes_by_name.get(node.parent_domain)
+            if parent is not None:
+                parent_skill = parent.skill_path
+        child_skills = [
+            child.skill_path
+            for child_name in node.child_domains
+            if (child := nodes_by_name.get(child_name)) is not None and child.skill_path is not None
+        ]
+        cross_references = [
+            related.skill_path
+            for related_name in node.related_domains
+            if (related := nodes_by_name.get(related_name)) is not None and related.skill_path is not None
+        ]
+        tree.append(
+            SkillTreeNode(
+                path=node.skill_path,
+                domain=node.name,
+                parent_skill=parent_skill,
+                child_skills=child_skills,
+                cross_references=cross_references,
+            )
+        )
+    return tree
 
-    frontend_children = ["skills/frontend/components/SKILL.md"]
-    if signals.frontend_routes:
-        frontend_children.append("skills/frontend/routes/SKILL.md")
 
-    return [
-        SkillTreeNode(
-            path="skills/requirements/SKILL.md",
-            domain="requirements",
-            parent_skill=None,
-            child_skills=[],
-            cross_references=["skills/backend/SKILL.md", "skills/frontend/SKILL.md", "skills/roadmap/SKILL.md"],
-        ),
-        SkillTreeNode(
-            path="skills/backend/SKILL.md",
-            domain="backend",
-            parent_skill=None,
-            child_skills=backend_children,
-            cross_references=["skills/requirements/SKILL.md", "skills/roadmap/SKILL.md"],
-        ),
-        SkillTreeNode(
-            path="skills/frontend/SKILL.md",
-            domain="frontend",
-            parent_skill=None,
-            child_skills=frontend_children,
-            cross_references=["skills/requirements/SKILL.md", "skills/roadmap/SKILL.md"],
-        ),
-        SkillTreeNode(
-            path="skills/roadmap/SKILL.md",
-            domain="roadmap",
-            parent_skill=None,
-            child_skills=[],
-            cross_references=["skills/requirements/SKILL.md"],
-        ),
-    ]
+def _dependency_map(domain_graph: DomainGraph) -> dict[str, list[str]]:
+    dependency_map: dict[str, list[str]] = {}
+    for node in domain_graph.nodes:
+        deps = list(dict.fromkeys([*node.child_domains, *node.related_domains]))
+        if deps:
+            dependency_map[node.name] = deps
+    return dependency_map
 
 
 def build_codebase_context(project_root: Path, requirements: RequirementsContext) -> CodebaseContext:
+    root = project_root.resolve()
+    domain_graph = build_domain_graph(root, requirements)
     return CodebaseContext(
-        project_root=project_root.resolve(),
-        file_tree=_build_file_tree(project_root.resolve()),
-        detected_domains=_domain_records(requirements),
-        dependency_map={"skills": ["requirements", "backend", "frontend", "roadmap"]},
-        framework_fingerprint=fingerprint_project(project_root.resolve()),
-        skill_tree=_skill_tree(project_root.resolve()),
+        project_root=root,
+        file_tree=_build_file_tree(root),
+        domain_graph=domain_graph,
+        detected_domains=_domain_records(domain_graph),
+        dependency_map=_dependency_map(domain_graph),
+        framework_fingerprint=fingerprint_project(root),
+        skill_tree=_skill_tree(domain_graph),
     )

@@ -5,6 +5,7 @@ from pathlib import Path
 from skilgen.api.service import (
     analyze_payload,
     cancel_job_payload,
+    decision_payload,
     create_deliver_job,
     features_payload,
     fingerprint_payload,
@@ -43,6 +44,11 @@ def map_codebase(project_root: str | Path = ".") -> dict[str, object]:
 def analyze_project(project_root: str | Path = ".", requirements: str | Path | None = None) -> dict[str, object]:
     resolved_requirements = Path(requirements).resolve() if requirements is not None else None
     return analyze_payload(Path(project_root).resolve(), resolved_requirements)
+
+
+def decide_project(project_root: str | Path = ".", requirements: str | Path | None = None) -> dict[str, object]:
+    resolved_requirements = Path(requirements).resolve() if requirements is not None else None
+    return decision_payload(Path(project_root).resolve(), resolved_requirements)
 
 
 def parse_intent(requirements: str | Path) -> dict[str, object]:

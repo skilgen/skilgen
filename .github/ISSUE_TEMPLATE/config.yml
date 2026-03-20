@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Skilgen discussions
+    url: https://github.com/skilgen/skilgen/discussions
+    about: Ask questions, share ideas, or discuss roadmap topics.

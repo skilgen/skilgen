@@ -1,24 +1,19 @@
 import json
 import subprocess
 import sys
-from pathlib import Path
-from tempfile import TemporaryDirectory
+import tempfile
 import unittest
+from pathlib import Path
 
 
 class PlanCliTests(unittest.TestCase):
     def test_plan_command_outputs_steps(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            requirements = root / "requirements.md"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            requirements = Path(tmpdir) / "requirements.md"
             requirements.write_text(
-                "\n".join(
-                    [
-                        "Feature: Skill generation",
-                        "Backend API endpoint for project analysis",
-                        "Frontend dashboard flow for repository review",
-                    ]
-                ),
+                "# Requirements\n\n"
+                "- Add endpoint-aware feature extraction.\n"
+                "- Add dashboard UI flow.\n",
                 encoding="utf-8",
             )
             result = subprocess.run(
@@ -30,15 +25,15 @@ class PlanCliTests(unittest.TestCase):
                     "--requirements",
                     str(requirements),
                     "--project-root",
-                    str(root),
+                    tmpdir,
                 ],
                 text=True,
                 capture_output=True,
                 check=True,
             )
-            payload = json.loads(result.stdout)
-            self.assertIn("model", payload)
-            self.assertTrue(payload["steps"])
+        payload = json.loads(result.stdout)
+        self.assertIn("model", payload)
+        self.assertTrue(payload["steps"])
 
 
 if __name__ == "__main__":

@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import Callable
 
 from skilgen.api.jobs import get_job, job_payload, list_jobs, request_cancel, submit_job
-from skilgen.deep_agents_core import current_runtime_mode
+from skilgen.agents.decision_planner import build_agent_decision
+from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.deep_agents_runtime import (
     DeepAgentsRuntime,
     native_analyze_payload,
@@ -19,6 +20,11 @@ from skilgen.deep_agents_runtime import (
     native_validate_payload,
 )
 from skilgen.delivery import run_delivery
+from skilgen.core.freshness import compute_freshness_report, load_freshness_state
+from skilgen.core.context import build_codebase_context
+from skilgen.core.project_memory import load_project_memory
+from skilgen.core.requirements import load_project_context
+from skilgen.core.run_memory import load_current_run_memory
 
 
 API_VERSION = "1.0"
@@ -29,7 +35,20 @@ def _with_api_meta(payload: dict[str, object]) -> dict[str, object]:
 
 
 def health_payload() -> dict[str, object]:
-    return _with_api_meta({"status": "ok", "service": "skilgen"})
+    return _with_api_meta({"status": "ok", "service": "skilgen", "runtime": current_runtime_mode()})
+
+
+def doctor_payload(project_root: str | Path) -> dict[str, object]:
+    return _with_api_meta(runtime_diagnostics(Path(project_root).resolve()))
+
+
+def decision_payload(project_root: str | Path, requirements: str | Path | None = None) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    req = Path(requirements).resolve() if requirements is not None else None
+    requirements_context = load_project_context(root, req)
+    codebase_context = build_codebase_context(root, requirements_context)
+    decision = build_agent_decision(root, requirements_context, codebase_context.domain_graph, codebase_context.skill_tree)
+    return _with_api_meta(decision.__dict__)
 
 
 def fingerprint_payload(project_root: str | Path) -> dict[str, object]:
@@ -72,6 +91,7 @@ def plan_payload(requirements: str | Path | None, project_root: str | Path) -> d
     return _with_api_meta(
         {
             "runtime": current_runtime_mode(),
+            "runtime_diagnostics": runtime_diagnostics(root),
             "events": events,
             **result,
         }
@@ -105,6 +125,7 @@ def deliver_payload(requirements: str | Path | None, project_root: str | Path) -
     return _with_api_meta(
         {
             "runtime": current_runtime_mode(),
+            "runtime_diagnostics": runtime_diagnostics(Path(project_root).resolve()),
             "events": events,
             "generated_files": [str(path) for path in generated],
         }
@@ -198,6 +219,7 @@ def features_payload(requirements: str | Path | None, project_root: str | Path) 
     return _with_api_meta(
         {
             "runtime": current_runtime_mode(),
+            "runtime_diagnostics": runtime_diagnostics(root),
             "events": events,
             **result,
         }
@@ -219,12 +241,23 @@ def map_payload(project_root: str | Path) -> dict[str, object]:
 def status_payload(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root).resolve()
     runtime = DeepAgentsRuntime(root)
+    requirements_context = load_project_context(root, None)
+    codebase_context = build_codebase_context(root, requirements_context)
+    freshness = compute_freshness_report(root, requirements_context, codebase_context.domain_graph, load_freshness_state(root))
+    current_run = load_current_run_memory(root)
+    project_memory = load_project_memory(root)
     return _with_api_meta(
-        runtime.run(
-            "status",
-            f"Summarize generated artifact status for project_root={root}.",
-            lambda: native_status_payload(root),
-        )
+        {
+            **runtime.run(
+                "status",
+                f"Summarize generated artifact status for project_root={root}.",
+                lambda: native_status_payload(root),
+            ),
+            "freshness": freshness.__dict__,
+            "project_memory": project_memory.__dict__ if project_memory is not None else None,
+            "current_run_memory": current_run.__dict__ if current_run is not None else None,
+            "agent_decision": build_agent_decision(root, requirements_context, codebase_context.domain_graph, codebase_context.skill_tree).__dict__,
+        }
     )
 
 

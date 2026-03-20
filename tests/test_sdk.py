@@ -5,6 +5,7 @@ import unittest
 from skilgen.sdk import (
     analyze_project,
     cancel_job,
+    decide_project,
     deliver_project,
     get_job_status,
     init_project,
@@ -37,6 +38,10 @@ class SdkTests(unittest.TestCase):
             self.assertIn("signals", analysis)
             self.assertEqual(analysis["api_version"], "1.0")
 
+            decision = decide_project(root, requirements)
+            self.assertIn("should_refresh", decision)
+            self.assertTrue(decision["prioritized_skill_paths"])
+
             preview = preview_project(requirements, root, targets=("docs",))
             self.assertTrue(preview["planned_files"])
             self.assertFalse((root / "ANALYSIS.md").exists())
@@ -67,6 +72,14 @@ class SdkTests(unittest.TestCase):
             status = project_status(root)
             self.assertIn("skill_count", status)
             self.assertTrue(status["traceability_exists"])
+            self.assertIn("project_memory", status)
+            self.assertIsNotNone(status["project_memory"])
+            self.assertIn("current_run_memory", status)
+            self.assertIsNotNone(status["current_run_memory"])
+            self.assertIn("agent_decision", status)
+            self.assertIn("pending_validations", status["current_run_memory"])
+            self.assertIn("resumable_steps", status["current_run_memory"])
+            self.assertIn(".skilgen/memory/project_memory.json", status["project_memory"]["memory_files"])
 
             report = project_report(root)
             self.assertIn("summary", report)

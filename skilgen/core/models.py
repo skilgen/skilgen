@@ -74,6 +74,8 @@ class SkilgenConfig:
     api_key_env: str | None
     model_temperature: float | None = None
     model_max_tokens: int | None = None
+    model_retry_attempts: int = 3
+    model_retry_base_delay_seconds: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,8 @@ class ModelSettings:
     api_key_present: bool
     temperature: float | None
     max_tokens: int | None
+    retry_attempts: int
+    retry_base_delay_seconds: float
 
 
 @dataclass(frozen=True)
@@ -110,6 +114,25 @@ class DomainRecord:
 
 
 @dataclass(frozen=True)
+class DomainGraphNode:
+    name: str
+    summary: str
+    confidence: float
+    key_files: list[str]
+    key_patterns: list[str]
+    parent_domain: str | None
+    child_domains: list[str]
+    related_domains: list[str]
+    skill_path: str | None = None
+
+
+@dataclass(frozen=True)
+class DomainGraph:
+    nodes: list[DomainGraphNode]
+    recommendations: list[str]
+
+
+@dataclass(frozen=True)
 class SkillTreeNode:
     path: str
     domain: str
@@ -122,6 +145,7 @@ class SkillTreeNode:
 class CodebaseContext:
     project_root: Path
     file_tree: list[str]
+    domain_graph: DomainGraph
     detected_domains: list[DomainRecord]
     dependency_map: dict[str, list[str]]
     framework_fingerprint: FrameworkFingerprint
@@ -149,3 +173,63 @@ class DeliveryResult:
     test_command: str | None = None
     tests_passed: bool = False
     branch_name: str | None = None
+
+
+@dataclass(frozen=True)
+class FreshnessState:
+    source_hashes: dict[str, str]
+    requirements_source_hash: str
+    domain_graph_nodes: list[dict[str, object]]
+    top_level_domains: list[str]
+
+
+@dataclass(frozen=True)
+class FreshnessReport:
+    changed_files: list[str]
+    impacted_domains: list[str]
+    stale_skill_paths: list[str]
+    top_level_domains: list[str]
+    reason: str
+
+
+@dataclass(frozen=True)
+class RunMemory:
+    run_id: str
+    status: str
+    project_root: str
+    requirements_path: str | None
+    objective: str
+    runtime: str
+    impacted_domains: list[str]
+    selected_domains: list[str]
+    selected_skill_paths: list[str]
+    changed_files: list[str]
+    generated_files: list[str]
+    active_file_focus: list[str]
+    unresolved_questions: list[str]
+    pending_validations: list[str]
+    resumable_steps: list[str]
+    recent_events: list[str]
+
+
+@dataclass(frozen=True)
+class ProjectMemory:
+    project_root: str
+    input_mode: str
+    top_level_domains: list[str]
+    prioritized_skill_paths: list[str]
+    generated_docs: list[str]
+    refresh_policy: list[str]
+    recent_objectives: list[str]
+    architectural_notes: list[str]
+    memory_files: list[str]
+
+
+@dataclass(frozen=True)
+class AgentDecision:
+    should_refresh: bool
+    reason: str
+    prioritized_domains: list[str]
+    prioritized_skill_paths: list[str]
+    memory_to_load: list[str]
+    next_actions: list[str]

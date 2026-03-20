@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a bug in Skilgen's CLI, API, SDK, or generated outputs.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail for us to reproduce the issue quickly.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the bug and the behavior you expected.
+      placeholder: Skilgen generated an incomplete skill tree after...
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command or API call
+      description: The exact CLI command, API request, or SDK call that triggered the bug.
+      placeholder: skilgen deliver --project-root .
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Python version, provider, model, and OS.
+      placeholder: Python 3.13, openai/gpt-4.1-mini, macOS 15
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Paste the error, traceback, or incorrect output.
+      render: shell
+  - type: textarea
+    id: inputs
+    attributes:
+      label: Inputs
+      description: Describe the codebase, requirements file, or generated files involved.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else?
+      description: Add any extra context that may help reproduce the issue.

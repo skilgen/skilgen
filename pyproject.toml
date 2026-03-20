@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skilgen"
-version = "0.1.0"
+version = "0.2.0"
 description = "Generate agent-readable project skills and starter scaffolds from requirements documents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -38,9 +38,9 @@ dev = ["build>=1.2", "twine>=5.1"]
 skilgen = "skilgen.cli.main:console_main"
 
 [project.urls]
-Homepage = "https://github.com/skilgen/skilgen"
-Repository = "https://github.com/skilgen/skilgen"
-Issues = "https://github.com/skilgen/skilgen/issues"
+Homepage = "https://github.com/RaviChanduUmmadisetti/skilgen"
+Repository = "https://github.com/RaviChanduUmmadisetti/skilgen"
+Issues = "https://github.com/RaviChanduUmmadisetti/skilgen/issues"
 
 [tool.setuptools]
 license-files = ["LICENSE"]

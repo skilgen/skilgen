@@ -17,11 +17,15 @@ class ModelRegistryTests(unittest.TestCase):
             model_provider="openai",
             model="gpt-5",
             api_key_env=None,
+            model_retry_attempts=4,
+            model_retry_base_delay_seconds=1.5,
         )
         settings = resolve_model_settings(config)
         self.assertEqual(settings.provider, "openai")
         self.assertEqual(settings.model, "gpt-5")
         self.assertEqual(settings.api_key_env, "OPENAI_API_KEY")
+        self.assertEqual(settings.retry_attempts, 4)
+        self.assertEqual(settings.retry_base_delay_seconds, 1.5)
 
     def test_resolve_model_settings_reports_api_key_presence(self) -> None:
         os.environ["TEST_MODEL_KEY"] = "present"
@@ -35,6 +39,8 @@ class ModelRegistryTests(unittest.TestCase):
             model_provider="custom",
             model="local-model",
             api_key_env="TEST_MODEL_KEY",
+            model_retry_attempts=3,
+            model_retry_base_delay_seconds=1.0,
         )
         settings = resolve_model_settings(config)
         self.assertTrue(settings.api_key_present)

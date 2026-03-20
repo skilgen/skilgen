@@ -17,6 +17,8 @@ DEFAULT_CONFIG = SkilgenConfig(
     api_key_env="OPENAI_API_KEY",
     model_temperature=None,
     model_max_tokens=None,
+    model_retry_attempts=3,
+    model_retry_base_delay_seconds=1.0,
 )
 
 
@@ -57,6 +59,8 @@ def load_config(project_root: Path) -> SkilgenConfig:
         "api_key_env": DEFAULT_CONFIG.api_key_env,
         "model_temperature": DEFAULT_CONFIG.model_temperature,
         "model_max_tokens": DEFAULT_CONFIG.model_max_tokens,
+        "model_retry_attempts": DEFAULT_CONFIG.model_retry_attempts,
+        "model_retry_base_delay_seconds": DEFAULT_CONFIG.model_retry_base_delay_seconds,
     }
     current_list: str | None = None
 
@@ -95,6 +99,8 @@ def load_config(project_root: Path) -> SkilgenConfig:
         api_key_env=data.get("api_key_env") if isinstance(data.get("api_key_env"), str) or data.get("api_key_env") is None else None,
         model_temperature=float(data.get("model_temperature")) if isinstance(data.get("model_temperature"), (float, int)) else None,
         model_max_tokens=int(data.get("model_max_tokens")) if isinstance(data.get("model_max_tokens"), int) else None,
+        model_retry_attempts=int(data.get("model_retry_attempts", DEFAULT_CONFIG.model_retry_attempts)),
+        model_retry_base_delay_seconds=float(data.get("model_retry_base_delay_seconds", DEFAULT_CONFIG.model_retry_base_delay_seconds)),
     )
 
 
@@ -116,4 +122,6 @@ model: gpt-4.1-mini
 api_key_env: OPENAI_API_KEY
 model_temperature:
 model_max_tokens:
+model_retry_attempts: 3
+model_retry_base_delay_seconds: 1.0
 """

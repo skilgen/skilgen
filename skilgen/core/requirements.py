@@ -108,7 +108,10 @@ def synthesize_requirements_context(project_root: Path) -> RequirementsContext:
     file_tree = sorted(
         path.relative_to(root).as_posix()
         for path in root.rglob("*")
-        if path.is_file() and ".git/" not in path.as_posix()
+        if path.is_file()
+        and ".git/" not in path.as_posix()
+        and not path.relative_to(root).as_posix().startswith(("skills/", ".skilgen/"))
+        and path.name not in {"AGENTS.md", "ANALYSIS.md", "FEATURES.md", "REPORT.md", "TRACEABILITY.md"}
     )
     backend_detected = any(
         marker in path.lower()

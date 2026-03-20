@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from skilgen.agents.codebase_signals import analyze_codebase
+from skilgen.deep_agents_core import runtime_diagnostics
 
 
 def _parse_references(skill: Path) -> list[str]:
@@ -42,13 +43,17 @@ def validate_project(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root).resolve()
     errors: list[str] = []
     warnings: list[str] = []
+    recommendations: list[str] = []
     manifest = root / "skills" / "MANIFEST.md"
+    agents_contract = root / "AGENTS.md"
     if not manifest.exists():
         errors.append("skills/MANIFEST.md is missing")
     if not (root / "skills" / "GRAPH.md").exists():
         errors.append("skills/GRAPH.md is missing")
     if not (root / "TRACEABILITY.md").exists():
         warnings.append("TRACEABILITY.md is missing")
+    if not agents_contract.exists():
+        errors.append("AGENTS.md is missing")
 
     resolved_refs: dict[Path, set[Path]] = {}
     if (root / "skills").exists():
@@ -73,6 +78,10 @@ def validate_project(project_root: str | Path) -> dict[str, object]:
                 )
 
     signals = analyze_codebase(root)
+    diagnostics = runtime_diagnostics(root)
+    if diagnostics["runtime"] != "model_backed":
+        warnings.append(f"Model-backed runtime is not ready: {diagnostics['reason']}")
+        recommendations.extend(diagnostics["recommendations"])
     if signals.backend_routes and not (root / "skills" / "backend" / "routes" / "SKILL.md").exists():
         warnings.append("Backend route files were detected but skills/backend/routes/SKILL.md is missing")
     if signals.services and not (root / "skills" / "backend" / "services" / "SKILL.md").exists():
@@ -91,6 +100,20 @@ def validate_project(project_root: str | Path) -> dict[str, object]:
         warnings.append("State files were detected but frontend guidance is missing")
     if signals.design_system_files and not (root / "skills" / "frontend" / "components" / "SKILL.md").exists():
         warnings.append("Design system files were detected but frontend component guidance is missing")
+    if agents_contract.exists():
+        contract_text = agents_contract.read_text(encoding="utf-8")
+        required_refs = [
+            "skills/MANIFEST.md",
+            "skills/requirements/SKILL.md",
+            "skills/roadmap/SKILL.md",
+        ]
+        if signals.backend_routes or signals.services or signals.auth_files:
+            required_refs.append("skills/backend/SKILL.md")
+        if signals.frontend_routes or signals.components or signals.state_files:
+            required_refs.append("skills/frontend/SKILL.md")
+        for required_ref in required_refs:
+            if required_ref not in contract_text:
+                warnings.append(f"AGENTS.md does not reference {required_ref}")
 
     coverage = {
         "backend_routes": len(signals.backend_routes),
@@ -118,6 +141,12 @@ def validate_project(project_root: str | Path) -> dict[str, object]:
     satisfied = sum(1 for matched in applicable if matched)
     base_score = int((satisfied / len(applicable)) * 100) if applicable else 100
     completeness_score = max(0, base_score - (len(warnings) * 5) - (len(errors) * 20))
+    if signals.backend_routes and signals.tests:
+        completeness_score = min(100, completeness_score + 5)
+    if agents_contract.exists():
+        completeness_score = min(100, completeness_score + 5)
+    if not recommendations:
+        recommendations.append("Runtime, agent contract, and generated skill coverage look healthy.")
 
     return {
         "valid": not errors,
@@ -125,4 +154,6 @@ def validate_project(project_root: str | Path) -> dict[str, object]:
         "warnings": warnings,
         "coverage": coverage,
         "completeness_score": completeness_score,
+        "runtime_diagnostics": diagnostics,
+        "recommendations": recommendations,
     }

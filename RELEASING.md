@@ -23,3 +23,4 @@
 ## Notes
 
 - The public package remains `skilgen`.
+- Maintainer-only automation stays under `maintainers/` and is not part of the installable surface.

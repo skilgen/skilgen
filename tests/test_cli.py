@@ -25,7 +25,7 @@ class CliTests(unittest.TestCase):
             capture_output=True,
             check=True,
         )
-        self.assertIn("0.1.0", result.stdout)
+        self.assertIn("0.2.0", result.stdout)
 
     def test_analyze_outputs_signal_payload(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -211,6 +211,28 @@ class CliTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertTrue(payload["generated_files"])
             self.assertTrue((root / "FEATURES.md").exists())
+
+    def test_doctor_outputs_runtime_diagnostics(self) -> None:
+        with TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "doctor",
+                    "--project-root",
+                    tmp,
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertIn("runtime", payload)
+            self.assertIn("recommendations", payload)
+            self.assertIn("api_key_env", payload)
+            self.assertIn("retry_attempts", payload)
+            self.assertIn("retry_base_delay_seconds", payload)
 
 
 if __name__ == "__main__":

@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from skilgen.agents import analyze_codebase, build_import_graph, fingerprint_project
+from skilgen.agents import analyze_codebase, build_agent_decision, build_import_graph, fingerprint_project
 from skilgen.agents.feature_extractor import extract_features
 from skilgen.agents.requirements_parser import parse_project_intent
 from skilgen.deep_agents_core import run_deep_text
 from skilgen.core.config import render_default_config
 from skilgen.core.context import build_codebase_context
 from skilgen.core.models import RequirementsContext
+from skilgen.core.project_memory import load_project_memory
 
 
 def ensure_file(path: Path, content: str) -> Path:
@@ -57,8 +58,10 @@ def render_feature_inventory(context: RequirementsContext) -> str:
     return run_deep_text(
         "feature inventory markdown",
         (
-            "Write a markdown feature inventory document for Skilgen. "
-            "Keep the existing table format with columns Feature Name, Domain, Location, Description, Status, Last Modified.\n\n"
+            "Write a markdown feature inventory document for Skilgen. Keep the existing table format with columns "
+            "Feature Name, Domain, Location, Description, Status, Last Modified. Preserve grounded engineering detail, "
+            "favor concise but specific descriptions, and make the document useful to coding agents that need to decide "
+            "what already exists before implementing more changes.\n\n"
             f"Features JSON:\n{json.dumps([feature.__dict__ for feature in features], indent=2)}"
         ),
         lambda: _render_feature_inventory_native(context),
@@ -78,6 +81,10 @@ def render_analysis_report(context: RequirementsContext, project_root: Path) -> 
             "build_tool": fingerprint.build_tool.__dict__ if fingerprint.build_tool else None,
         },
         "signals": signals.__dict__,
+        "domain_graph": {
+            "nodes": [node.__dict__ for node in codebase_context.domain_graph.nodes],
+            "recommendations": codebase_context.domain_graph.recommendations,
+        },
         "detected_domains": [record.__dict__ for record in codebase_context.detected_domains],
         "skill_tree": [node.__dict__ for node in codebase_context.skill_tree],
         "import_graph": import_graph,
@@ -156,6 +163,19 @@ def _render_traceability_report_native(context: RequirementsContext, project_roo
             "",
         ]
     )
+    gaps: list[str] = []
+    if signals.backend_routes and not signals.tests:
+        gaps.append("Backend routes exist but no tests were detected for endpoint validation.")
+    if signals.frontend_routes and not signals.components:
+        gaps.append("Frontend routes exist but reusable components were not strongly detected yet.")
+    if not context.requirements_path.exists():
+        gaps.append("This run was codebase-only, so roadmap and intent guidance came from implementation signals rather than a product spec.")
+    lines.extend(["## Gaps And Next Actions"])
+    if gaps:
+        lines.extend(f"- {gap}" for gap in gaps)
+    else:
+        lines.append("- No major delivery gaps were inferred from the current codebase and requirement inputs.")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -168,7 +188,9 @@ def render_traceability_report(context: RequirementsContext, project_root: Path)
         "traceability explanation",
         (
             "Write a markdown traceability report for Skilgen that explains how requirements and code evidence map to generated outputs. "
-            "Include sections for requirements source, intent to output mapping, domain evidence, and generated outputs.\n\n"
+            "Include sections for requirements source, intent to output mapping, domain evidence, generated outputs, and "
+            "clear next actions or gaps. Keep the output grounded in the provided intent, signals, and detected domains. "
+            "Optimize for a coding agent or maintainer who needs to understand why a skill exists and what evidence justifies it.\n\n"
             f"Intent JSON:\n{json.dumps(intent.__dict__, indent=2)}\n\n"
             f"Signals JSON:\n{json.dumps(signals.__dict__, indent=2)}\n\n"
             f"Detected domains JSON:\n{json.dumps([record.__dict__ for record in codebase_context.detected_domains], indent=2)}\n"
@@ -556,14 +578,41 @@ def render_init_files() -> dict[str, str]:
 
 def render_agents_contract(context: RequirementsContext, project_root: Path) -> str:
     input_mode = "requirements + codebase" if context.requirements_path.exists() else "codebase only"
+    codebase_context = build_codebase_context(project_root, context)
+    decision = build_agent_decision(project_root, context, codebase_context.domain_graph, codebase_context.skill_tree)
+    project_memory = load_project_memory(project_root)
+    parent_skills = [node for node in codebase_context.skill_tree if node.parent_skill is None]
     skill_refs = ["- `skills/MANIFEST.md`: Start here to discover the generated skill tree."]
-    if context.domains.get("requirements") or context.requirements_path.exists():
-        skill_refs.append("- `skills/requirements/SKILL.md`: Use for intent extraction, planning, and scope alignment.")
-    if context.domains.get("backend"):
-        skill_refs.append("- `skills/backend/SKILL.md`: Use for API, services, and backend implementation patterns.")
-    if context.domains.get("frontend"):
-        skill_refs.append("- `skills/frontend/SKILL.md`: Use for routes, components, and UI implementation patterns.")
-    skill_refs.append("- `skills/roadmap/SKILL.md`: Use for phase-based delivery planning and sequencing.")
+    skill_refs.extend(
+        f"- `{node.path}`: Parent skill for the inferred `{node.domain}` domain."
+        for node in parent_skills
+    )
+    inferred_domains = [node for node in codebase_context.domain_graph.nodes if node.parent_domain is None]
+    priority_lines = [
+        f"- `{path}`"
+        for path in decision.prioritized_skill_paths
+    ] or ["- No prioritized skills were suggested for this run."]
+    dynamic_domain_lines = [
+        f"- `{node.name}` ({node.confidence:.2f}): {node.summary}"
+        for node in inferred_domains
+    ] or ["- No inferred domains were available."]
+    memory_lines = [
+        f"- `{path}`"
+        for path in (project_memory.memory_files if project_memory is not None else decision.memory_to_load)
+    ] or ["- No memory files were suggested for this run."]
+    refresh_policy_lines = (
+        [f"- {item}" for item in project_memory.refresh_policy]
+        if project_memory is not None
+        else [
+            "- Refresh only the impacted dynamic domains when source changes are detected.",
+            "- Reuse the current skill tree when the decision planner reports no source changes.",
+        ]
+    )
+    architectural_note_lines = (
+        [f"- {item}" for item in project_memory.architectural_notes]
+        if project_memory is not None
+        else ["- Dynamic project memory will be created after the first delivery run."]
+    )
 
     return "\n".join(
         [
@@ -575,12 +624,32 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
             "",
             "## How To Work In This Repo",
             "1. Open `skills/MANIFEST.md` first.",
-            "2. Follow the most specific domain skill before changing code.",
-            "3. Use the generated docs to understand project intent, detected features, and traceability.",
+            "2. Open the most specific inferred child skill before changing code.",
+            "3. Use `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md` to understand intent, current shape, and evidence.",
             "4. Keep generated references relative so the skill tree stays portable across repos.",
+            "5. When backend behavior changes, test every touched endpoint before closing the task.",
+            "",
+            "## Inferred Domains",
+            *dynamic_domain_lines,
             "",
             "## Skill Entry Points",
             *skill_refs,
+            "",
+            "## Refresh Policy",
+            *refresh_policy_lines,
+            "",
+            "## Recommended Start Order",
+            f"- Input mode: `{input_mode}`",
+            f"- Detected domains: {', '.join(record.name for record in codebase_context.detected_domains) or 'none'}",
+            f"- Decision planner refresh recommendation: `{decision.should_refresh}`",
+            f"- Decision planner reason: {decision.reason}",
+            "- Load these prioritized skills first:",
+            *priority_lines,
+            "- Load decision memory in this order:",
+            *memory_lines,
+            "",
+            "## Stable Project Memory",
+            *architectural_note_lines,
             "",
             "## Generated Docs",
             "- `ANALYSIS.md`: Machine-readable project analysis.",
@@ -593,6 +662,7 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
             "- If backend behavior changes, test all affected endpoints before closing the task.",
             "- When adding new reusable patterns, update the relevant skill file and manifest references.",
             "- Treat `AGENTS.md` as the top-level contract and the `skills/` tree as the operating system for coding agents.",
+            "- Use `TRACEABILITY.md` whenever you need to explain why a generated skill or document exists.",
             "",
             "## Project Root",
             f"- `{project_root}`",

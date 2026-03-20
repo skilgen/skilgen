@@ -29,7 +29,7 @@ class PackagingTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
-            self.assertIn("0.1.0", version.stdout)
+            self.assertIn("0.2.0", version.stdout)
 
             with TemporaryDirectory() as project_tmp:
                 init_result = subprocess.run(
