@@ -1,6 +1,5 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import json
 import unittest
 
 from skilgen.delivery import run_delivery
@@ -109,16 +108,12 @@ class DeliveryTests(unittest.TestCase):
             first_generated = run_delivery(None, root)
             self.assertTrue((root / ".skilgen" / "state" / "freshness.json").exists())
             self.assertTrue((root / ".skilgen" / "memory" / "current_run.json").exists())
-            self.assertTrue((root / ".skilgen" / "memory" / "project_memory.json").exists())
             self.assertIn(root / "skills" / "backend" / "SKILL.md", first_generated)
             self.assertIn(root / "skills" / "frontend" / "SKILL.md", first_generated)
             memory_text = (root / ".skilgen" / "memory" / "current_run.json").read_text(encoding="utf-8")
             self.assertIn("pending_validations", memory_text)
             self.assertIn("resumable_steps", memory_text)
             self.assertIn("active_file_focus", memory_text)
-            project_memory = json.loads((root / ".skilgen" / "memory" / "project_memory.json").read_text(encoding="utf-8"))
-            self.assertIn("top_level_domains", project_memory)
-            self.assertIn(".skilgen/memory/project_memory.json", project_memory["memory_files"])
 
             (root / "api" / "routes" / "users.py").write_text("def handler():\n    return {'ok': True}\n", encoding="utf-8")
 
@@ -155,8 +150,6 @@ class DeliveryTests(unittest.TestCase):
 
             agents_text = (root / "AGENTS.md").read_text(encoding="utf-8")
             self.assertIn("## Inferred Domains", agents_text)
-            self.assertIn("## Refresh Policy", agents_text)
-            self.assertIn("## Stable Project Memory", agents_text)
             self.assertIn("Decision planner refresh recommendation", agents_text)
             self.assertIn("Load these prioritized skills first:", agents_text)
             self.assertIn("skills/backend/SKILL.md", agents_text)

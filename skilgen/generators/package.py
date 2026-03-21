@@ -10,7 +10,6 @@ from skilgen.deep_agents_core import run_deep_text
 from skilgen.core.config import render_default_config
 from skilgen.core.context import build_codebase_context
 from skilgen.core.models import RequirementsContext
-from skilgen.core.project_memory import load_project_memory
 
 
 def ensure_file(path: Path, content: str) -> Path:
@@ -65,6 +64,7 @@ def render_feature_inventory(context: RequirementsContext) -> str:
             f"Features JSON:\n{json.dumps([feature.__dict__ for feature in features], indent=2)}"
         ),
         lambda: _render_feature_inventory_native(context),
+        project_root=project_root,
     )
 
 
@@ -196,6 +196,7 @@ def render_traceability_report(context: RequirementsContext, project_root: Path)
             f"Detected domains JSON:\n{json.dumps([record.__dict__ for record in codebase_context.detected_domains], indent=2)}\n"
         ),
         lambda: _render_traceability_report_native(context, project_root),
+        project_root=project_root,
     )
 
 
@@ -263,6 +264,7 @@ def render_project_report(context: RequirementsContext, project_root: Path) -> s
             f"Detected domains JSON:\n{json.dumps([record.__dict__ for record in codebase_context.detected_domains], indent=2)}"
         ),
         lambda: _render_project_report_native(context, project_root),
+        project_root=project_root,
     )
 
 
@@ -580,7 +582,6 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
     input_mode = "requirements + codebase" if context.requirements_path.exists() else "codebase only"
     codebase_context = build_codebase_context(project_root, context)
     decision = build_agent_decision(project_root, context, codebase_context.domain_graph, codebase_context.skill_tree)
-    project_memory = load_project_memory(project_root)
     parent_skills = [node for node in codebase_context.skill_tree if node.parent_skill is None]
     skill_refs = ["- `skills/MANIFEST.md`: Start here to discover the generated skill tree."]
     skill_refs.extend(
@@ -596,23 +597,6 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
         f"- `{node.name}` ({node.confidence:.2f}): {node.summary}"
         for node in inferred_domains
     ] or ["- No inferred domains were available."]
-    memory_lines = [
-        f"- `{path}`"
-        for path in (project_memory.memory_files if project_memory is not None else decision.memory_to_load)
-    ] or ["- No memory files were suggested for this run."]
-    refresh_policy_lines = (
-        [f"- {item}" for item in project_memory.refresh_policy]
-        if project_memory is not None
-        else [
-            "- Refresh only the impacted dynamic domains when source changes are detected.",
-            "- Reuse the current skill tree when the decision planner reports no source changes.",
-        ]
-    )
-    architectural_note_lines = (
-        [f"- {item}" for item in project_memory.architectural_notes]
-        if project_memory is not None
-        else ["- Dynamic project memory will be created after the first delivery run."]
-    )
 
     return "\n".join(
         [
@@ -635,9 +619,6 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
             "## Skill Entry Points",
             *skill_refs,
             "",
-            "## Refresh Policy",
-            *refresh_policy_lines,
-            "",
             "## Recommended Start Order",
             f"- Input mode: `{input_mode}`",
             f"- Detected domains: {', '.join(record.name for record in codebase_context.detected_domains) or 'none'}",
@@ -646,10 +627,7 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
             "- Load these prioritized skills first:",
             *priority_lines,
             "- Load decision memory in this order:",
-            *memory_lines,
-            "",
-            "## Stable Project Memory",
-            *architectural_note_lines,
+            *[f"  - `{path}`" for path in decision.memory_to_load],
             "",
             "## Generated Docs",
             "- `ANALYSIS.md`: Machine-readable project analysis.",

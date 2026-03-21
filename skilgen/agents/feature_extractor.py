@@ -129,6 +129,7 @@ def extract_features(requirements_path: Path | None, project_root: Path) -> list
             f"Services: {signals.services}\n"
         ),
         lambda: {"features": [feature.__dict__ for feature in native_features]},
+        project_root=resolved_root,
     )
     items = payload.get("features", [])
     features: list[FeatureRecord] = []

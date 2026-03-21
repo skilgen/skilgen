@@ -22,7 +22,6 @@ from skilgen.deep_agents_runtime import (
 from skilgen.delivery import run_delivery
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state
 from skilgen.core.context import build_codebase_context
-from skilgen.core.project_memory import load_project_memory
 from skilgen.core.requirements import load_project_context
 from skilgen.core.run_memory import load_current_run_memory
 
@@ -90,7 +89,7 @@ def plan_payload(requirements: str | Path | None, project_root: str | Path) -> d
         )
     return _with_api_meta(
         {
-            "runtime": current_runtime_mode(),
+            "runtime": current_runtime_mode(root),
             "runtime_diagnostics": runtime_diagnostics(root),
             "events": events,
             **result,
@@ -124,7 +123,7 @@ def deliver_payload(requirements: str | Path | None, project_root: str | Path) -
     )
     return _with_api_meta(
         {
-            "runtime": current_runtime_mode(),
+            "runtime": current_runtime_mode(Path(project_root).resolve()),
             "runtime_diagnostics": runtime_diagnostics(Path(project_root).resolve()),
             "events": events,
             "generated_files": [str(path) for path in generated],
@@ -218,7 +217,7 @@ def features_payload(requirements: str | Path | None, project_root: str | Path) 
         )
     return _with_api_meta(
         {
-            "runtime": current_runtime_mode(),
+            "runtime": current_runtime_mode(root),
             "runtime_diagnostics": runtime_diagnostics(root),
             "events": events,
             **result,
@@ -245,7 +244,6 @@ def status_payload(project_root: str | Path) -> dict[str, object]:
     codebase_context = build_codebase_context(root, requirements_context)
     freshness = compute_freshness_report(root, requirements_context, codebase_context.domain_graph, load_freshness_state(root))
     current_run = load_current_run_memory(root)
-    project_memory = load_project_memory(root)
     return _with_api_meta(
         {
             **runtime.run(
@@ -254,7 +252,6 @@ def status_payload(project_root: str | Path) -> dict[str, object]:
                 lambda: native_status_payload(root),
             ),
             "freshness": freshness.__dict__,
-            "project_memory": project_memory.__dict__ if project_memory is not None else None,
             "current_run_memory": current_run.__dict__ if current_run is not None else None,
             "agent_decision": build_agent_decision(root, requirements_context, codebase_context.domain_graph, codebase_context.skill_tree).__dict__,
         }

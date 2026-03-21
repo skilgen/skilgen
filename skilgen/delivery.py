@@ -9,7 +9,6 @@ from skilgen.core.config import load_config
 from skilgen.core.context import build_codebase_context
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state, save_freshness_state, snapshot_freshness_state
 from skilgen.core.models import RunMemory
-from skilgen.core.project_memory import build_project_memory, save_project_memory
 from skilgen.core.run_memory import append_run_event, create_run_memory, finalize_run_memory
 from skilgen.deep_agents_core import current_runtime_mode
 from skilgen.core.requirements import load_project_context
@@ -54,7 +53,7 @@ def run_delivery(
     run_memory = create_run_memory(
         root,
         Path(requirements_path).resolve() if requirements_path is not None else None,
-        current_runtime_mode(),
+        current_runtime_mode(root),
         freshness,
         sorted(selected_domains),
         selected_skill_paths,
@@ -154,9 +153,6 @@ def run_delivery(
         saved_codebase_context = build_codebase_context(root, saved_context)
         save_freshness_state(root, snapshot_freshness_state(root, saved_context, saved_codebase_context.domain_graph))
     run_memory = finalize_run_memory(root, run_memory, generated, "completed")
-    if not dry_run:
-        project_memory = build_project_memory(root, context, codebase_context, decision, generated)
-        save_project_memory(root, project_memory)
     message = f"Finished delivery. Generated or refreshed {len(generated)} files."
     run_memory = append_run_event(root, run_memory, message)
     _emit(progress_callback, message)

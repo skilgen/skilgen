@@ -213,19 +213,6 @@ class RunMemory:
 
 
 @dataclass(frozen=True)
-class ProjectMemory:
-    project_root: str
-    input_mode: str
-    top_level_domains: list[str]
-    prioritized_skill_paths: list[str]
-    generated_docs: list[str]
-    refresh_policy: list[str]
-    recent_objectives: list[str]
-    architectural_notes: list[str]
-    memory_files: list[str]
-
-
-@dataclass(frozen=True)
 class AgentDecision:
     should_refresh: bool
     reason: str

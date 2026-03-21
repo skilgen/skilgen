@@ -5,7 +5,6 @@ from pathlib import Path
 from skilgen.deep_agents_core import run_deep_json
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state
 from skilgen.core.models import AgentDecision, RequirementsContext, RunMemory
-from skilgen.core.project_memory import load_project_memory
 from skilgen.core.run_memory import load_current_run_memory
 
 
@@ -24,10 +23,7 @@ def build_agent_decision_native(
     ]
     if not top_level_skill_paths:
         top_level_skill_paths = [node.path for node in skill_tree if node.parent_skill is None]
-    memory_to_load = [".skilgen/memory/project_memory.json", ".skilgen/memory/current_run.json", ".skilgen/state/freshness.json"]
-    project_memory = load_project_memory(project_root)
-    if project_memory is not None and project_memory.memory_files:
-        memory_to_load = list(dict.fromkeys([*project_memory.memory_files, *memory_to_load]))
+    memory_to_load = [".skilgen/memory/current_run.json", ".skilgen/state/freshness.json"]
     if current_run_memory is not None:
         memory_to_load.append(f".skilgen/memory/runs/{current_run_memory.run_id}.json")
     should_refresh = freshness.reason != "no_source_changes"
@@ -77,6 +73,7 @@ def build_agent_decision(
             f"Native decision JSON: {native.__dict__}\n"
         ),
         lambda: native.__dict__,
+        project_root=root,
     )
     return AgentDecision(
         should_refresh=bool(payload.get("should_refresh", native.should_refresh)),

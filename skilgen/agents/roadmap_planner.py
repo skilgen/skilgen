@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from skilgen.deep_agents_core import run_deep_json
 from skilgen.agents.model_registry import resolve_model_settings
 from skilgen.core.models import PlanStep, ProjectIntent, RoadmapPlan, SkilgenConfig
@@ -54,8 +56,9 @@ def build_roadmap_plan_native(config: SkilgenConfig, intent: ProjectIntent) -> R
     return RoadmapPlan(model=model, steps=steps)
 
 
-def build_roadmap_plan(config: SkilgenConfig, intent: ProjectIntent) -> RoadmapPlan:
+def build_roadmap_plan(config: SkilgenConfig, intent: ProjectIntent, project_root: Path | str = ".") -> RoadmapPlan:
     native_plan = build_roadmap_plan_native(config, intent)
+    root = Path(project_root).resolve()
     payload = run_deep_json(
         "roadmap planning",
         (
@@ -75,6 +78,7 @@ def build_roadmap_plan(config: SkilgenConfig, intent: ProjectIntent) -> RoadmapP
             "model": native_plan.model.__dict__,
             "steps": [step.__dict__ for step in native_plan.steps],
         },
+        project_root=root,
     )
     steps = [
         PlanStep(

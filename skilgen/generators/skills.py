@@ -393,7 +393,7 @@ def _render_skill_native(spec: SkillSpec, source_hash: str) -> str:
     return "\n".join(sections)
 
 
-def render_skill(spec: SkillSpec, source_hash: str) -> str:
+def render_skill(spec: SkillSpec, source_hash: str, project_root: Path | str = ".") -> str:
     if spec.path.count("/") >= 2:
         return _render_skill_native(spec, source_hash)
     return run_deep_text(
@@ -407,6 +407,7 @@ def render_skill(spec: SkillSpec, source_hash: str) -> str:
             f"Skill spec JSON:\n{spec}\nSource hash: {source_hash}"
         ),
         lambda: _render_skill_native(spec, source_hash),
+        project_root=project_root,
     )
 
 
@@ -511,7 +512,7 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
     for spec in specs:
         target = output_dir / spec.path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(render_skill(spec, context.source_hash), encoding="utf-8")
+        target.write_text(render_skill(spec, context.source_hash, output_dir.parent), encoding="utf-8")
         written.append(target)
 
     manifest = output_dir / "MANIFEST.md"

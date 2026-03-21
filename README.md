@@ -114,6 +114,17 @@ Initialize config in your repo:
 skilgen init --project-root .
 ```
 
+`skilgen init` now writes a provider-neutral `skilgen.yml` by default, so it does not assume OpenAI unless you explicitly want that.
+
+If you want provider-specific starter values:
+
+```bash
+skilgen init --project-root . --provider openai
+skilgen init --project-root . --provider anthropic
+skilgen init --project-root . --provider gemini
+skilgen init --project-root . --provider huggingface
+```
+
 Analyze a codebase:
 
 ```bash
@@ -283,9 +294,14 @@ domains_override:
 skill_depth: 2
 update_trigger: manual
 langsmith_project:
-model_provider: openai
-model: gpt-4.1-mini
-api_key_env: OPENAI_API_KEY
+# Set these to your preferred provider. For example:
+# openai / gpt-4.1-mini / OPENAI_API_KEY
+# anthropic / claude-sonnet-4-5 / ANTHROPIC_API_KEY
+# gemini / gemini-2.5-pro / GOOGLE_API_KEY
+# huggingface / meta-llama/Llama-3.1-70B-Instruct / HUGGINGFACEHUB_API_TOKEN
+model_provider:
+model:
+api_key_env:
 model_temperature:
 model_max_tokens:
 model_retry_attempts: 3

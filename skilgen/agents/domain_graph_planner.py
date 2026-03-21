@@ -39,6 +39,27 @@ def _top_file(paths: list[str], fallback: list[str], limit: int = 4) -> list[str
     return fallback
 
 
+def _confidence_value(raw: object) -> float:
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    text = str(raw).strip().lower()
+    mapping = {
+        "very_high": 0.95,
+        "very high": 0.95,
+        "high": 0.85,
+        "medium": 0.65,
+        "low": 0.4,
+        "very_low": 0.2,
+        "very low": 0.2,
+    }
+    if text in mapping:
+        return mapping[text]
+    try:
+        return float(text)
+    except ValueError:
+        return 0.5
+
+
 def build_domain_graph_native(project_root: Path, requirements: RequirementsContext) -> DomainGraph:
     root = project_root.resolve()
     signals = analyze_codebase(root)
@@ -347,12 +368,13 @@ def build_domain_graph(project_root: Path, requirements: RequirementsContext) ->
             "nodes": [node.__dict__ for node in native_graph.nodes],
             "recommendations": native_graph.recommendations,
         },
+        project_root=root,
     )
     nodes = [
         DomainGraphNode(
             name=str(node.get("name", "domain")),
             summary=str(node.get("summary", "")),
-            confidence=float(node.get("confidence", 0.5)),
+            confidence=_confidence_value(node.get("confidence", 0.5)),
             key_files=[str(item) for item in node.get("key_files", [])],
             key_patterns=[str(item) for item in node.get("key_patterns", [])],
             parent_domain=str(node.get("parent_domain")) if node.get("parent_domain") is not None else None,

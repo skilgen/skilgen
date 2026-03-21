@@ -104,17 +104,26 @@ def _classify_model_error(exc: Exception, provider: str | None, api_key_env: str
     }
 
 
-def deep_agents_unavailable_reason() -> str | None:
-    settings = resolve_model_settings(load_config(Path.cwd()))
+def _resolved_settings(project_root: str | Path = "."):
+    return resolve_model_settings(load_config(Path(project_root).resolve()))
+
+
+def deep_agents_unavailable_reason(project_root: str | Path = ".") -> str | None:
+    settings = _resolved_settings(project_root)
     if not provider_supported(settings.provider):
         return (
             f"Unsupported model provider: {settings.provider}. "
             "Supported providers are openai, anthropic, google_genai/gemini, huggingface, groq, and openrouter."
         )
-    if create_deep_agent is None or init_chat_model is None:
+    if create_deep_agent is None:
         return (
             "Deep Agents dependencies are not installed in this Python environment. "
             "Use Python 3.11+ for Deep Agents support, or reinstall after upgrading Python."
+        )
+    if settings.provider != "huggingface" and init_chat_model is None:
+        return (
+            "Chat model initialization is unavailable in this Python environment. "
+            "Reinstall Skilgen with the required LangChain provider packages."
         )
     key_env = settings.api_key_env or "OPENAI_API_KEY"
     if not os.getenv(key_env):
@@ -134,26 +143,26 @@ def _close_model(model: object) -> None:
         pass
 
 
-def _model_name() -> str:
-    settings = resolve_model_settings(load_config(Path.cwd()))
+def _model_name(project_root: str | Path = ".") -> str:
+    settings = _resolved_settings(project_root)
     provider = settings.provider or "openai"
     model = settings.model or DEFAULT_CONFIG.model or os.getenv("SKILGEN_MODEL", "gpt-4.1-mini")
     return f"{provider}:{model}"
 
 
-def deep_agents_available() -> bool:
-    return deep_agents_unavailable_reason() is None
+def deep_agents_available(project_root: str | Path = ".") -> bool:
+    return deep_agents_unavailable_reason(project_root) is None
 
 
-def current_runtime_mode() -> str:
-    return runtime_label(deep_agents_available())
+def current_runtime_mode(project_root: str | Path = ".") -> str:
+    return runtime_label(deep_agents_available(project_root))
 
 
 def runtime_diagnostics(project_root: str | Path = ".") -> dict[str, object]:
     root = Path(project_root).resolve()
     config = load_config(root)
     settings = resolve_model_settings(config)
-    reason = deep_agents_unavailable_reason()
+    reason = deep_agents_unavailable_reason(root)
     enabled = reason is None
     recommendations: list[str] = []
     if not provider_supported(settings.provider):
@@ -183,11 +192,23 @@ def runtime_diagnostics(project_root: str | Path = ".") -> dict[str, object]:
     }
 
 
-def _build_chat_model():
+def _build_chat_model(project_root: str | Path = "."):
     if init_chat_model is None:
         raise RuntimeError("Chat model initialization is unavailable")
-    settings = resolve_model_settings(load_config(Path.cwd()))
-    model_name = _model_name()
+    settings = _resolved_settings(project_root)
+    if settings.provider == "huggingface":
+        kwargs: dict[str, object] = {
+            "base_url": "https://router.huggingface.co/v1",
+            "api_key": os.getenv(settings.api_key_env or "HUGGINGFACEHUB_API_TOKEN"),
+            "use_responses_api": False,
+        }
+        if settings.temperature is not None:
+            kwargs["temperature"] = settings.temperature
+        if settings.max_tokens is not None:
+            kwargs["max_tokens"] = settings.max_tokens
+        model = settings.model or DEFAULT_CONFIG.model or "meta-llama/Llama-3.1-70B-Instruct"
+        return init_chat_model(f"openai:{model}", **kwargs)
+    model_name = _model_name(project_root)
     kwargs: dict[str, object] = {}
     if settings.temperature is not None:
         kwargs["temperature"] = settings.temperature
@@ -233,11 +254,11 @@ def _invoke_with_retry(
     raise RuntimeError("Model-backed invocation failed without an exception")
 
 
-def _normalize_json_with_model(task: str, raw_text: str) -> dict[str, object]:
+def _normalize_json_with_model(task: str, raw_text: str, project_root: str | Path = ".") -> dict[str, object]:
     if init_chat_model is None:
         raise RuntimeError("Chat model is unavailable for JSON normalization")
-    settings = resolve_model_settings(load_config(Path.cwd()))
-    model = _build_chat_model()
+    settings = _resolved_settings(project_root)
+    model = _build_chat_model(project_root)
     try:
         response = _invoke_with_retry(
             lambda: model.invoke(
@@ -280,15 +301,22 @@ def _message_text(message: object) -> str:
     return str(content).strip()
 
 
-def run_deep_json(task: str, prompt: str, fallback: Callable[[], dict[str, object]]) -> dict[str, object]:
+def run_deep_json(
+    task: str,
+    prompt: str,
+    fallback: Callable[[], dict[str, object]],
+    *,
+    project_root: str | Path = ".",
+) -> dict[str, object]:
     required = os.getenv("SKILGEN_DEEPAGENTS_REQUIRED") == "1"
-    if not deep_agents_available():
+    root = Path(project_root).resolve()
+    if not deep_agents_available(root):
         if required:
-            raise RuntimeError(deep_agents_unavailable_reason() or "Deep Agents runtime is required but unavailable")
+            raise RuntimeError(deep_agents_unavailable_reason(root) or "Deep Agents runtime is required but unavailable")
         return fallback()
 
-    settings = resolve_model_settings(load_config(Path.cwd()))
-    model = _build_chat_model()
+    settings = _resolved_settings(root)
+    model = _build_chat_model(root)
     agent = create_deep_agent(
         model=model,
         system_prompt=(
@@ -334,13 +362,13 @@ def run_deep_json(task: str, prompt: str, fallback: Callable[[], dict[str, objec
                 continue
         normalized_source = "\n\n".join(reversed(collected))
         if normalized_source:
-            return _normalize_json_with_model(task, normalized_source)
+            return _normalize_json_with_model(task, normalized_source, root)
         raise ValueError("No usable agent text found for JSON normalization")
     except Exception as exc:
         if required:
             error = _classify_model_error(exc, settings.provider, settings.api_key_env)
             raise RuntimeError(
-                f"{error['message']} Task=`{task}` Provider={_model_name()} "
+                f"{error['message']} Task=`{task}` Provider={_model_name(root)} "
                 f"Category={error['category']} Recommendations={' | '.join(error['recommendations'])}"
             ) from exc
         return fallback()
@@ -348,15 +376,22 @@ def run_deep_json(task: str, prompt: str, fallback: Callable[[], dict[str, objec
         _close_model(model)
 
 
-def run_deep_text(task: str, prompt: str, fallback: Callable[[], str]) -> str:
+def run_deep_text(
+    task: str,
+    prompt: str,
+    fallback: Callable[[], str],
+    *,
+    project_root: str | Path = ".",
+) -> str:
     required = os.getenv("SKILGEN_DEEPAGENTS_REQUIRED") == "1"
-    if not deep_agents_available():
+    root = Path(project_root).resolve()
+    if not deep_agents_available(root):
         if required:
-            raise RuntimeError(deep_agents_unavailable_reason() or "Deep Agents runtime is required but unavailable")
+            raise RuntimeError(deep_agents_unavailable_reason(root) or "Deep Agents runtime is required but unavailable")
         return fallback()
 
-    settings = resolve_model_settings(load_config(Path.cwd()))
-    model = _build_chat_model()
+    settings = _resolved_settings(root)
+    model = _build_chat_model(root)
     agent = create_deep_agent(
         model=model,
         system_prompt=(
@@ -389,7 +424,7 @@ def run_deep_text(task: str, prompt: str, fallback: Callable[[], str]) -> str:
         if required:
             error = _classify_model_error(exc, settings.provider, settings.api_key_env)
             raise RuntimeError(
-                f"{error['message']} Task=`{task}` Provider={_model_name()} "
+                f"{error['message']} Task=`{task}` Provider={_model_name(root)} "
                 f"Category={error['category']} Recommendations={' | '.join(error['recommendations'])}"
             ) from exc
         return fallback()

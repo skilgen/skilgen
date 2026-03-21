@@ -36,6 +36,7 @@ def parse_requirements_file(path: Path) -> ProjectIntent:
             "endpoints": native_intent.endpoints,
             "ui_flows": native_intent.ui_flows,
         },
+        project_root=resolved.parent,
     )
     return ProjectIntent(
         features=[str(item) for item in payload.get("features", [])][:12],
@@ -100,6 +101,7 @@ def parse_project_intent(project_root: Path, requirements_path: Path | None = No
             "endpoints": native_intent.endpoints,
             "ui_flows": native_intent.ui_flows,
         },
+        project_root=resolved_root,
     )
     return ProjectIntent(
         features=[str(item) for item in payload.get("features", [])][:12],

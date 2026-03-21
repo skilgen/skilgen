@@ -26,7 +26,7 @@ from skilgen.generators.package import (
     write_project_docs,
 )
 from skilgen.generators.skills import planned_skill_paths, write_skills
-from skilgen.deep_agents_core import _close_model, _normalize_json_with_model, deep_agents_unavailable_reason
+from skilgen.deep_agents_core import _build_chat_model, _close_model, _normalize_json_with_model, deep_agents_unavailable_reason
 from skilgen.deep_agents_core import _classify_model_error, _invoke_with_retry, runtime_diagnostics
 
 try:
@@ -80,17 +80,15 @@ class DeepAgentsRuntime:
 
     @property
     def enabled(self) -> bool:
-        return create_deep_agent is not None and init_chat_model is not None and tool is not None and deep_agents_unavailable_reason() is None
+        return (
+            create_deep_agent is not None
+            and init_chat_model is not None
+            and tool is not None
+            and deep_agents_unavailable_reason(self.project_root) is None
+        )
 
     def _build_model(self) -> Any:
-        model_name = self.model_settings.model or "gpt-4.1-mini"
-        provider = self.model_settings.provider or "openai"
-        kwargs: dict[str, object] = {}
-        if self.model_settings.temperature is not None:
-            kwargs["temperature"] = self.model_settings.temperature
-        if self.model_settings.max_tokens is not None:
-            kwargs["max_tokens"] = self.model_settings.max_tokens
-        return init_chat_model(f"{provider}:{model_name}", **kwargs)
+        return _build_chat_model(self.project_root)
 
     def _make_tools(self) -> list[Any]:
         if tool is None:
@@ -193,7 +191,7 @@ class DeepAgentsRuntime:
         if not self.enabled:
             if require_agent:
                 raise RuntimeError(
-                    deep_agents_unavailable_reason()
+                    deep_agents_unavailable_reason(self.project_root)
                     or "Model-backed runtime is required but dependencies or model credentials are unavailable"
                 )
             return fallback()
@@ -239,7 +237,7 @@ class DeepAgentsRuntime:
                     continue
             normalized_source = "\n\n".join(reversed(collected))
             if normalized_source:
-                return _normalize_json_with_model(task, normalized_source)
+                    return _normalize_json_with_model(task, normalized_source, self.project_root)
             raise ValueError("Agent response did not contain a usable JSON object")
         except Exception as exc:
             if require_agent:

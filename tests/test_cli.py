@@ -16,7 +16,34 @@ class CliTests(unittest.TestCase):
                 check=True,
             )
             payload = json.loads(result.stdout)
-            self.assertTrue(Path(payload["config_path"]).exists())
+            config_path = Path(payload["config_path"])
+            self.assertTrue(config_path.exists())
+            config_text = config_path.read_text(encoding="utf-8")
+            self.assertIn("model_provider:", config_text)
+            self.assertNotIn("model_provider: openai", config_text)
+
+    def test_init_can_scaffold_provider_specific_defaults(self) -> None:
+        with TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "init",
+                    "--project-root",
+                    tmp,
+                    "--provider",
+                    "anthropic",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            config_text = Path(payload["config_path"]).read_text(encoding="utf-8")
+            self.assertIn("model_provider: anthropic", config_text)
+            self.assertIn("model: claude-sonnet-4-5", config_text)
+            self.assertIn("api_key_env: ANTHROPIC_API_KEY", config_text)
 
     def test_version_outputs_package_version(self) -> None:
         result = subprocess.run(
