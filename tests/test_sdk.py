@@ -18,6 +18,7 @@ from skilgen.sdk import (
     list_active_skill_sources,
     list_project_jobs,
     list_skill_sources,
+    rank_skill_sources,
     project_report,
     project_status,
     preview_project,
@@ -143,6 +144,9 @@ class SdkTests(unittest.TestCase):
             self.assertEqual(active_sources["skills"][0]["slug"], "demo-pack")
             locked = skill_source_lock(root)
             self.assertEqual(locked["skills"][0]["slug"], "demo-pack")
+            self.assertIn("normalized", locked["skills"][0])
+            ranked = rank_skill_sources(root)
+            self.assertEqual(ranked["skills"][0]["slug"], "demo-pack")
 
             deactivated = deactivate_skill_source("demo-pack", root)
             self.assertFalse(deactivated["deactivated_skill"]["active"])

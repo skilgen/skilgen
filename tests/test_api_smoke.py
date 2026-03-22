@@ -139,6 +139,8 @@ class ApiSmokeTests(unittest.TestCase):
 
                 lock = get_json(f"{base}/skills/lock?{urlencode({'project_root': str(root)})}")
                 self.assertTrue(lock["skills"])
+                ranked = get_json(f"{base}/skills/rank?{urlencode({'project_root': str(root)})}")
+                self.assertTrue(ranked["skills"])
 
                 deactivated = post_json(f"{base}/skills/deactivate", {"project_root": str(root), "slug": "demo-pack"})
                 self.assertFalse(deactivated["deactivated_skill"]["active"])
@@ -164,6 +166,7 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertIn("agent_decision", status)
                 self.assertIn("installed_external_skills", status)
                 self.assertIn("active_external_skills", status)
+                self.assertIn("ranked_external_skills", status)
                 self.assertIn("external_skill_lock", status)
                 self.assertIn("external_skill_recommendations", status)
                 self.assertIn("pending_validations", status["current_run_memory"])

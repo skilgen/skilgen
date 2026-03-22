@@ -209,6 +209,7 @@ class DeliveryTests(unittest.TestCase):
             self.assertIn("## External Skill Packs", agents_text)
             self.assertIn("anthropic-skills", agents_text)
             self.assertIn("langchain-skills", agents_text)
+            self.assertIn("## Preferred External Skill Packs", agents_text)
 
 
 if __name__ == "__main__":

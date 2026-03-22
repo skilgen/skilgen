@@ -22,6 +22,7 @@ from skilgen.external_skills import (
     get_external_skill,
     install_external_skill,
     list_external_skills,
+    ranked_external_skills,
     remove_external_skill,
     sync_all_external_skills,
     sync_external_skill,
@@ -115,6 +116,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     skills_lock = skills_subparsers.add_parser("lock", help="Show the resolved external-skills lockfile for this project.")
     skills_lock.add_argument("--project-root", default=".")
+
+    skills_rank = skills_subparsers.add_parser("rank", help="Rank active external skill packs by trust and relevance for the current project.")
+    skills_rank.add_argument("--project-root", default=".")
 
     skills_install = skills_subparsers.add_parser("install", help="Install a curated or custom external skill source into the local project.")
     skills_install.add_argument("slug", nargs="?")
@@ -228,6 +232,10 @@ def main() -> None:
         if args.skills_command == "lock":
             emit_progress("Loading the resolved external-skills lockfile.")
             print(json.dumps(external_skill_lock(root), indent=2))
+            return
+        if args.skills_command == "rank":
+            emit_progress("Ranking active external skill packs by trust, detection signals, and repo fit.")
+            print(json.dumps(ranked_external_skills(root), indent=2))
             return
         if args.skills_command == "install":
             emit_progress("Installing the external skill source into .skilgen/external-skills so it can be managed through Skilgen.")

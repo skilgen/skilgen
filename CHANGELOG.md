@@ -15,6 +15,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - External skill sync/remove flows and expanded multi-ecosystem source coverage
 - Automatic external skill discovery and one-time auto-install for matching repositories
 - External skill activation, lockfile metadata, normalized indexes, and trust-policy controls
+- Adapter-aware external skill ranking, provenance surfacing, and preferred-pack recommendations
 
 ### Changed
 - `AGENTS.md` generation now reflects inferred domains, prioritized skills, and memory loading guidance

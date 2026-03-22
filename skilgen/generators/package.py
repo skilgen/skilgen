@@ -9,7 +9,7 @@ from skilgen.agents.requirements_parser import parse_project_intent
 from skilgen.deep_agents_core import run_deep_text
 from skilgen.core.config import render_default_config
 from skilgen.core.context import build_codebase_context
-from skilgen.external_skills import active_external_skills, detect_external_skill_sources, installed_external_skills
+from skilgen.external_skills import active_external_skills, detect_external_skill_sources, installed_external_skills, ranked_external_skills
 from skilgen.core.models import RequirementsContext
 
 
@@ -206,6 +206,7 @@ def _render_project_report_native(context: RequirementsContext, project_root: Pa
     requirements_path = context.requirements_path if context.requirements_path.exists() else None
     features = extract_features(requirements_path, project_root)
     codebase_context = build_codebase_context(project_root, context)
+    ranked_skill_packs = ranked_external_skills(project_root).get("skills", [])
     domain_names = ", ".join(record.name for record in codebase_context.detected_domains)
     lines = [
         "# Report",
@@ -247,6 +248,22 @@ def _render_project_report_native(context: RequirementsContext, project_root: Pa
         lines.append(f"- Components: start from `{signals.components[0]}`")
     if not any([signals.backend_routes, signals.services, signals.frontend_routes, signals.components]):
         lines.append("- No concrete route/service/component files were detected yet; start from the requirements and roadmap skills.")
+    lines.extend(
+        [
+            "",
+            "## External Skill Packs",
+            f"- Installed packs: {len(installed_external_skills(project_root))}",
+            f"- Active packs: {len(active_external_skills(project_root))}",
+        ]
+    )
+    if ranked_skill_packs:
+        lines.append("- Preferred packs to load first:")
+        lines.extend(
+            f"  - `{entry['slug']}` (score {entry.get('priority_score', 0)}, trust `{entry.get('trust_level', 'unknown')}`)"
+            for entry in ranked_skill_packs[:5]
+        )
+    else:
+        lines.append("- No active external skill packs have been ranked yet.")
     lines.append("")
     return "\n".join(lines)
 
@@ -592,14 +609,19 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
     inferred_domains = [node for node in codebase_context.domain_graph.nodes if node.parent_domain is None]
     installed_skill_packs = installed_external_skills(project_root)
     active_skill_packs = active_external_skills(project_root)
+    ranked_skill_packs = ranked_external_skills(project_root).get("skills", [])
     external_skill_lines = [
-        f"- `{entry['slug']}` ({entry.get('ecosystem', 'unknown')}): installed at `{entry.get('install_path', '')}`"
+        f"- `{entry['slug']}` ({entry.get('ecosystem', 'unknown')}, trust `{entry.get('trust_level', 'unknown')}`): installed at `{entry.get('install_path', '')}`"
         for entry in installed_skill_packs
     ] or ["- No external skill packs have been installed yet."]
     active_external_lines = [
-        f"- `{entry['slug']}` ({entry.get('lock_metadata', {}).get('normalized', {}).get('adapter', 'raw')}): load from `{entry.get('install_path', '')}`"
+        f"- `{entry['slug']}` ({entry.get('lock_metadata', {}).get('normalized', {}).get('adapter', 'raw')}, trust score {entry.get('lock_metadata', {}).get('trust_score', entry.get('trust_score', 0))}): load from `{entry.get('install_path', '')}`"
         for entry in active_skill_packs
     ] or ["- No external skill packs are currently active."]
+    ranked_external_lines = [
+        f"- `{entry['slug']}` (score {entry.get('priority_score', 0)}): {entry.get('priority_reason', 'Ranked by trust and repo fit.')}"
+        for entry in ranked_skill_packs
+    ] or ["- No active external skill packs have been ranked yet."]
     recommended_external_lines = [
         f"- `{entry['slug']}`: {'; '.join(entry.get('reasons', []))}"
         for entry in detect_external_skill_sources(project_root).get("manual_recommendations", [])
@@ -639,6 +661,9 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
             "",
             "## Active External Skill Packs",
             *active_external_lines,
+            "",
+            "## Preferred External Skill Packs",
+            *ranked_external_lines,
             "",
             "## Suggested External Skill Packs",
             *recommended_external_lines,

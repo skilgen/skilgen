@@ -341,6 +341,15 @@ class CliTests(unittest.TestCase):
                 check=True,
             )
             self.assertIn("resolved_revision", locked.stdout)
+            self.assertIn("normalized", locked.stdout)
+
+            ranked = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "skills", "rank", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("priority_score", ranked.stdout)
 
     def test_skills_list_returns_curated_sources(self) -> None:
         result = subprocess.run(

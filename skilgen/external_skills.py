@@ -10,6 +10,17 @@ from pathlib import Path
 
 from skilgen.core.config import load_config
 
+
+TRUST_SCORES = {
+    "official": 5,
+    "spec": 4,
+    "curated": 3,
+    "community": 2,
+    "directory": 1,
+    "custom": 1,
+}
+
+
 @dataclass(frozen=True)
 class ExternalSkillSource:
     slug: str
@@ -343,6 +354,7 @@ def _serialize_entry(entry: ExternalSkillSource, installed: dict[str, object] | 
     payload["installed"] = installed is not None
     payload["install_path"] = installed.get("install_path") if installed else None
     payload["installed_metadata"] = installed
+    payload["trust_score"] = TRUST_SCORES.get(entry.trust_level, 0)
     return payload
 
 
@@ -363,6 +375,77 @@ def active_external_skills(project_root: str | Path = ".") -> list[dict[str, obj
         if lock_entry.get("active"):
             active.append({**entry, "lock_metadata": lock_entry})
     return sorted(active, key=lambda entry: str(entry.get("slug", "")))
+
+
+def _repo_keyword_profile(project_root: str | Path) -> set[str]:
+    _, text = _repo_text_snapshot(Path(project_root).resolve())
+    keywords: set[str] = set()
+    keyword_map = {
+        "claude": ("claude", "anthropic"),
+        "langchain": ("langchain", "langgraph", "deep agents", "deepagents"),
+        "langsmith": ("langsmith", "evaluation", "observability", "tracing"),
+        "huggingface": ("huggingface", "hugging face", "transformers", "datasets", "diffusers"),
+        "copilot": ("copilot", "github copilot", "copilot-instructions"),
+        "n8n": ("n8n", "workflow"),
+        "research": ("rag", "crewai", "llamaindex", "rlhf", "fine-tuning", "finetuning"),
+        "benchmark": ("benchmark", "benchmarks"),
+        "context": ("memory", "multi-agent", "context engineering"),
+    }
+    for label, needles in keyword_map.items():
+        if any(needle in text for needle in needles):
+            keywords.add(label)
+    return keywords
+
+
+def _catalog_tags(entry: ExternalSkillSource) -> set[str]:
+    values = {
+        entry.ecosystem.lower(),
+        entry.publisher.lower(),
+        entry.category.lower(),
+        entry.trust_level.lower(),
+        *(tag.lower() for tag in entry.tags),
+        *(agent.lower() for agent in entry.supported_agents),
+    }
+    return {value for value in values if value}
+
+
+def prioritized_active_external_skills(project_root: str | Path = ".") -> list[dict[str, object]]:
+    root = Path(project_root).resolve()
+    active = active_external_skills(root)
+    detection_map = {
+        str(entry["slug"]): entry for entry in detect_external_skill_sources(root).get("detected_skills", [])
+    }
+    keywords = _repo_keyword_profile(root)
+    ranked: list[dict[str, object]] = []
+    for entry in active:
+        slug = str(entry["slug"])
+        lock_metadata = entry.get("lock_metadata", {}) if isinstance(entry.get("lock_metadata"), dict) else {}
+        source = _catalog_entry(slug)
+        tags = _catalog_tags(source) if source is not None else set()
+        matched_keywords = sorted(keyword for keyword in keywords if keyword in tags)
+        detection = detection_map.get(slug)
+        trust_level = str(entry.get("trust_level", source.trust_level if source else "custom"))
+        trust_score = TRUST_SCORES.get(trust_level, 0)
+        score = trust_score * 10
+        score += len(matched_keywords) * 5
+        if detection is not None:
+            score += 12
+        normalized = lock_metadata.get("normalized", {}) if isinstance(lock_metadata, dict) else {}
+        score += min(int(normalized.get("entry_count", 0) or 0), 20)
+        ranked.append(
+            {
+                **entry,
+                "priority_score": score,
+                "priority_reason": (
+                    detection["reasons"][0]
+                    if isinstance(detection, dict) and detection.get("reasons")
+                    else f"Trust level `{trust_level}` and ecosystem fit for this repo."
+                ),
+                "matched_keywords": matched_keywords,
+                "trust_score": trust_score,
+            }
+        )
+    return sorted(ranked, key=lambda item: (-int(item["priority_score"]), str(item["slug"])))
 
 
 def _repo_text_snapshot(project_root: Path) -> tuple[list[str], str]:
@@ -526,7 +609,59 @@ def _adapter_for_source(source: ExternalSkillSource) -> str:
     return "generic-repo"
 
 
-def _collect_normalized_entries(install_path: Path, source_path: str | None) -> list[dict[str, object]]:
+def _title_from_path(path: Path) -> str:
+    return path.stem.replace("-", " ").replace("_", " ")
+
+
+def _entry_score(adapter: str, relative: str, entry_type: str) -> tuple[int, int]:
+    lower = relative.lower()
+    entrypoint_score = 0
+    keyword_score = 0
+    if entry_type == "skill":
+        entrypoint_score += 40
+    elif entry_type == "readme":
+        entrypoint_score += 20
+    elif entry_type == "doc":
+        entrypoint_score += 5
+
+    if adapter == "anthropic-skills":
+        if "/skills/" in f"/{lower}" or lower.startswith("skills/"):
+            keyword_score += 30
+        if lower.endswith("/skill.md"):
+            keyword_score += 20
+        if "template" in lower:
+            keyword_score += 10
+    elif adapter == "langchain-skills":
+        if any(token in lower for token in ("langgraph", "deep-agent", "deep_agents", "langsmith", "rag")):
+            keyword_score += 25
+        if lower.endswith("readme.md"):
+            keyword_score += 10
+    elif adapter == "huggingface-skills":
+        if any(token in lower for token in ("dataset", "trainer", "evaluation", "hub", "benchmark")):
+            keyword_score += 25
+    elif adapter == "catalog-directory":
+        if "awesome" in lower or "index" in lower:
+            keyword_score += 20
+    elif adapter == "skill-spec":
+        if "skill" in lower or "spec" in lower:
+            keyword_score += 30
+    elif adapter == "benchmarks":
+        if "benchmark" in lower or "eval" in lower:
+            keyword_score += 30
+    elif adapter == "generic-repo":
+        if lower.endswith("/skill.md") or lower.endswith("readme.md"):
+            keyword_score += 10
+
+    depth_penalty = lower.count("/")
+    return entrypoint_score + keyword_score - depth_penalty, depth_penalty
+
+
+def _collect_normalized_entries(
+    install_path: Path,
+    source_path: str | None,
+    *,
+    adapter: str,
+) -> list[dict[str, object]]:
     root = install_path / source_path if source_path else install_path
     if not root.exists():
         root = install_path
@@ -543,6 +678,7 @@ def _collect_normalized_entries(install_path: Path, source_path: str | None) -> 
                     "type": "skill",
                     "title": path.parent.name,
                     "entrypoint": True,
+                    "adapter_hint": adapter,
                 }
             )
         elif lower == "readme.md":
@@ -552,6 +688,7 @@ def _collect_normalized_entries(install_path: Path, source_path: str | None) -> 
                     "type": "readme",
                     "title": path.parent.name if path.parent != install_path else path.stem,
                     "entrypoint": len(path.relative_to(root).parts) <= 2,
+                    "adapter_hint": adapter,
                 }
             )
         elif path.suffix.lower() == ".md" and len(entries) < 50:
@@ -559,14 +696,20 @@ def _collect_normalized_entries(install_path: Path, source_path: str | None) -> 
                 {
                     "path": relative,
                     "type": "doc",
-                    "title": path.stem.replace("-", " ").replace("_", " "),
+                    "title": _title_from_path(path),
                     "entrypoint": False,
+                    "adapter_hint": adapter,
                 }
             )
-    prioritized = [entry for entry in entries if entry["type"] in {"skill", "readme"}]
-    if prioritized:
-        return prioritized + [entry for entry in entries if entry["type"] == "doc"]
-    return entries
+    decorated = [
+        (
+            *_entry_score(adapter, str(entry["path"]), str(entry["type"])),
+            entry,
+        )
+        for entry in entries
+    ]
+    decorated.sort(key=lambda item: (-item[0], item[1], str(item[2]["path"])))
+    return [entry for _, _, entry in decorated]
 
 
 def _normalize_external_skill_install(
@@ -577,11 +720,23 @@ def _normalize_external_skill_install(
 ) -> dict[str, object]:
     normalized_root = _normalized_dir(project_root) / source.slug
     normalized_root.mkdir(parents=True, exist_ok=True)
-    entries = _collect_normalized_entries(install_path, source.source_path)
+    adapter = _adapter_for_source(source)
+    entries = _collect_normalized_entries(install_path, source.source_path, adapter=adapter)
+    entry_type_counts: dict[str, int] = {}
+    for entry in entries:
+        entry_type_counts[str(entry["type"])] = entry_type_counts.get(str(entry["type"]), 0) + 1
     payload = {
         "slug": source.slug,
-        "adapter": _adapter_for_source(source),
+        "adapter": adapter,
+        "ecosystem": source.ecosystem,
+        "publisher": source.publisher,
+        "trust_level": source.trust_level,
+        "trust_score": TRUST_SCORES.get(source.trust_level, 0),
+        "supported_agents": list(source.supported_agents),
+        "repository_url": source.repository_url,
+        "docs_url": source.docs_url,
         "entry_count": len(entries),
+        "entry_type_counts": entry_type_counts,
         "entrypoints": [entry["path"] for entry in entries if entry["entrypoint"]][:12],
         "entries": entries[:100],
     }
@@ -595,7 +750,14 @@ def _normalize_external_skill_install(
         f"# {source.name}",
         "",
         f"- Adapter: `{payload['adapter']}`",
+        f"- Ecosystem: `{payload['ecosystem']}`",
+        f"- Publisher: `{payload['publisher']}`",
+        f"- Trust level: `{payload['trust_level']}` (score: {payload['trust_score']})",
+        f"- Repository: {payload['repository_url']}",
+        f"- Docs: {payload['docs_url']}",
         f"- Entrypoints indexed: {len(payload['entrypoints'])}",
+        f"- Entry types: {', '.join(f'{name}={count}' for name, count in sorted(entry_type_counts.items())) or 'none'}",
+        f"- Supported agents: {', '.join(payload['supported_agents']) or 'unknown'}",
         "",
         "## Entrypoints",
         *entrypoint_lines,
@@ -604,7 +766,14 @@ def _normalize_external_skill_install(
     return {
         "adapter": payload["adapter"],
         "entry_count": payload["entry_count"],
+        "entry_type_counts": payload["entry_type_counts"],
         "entrypoints": payload["entrypoints"],
+        "publisher": payload["publisher"],
+        "trust_level": payload["trust_level"],
+        "trust_score": payload["trust_score"],
+        "supported_agents": payload["supported_agents"],
+        "repository_url": payload["repository_url"],
+        "docs_url": payload["docs_url"],
         "index_path": str(index_path),
         "summary_path": str(summary_path),
     }
@@ -669,6 +838,14 @@ def list_external_skills(
     }
 
 
+def ranked_external_skills(project_root: str | Path = ".") -> dict[str, object]:
+    items = prioritized_active_external_skills(project_root)
+    return {
+        "skills": items,
+        "count": len(items),
+    }
+
+
 def get_external_skill(slug: str, project_root: str | Path = ".") -> dict[str, object]:
     entry = _catalog_entry(slug)
     if entry is None:
@@ -694,14 +871,19 @@ def _build_install_metadata(
     install_mode: str = "manual",
     detection_reasons: list[str] | None = None,
 ) -> dict[str, object]:
+    source = _catalog_entry(slug)
     return {
         "slug": slug,
         "name": name,
         "ecosystem": ecosystem,
+        "publisher": source.publisher if source is not None else "Custom",
+        "category": source.category if source is not None else "custom",
+        "supported_agents": list(source.supported_agents) if source is not None else [],
         "repository_url": repository_url,
         "source_path": source_path,
         "docs_url": docs_url,
         "trust_level": trust_level,
+        "trust_score": TRUST_SCORES.get(trust_level, 0),
         "description": description,
         "install_path": str(install_path),
         "installed_at": datetime.now(UTC).isoformat(),
@@ -828,12 +1010,16 @@ def install_external_skill(
         {
             "slug": resolved_slug,
             "name": resolved_name,
+            "publisher": metadata.get("publisher"),
+            "category": metadata.get("category"),
             "repository_url": metadata["repository_url"],
             "requested_ref": ref,
             "resolved_revision": resolved_revision,
             "active": active_value,
             "normalized": normalization,
             "trust_level": trust_level,
+            "trust_score": TRUST_SCORES.get(trust_level, 0),
+            "supported_agents": metadata.get("supported_agents", []),
             "install_mode": install_mode,
             "updated_at": datetime.now(UTC).isoformat(),
         },
@@ -937,12 +1123,16 @@ def sync_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[st
         {
             "slug": slug,
             "name": installed.get("name"),
+            "publisher": installed.get("publisher"),
+            "category": installed.get("category"),
             "repository_url": installed.get("repository_url"),
             "requested_ref": installed.get("requested_ref"),
             "resolved_revision": installed.get("resolved_revision"),
             "active": lock_entry.get("active", False),
             "normalized": normalization,
             "trust_level": installed.get("trust_level"),
+            "trust_score": installed.get("trust_score", TRUST_SCORES.get(str(installed.get("trust_level", "custom")), 0)),
+            "supported_agents": installed.get("supported_agents", []),
             "install_mode": installed.get("install_mode", "manual"),
             "updated_at": datetime.now(UTC).isoformat(),
         }
@@ -970,6 +1160,11 @@ def activate_external_skill(*, project_root: str | Path = ".", slug: str) -> dic
     lock_entry = _lock_by_slug(project_root).get(slug, {"slug": slug})
     lock_entry["active"] = True
     lock_entry["updated_at"] = datetime.now(UTC).isoformat()
+    lock_entry.setdefault("publisher", installed.get("publisher"))
+    lock_entry.setdefault("category", installed.get("category"))
+    lock_entry.setdefault("trust_level", installed.get("trust_level"))
+    lock_entry.setdefault("trust_score", installed.get("trust_score", TRUST_SCORES.get(str(installed.get("trust_level", "custom")), 0)))
+    lock_entry.setdefault("supported_agents", installed.get("supported_agents", []))
     if "normalized" not in lock_entry:
         install_path = Path(str(installed["install_path"]))
         source = _catalog_entry(slug) or ExternalSkillSource(
@@ -996,6 +1191,11 @@ def deactivate_external_skill(*, project_root: str | Path = ".", slug: str) -> d
     lock_entry = _lock_by_slug(project_root).get(slug, {"slug": slug})
     lock_entry["active"] = False
     lock_entry["updated_at"] = datetime.now(UTC).isoformat()
+    lock_entry.setdefault("publisher", installed.get("publisher"))
+    lock_entry.setdefault("category", installed.get("category"))
+    lock_entry.setdefault("trust_level", installed.get("trust_level"))
+    lock_entry.setdefault("trust_score", installed.get("trust_score", TRUST_SCORES.get(str(installed.get("trust_level", "custom")), 0)))
+    lock_entry.setdefault("supported_agents", installed.get("supported_agents", []))
     _upsert_lock_entry(project_root, lock_entry)
     return {"slug": slug, "active": False, "lock_metadata": lock_entry}
 
