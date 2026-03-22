@@ -56,6 +56,15 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertIn("retry_attempts", doctor)
                 self.assertIn("retry_base_delay_seconds", doctor)
 
+                skills_list = get_json(f"{base}/skills?{urlencode({'project_root': str(root), 'search': 'langsmith'})}")
+                self.assertTrue(skills_list["skills"])
+
+                skills_detect = get_json(f"{base}/skills/detect?{urlencode({'project_root': str(root)})}")
+                self.assertIn("detected_skills", skills_detect)
+
+                langchain_skill = get_json(f"{base}/skills/langchain-skills?{urlencode({'project_root': str(root)})}")
+                self.assertEqual(langchain_skill["skill"]["slug"], "langchain-skills")
+
                 decision = get_json(f"{base}/decide?{urlencode({'project_root': str(root), 'requirements': str(requirements)})}")
                 self.assertIn("should_refresh", decision)
                 self.assertIn("prioritized_skill_paths", decision)
@@ -109,6 +118,38 @@ class ApiSmokeTests(unittest.TestCase):
                 jobs = get_json(f"{base}/jobs?{urlencode({'project_root': str(root)})}")
                 self.assertTrue(jobs["jobs"])
 
+                source = root / "external-source"
+                source.mkdir()
+                (source / "README.md").write_text("demo\n", encoding="utf-8")
+                import subprocess
+                subprocess.run(["git", "init", str(source)], text=True, capture_output=True, check=True)
+                subprocess.run(["git", "-C", str(source), "config", "user.email", "tests@example.com"], text=True, capture_output=True, check=True)
+                subprocess.run(["git", "-C", str(source), "config", "user.name", "Tests"], text=True, capture_output=True, check=True)
+                subprocess.run(["git", "-C", str(source), "add", "."], text=True, capture_output=True, check=True)
+                subprocess.run(["git", "-C", str(source), "commit", "-m", "init"], text=True, capture_output=True, check=True)
+
+                installed_skill = post_json(
+                    f"{base}/skills/install",
+                    {"project_root": str(root), "git_url": str(source), "name": "demo pack", "active": True},
+                )
+                self.assertEqual(installed_skill["installed_skill"]["slug"], "demo-pack")
+
+                active_skills = get_json(f"{base}/skills/active?{urlencode({'project_root': str(root)})}")
+                self.assertTrue(active_skills["skills"])
+
+                lock = get_json(f"{base}/skills/lock?{urlencode({'project_root': str(root)})}")
+                self.assertTrue(lock["skills"])
+
+                deactivated = post_json(f"{base}/skills/deactivate", {"project_root": str(root), "slug": "demo-pack"})
+                self.assertFalse(deactivated["deactivated_skill"]["active"])
+                activated = post_json(f"{base}/skills/activate", {"project_root": str(root), "slug": "demo-pack"})
+                self.assertTrue(activated["activated_skill"]["active"])
+                synced = post_json(f"{base}/skills/sync", {"project_root": str(root), "all": True})
+                self.assertGreaterEqual(synced["count"], 1)
+                self.assertIn("demo-pack", {item["slug"] for item in synced["skills"]})
+                removed = post_json(f"{base}/skills/remove", {"project_root": str(root), "slug": "demo-pack"})
+                self.assertTrue(removed["removed_skill"]["removed"])
+
                 status = get_json(f"{base}/status?{urlencode({'project_root': str(root)})}")
                 self.assertTrue(status["manifest_exists"])
                 self.assertTrue(status["graph_exists"])
@@ -122,6 +163,8 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertIsNotNone(status["current_run_memory"])
                 self.assertIn("agent_decision", status)
                 self.assertIn("installed_external_skills", status)
+                self.assertIn("active_external_skills", status)
+                self.assertIn("external_skill_lock", status)
                 self.assertIn("external_skill_recommendations", status)
                 self.assertIn("pending_validations", status["current_run_memory"])
                 self.assertIn("resumable_steps", status["current_run_memory"])

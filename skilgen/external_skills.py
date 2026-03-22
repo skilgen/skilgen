@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from skilgen.core.config import load_config
 
 @dataclass(frozen=True)
 class ExternalSkillSource:
@@ -264,8 +265,16 @@ def _manifest_path(project_root: str | Path) -> Path:
     return _external_skills_root(project_root) / "manifest.json"
 
 
+def _lock_path(project_root: str | Path) -> Path:
+    return _external_skills_root(project_root) / "lock.json"
+
+
 def _sources_dir(project_root: str | Path) -> Path:
     return _external_skills_root(project_root) / "sources"
+
+
+def _normalized_dir(project_root: str | Path) -> Path:
+    return _external_skills_root(project_root) / "normalized"
 
 
 def _normalize_slug(name: str) -> str:
@@ -285,9 +294,34 @@ def _write_manifest(project_root: str | Path, payload: dict[str, object]) -> Non
     _manifest_path(project_root).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def _load_lock(project_root: str | Path) -> dict[str, object]:
+    path = _lock_path(project_root)
+    if not path.exists():
+        return {"skills": []}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_lock(project_root: str | Path, payload: dict[str, object]) -> None:
+    root = _external_skills_root(project_root)
+    root.mkdir(parents=True, exist_ok=True)
+    _lock_path(project_root).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def _installed_by_slug(project_root: str | Path) -> dict[str, dict[str, object]]:
     manifest = _load_manifest(project_root)
     entries = manifest.get("skills", [])
+    if not isinstance(entries, list):
+        return {}
+    return {
+        str(entry.get("slug")): entry
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("slug")
+    }
+
+
+def _lock_by_slug(project_root: str | Path) -> dict[str, dict[str, object]]:
+    lock = _load_lock(project_root)
+    entries = lock.get("skills", [])
     if not isinstance(entries, list):
         return {}
     return {
@@ -314,6 +348,21 @@ def _serialize_entry(entry: ExternalSkillSource, installed: dict[str, object] | 
 
 def installed_external_skills(project_root: str | Path = ".") -> list[dict[str, object]]:
     return sorted(_installed_by_slug(project_root).values(), key=lambda entry: str(entry.get("slug", "")))
+
+
+def external_skill_lock(project_root: str | Path = ".") -> dict[str, object]:
+    return _load_lock(project_root)
+
+
+def active_external_skills(project_root: str | Path = ".") -> list[dict[str, object]]:
+    installed = _installed_by_slug(project_root)
+    locked = _lock_by_slug(project_root)
+    active: list[dict[str, object]] = []
+    for slug, entry in installed.items():
+        lock_entry = locked.get(slug, {})
+        if lock_entry.get("active"):
+            active.append({**entry, "lock_metadata": lock_entry})
+    return sorted(active, key=lambda entry: str(entry.get("slug", "")))
 
 
 def _repo_text_snapshot(project_root: Path) -> tuple[list[str], str]:
@@ -435,6 +484,154 @@ def detect_external_skill_sources(project_root: str | Path = ".") -> dict[str, o
     }
 
 
+def _git_revision(install_path: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(install_path), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip() or None
+    except subprocess.CalledProcessError:
+        return None
+
+
+def _git_remote_url(install_path: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(install_path), "remote", "get-url", "origin"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip() or None
+    except subprocess.CalledProcessError:
+        return None
+
+
+def _adapter_for_source(source: ExternalSkillSource) -> str:
+    if source.slug == "anthropic-skills":
+        return "anthropic-skills"
+    if source.slug in {"langchain-skills", "langsmith-skills"}:
+        return "langchain-skills"
+    if source.ecosystem == "huggingface":
+        return "huggingface-skills"
+    if source.category in {"directory", "curated"}:
+        return "catalog-directory"
+    if source.category == "spec":
+        return "skill-spec"
+    if source.category == "benchmarks":
+        return "benchmarks"
+    return "generic-repo"
+
+
+def _collect_normalized_entries(install_path: Path, source_path: str | None) -> list[dict[str, object]]:
+    root = install_path / source_path if source_path else install_path
+    if not root.exists():
+        root = install_path
+    entries: list[dict[str, object]] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(install_path).as_posix()
+        lower = path.name.lower()
+        if lower == "skill.md":
+            entries.append(
+                {
+                    "path": relative,
+                    "type": "skill",
+                    "title": path.parent.name,
+                    "entrypoint": True,
+                }
+            )
+        elif lower == "readme.md":
+            entries.append(
+                {
+                    "path": relative,
+                    "type": "readme",
+                    "title": path.parent.name if path.parent != install_path else path.stem,
+                    "entrypoint": len(path.relative_to(root).parts) <= 2,
+                }
+            )
+        elif path.suffix.lower() == ".md" and len(entries) < 50:
+            entries.append(
+                {
+                    "path": relative,
+                    "type": "doc",
+                    "title": path.stem.replace("-", " ").replace("_", " "),
+                    "entrypoint": False,
+                }
+            )
+    prioritized = [entry for entry in entries if entry["type"] in {"skill", "readme"}]
+    if prioritized:
+        return prioritized + [entry for entry in entries if entry["type"] == "doc"]
+    return entries
+
+
+def _normalize_external_skill_install(
+    project_root: str | Path,
+    *,
+    source: ExternalSkillSource,
+    install_path: Path,
+) -> dict[str, object]:
+    normalized_root = _normalized_dir(project_root) / source.slug
+    normalized_root.mkdir(parents=True, exist_ok=True)
+    entries = _collect_normalized_entries(install_path, source.source_path)
+    payload = {
+        "slug": source.slug,
+        "adapter": _adapter_for_source(source),
+        "entry_count": len(entries),
+        "entrypoints": [entry["path"] for entry in entries if entry["entrypoint"]][:12],
+        "entries": entries[:100],
+    }
+    index_path = normalized_root / "index.json"
+    index_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    summary_path = normalized_root / "SUMMARY.md"
+    entrypoint_lines = [f"- `{path}`" for path in payload["entrypoints"]] or [
+        "- No obvious entrypoints were indexed."
+    ]
+    summary_lines = [
+        f"# {source.name}",
+        "",
+        f"- Adapter: `{payload['adapter']}`",
+        f"- Entrypoints indexed: {len(payload['entrypoints'])}",
+        "",
+        "## Entrypoints",
+        *entrypoint_lines,
+    ]
+    summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+    return {
+        "adapter": payload["adapter"],
+        "entry_count": payload["entry_count"],
+        "entrypoints": payload["entrypoints"],
+        "index_path": str(index_path),
+        "summary_path": str(summary_path),
+    }
+
+
+def _policy_allows_source(project_root: str | Path, source: ExternalSkillSource) -> tuple[bool, str | None]:
+    config = load_config(Path(project_root).resolve())
+    allowlist = {slug for slug in config.external_skills_allowlist}
+    denylist = {slug for slug in config.external_skills_denylist}
+    allowed_trust = {trust for trust in config.external_skills_allowed_trust_levels}
+    if source.slug in denylist:
+        return False, "source is denylisted by config"
+    if allowlist and source.slug not in allowlist:
+        return False, "source is not allowlisted by config"
+    if allowed_trust and source.trust_level not in allowed_trust:
+        return False, f"trust level '{source.trust_level}' is blocked by config"
+    return True, None
+
+
+def _upsert_lock_entry(project_root: str | Path, entry: dict[str, object]) -> None:
+    lock = _load_lock(project_root)
+    skills = [item for item in lock.get("skills", []) if isinstance(item, dict) and item.get("slug") != entry.get("slug")]
+    skills.append(entry)
+    lock["skills"] = sorted(skills, key=lambda item: str(item.get("slug", "")))
+    _write_lock(project_root, lock)
+
+
 def list_external_skills(
     project_root: str | Path = ".",
     *,
@@ -442,6 +639,7 @@ def list_external_skills(
     search: str | None = None,
 ) -> dict[str, object]:
     installed = _installed_by_slug(project_root)
+    locked = _lock_by_slug(project_root)
     items: list[dict[str, object]] = []
     needle = search.lower() if search else None
     for entry in CATALOG:
@@ -460,7 +658,10 @@ def list_external_skills(
         ).lower()
         if needle and needle not in haystack:
             continue
-        items.append(_serialize_entry(entry, installed.get(entry.slug)))
+        payload = _serialize_entry(entry, installed.get(entry.slug))
+        payload["lock_metadata"] = locked.get(entry.slug)
+        payload["active"] = bool(locked.get(entry.slug, {}).get("active", False))
+        items.append(payload)
     return {
         "skills": items,
         "ecosystems": sorted({entry["ecosystem"] for entry in items}),
@@ -473,7 +674,10 @@ def get_external_skill(slug: str, project_root: str | Path = ".") -> dict[str, o
     if entry is None:
         raise KeyError(f"Unknown external skill source: {slug}")
     installed = _installed_by_slug(project_root).get(slug)
-    return _serialize_entry(entry, installed)
+    payload = _serialize_entry(entry, installed)
+    payload["lock_metadata"] = _lock_by_slug(project_root).get(slug)
+    payload["active"] = bool(payload["lock_metadata"].get("active", False)) if isinstance(payload["lock_metadata"], dict) else False
+    return payload
 
 
 def _build_install_metadata(
@@ -515,6 +719,8 @@ def install_external_skill(
     force: bool = False,
     install_mode: str = "manual",
     detection_reasons: list[str] | None = None,
+    ref: str | None = None,
+    active: bool | None = None,
 ) -> dict[str, object]:
     if slug is None and git_url is None:
         raise ValueError("Provide either a catalog slug or a git_url.")
@@ -523,6 +729,9 @@ def install_external_skill(
         entry = _catalog_entry(slug)
         if entry is None:
             raise KeyError(f"Unknown external skill source: {slug}")
+        allowed, reason = _policy_allows_source(project_root, entry)
+        if not allowed:
+            raise PermissionError(f"Cannot install {entry.slug}: {reason}")
         resolved_slug = entry.slug
         resolved_name = entry.name
         repository_url = entry.repository_url
@@ -573,26 +782,92 @@ def install_external_skill(
         install_mode=install_mode,
         detection_reasons=detection_reasons,
     )
+    metadata["requested_ref"] = ref
     (install_path / "skilgen-source.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+    if ref:
+        subprocess.run(
+            ["git", "-C", str(install_path), "checkout", ref],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    resolved_revision = _git_revision(install_path)
+    if resolved_revision is not None:
+        metadata["resolved_revision"] = resolved_revision
+    remote_url = _git_remote_url(install_path)
+    if remote_url is not None:
+        metadata["repository_url"] = remote_url
+
+    source = entry if slug is not None and entry is not None else ExternalSkillSource(
+        slug=resolved_slug,
+        name=resolved_name,
+        ecosystem=ecosystem,
+        publisher="Custom",
+        description=description,
+        repository_url=repository_url,
+        source_path=source_path,
+        docs_url=docs_url,
+        category="custom",
+        trust_level=trust_level,
+    )
+    normalization = _normalize_external_skill_install(project_root, source=source, install_path=install_path)
+    config = load_config(Path(project_root).resolve())
+    active_value = config.external_skills_auto_activate if active is None else active
+    metadata["normalized"] = normalization
+    metadata["active"] = active_value
 
     manifest = _load_manifest(project_root)
     skills = [entry for entry in manifest.get("skills", []) if isinstance(entry, dict) and entry.get("slug") != resolved_slug]
     skills.append(metadata)
     manifest["skills"] = sorted(skills, key=lambda entry: str(entry.get("slug", "")))
     _write_manifest(project_root, manifest)
+    _upsert_lock_entry(
+        project_root,
+        {
+            "slug": resolved_slug,
+            "name": resolved_name,
+            "repository_url": metadata["repository_url"],
+            "requested_ref": ref,
+            "resolved_revision": resolved_revision,
+            "active": active_value,
+            "normalized": normalization,
+            "trust_level": trust_level,
+            "install_mode": install_mode,
+            "updated_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    (install_path / "skilgen-source.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     return metadata
 
 
 def ensure_external_skills_for_project(project_root: str | Path = ".") -> dict[str, object]:
     root = Path(project_root).resolve()
+    config = load_config(root)
     detections = detect_external_skill_sources(root)
     installed = _installed_by_slug(root)
+    locked = _lock_by_slug(root)
     newly_installed: list[dict[str, object]] = []
     already_installed: list[dict[str, object]] = []
     errors: list[dict[str, str]] = []
+    blocked: list[dict[str, str]] = []
     for detection in detections["detected_skills"]:
         slug = str(detection["slug"])
+        source = _catalog_entry(slug)
+        if source is None:
+            continue
+        allowed, reason = _policy_allows_source(root, source)
+        if not allowed:
+            blocked.append({"slug": slug, "reason": reason or "blocked"})
+            continue
         if slug in installed:
+            if config.external_skills_auto_activate:
+                lock_entry = locked.get(slug)
+                if isinstance(lock_entry, dict) and not lock_entry.get("active"):
+                    lock_entry["active"] = True
+                    lock_entry["updated_at"] = datetime.now(UTC).isoformat()
+                    _upsert_lock_entry(root, lock_entry)
             already_installed.append(installed[slug])
             continue
         try:
@@ -601,6 +876,7 @@ def ensure_external_skills_for_project(project_root: str | Path = ".") -> dict[s
                 slug=slug,
                 install_mode="auto",
                 detection_reasons=[str(reason) for reason in detection.get("reasons", [])],
+                active=config.external_skills_auto_activate,
             )
             newly_installed.append(metadata)
             installed[slug] = metadata
@@ -612,6 +888,7 @@ def ensure_external_skills_for_project(project_root: str | Path = ".") -> dict[s
         "newly_installed": newly_installed,
         "already_installed": already_installed,
         "errors": errors,
+        "blocked": blocked,
     }
 
 
@@ -626,9 +903,24 @@ def sync_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[st
         capture_output=True,
         text=True,
     )
+    source = _catalog_entry(slug) or ExternalSkillSource(
+        slug=slug,
+        name=str(installed.get("name", slug)),
+        ecosystem=str(installed.get("ecosystem", "custom")),
+        publisher="Custom",
+        description=str(installed.get("description", "")),
+        repository_url=str(installed.get("repository_url", "")),
+        source_path=installed.get("source_path") if isinstance(installed.get("source_path"), str) or installed.get("source_path") is None else None,
+        docs_url=str(installed.get("docs_url", installed.get("repository_url", ""))),
+        category="custom",
+        trust_level=str(installed.get("trust_level", "custom")),
+    )
+    normalization = _normalize_external_skill_install(project_root, source=source, install_path=install_path)
     installed["synced_at"] = datetime.now(UTC).isoformat()
     installed["sync_stdout"] = result.stdout.strip()
     installed["sync_stderr"] = result.stderr.strip()
+    installed["resolved_revision"] = _git_revision(install_path)
+    installed["normalized"] = normalization
     manifest = _load_manifest(project_root)
     manifest["skills"] = sorted(
         [
@@ -640,7 +932,72 @@ def sync_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[st
     )
     _write_manifest(project_root, manifest)
     (install_path / "skilgen-source.json").write_text(json.dumps(installed, indent=2), encoding="utf-8")
+    lock_entry = _lock_by_slug(project_root).get(slug, {"slug": slug})
+    lock_entry.update(
+        {
+            "slug": slug,
+            "name": installed.get("name"),
+            "repository_url": installed.get("repository_url"),
+            "requested_ref": installed.get("requested_ref"),
+            "resolved_revision": installed.get("resolved_revision"),
+            "active": lock_entry.get("active", False),
+            "normalized": normalization,
+            "trust_level": installed.get("trust_level"),
+            "install_mode": installed.get("install_mode", "manual"),
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    _upsert_lock_entry(project_root, lock_entry)
     return installed
+
+
+def sync_all_external_skills(*, project_root: str | Path = ".") -> dict[str, object]:
+    synced: list[dict[str, object]] = []
+    errors: list[dict[str, str]] = []
+    for installed in installed_external_skills(project_root):
+        slug = str(installed["slug"])
+        try:
+            synced.append(sync_external_skill(project_root=project_root, slug=slug))
+        except Exception as exc:  # pragma: no cover
+            errors.append({"slug": slug, "error": str(exc)})
+    return {"skills": synced, "errors": errors, "count": len(synced)}
+
+
+def activate_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[str, object]:
+    installed = _installed_by_slug(project_root).get(slug)
+    if installed is None:
+        raise KeyError(f"External skill source is not installed: {slug}")
+    lock_entry = _lock_by_slug(project_root).get(slug, {"slug": slug})
+    lock_entry["active"] = True
+    lock_entry["updated_at"] = datetime.now(UTC).isoformat()
+    if "normalized" not in lock_entry:
+        install_path = Path(str(installed["install_path"]))
+        source = _catalog_entry(slug) or ExternalSkillSource(
+            slug=slug,
+            name=str(installed.get("name", slug)),
+            ecosystem=str(installed.get("ecosystem", "custom")),
+            publisher="Custom",
+            description=str(installed.get("description", "")),
+            repository_url=str(installed.get("repository_url", "")),
+            source_path=installed.get("source_path") if isinstance(installed.get("source_path"), str) or installed.get("source_path") is None else None,
+            docs_url=str(installed.get("docs_url", installed.get("repository_url", ""))),
+            category="custom",
+            trust_level=str(installed.get("trust_level", "custom")),
+        )
+        lock_entry["normalized"] = _normalize_external_skill_install(project_root, source=source, install_path=install_path)
+    _upsert_lock_entry(project_root, lock_entry)
+    return {"slug": slug, "active": True, "lock_metadata": lock_entry}
+
+
+def deactivate_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[str, object]:
+    installed = _installed_by_slug(project_root).get(slug)
+    if installed is None:
+        raise KeyError(f"External skill source is not installed: {slug}")
+    lock_entry = _lock_by_slug(project_root).get(slug, {"slug": slug})
+    lock_entry["active"] = False
+    lock_entry["updated_at"] = datetime.now(UTC).isoformat()
+    _upsert_lock_entry(project_root, lock_entry)
+    return {"slug": slug, "active": False, "lock_metadata": lock_entry}
 
 
 def remove_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[str, object]:
@@ -650,6 +1007,9 @@ def remove_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[
     install_path = Path(str(installed["install_path"]))
     if install_path.exists():
         shutil.rmtree(install_path)
+    normalized_path = _normalized_dir(project_root) / slug
+    if normalized_path.exists():
+        shutil.rmtree(normalized_path)
     manifest = _load_manifest(project_root)
     manifest["skills"] = [
         entry
@@ -657,6 +1017,13 @@ def remove_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[
         if isinstance(entry, dict) and entry.get("slug") != slug
     ]
     _write_manifest(project_root, manifest)
+    lock = _load_lock(project_root)
+    lock["skills"] = [
+        entry
+        for entry in lock.get("skills", [])
+        if isinstance(entry, dict) and entry.get("slug") != slug
+    ]
+    _write_lock(project_root, lock)
     return {
         "slug": slug,
         "removed": True,

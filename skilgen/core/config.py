@@ -20,6 +20,10 @@ DEFAULT_CONFIG = SkilgenConfig(
     model_retry_attempts=3,
     model_retry_base_delay_seconds=1.0,
     auto_install_external_skills=True,
+    external_skills_allowed_trust_levels=["official", "spec", "community", "curated"],
+    external_skills_allowlist=[],
+    external_skills_denylist=[],
+    external_skills_auto_activate=True,
 )
 
 
@@ -75,6 +79,10 @@ def load_config(project_root: Path) -> SkilgenConfig:
         "model_retry_attempts": DEFAULT_CONFIG.model_retry_attempts,
         "model_retry_base_delay_seconds": DEFAULT_CONFIG.model_retry_base_delay_seconds,
         "auto_install_external_skills": DEFAULT_CONFIG.auto_install_external_skills,
+        "external_skills_allowed_trust_levels": list(DEFAULT_CONFIG.external_skills_allowed_trust_levels),
+        "external_skills_allowlist": list(DEFAULT_CONFIG.external_skills_allowlist),
+        "external_skills_denylist": list(DEFAULT_CONFIG.external_skills_denylist),
+        "external_skills_auto_activate": DEFAULT_CONFIG.external_skills_auto_activate,
     }
     current_list: str | None = None
 
@@ -116,6 +124,10 @@ def load_config(project_root: Path) -> SkilgenConfig:
         model_retry_attempts=int(data.get("model_retry_attempts", DEFAULT_CONFIG.model_retry_attempts)),
         model_retry_base_delay_seconds=float(data.get("model_retry_base_delay_seconds", DEFAULT_CONFIG.model_retry_base_delay_seconds)),
         auto_install_external_skills=bool(data.get("auto_install_external_skills", DEFAULT_CONFIG.auto_install_external_skills)),
+        external_skills_allowed_trust_levels=list(data.get("external_skills_allowed_trust_levels", DEFAULT_CONFIG.external_skills_allowed_trust_levels)),
+        external_skills_allowlist=list(data.get("external_skills_allowlist", DEFAULT_CONFIG.external_skills_allowlist)),
+        external_skills_denylist=list(data.get("external_skills_denylist", DEFAULT_CONFIG.external_skills_denylist)),
+        external_skills_auto_activate=bool(data.get("external_skills_auto_activate", DEFAULT_CONFIG.external_skills_auto_activate)),
     )
 
 
@@ -155,4 +167,12 @@ model_max_tokens:
 model_retry_attempts: 3
 model_retry_base_delay_seconds: 1.0
 auto_install_external_skills: true
+external_skills_allowed_trust_levels:
+  - official
+  - spec
+  - community
+  - curated
+external_skills_allowlist:
+external_skills_denylist:
+external_skills_auto_activate: true
 """

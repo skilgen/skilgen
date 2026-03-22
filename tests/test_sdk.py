@@ -5,13 +5,17 @@ from unittest.mock import patch
 
 from skilgen.external_skills import detect_external_skill_sources, ensure_external_skills_for_project
 from skilgen.sdk import (
+    activate_skill_source,
     analyze_project,
     cancel_job,
+    deactivate_skill_source,
+    detect_skill_sources,
     decide_project,
     deliver_project,
     get_job_status,
     init_project,
     install_skill_source,
+    list_active_skill_sources,
     list_project_jobs,
     list_skill_sources,
     project_report,
@@ -20,7 +24,9 @@ from skilgen.sdk import (
     remove_skill_source,
     resume_job,
     show_skill_source,
+    skill_source_lock,
     start_deliver_job,
+    sync_all_skill_sources,
     sync_skill_source,
     update_project,
     validate_project_outputs,
@@ -131,6 +137,19 @@ class SdkTests(unittest.TestCase):
             synced = sync_skill_source("demo-pack", root)
             self.assertIn("synced_at", synced["synced_skill"])
 
+            activated = activate_skill_source("demo-pack", root)
+            self.assertTrue(activated["activated_skill"]["active"])
+            active_sources = list_active_skill_sources(root)
+            self.assertEqual(active_sources["skills"][0]["slug"], "demo-pack")
+            locked = skill_source_lock(root)
+            self.assertEqual(locked["skills"][0]["slug"], "demo-pack")
+
+            deactivated = deactivate_skill_source("demo-pack", root)
+            self.assertFalse(deactivated["deactivated_skill"]["active"])
+
+            sync_all = sync_all_skill_sources(root)
+            self.assertEqual(sync_all["count"], 1)
+
             removed = remove_skill_source("demo-pack", root)
             self.assertTrue(removed["removed_skill"]["removed"])
             self.assertFalse(install_path.exists())
@@ -196,6 +215,13 @@ class SdkTests(unittest.TestCase):
             self.assertEqual(install_mock.call_count, 2)
             slugs = {call.kwargs["slug"] for call in install_mock.call_args_list}
             self.assertEqual(slugs, {"anthropic-skills", "langchain-skills"})
+
+    def test_detect_skill_sources_sdk_wrapper(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "CLAUDE.md").write_text("Claude Code instructions\n", encoding="utf-8")
+            detected = detect_skill_sources(root)
+            self.assertTrue(detected["detected_skills"])
 
 
 if __name__ == "__main__":

@@ -172,6 +172,7 @@ Discover consolidated external skill ecosystems through Skilgen:
 
 ```bash
 skilgen skills list
+skilgen skills detect --project-root .
 skilgen skills show anthropic-skills
 ```
 
@@ -179,6 +180,8 @@ Install a curated or custom external skill source into the local Skilgen-managed
 
 ```bash
 skilgen skills install anthropic-skills --project-root .
+skilgen skills active --project-root .
+skilgen skills lock --project-root .
 skilgen skills sync anthropic-skills --project-root .
 skilgen skills remove anthropic-skills --project-root .
 skilgen skills install --git-url https://github.com/example/skills.git --name my-skill-pack --project-root .
@@ -193,6 +196,10 @@ When Skilgen runs on an existing repository, it also looks for strong ecosystem 
 - existing `SKILL.md` / `skills/` structures
 
 If a strong match is found, Skilgen auto-installs the matching external skill pack into `.skilgen/external-skills/` so coding agents can use it immediately.
+Installed packs are tracked with:
+- `manifest.json` for installed sources
+- `lock.json` for resolved revisions, active/inactive state, and normalized entrypoint indexes
+- `normalized/<slug>/` for Skilgen-friendly adapter summaries
 
 ## Supported External Skills
 
@@ -200,9 +207,15 @@ Skilgen can act as a one-stop shop for skill ecosystems by exposing them through
 
 ```bash
 skilgen skills list
+skilgen skills detect --project-root .
 skilgen skills show <slug>
 skilgen skills install <slug> --project-root .
+skilgen skills activate <slug> --project-root .
+skilgen skills deactivate <slug> --project-root .
+skilgen skills active --project-root .
+skilgen skills lock --project-root .
 skilgen skills sync <slug> --project-root .
+skilgen skills sync --all --project-root .
 skilgen skills remove <slug> --project-root .
 ```
 

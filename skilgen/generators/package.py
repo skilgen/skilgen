@@ -9,7 +9,7 @@ from skilgen.agents.requirements_parser import parse_project_intent
 from skilgen.deep_agents_core import run_deep_text
 from skilgen.core.config import render_default_config
 from skilgen.core.context import build_codebase_context
-from skilgen.external_skills import detect_external_skill_sources, installed_external_skills
+from skilgen.external_skills import active_external_skills, detect_external_skill_sources, installed_external_skills
 from skilgen.core.models import RequirementsContext
 
 
@@ -591,10 +591,15 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
     )
     inferred_domains = [node for node in codebase_context.domain_graph.nodes if node.parent_domain is None]
     installed_skill_packs = installed_external_skills(project_root)
+    active_skill_packs = active_external_skills(project_root)
     external_skill_lines = [
         f"- `{entry['slug']}` ({entry.get('ecosystem', 'unknown')}): installed at `{entry.get('install_path', '')}`"
         for entry in installed_skill_packs
     ] or ["- No external skill packs have been installed yet."]
+    active_external_lines = [
+        f"- `{entry['slug']}` ({entry.get('lock_metadata', {}).get('normalized', {}).get('adapter', 'raw')}): load from `{entry.get('install_path', '')}`"
+        for entry in active_skill_packs
+    ] or ["- No external skill packs are currently active."]
     recommended_external_lines = [
         f"- `{entry['slug']}`: {'; '.join(entry.get('reasons', []))}"
         for entry in detect_external_skill_sources(project_root).get("manual_recommendations", [])
@@ -631,6 +636,9 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
             "",
             "## External Skill Packs",
             *external_skill_lines,
+            "",
+            "## Active External Skill Packs",
+            *active_external_lines,
             "",
             "## Suggested External Skill Packs",
             *recommended_external_lines,

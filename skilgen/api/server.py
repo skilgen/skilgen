@@ -22,6 +22,16 @@ from skilgen.api.service import (
     preview_payload,
     resume_job_payload,
     report_payload,
+    skills_activate_payload,
+    skills_active_payload,
+    skills_deactivate_payload,
+    skills_detect_payload,
+    skills_install_payload,
+    skills_list_payload,
+    skills_lock_payload,
+    skills_remove_payload,
+    skills_show_payload,
+    skills_sync_payload,
     status_payload,
     validate_payload,
 )
@@ -55,6 +65,29 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/doctor":
                 _json_response(self, 200, doctor_payload(query.get("project_root", ["."])[0]))
+                return
+            if parsed.path == "/skills":
+                _json_response(
+                    self,
+                    200,
+                    skills_list_payload(
+                        query.get("project_root", ["."])[0],
+                        query.get("ecosystem", [None])[0],
+                        query.get("search", [None])[0],
+                    ),
+                )
+                return
+            if parsed.path == "/skills/detect":
+                _json_response(self, 200, skills_detect_payload(query.get("project_root", ["."])[0]))
+                return
+            if parsed.path == "/skills/active":
+                _json_response(self, 200, skills_active_payload(query.get("project_root", ["."])[0]))
+                return
+            if parsed.path == "/skills/lock":
+                _json_response(self, 200, skills_lock_payload(query.get("project_root", ["."])[0]))
+                return
+            if parsed.path.startswith("/skills/"):
+                _json_response(self, 200, skills_show_payload(parsed.path.split("/")[-1], query.get("project_root", ["."])[0]))
                 return
             if parsed.path == "/decide":
                 _json_response(
@@ -124,6 +157,41 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                         domains=domains,
                     ),
                 )
+                return
+            if self.path == "/skills/install":
+                _json_response(
+                    self,
+                    200,
+                    skills_install_payload(
+                        str(data.get("project_root", ".")),
+                        slug=str(data["slug"]) if "slug" in data and data.get("slug") is not None else None,
+                        git_url=str(data["git_url"]) if "git_url" in data and data.get("git_url") is not None else None,
+                        name=str(data["name"]) if "name" in data and data.get("name") is not None else None,
+                        force=bool(data.get("force", False)),
+                        ref=str(data["ref"]) if "ref" in data and data.get("ref") is not None else None,
+                        active=data.get("active") if isinstance(data.get("active"), bool) else None,
+                    ),
+                )
+                return
+            if self.path == "/skills/sync":
+                _json_response(
+                    self,
+                    200,
+                    skills_sync_payload(
+                        str(data.get("project_root", ".")),
+                        str(data["slug"]) if "slug" in data and data.get("slug") is not None else None,
+                        all_sources=bool(data.get("all", False)),
+                    ),
+                )
+                return
+            if self.path == "/skills/remove":
+                _json_response(self, 200, skills_remove_payload(str(data.get("project_root", ".")), str(data["slug"])))
+                return
+            if self.path == "/skills/activate":
+                _json_response(self, 200, skills_activate_payload(str(data.get("project_root", ".")), str(data["slug"])))
+                return
+            if self.path == "/skills/deactivate":
+                _json_response(self, 200, skills_deactivate_payload(str(data.get("project_root", ".")), str(data["slug"])))
                 return
             if self.path == "/jobs/deliver":
                 _json_response(self, 202, create_deliver_job(str(data["requirements"]) if "requirements" in data else None, str(data.get("project_root", "."))))

@@ -259,6 +259,89 @@ class CliTests(unittest.TestCase):
             self.assertIn("recommendations", payload)
             self.assertIn("api_key_env", payload)
 
+    def test_skills_detect_active_lock_and_activation_flow(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "CLAUDE.md").write_text("Use Claude Code\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text("dependencies = ['langchain']\n", encoding="utf-8")
+
+            detected = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "skills", "detect", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(detected.stdout)
+            slugs = {entry["slug"] for entry in payload["detected_skills"]}
+            self.assertIn("anthropic-skills", slugs)
+            self.assertIn("langchain-skills", slugs)
+
+            source = root / "external-source"
+            source.mkdir()
+            (source / "README.md").write_text("demo\n", encoding="utf-8")
+            subprocess.run(["git", "init", str(source)], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "config", "user.email", "tests@example.com"], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "config", "user.name", "Tests"], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "add", "."], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "init"], text=True, capture_output=True, check=True)
+            revision = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"], text=True, capture_output=True, check=True).stdout.strip()
+
+            installed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "skills",
+                    "install",
+                    "--git-url",
+                    str(source),
+                    "--name",
+                    "demo pack",
+                    "--project-root",
+                    str(root),
+                    "--ref",
+                    revision,
+                    "--activate",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            installed_payload = json.loads(installed.stdout)
+            self.assertEqual(installed_payload["installed_skill"]["requested_ref"], revision)
+
+            active = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "skills", "active", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("demo-pack", active.stdout)
+
+            deactivated = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "skills", "deactivate", "demo-pack", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertFalse(json.loads(deactivated.stdout)["deactivated_skill"]["active"])
+
+            activated = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "skills", "activate", "demo-pack", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertTrue(json.loads(activated.stdout)["activated_skill"]["active"])
+
+            locked = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "skills", "lock", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("resolved_revision", locked.stdout)
+
     def test_skills_list_returns_curated_sources(self) -> None:
         result = subprocess.run(
             [sys.executable, "-m", "skilgen.cli.main", "skills", "list"],
