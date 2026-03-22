@@ -28,6 +28,7 @@ from skilgen.generators.package import (
 from skilgen.generators.skills import planned_skill_paths, write_skills
 from skilgen.deep_agents_core import _build_chat_model, _close_model, _normalize_json_with_model, deep_agents_unavailable_reason
 from skilgen.deep_agents_core import _classify_model_error, _invoke_with_retry, runtime_diagnostics
+from skilgen.external_skills import ensure_external_skills_for_project
 
 try:
     from deepagents import create_deep_agent
@@ -188,6 +189,8 @@ class DeepAgentsRuntime:
 
     def run(self, task: str, prompt: str, fallback: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         require_agent = os.getenv("SKILGEN_DEEPAGENTS_REQUIRED") == "1"
+        if self.config.auto_install_external_skills:
+            ensure_external_skills_for_project(self.project_root)
         if not self.enabled:
             if require_agent:
                 raise RuntimeError(

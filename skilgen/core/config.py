@@ -7,7 +7,7 @@ from skilgen.core.models import SkilgenConfig
 
 DEFAULT_CONFIG = SkilgenConfig(
     include_paths=["."],
-    exclude_paths=[".git", "__pycache__", ".venv", "node_modules"],
+    exclude_paths=[".git", "__pycache__", ".venv", "node_modules", ".skilgen"],
     domains_override=[],
     skill_depth=2,
     update_trigger="manual",
@@ -19,6 +19,7 @@ DEFAULT_CONFIG = SkilgenConfig(
     model_max_tokens=None,
     model_retry_attempts=3,
     model_retry_base_delay_seconds=1.0,
+    auto_install_external_skills=True,
 )
 
 
@@ -73,6 +74,7 @@ def load_config(project_root: Path) -> SkilgenConfig:
         "model_max_tokens": DEFAULT_CONFIG.model_max_tokens,
         "model_retry_attempts": DEFAULT_CONFIG.model_retry_attempts,
         "model_retry_base_delay_seconds": DEFAULT_CONFIG.model_retry_base_delay_seconds,
+        "auto_install_external_skills": DEFAULT_CONFIG.auto_install_external_skills,
     }
     current_list: str | None = None
 
@@ -113,6 +115,7 @@ def load_config(project_root: Path) -> SkilgenConfig:
         model_max_tokens=int(data.get("model_max_tokens")) if isinstance(data.get("model_max_tokens"), int) else None,
         model_retry_attempts=int(data.get("model_retry_attempts", DEFAULT_CONFIG.model_retry_attempts)),
         model_retry_base_delay_seconds=float(data.get("model_retry_base_delay_seconds", DEFAULT_CONFIG.model_retry_base_delay_seconds)),
+        auto_install_external_skills=bool(data.get("auto_install_external_skills", DEFAULT_CONFIG.auto_install_external_skills)),
     )
 
 
@@ -139,6 +142,7 @@ exclude_paths:
   - __pycache__
   - .venv
   - node_modules
+  - .skilgen
 domains_override:
 skill_depth: 2
 update_trigger: manual
@@ -150,4 +154,5 @@ model_temperature:
 model_max_tokens:
 model_retry_attempts: 3
 model_retry_base_delay_seconds: 1.0
+auto_install_external_skills: true
 """

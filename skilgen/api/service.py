@@ -24,6 +24,7 @@ from skilgen.core.freshness import compute_freshness_report, load_freshness_stat
 from skilgen.core.context import build_codebase_context
 from skilgen.core.requirements import load_project_context
 from skilgen.core.run_memory import load_current_run_memory
+from skilgen.external_skills import detect_external_skill_sources, installed_external_skills
 
 
 API_VERSION = "1.0"
@@ -244,6 +245,7 @@ def status_payload(project_root: str | Path) -> dict[str, object]:
     codebase_context = build_codebase_context(root, requirements_context)
     freshness = compute_freshness_report(root, requirements_context, codebase_context.domain_graph, load_freshness_state(root))
     current_run = load_current_run_memory(root)
+    external_skill_detection = detect_external_skill_sources(root)
     return _with_api_meta(
         {
             **runtime.run(
@@ -254,6 +256,8 @@ def status_payload(project_root: str | Path) -> dict[str, object]:
             "freshness": freshness.__dict__,
             "current_run_memory": current_run.__dict__ if current_run is not None else None,
             "agent_decision": build_agent_decision(root, requirements_context, codebase_context.domain_graph, codebase_context.skill_tree).__dict__,
+            "installed_external_skills": installed_external_skills(root),
+            "external_skill_recommendations": external_skill_detection["manual_recommendations"],
         }
     )
 

@@ -18,6 +18,7 @@ IGNORED_PARTS = {
     ".next",
     ".idea",
     ".pytest_cache",
+    ".skilgen",
 }
 
 

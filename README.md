@@ -179,8 +179,20 @@ Install a curated or custom external skill source into the local Skilgen-managed
 
 ```bash
 skilgen skills install anthropic-skills --project-root .
+skilgen skills sync anthropic-skills --project-root .
+skilgen skills remove anthropic-skills --project-root .
 skilgen skills install --git-url https://github.com/example/skills.git --name my-skill-pack --project-root .
 ```
+
+When Skilgen runs on an existing repository, it also looks for strong ecosystem hints such as:
+- `CLAUDE.md` or `.claude/`
+- LangChain, LangGraph, Deep Agents, or LangSmith dependencies
+- Hugging Face package usage
+- GitHub Copilot instructions
+- n8n workflow patterns
+- existing `SKILL.md` / `skills/` structures
+
+If a strong match is found, Skilgen auto-installs the matching external skill pack into `.skilgen/external-skills/` so coding agents can use it immediately.
 
 ## Supported External Skills
 
@@ -194,25 +206,25 @@ skilgen skills sync <slug> --project-root .
 skilgen skills remove <slug> --project-root .
 ```
 
-| Publisher | Source | Category | Trust | Best For | Install |
-| --- | --- | --- | --- | --- | --- |
-| Anthropic | `anthropic-skills` | Official | Official | Claude Code skills and templates | `skilgen skills install anthropic-skills --project-root .` |
-| LangChain AI | `langchain-skills` | Official | Official | LangChain, LangGraph, Deep Agents | `skilgen skills install langchain-skills --project-root .` |
-| LangChain AI | `langsmith-skills` | Official | Official | LangSmith evaluation and tracing skills | `skilgen skills install langsmith-skills --project-root .` |
-| Hugging Face | `huggingface-skills` | Official | Official | HF hub, datasets, jobs, trainers | `skilgen skills install huggingface-skills --project-root .` |
-| Hugging Face | `huggingface-upskill` | Official | Official | Skill generation and benchmarking | `skilgen skills install huggingface-upskill --project-root .` |
-| GitHub / Microsoft | `awesome-copilot` | Official | Official | GitHub Copilot workflow skills | `skilgen skills install awesome-copilot --project-root .` |
-| agentskills.io | `agentskills-spec` | Spec | Spec | SKILL.md format reference | `skilgen skills install agentskills-spec --project-root .` |
-| czlonkowski | `n8n-mcp-patterns` | Framework | Community | n8n MCP and workflow patterns | `skilgen skills install n8n-mcp-patterns --project-root .` |
-| Orchestra Research | `ai-research-skills` | Framework | Community | Research, RAG, CrewAI, LlamaIndex | `skilgen skills install ai-research-skills --project-root .` |
-| muratcankoylan | `context-engineering-skills` | Framework | Community | Context engineering and multi-agent patterns | `skilgen skills install context-engineering-skills --project-root .` |
-| yusufkaraaslan | `skill-seekers` | Tooling | Community | Converting docs/sites/repos into SKILL.md | `skilgen skills install skill-seekers --project-root .` |
-| VoltAgent | `awesome-agent-skills-voltagent` | Directory | Directory | Broad cross-ecosystem discovery | `skilgen skills install awesome-agent-skills-voltagent --project-root .` |
-| skillmatic-ai | `awesome-agent-skills-skillmatic` | Directory | Directory | Aggregated skill guides and links | `skilgen skills install awesome-agent-skills-skillmatic --project-root .` |
-| heilcheng | `awesome-agent-skills-heilcheng` | Directory | Directory | Claude, Codex, Copilot-oriented directories | `skilgen skills install awesome-agent-skills-heilcheng --project-root .` |
-| Prat011 | `awesome-llm-skills` | Directory | Directory | Workspace and multi-agent skill lists | `skilgen skills install awesome-llm-skills --project-root .` |
-| MoizIbnYousaf | `curated-ai-agent-skills` | Curated | Curated | Trust-aware curated skill packs | `skilgen skills install curated-ai-agent-skills --project-root .` |
-| LangChain AI | `skills-benchmarks` | Benchmarks | Official | Skill quality and benchmarking flows | `skilgen skills install skills-benchmarks --project-root .` |
+| Publisher | Source | Category | Trust | Auto Install | Best For | Install |
+| --- | --- | --- | --- | --- | --- | --- |
+| Anthropic | `anthropic-skills` | Official | Official | Yes | Claude Code skills and templates | `skilgen skills install anthropic-skills --project-root .` |
+| LangChain AI | `langchain-skills` | Official | Official | Yes | LangChain, LangGraph, Deep Agents | `skilgen skills install langchain-skills --project-root .` |
+| LangChain AI | `langsmith-skills` | Official | Official | Yes | LangSmith evaluation and tracing skills | `skilgen skills install langsmith-skills --project-root .` |
+| Hugging Face | `huggingface-skills` | Official | Official | Yes | HF hub, datasets, jobs, trainers | `skilgen skills install huggingface-skills --project-root .` |
+| Hugging Face | `huggingface-upskill` | Official | Official | Yes | Skill generation and benchmarking | `skilgen skills install huggingface-upskill --project-root .` |
+| GitHub / Microsoft | `awesome-copilot` | Official | Official | Yes | GitHub Copilot workflow skills | `skilgen skills install awesome-copilot --project-root .` |
+| agentskills.io | `agentskills-spec` | Spec | Spec | Yes | SKILL.md format reference | `skilgen skills install agentskills-spec --project-root .` |
+| czlonkowski | `n8n-mcp-patterns` | Framework | Community | Yes | n8n MCP and workflow patterns | `skilgen skills install n8n-mcp-patterns --project-root .` |
+| Orchestra Research | `ai-research-skills` | Framework | Community | Yes | Research, RAG, CrewAI, LlamaIndex | `skilgen skills install ai-research-skills --project-root .` |
+| muratcankoylan | `context-engineering-skills` | Framework | Community | Yes | Context engineering and multi-agent patterns | `skilgen skills install context-engineering-skills --project-root .` |
+| yusufkaraaslan | `skill-seekers` | Tooling | Community | Manual | Converting docs/sites/repos into SKILL.md | `skilgen skills install skill-seekers --project-root .` |
+| VoltAgent | `awesome-agent-skills-voltagent` | Directory | Directory | Manual | Broad cross-ecosystem discovery | `skilgen skills install awesome-agent-skills-voltagent --project-root .` |
+| skillmatic-ai | `awesome-agent-skills-skillmatic` | Directory | Directory | Manual | Aggregated skill guides and links | `skilgen skills install awesome-agent-skills-skillmatic --project-root .` |
+| heilcheng | `awesome-agent-skills-heilcheng` | Directory | Directory | Manual | Claude, Codex, Copilot-oriented directories | `skilgen skills install awesome-agent-skills-heilcheng --project-root .` |
+| Prat011 | `awesome-llm-skills` | Directory | Directory | Manual | Workspace and multi-agent skill lists | `skilgen skills install awesome-llm-skills --project-root .` |
+| MoizIbnYousaf | `curated-ai-agent-skills` | Curated | Curated | Manual | Trust-aware curated skill packs | `skilgen skills install curated-ai-agent-skills --project-root .` |
+| LangChain AI | `skills-benchmarks` | Benchmarks | Official | Manual | Skill quality and benchmarking flows | `skilgen skills install skills-benchmarks --project-root .` |
 
 Generate the full skills system from codebase + requirements:
 

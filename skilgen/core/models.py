@@ -76,6 +76,7 @@ class SkilgenConfig:
     model_max_tokens: int | None = None
     model_retry_attempts: int = 3
     model_retry_base_delay_seconds: float = 1.0
+    auto_install_external_skills: bool = True
 
 
 @dataclass(frozen=True)

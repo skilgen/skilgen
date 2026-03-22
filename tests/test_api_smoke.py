@@ -97,7 +97,7 @@ class ApiSmokeTests(unittest.TestCase):
 
                 job_id = deliver_job["job_id"]
                 polled: dict[str, object] = {}
-                for _ in range(20):
+                for _ in range(80):
                     polled = get_json(f"{base}/jobs/{job_id}?{urlencode({'project_root': str(root)})}")
                     if polled["status"] in {"completed", "failed"}:
                         break
@@ -121,6 +121,8 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertIn("current_run_memory", status)
                 self.assertIsNotNone(status["current_run_memory"])
                 self.assertIn("agent_decision", status)
+                self.assertIn("installed_external_skills", status)
+                self.assertIn("external_skill_recommendations", status)
                 self.assertIn("pending_validations", status["current_run_memory"])
                 self.assertIn("resumable_steps", status["current_run_memory"])
 

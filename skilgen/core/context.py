@@ -18,7 +18,7 @@ def _build_file_tree(project_root: Path) -> list[str]:
     return sorted(
         path.relative_to(project_root).as_posix()
         for path in project_root.rglob("*")
-        if path.is_file() and ".git/" not in path.as_posix()
+        if path.is_file() and ".git/" not in path.as_posix() and not path.relative_to(project_root).as_posix().startswith(".skilgen/")
     )
 
 

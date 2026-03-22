@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -311,6 +312,129 @@ def _serialize_entry(entry: ExternalSkillSource, installed: dict[str, object] | 
     return payload
 
 
+def installed_external_skills(project_root: str | Path = ".") -> list[dict[str, object]]:
+    return sorted(_installed_by_slug(project_root).values(), key=lambda entry: str(entry.get("slug", "")))
+
+
+def _repo_text_snapshot(project_root: Path) -> tuple[list[str], str]:
+    ignored_parts = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build", ".next", ".skilgen", "skills"}
+    ignored_files = {"AGENTS.md", "ANALYSIS.md", "FEATURES.md", "REPORT.md", "TRACEABILITY.md"}
+    text_extensions = {".py", ".ts", ".tsx", ".js", ".jsx", ".json", ".toml", ".yml", ".yaml", ".md", ".txt"}
+    paths: list[str] = []
+    snippets: list[str] = []
+    for path in sorted(project_root.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.name in ignored_files:
+            continue
+        relative = path.relative_to(project_root)
+        if set(relative.parts) & ignored_parts:
+            continue
+        rel = relative.as_posix()
+        paths.append(rel.lower())
+        if path.suffix.lower() in text_extensions and len(snippets) < 80:
+            try:
+                snippets.append(path.read_text(encoding="utf-8", errors="ignore")[:12000].lower())
+            except OSError:
+                continue
+    return paths, "\n".join(snippets)
+
+
+def detect_external_skill_sources(project_root: str | Path = ".") -> dict[str, object]:
+    root = Path(project_root).resolve()
+    lower_paths, text = _repo_text_snapshot(root)
+    installed = _installed_by_slug(root)
+    detected: list[dict[str, object]] = []
+    manual_recommendations: list[dict[str, object]] = []
+
+    def has_path(fragment: str) -> bool:
+        needle = fragment.lower()
+        return any(needle in path for path in lower_paths)
+
+    def has_text(*needles: str) -> bool:
+        return any(needle.lower() in text for needle in needles)
+
+    def has_pattern(pattern: str) -> bool:
+        return re.search(pattern, text, re.IGNORECASE) is not None
+
+    def add_detected(slug: str, reason: str) -> None:
+        entry = _catalog_entry(slug)
+        if entry is None:
+            return
+        for existing in detected:
+            if existing["slug"] == slug:
+                existing["reasons"].append(reason)
+                return
+        detected.append(
+            {
+                "slug": slug,
+                "name": entry.name,
+                "ecosystem": entry.ecosystem,
+                "installed": slug in installed,
+                "reasons": [reason],
+            }
+        )
+
+    def add_manual(slug: str, reason: str) -> None:
+        entry = _catalog_entry(slug)
+        if entry is None:
+            return
+        for existing in manual_recommendations:
+            if existing["slug"] == slug:
+                existing["reasons"].append(reason)
+                return
+        manual_recommendations.append(
+            {
+                "slug": slug,
+                "name": entry.name,
+                "ecosystem": entry.ecosystem,
+                "reasons": [reason],
+            }
+        )
+
+    if has_path("claude.md") or (root / ".claude").exists() or has_text("claude code", "anthropic"):
+        add_detected("anthropic-skills", "Detected Claude/Anthropic repo hints.")
+    if has_text("langchain", "langgraph", "deepagents", "deep agents", "langchain_openai", "langchain_anthropic"):
+        add_detected("langchain-skills", "Detected LangChain/LangGraph/Deep Agents dependencies.")
+    if has_text("langsmith", "langsmith_project", "langsmith tracing", "langsmith sdk"):
+        add_detected("langsmith-skills", "Detected LangSmith observability or tracing usage.")
+    if has_text("huggingface_hub", "transformers", "diffusers", "datasets", "trl", "sentence_transformers", "hugging face"):
+        add_detected("huggingface-skills", "Detected Hugging Face package usage.")
+        if has_text("benchmark", "teacher", "student", "evaluation", "trainer", "upskill"):
+            add_detected("huggingface-upskill", "Detected Hugging Face evaluation or teacher/student workflow hints.")
+    if has_path(".github/copilot-instructions.md") or (root / ".copilot").exists() or has_text("github copilot", "copilot-instructions"):
+        add_detected("awesome-copilot", "Detected GitHub Copilot instructions or workspace setup.")
+    if has_text("n8n-nodes", "n8n workflow") or has_path("n8n"):
+        add_detected("n8n-mcp-patterns", "Detected n8n workflow or MCP-style repo signals.")
+    if has_text("llamaindex", "crewai", "rlhf", "fine-tuning", "finetuning") or (
+        has_text("pinecone", "qdrant", "chroma") and has_pattern(r"\brag\b")
+    ):
+        add_detected("ai-research-skills", "Detected research-stack or retrieval workflow dependencies.")
+    if has_text("context engineering", "llm-as-judge", "memory strategy") or (
+        has_pattern(r"\bmulti-agent\b") and has_pattern(r"\bmemory\b")
+    ):
+        add_detected("context-engineering-skills", "Detected context engineering or multi-agent memory patterns.")
+    if has_path("skill.md") or has_path("skills/"):
+        add_detected("agentskills-spec", "Detected SKILL.md-style files or an existing skills tree.")
+
+    if any(entry["slug"] in {"langchain-skills", "langsmith-skills"} for entry in detected):
+        add_manual("skills-benchmarks", "Recommended because LangChain/LangSmith was detected.")
+    if detected:
+        add_manual("awesome-agent-skills-voltagent", "Recommended directory of adjacent agent skills.")
+        add_manual("awesome-agent-skills-skillmatic", "Recommended directory of adjacent agent skills.")
+        add_manual("awesome-agent-skills-heilcheng", "Recommended directory of adjacent agent skills.")
+        add_manual("awesome-llm-skills", "Recommended directory of adjacent agent skills.")
+        add_manual("curated-ai-agent-skills", "Recommended curated cross-agent collection.")
+        add_manual("skill-seekers", "Recommended tooling for converting docs and repos into skills.")
+
+    return {
+        "detected_skills": sorted(detected, key=lambda entry: entry["slug"]),
+        "manual_recommendations": sorted(manual_recommendations, key=lambda entry: entry["slug"]),
+        "installed_skills": installed_external_skills(root),
+        "auto_install_count": len(detected),
+    }
+
+
 def list_external_skills(
     project_root: str | Path = ".",
     *,
@@ -363,6 +487,8 @@ def _build_install_metadata(
     trust_level: str,
     description: str,
     install_path: Path,
+    install_mode: str = "manual",
+    detection_reasons: list[str] | None = None,
 ) -> dict[str, object]:
     return {
         "slug": slug,
@@ -375,6 +501,8 @@ def _build_install_metadata(
         "description": description,
         "install_path": str(install_path),
         "installed_at": datetime.now(UTC).isoformat(),
+        "install_mode": install_mode,
+        "detection_reasons": detection_reasons or [],
     }
 
 
@@ -385,6 +513,8 @@ def install_external_skill(
     git_url: str | None = None,
     name: str | None = None,
     force: bool = False,
+    install_mode: str = "manual",
+    detection_reasons: list[str] | None = None,
 ) -> dict[str, object]:
     if slug is None and git_url is None:
         raise ValueError("Provide either a catalog slug or a git_url.")
@@ -440,6 +570,8 @@ def install_external_skill(
         trust_level=trust_level,
         description=description,
         install_path=install_path,
+        install_mode=install_mode,
+        detection_reasons=detection_reasons,
     )
     (install_path / "skilgen-source.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
@@ -449,6 +581,38 @@ def install_external_skill(
     manifest["skills"] = sorted(skills, key=lambda entry: str(entry.get("slug", "")))
     _write_manifest(project_root, manifest)
     return metadata
+
+
+def ensure_external_skills_for_project(project_root: str | Path = ".") -> dict[str, object]:
+    root = Path(project_root).resolve()
+    detections = detect_external_skill_sources(root)
+    installed = _installed_by_slug(root)
+    newly_installed: list[dict[str, object]] = []
+    already_installed: list[dict[str, object]] = []
+    errors: list[dict[str, str]] = []
+    for detection in detections["detected_skills"]:
+        slug = str(detection["slug"])
+        if slug in installed:
+            already_installed.append(installed[slug])
+            continue
+        try:
+            metadata = install_external_skill(
+                project_root=root,
+                slug=slug,
+                install_mode="auto",
+                detection_reasons=[str(reason) for reason in detection.get("reasons", [])],
+            )
+            newly_installed.append(metadata)
+            installed[slug] = metadata
+        except Exception as exc:  # pragma: no cover
+            errors.append({"slug": slug, "error": str(exc)})
+    return {
+        **detections,
+        "installed_skills": installed_external_skills(root),
+        "newly_installed": newly_installed,
+        "already_installed": already_installed,
+        "errors": errors,
+    }
 
 
 def sync_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[str, object]:

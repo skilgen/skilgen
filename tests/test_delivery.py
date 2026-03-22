@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from skilgen.delivery import run_delivery
 
@@ -165,6 +166,49 @@ class DeliveryTests(unittest.TestCase):
             self.assertIn(root / "skills" / "design-system" / "SKILL.md", generated)
             self.assertTrue((root / "skills" / "design-system" / "SUMMARY.md").exists())
             self.assertIn("skills/design-system/SKILL.md", (root / "AGENTS.md").read_text(encoding="utf-8"))
+
+    def test_run_delivery_surfaces_auto_installed_external_skills(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "pyproject.toml").write_text("dependencies = ['langchain', 'langsmith']\n", encoding="utf-8")
+            (root / "CLAUDE.md").write_text("Use Claude Code for this repo.\n", encoding="utf-8")
+
+            installed = [
+                {
+                    "slug": "anthropic-skills",
+                    "ecosystem": "anthropic",
+                    "install_path": str(root / ".skilgen" / "external-skills" / "sources" / "anthropic-skills"),
+                },
+                {
+                    "slug": "langchain-skills",
+                    "ecosystem": "langchain",
+                    "install_path": str(root / ".skilgen" / "external-skills" / "sources" / "langchain-skills"),
+                },
+            ]
+            with patch(
+                "skilgen.delivery.ensure_external_skills_for_project",
+                return_value={
+                    "detected_skills": [],
+                    "manual_recommendations": [],
+                    "installed_skills": installed,
+                    "newly_installed": installed,
+                    "already_installed": [],
+                    "errors": [],
+                },
+            ) as ensure_mock, patch(
+                "skilgen.generators.package.installed_external_skills",
+                return_value=installed,
+            ), patch(
+                "skilgen.generators.package.detect_external_skill_sources",
+                return_value={"manual_recommendations": []},
+            ):
+                run_delivery(None, root)
+
+            ensure_mock.assert_called_once()
+            agents_text = (root / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("## External Skill Packs", agents_text)
+            self.assertIn("anthropic-skills", agents_text)
+            self.assertIn("langchain-skills", agents_text)
 
 
 if __name__ == "__main__":

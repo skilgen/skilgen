@@ -1,7 +1,9 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
+from skilgen.external_skills import detect_external_skill_sources, ensure_external_skills_for_project
 from skilgen.sdk import (
     analyze_project,
     cancel_job,
@@ -67,7 +69,7 @@ class SdkTests(unittest.TestCase):
             self.assertIn("progress", job)
             job_id = job["job_id"]
             current = {}
-            for _ in range(20):
+            for _ in range(80):
                 current = get_job_status(job_id, root)
                 if current["status"] in {"completed", "failed"}:
                     break
@@ -132,6 +134,68 @@ class SdkTests(unittest.TestCase):
             removed = remove_skill_source("demo-pack", root)
             self.assertTrue(removed["removed_skill"]["removed"])
             self.assertFalse(install_path.exists())
+
+    def test_detect_external_skill_sources_finds_supported_ecosystems(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "CLAUDE.md").write_text("Claude Code instructions\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                "dependencies = ['langchain', 'langsmith', 'transformers', 'crewai']\n",
+                encoding="utf-8",
+            )
+            (root / ".github").mkdir()
+            (root / ".github" / "copilot-instructions.md").write_text("Use Copilot\n", encoding="utf-8")
+            (root / "workflow-n8n.json").write_text('{"name":"n8n workflow"}', encoding="utf-8")
+
+            detected = detect_external_skill_sources(root)
+            slugs = {entry["slug"] for entry in detected["detected_skills"]}
+            manual = {entry["slug"] for entry in detected["manual_recommendations"]}
+
+            self.assertIn("anthropic-skills", slugs)
+            self.assertIn("langchain-skills", slugs)
+            self.assertIn("langsmith-skills", slugs)
+            self.assertIn("huggingface-skills", slugs)
+            self.assertIn("awesome-copilot", slugs)
+            self.assertIn("n8n-mcp-patterns", slugs)
+            self.assertIn("ai-research-skills", slugs)
+            self.assertIn("skills-benchmarks", manual)
+
+    def test_ensure_external_skills_installs_detected_sources_once(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "CLAUDE.md").write_text("Claude Code instructions\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text("dependencies = ['langchain']\n", encoding="utf-8")
+
+            def fake_install(**kwargs: object) -> dict[str, object]:
+                project_root = Path(str(kwargs["project_root"]))
+                slug = str(kwargs["slug"])
+                install_path = project_root / ".skilgen" / "external-skills" / "sources" / slug
+                install_path.mkdir(parents=True, exist_ok=True)
+                metadata = {
+                    "slug": slug,
+                    "ecosystem": slug.split("-")[0],
+                    "install_path": str(install_path),
+                    "install_mode": kwargs.get("install_mode", "manual"),
+                    "detection_reasons": kwargs.get("detection_reasons", []),
+                }
+                manifest_path = project_root / ".skilgen" / "external-skills" / "manifest.json"
+                manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                existing = []
+                if manifest_path.exists():
+                    import json
+                    existing = json.loads(manifest_path.read_text(encoding="utf-8")).get("skills", [])
+                manifest_path.write_text(__import__("json").dumps({"skills": [*existing, metadata]}, indent=2), encoding="utf-8")
+                return metadata
+
+            with patch("skilgen.external_skills.install_external_skill", side_effect=fake_install) as install_mock:
+                first = ensure_external_skills_for_project(root)
+                second = ensure_external_skills_for_project(root)
+
+            self.assertTrue(first["newly_installed"])
+            self.assertTrue(second["already_installed"])
+            self.assertEqual(install_mock.call_count, 2)
+            slugs = {call.kwargs["slug"] for call in install_mock.call_args_list}
+            self.assertEqual(slugs, {"anthropic-skills", "langchain-skills"})
 
 
 if __name__ == "__main__":

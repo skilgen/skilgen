@@ -8,9 +8,12 @@ from skilgen.core.models import FrameworkFingerprint, FrameworkMatch
 def _gather_files(project_root: Path) -> set[str]:
     names: set[str] = set()
     for path in project_root.rglob("*"):
-        if path.is_file():
-            names.add(path.name)
-            names.add(path.as_posix().replace(f"{project_root.as_posix()}/", ""))
+        if not path.is_file():
+            continue
+        if ".skilgen" in path.relative_to(project_root).parts:
+            continue
+        names.add(path.name)
+        names.add(path.as_posix().replace(f"{project_root.as_posix()}/", ""))
     return names
 
 

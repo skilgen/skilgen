@@ -9,6 +9,7 @@ from skilgen.agents.requirements_parser import parse_project_intent
 from skilgen.deep_agents_core import run_deep_text
 from skilgen.core.config import render_default_config
 from skilgen.core.context import build_codebase_context
+from skilgen.external_skills import detect_external_skill_sources, installed_external_skills
 from skilgen.core.models import RequirementsContext
 
 
@@ -589,6 +590,15 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
         for node in parent_skills
     )
     inferred_domains = [node for node in codebase_context.domain_graph.nodes if node.parent_domain is None]
+    installed_skill_packs = installed_external_skills(project_root)
+    external_skill_lines = [
+        f"- `{entry['slug']}` ({entry.get('ecosystem', 'unknown')}): installed at `{entry.get('install_path', '')}`"
+        for entry in installed_skill_packs
+    ] or ["- No external skill packs have been installed yet."]
+    recommended_external_lines = [
+        f"- `{entry['slug']}`: {'; '.join(entry.get('reasons', []))}"
+        for entry in detect_external_skill_sources(project_root).get("manual_recommendations", [])
+    ] or ["- No additional external skill recommendations were inferred."]
     priority_lines = [
         f"- `{path}`"
         for path in decision.prioritized_skill_paths
@@ -618,6 +628,12 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
             "",
             "## Skill Entry Points",
             *skill_refs,
+            "",
+            "## External Skill Packs",
+            *external_skill_lines,
+            "",
+            "## Suggested External Skill Packs",
+            *recommended_external_lines,
             "",
             "## Recommended Start Order",
             f"- Input mode: `{input_mode}`",
