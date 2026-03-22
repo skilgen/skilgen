@@ -26,9 +26,12 @@ from skilgen.api.service import (
     skills_active_payload,
     skills_deactivate_payload,
     skills_detect_payload,
+    skills_import_payload,
     skills_install_payload,
     skills_list_payload,
     skills_lock_payload,
+    skills_lock_export_payload,
+    skills_lock_import_payload,
     skills_policy_payload,
     skills_rank_payload,
     skills_remove_payload,
@@ -87,6 +90,13 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/skills/lock":
                 _json_response(self, 200, skills_lock_payload(query.get("project_root", ["."])[0]))
+                return
+            if parsed.path == "/skills/lock/export":
+                _json_response(
+                    self,
+                    200,
+                    skills_lock_export_payload(query.get("project_root", ["."])[0], query.get("output_path", [None])[0]),
+                )
                 return
             if parsed.path == "/skills/policy":
                 _json_response(self, 200, skills_policy_payload(query.get("project_root", ["."])[0]))
@@ -178,6 +188,29 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                         force=bool(data.get("force", False)),
                         ref=str(data["ref"]) if "ref" in data and data.get("ref") is not None else None,
                         active=data.get("active") if isinstance(data.get("active"), bool) else None,
+                    ),
+                )
+                return
+            if self.path == "/skills/import":
+                _json_response(
+                    self,
+                    200,
+                    skills_import_payload(
+                        str(data.get("project_root", ".")),
+                        str(data["slug"]),
+                        limit=int(data.get("limit", 5)),
+                        active=data.get("active") if isinstance(data.get("active"), bool) else None,
+                    ),
+                )
+                return
+            if self.path == "/skills/lock/import":
+                _json_response(
+                    self,
+                    200,
+                    skills_lock_import_payload(
+                        str(data.get("project_root", ".")),
+                        str(data["input_path"]),
+                        sync_existing=bool(data.get("sync_existing", False)),
                     ),
                 )
                 return

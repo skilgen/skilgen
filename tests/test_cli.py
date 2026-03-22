@@ -343,6 +343,35 @@ class CliTests(unittest.TestCase):
             self.assertIn("resolved_revision", locked.stdout)
             self.assertIn("normalized", locked.stdout)
 
+            exported = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "skills", "lock-export", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            export_payload = json.loads(exported.stdout)
+            self.assertTrue(Path(export_payload["export_path"]).exists())
+
+            imported_root = root / "imported-project"
+            imported_root.mkdir()
+            imported = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "skills",
+                    "lock-import",
+                    "--project-root",
+                    str(imported_root),
+                    "--input-path",
+                    export_payload["export_path"],
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(json.loads(imported.stdout)["count"], 1)
+
             policy = subprocess.run(
                 [sys.executable, "-m", "skilgen.cli.main", "skills", "policy", "--project-root", str(root)],
                 text=True,

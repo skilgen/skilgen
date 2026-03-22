@@ -31,7 +31,10 @@ from skilgen.external_skills import (
     detect_external_skill_sources,
     external_skill_lock,
     external_skill_policy,
+    export_external_skill_lock,
     get_external_skill,
+    import_external_skill_candidates,
+    import_external_skill_lock,
     install_external_skill,
     installed_external_skills,
     list_external_skills,
@@ -297,6 +300,14 @@ def skills_lock_payload(project_root: str | Path) -> dict[str, object]:
     return _with_api_meta(external_skill_lock(Path(project_root).resolve()))
 
 
+def skills_lock_export_payload(project_root: str | Path, output_path: str | Path | None = None) -> dict[str, object]:
+    return _with_api_meta(export_external_skill_lock(project_root=Path(project_root).resolve(), output_path=output_path))
+
+
+def skills_lock_import_payload(project_root: str | Path, input_path: str | Path, *, sync_existing: bool = False) -> dict[str, object]:
+    return _with_api_meta(import_external_skill_lock(project_root=Path(project_root).resolve(), input_path=input_path, sync_existing=sync_existing))
+
+
 def skills_rank_payload(project_root: str | Path) -> dict[str, object]:
     return _with_api_meta(ranked_external_skills(Path(project_root).resolve()))
 
@@ -332,6 +343,16 @@ def skills_install_payload(
             )
         }
     )
+
+
+def skills_import_payload(
+    project_root: str | Path,
+    slug: str,
+    *,
+    limit: int = 5,
+    active: bool | None = None,
+) -> dict[str, object]:
+    return _with_api_meta(import_external_skill_candidates(project_root=Path(project_root).resolve(), slug=slug, limit=limit, active=active))
 
 
 def skills_sync_payload(project_root: str | Path, slug: str | None = None, *, all_sources: bool = False) -> dict[str, object]:

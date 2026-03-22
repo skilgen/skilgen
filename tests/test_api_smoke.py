@@ -139,10 +139,20 @@ class ApiSmokeTests(unittest.TestCase):
 
                 lock = get_json(f"{base}/skills/lock?{urlencode({'project_root': str(root)})}")
                 self.assertTrue(lock["skills"])
+                exported_lock = get_json(f"{base}/skills/lock/export?{urlencode({'project_root': str(root)})}")
+                self.assertIn("export_path", exported_lock)
                 policy = get_json(f"{base}/skills/policy?{urlencode({'project_root': str(root)})}")
                 self.assertEqual(policy["policy_mode"], "permissive")
                 ranked = get_json(f"{base}/skills/rank?{urlencode({'project_root': str(root)})}")
                 self.assertTrue(ranked["skills"])
+
+                imported_root = root / "imported-project"
+                imported_root.mkdir()
+                imported_lock = post_json(
+                    f"{base}/skills/lock/import",
+                    {"project_root": str(imported_root), "input_path": exported_lock["export_path"]},
+                )
+                self.assertGreaterEqual(imported_lock["count"], 1)
 
                 deactivated = post_json(f"{base}/skills/deactivate", {"project_root": str(root), "slug": "demo-pack"})
                 self.assertFalse(deactivated["deactivated_skill"]["active"])
@@ -151,6 +161,36 @@ class ApiSmokeTests(unittest.TestCase):
                 synced = post_json(f"{base}/skills/sync", {"project_root": str(root), "all": True})
                 self.assertGreaterEqual(synced["count"], 1)
                 self.assertIn("demo-pack", {item["slug"] for item in synced["skills"]})
+
+                directory_source = root / ".skilgen" / "external-skills" / "sources" / "awesome-agent-skills-voltagent"
+                directory_source.mkdir(parents=True)
+                repo_candidate = {"repo": "example/candidate-pack", "url": str(source)}
+                manifest_path = root / ".skilgen" / "external-skills" / "manifest.json"
+                manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest_data["skills"].append(
+                    {
+                        "slug": "awesome-agent-skills-voltagent",
+                        "name": "Awesome Agent Skills",
+                        "ecosystem": "directory",
+                        "publisher": "VoltAgent",
+                        "category": "directory",
+                        "trust_level": "directory",
+                        "trust_score": 4,
+                        "install_path": str(directory_source),
+                        "normalized": {"repo_candidates": [repo_candidate]},
+                    }
+                )
+                manifest_path.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
+                lock_path = root / ".skilgen" / "external-skills" / "lock.json"
+                lock_data = json.loads(lock_path.read_text(encoding="utf-8"))
+                lock_data["skills"].append({"slug": "awesome-agent-skills-voltagent", "normalized": {"repo_candidates": [repo_candidate]}})
+                lock_path.write_text(json.dumps(lock_data, indent=2), encoding="utf-8")
+                imported_candidates = post_json(
+                    f"{base}/skills/import",
+                    {"project_root": str(root), "slug": "awesome-agent-skills-voltagent", "limit": 1, "active": True},
+                )
+                self.assertEqual(imported_candidates["count"], 1)
+
                 removed = post_json(f"{base}/skills/remove", {"project_root": str(root), "slug": "demo-pack"})
                 self.assertTrue(removed["removed_skill"]["removed"])
 

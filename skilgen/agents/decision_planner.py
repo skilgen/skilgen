@@ -26,11 +26,14 @@ def build_agent_decision_native(
         top_level_skill_paths = [node.path for node in skill_tree if node.parent_skill is None]
     ranked_external = ranked_external_skills(project_root).get("skills", [])
     memory_to_load = [".skilgen/memory/current_run.json", ".skilgen/state/freshness.json", ".skilgen/external-skills/lock.json"]
+    preferred_external: list[str] = []
     if current_run_memory is not None:
         memory_to_load.append(f".skilgen/memory/runs/{current_run_memory.run_id}.json")
     for entry in ranked_external[:3]:
+        preferred_external.append(str(entry.get("slug", "")))
         normalized = entry.get("lock_metadata", {}).get("normalized", {}) if isinstance(entry.get("lock_metadata"), dict) else {}
         summary_path = normalized.get("summary_path")
+        index_path = normalized.get("index_path")
         if isinstance(summary_path, str):
             try:
                 relative = Path(summary_path).resolve().relative_to(project_root).as_posix()
@@ -39,6 +42,12 @@ def build_agent_decision_native(
             memory_to_load.append(relative)
             if relative not in top_level_skill_paths:
                 top_level_skill_paths.append(relative)
+        if isinstance(index_path, str):
+            try:
+                relative_index = Path(index_path).resolve().relative_to(project_root).as_posix()
+            except ValueError:
+                relative_index = index_path
+            memory_to_load.append(relative_index)
     should_refresh = freshness.reason != "no_source_changes"
     reason = (
         "Source changes were detected and the impacted domains should be refreshed before the next coding task."
@@ -50,7 +59,10 @@ def build_agent_decision_native(
         next_actions.append("Refresh the impacted top-level skills before starting implementation work.")
     next_actions.append("Load AGENTS.md and the prioritized parent skills first.")
     if ranked_external:
-        next_actions.append("Load the top ranked external skill pack summaries before using imported ecosystem skills.")
+        next_actions.append(
+            f"Load the top ranked external skill packs first: {', '.join(slug for slug in preferred_external if slug) or 'external summaries'}."
+        )
+        next_actions.append("Use each external pack's normalized index and summary before loading lower-ranked imports.")
     if current_run_memory is not None and current_run_memory.recent_events:
         next_actions.append("Use the latest run memory to continue from the most recent execution context.")
     return AgentDecision(

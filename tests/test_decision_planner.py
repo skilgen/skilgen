@@ -49,6 +49,7 @@ class DecisionPlannerTests(unittest.TestCase):
             self.assertIn(".skilgen/external-skills/lock.json", decision.memory_to_load)
             self.assertTrue(any("external-skills/normalized" in path for path in decision.memory_to_load))
             self.assertTrue(any("external-skills/normalized" in path for path in decision.prioritized_skill_paths))
+            self.assertTrue(any("demo-pack" in action for action in decision.next_actions))
 
             remove_external_skill(project_root=root, slug=installed["slug"])
 

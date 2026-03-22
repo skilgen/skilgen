@@ -29,7 +29,10 @@ from skilgen.external_skills import (
     external_skill_lock,
     external_skill_policy,
     deactivate_external_skill,
+    export_external_skill_lock,
     get_external_skill,
+    import_external_skill_candidates,
+    import_external_skill_lock,
     install_external_skill,
     list_external_skills,
     ranked_external_skills,
@@ -182,6 +185,29 @@ def list_active_skill_sources(project_root: str | Path = ".") -> dict[str, objec
 
 def skill_source_lock(project_root: str | Path = ".") -> dict[str, object]:
     return external_skill_lock(Path(project_root).resolve())
+
+
+def export_skill_source_lock(project_root: str | Path = ".", output_path: str | Path | None = None) -> dict[str, object]:
+    return export_external_skill_lock(project_root=Path(project_root).resolve(), output_path=output_path)
+
+
+def import_skill_source_lock(
+    project_root: str | Path = ".",
+    input_path: str | Path = ".",
+    *,
+    sync_existing: bool = False,
+) -> dict[str, object]:
+    return import_external_skill_lock(project_root=Path(project_root).resolve(), input_path=input_path, sync_existing=sync_existing)
+
+
+def import_skill_source_candidates(
+    slug: str,
+    project_root: str | Path = ".",
+    *,
+    limit: int = 5,
+    active: bool | None = None,
+) -> dict[str, object]:
+    return import_external_skill_candidates(project_root=Path(project_root).resolve(), slug=slug, limit=limit, active=active)
 
 
 def rank_skill_sources(project_root: str | Path = ".") -> dict[str, object]:

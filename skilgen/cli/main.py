@@ -20,7 +20,10 @@ from skilgen.external_skills import (
     external_skill_lock,
     external_skill_policy,
     deactivate_external_skill,
+    export_external_skill_lock,
     get_external_skill,
+    import_external_skill_candidates,
+    import_external_skill_lock,
     install_external_skill,
     list_external_skills,
     ranked_external_skills,
@@ -118,6 +121,15 @@ def build_parser() -> argparse.ArgumentParser:
     skills_lock = skills_subparsers.add_parser("lock", help="Show the resolved external-skills lockfile for this project.")
     skills_lock.add_argument("--project-root", default=".")
 
+    skills_lock_export = skills_subparsers.add_parser("lock-export", help="Export the resolved external-skills lockfile for reuse in another repo.")
+    skills_lock_export.add_argument("--project-root", default=".")
+    skills_lock_export.add_argument("--output-path")
+
+    skills_lock_import = skills_subparsers.add_parser("lock-import", help="Import an exported external-skills lockfile into this project.")
+    skills_lock_import.add_argument("--project-root", default=".")
+    skills_lock_import.add_argument("--input-path", required=True)
+    skills_lock_import.add_argument("--sync-existing", action="store_true")
+
     skills_policy = skills_subparsers.add_parser("policy", help="Show the external-skills policy currently applied to this project.")
     skills_policy.add_argument("--project-root", default=".")
 
@@ -132,6 +144,12 @@ def build_parser() -> argparse.ArgumentParser:
     skills_install.add_argument("--force", action="store_true")
     skills_install.add_argument("--ref")
     skills_install.add_argument("--activate", action=argparse.BooleanOptionalAction, default=None)
+
+    skills_import = skills_subparsers.add_parser("import", help="Import downstream repos from an installed directory-style external skill source.")
+    skills_import.add_argument("slug")
+    skills_import.add_argument("--project-root", default=".")
+    skills_import.add_argument("--limit", type=int, default=5)
+    skills_import.add_argument("--activate", action=argparse.BooleanOptionalAction, default=None)
 
     skills_sync = skills_subparsers.add_parser("sync", help="Sync an installed external skill source with its upstream repository.")
     skills_sync.add_argument("slug", nargs="?")
@@ -237,6 +255,14 @@ def main() -> None:
             emit_progress("Loading the resolved external-skills lockfile.")
             print(json.dumps(external_skill_lock(root), indent=2))
             return
+        if args.skills_command == "lock-export":
+            emit_progress("Exporting the resolved external-skills lockfile for reuse in another project.")
+            print(json.dumps(export_external_skill_lock(project_root=root, output_path=args.output_path), indent=2))
+            return
+        if args.skills_command == "lock-import":
+            emit_progress("Importing external skills from an exported lockfile into this project.")
+            print(json.dumps(import_external_skill_lock(project_root=root, input_path=args.input_path, sync_existing=args.sync_existing), indent=2))
+            return
         if args.skills_command == "policy":
             emit_progress("Loading the external-skills policy for this project.")
             print(json.dumps(external_skill_policy(root), indent=2))
@@ -263,6 +289,10 @@ def main() -> None:
                     indent=2,
                 )
             )
+            return
+        if args.skills_command == "import":
+            emit_progress("Importing downstream repositories from the selected directory-style skill source.")
+            print(json.dumps(import_external_skill_candidates(project_root=root, slug=args.slug, limit=args.limit, active=args.activate), indent=2))
             return
         if args.skills_command == "sync":
             if args.all:

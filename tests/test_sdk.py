@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import json
 import unittest
 from unittest.mock import patch
 
@@ -18,7 +19,10 @@ from skilgen.sdk import (
     detect_skill_sources,
     decide_project,
     deliver_project,
+    export_skill_source_lock,
     get_job_status,
+    import_skill_source_candidates,
+    import_skill_source_lock,
     init_project,
     install_skill_source,
     list_active_skill_sources,
@@ -180,6 +184,64 @@ class SdkTests(unittest.TestCase):
             removed = remove_skill_source("demo-pack", root)
             self.assertTrue(removed["removed_skill"]["removed"])
             self.assertFalse(install_path.exists())
+
+    def test_sdk_can_export_and_import_external_skill_lock(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            source = root / "external-source"
+            source.mkdir()
+            (source / "README.md").write_text("# Demo Pack\n\nReusable pack.\n", encoding="utf-8")
+            subprocess.run(["git", "init", str(source)], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "config", "user.email", "tests@example.com"], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "config", "user.name", "Tests"], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "add", "."], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "init"], text=True, capture_output=True, check=True)
+
+            installed = install_skill_source(root, git_url=str(source), name="demo pack", active=True)
+            export_payload = export_skill_source_lock(root)
+            export_path = Path(export_payload["export_path"])
+            self.assertTrue(export_path.exists())
+
+            imported_root = root / "other-project"
+            imported_root.mkdir()
+            imported = import_skill_source_lock(imported_root, export_path)
+            self.assertEqual(imported["count"], 1)
+            active = list_active_skill_sources(imported_root)
+            self.assertEqual(active["skills"][0]["slug"], installed["installed_skill"]["slug"])
+
+    def test_sdk_can_bulk_import_directory_candidates(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            candidate = root / "candidate-source"
+            candidate.mkdir()
+            (candidate / "README.md").write_text("# Candidate Pack\n\nReusable candidate pack.\n", encoding="utf-8")
+            subprocess.run(["git", "init", str(candidate)], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(candidate), "config", "user.email", "tests@example.com"], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(candidate), "config", "user.name", "Tests"], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(candidate), "add", "."], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(candidate), "commit", "-m", "init"], text=True, capture_output=True, check=True)
+
+            manifest_path = root / ".skilgen" / "external-skills" / "manifest.json"
+            lock_path = root / ".skilgen" / "external-skills" / "lock.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            repo_candidate = {"repo": "example/candidate-pack", "url": str(candidate)}
+            installed = {
+                "slug": "awesome-agent-skills-voltagent",
+                "name": "Awesome Agent Skills",
+                "ecosystem": "directory",
+                "publisher": "VoltAgent",
+                "category": "directory",
+                "trust_level": "directory",
+                "trust_score": 4,
+                "install_path": str(root / ".skilgen" / "external-skills" / "sources" / "awesome-agent-skills-voltagent"),
+                "normalized": {"repo_candidates": [repo_candidate]},
+            }
+            manifest_path.write_text(json.dumps({"skills": [installed]}, indent=2), encoding="utf-8")
+            lock_path.write_text(json.dumps({"skills": [{"slug": installed["slug"], "normalized": installed["normalized"]}]}, indent=2), encoding="utf-8")
+
+            imported = import_skill_source_candidates("awesome-agent-skills-voltagent", root, limit=1, active=True)
+            self.assertEqual(imported["count"], 1)
+            self.assertEqual(imported["imported_skills"][0]["imported_from"], "awesome-agent-skills-voltagent")
 
     def test_detect_external_skill_sources_finds_supported_ecosystems(self) -> None:
         with TemporaryDirectory() as tmp:

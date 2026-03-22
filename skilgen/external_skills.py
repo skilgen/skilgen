@@ -317,6 +317,10 @@ def _write_lock(project_root: str | Path, payload: dict[str, object]) -> None:
     _lock_path(project_root).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def _export_lock_path(project_root: str | Path) -> Path:
+    return _external_skills_root(project_root) / "export-lock.json"
+
+
 def _installed_by_slug(project_root: str | Path) -> dict[str, dict[str, object]]:
     manifest = _load_manifest(project_root)
     entries = manifest.get("skills", [])
@@ -636,6 +640,54 @@ def _readme_summary(install_path: Path) -> dict[str, str] | None:
         if title or summary:
             return {"path": path.relative_to(install_path).as_posix(), "title": title, "summary": summary}
     return None
+
+
+def _compute_trust_score(
+    trust_level: str,
+    *,
+    license_info: dict[str, str] | None,
+    readme_info: dict[str, str] | None,
+    entry_count: int,
+    repo_candidate_count: int = 0,
+) -> int:
+    score = TRUST_SCORES.get(trust_level, 0)
+    if license_info is not None:
+        score += 1
+    if readme_info is not None and (readme_info.get("title") or readme_info.get("summary")):
+        score += 1
+    if entry_count >= 3:
+        score += 1
+    if repo_candidate_count:
+        score += 1
+    return min(score, 10)
+
+
+def _build_provenance_payload(
+    *,
+    source: ExternalSkillSource,
+    install_path: Path,
+    requested_ref: str | None,
+    resolved_revision: str | None,
+    remote_url: str | None,
+    license_info: dict[str, str] | None,
+    readme_info: dict[str, str] | None,
+    install_mode: str,
+    imported_from: str | None,
+) -> dict[str, object]:
+    return {
+        "source_slug": source.slug,
+        "publisher": source.publisher,
+        "repository_url": remote_url or source.repository_url,
+        "docs_url": source.docs_url,
+        "requested_ref": requested_ref,
+        "resolved_revision": resolved_revision,
+        "license": license_info,
+        "readme": readme_info,
+        "install_mode": install_mode,
+        "imported_from": imported_from,
+        "captured_at": datetime.now(UTC).isoformat(),
+        "install_path": str(install_path),
+    }
 
 
 def _adapter_for_source(source: ExternalSkillSource) -> str:
@@ -995,13 +1047,20 @@ def _normalize_external_skill_install(
     readme_info = _readme_summary(install_path)
     repo_candidates = _extract_github_repo_candidates(install_path) if adapter == "catalog-directory" else []
     native_view = _extract_adapter_native_view(adapter, entries, repo_candidates)
+    trust_score = _compute_trust_score(
+        source.trust_level,
+        license_info=license_info,
+        readme_info=readme_info,
+        entry_count=len(entries),
+        repo_candidate_count=len(repo_candidates),
+    )
     payload = {
         "slug": source.slug,
         "adapter": adapter,
         "ecosystem": source.ecosystem,
         "publisher": source.publisher,
         "trust_level": source.trust_level,
-        "trust_score": TRUST_SCORES.get(source.trust_level, 0),
+        "trust_score": trust_score,
         "supported_agents": list(source.supported_agents),
         "repository_url": source.repository_url,
         "docs_url": source.docs_url,
@@ -1197,6 +1256,7 @@ def _build_install_metadata(
     install_path: Path,
     install_mode: str = "manual",
     detection_reasons: list[str] | None = None,
+    imported_from: str | None = None,
 ) -> dict[str, object]:
     source = _catalog_entry(slug)
     return {
@@ -1216,6 +1276,7 @@ def _build_install_metadata(
         "installed_at": datetime.now(UTC).isoformat(),
         "install_mode": install_mode,
         "detection_reasons": detection_reasons or [],
+        "imported_from": imported_from,
     }
 
 
@@ -1230,6 +1291,13 @@ def install_external_skill(
     detection_reasons: list[str] | None = None,
     ref: str | None = None,
     active: bool | None = None,
+    ecosystem_override: str | None = None,
+    docs_url_override: str | None = None,
+    trust_level_override: str | None = None,
+    category_override: str | None = None,
+    publisher_override: str | None = None,
+    description_override: str | None = None,
+    imported_from: str | None = None,
 ) -> dict[str, object]:
     if slug is None and git_url is None:
         raise ValueError("Provide either a catalog slug or a git_url.")
@@ -1259,6 +1327,14 @@ def install_external_skill(
         docs_url = git_url
         trust_level = "custom"
         description = f"Custom external skill source installed from {git_url}."
+    if ecosystem_override:
+        ecosystem = ecosystem_override
+    if docs_url_override:
+        docs_url = docs_url_override
+    if trust_level_override:
+        trust_level = trust_level_override
+    if description_override:
+        description = description_override
 
     sources_dir = _sources_dir(project_root)
     sources_dir.mkdir(parents=True, exist_ok=True)
@@ -1290,6 +1366,7 @@ def install_external_skill(
         install_path=install_path,
         install_mode=install_mode,
         detection_reasons=detection_reasons,
+        imported_from=imported_from,
     )
     metadata["requested_ref"] = ref
     (install_path / "skilgen-source.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -1316,12 +1393,12 @@ def install_external_skill(
         slug=resolved_slug,
         name=resolved_name,
         ecosystem=ecosystem,
-        publisher="Custom",
+        publisher=publisher_override or "Custom",
         description=description,
         repository_url=repository_url,
         source_path=source_path,
         docs_url=docs_url,
-        category="custom",
+        category=category_override or "custom",
         trust_level=trust_level,
     )
     normalization = _normalize_external_skill_install(project_root, source=source, install_path=install_path)
@@ -1330,6 +1407,20 @@ def install_external_skill(
     active_value = auto_activate_allowed if active is None else active
     metadata["normalized"] = normalization
     metadata["active"] = active_value
+    metadata["publisher"] = publisher_override or metadata.get("publisher") or source.publisher
+    metadata["category"] = category_override or metadata.get("category") or source.category
+    metadata["trust_score"] = normalization.get("trust_score", TRUST_SCORES.get(trust_level, 0))
+    metadata["provenance"] = _build_provenance_payload(
+        source=source,
+        install_path=install_path,
+        requested_ref=ref,
+        resolved_revision=resolved_revision,
+        remote_url=remote_url,
+        license_info=license_info,
+        readme_info=metadata.get("normalized", {}).get("readme") if isinstance(metadata.get("normalized"), dict) else None,
+        install_mode=install_mode,
+        imported_from=imported_from,
+    )
 
     manifest = _load_manifest(project_root)
     skills = [entry for entry in manifest.get("skills", []) if isinstance(entry, dict) and entry.get("slug") != resolved_slug]
@@ -1349,10 +1440,12 @@ def install_external_skill(
             "active": active_value,
             "normalized": normalization,
             "license": metadata.get("license"),
+            "provenance": metadata.get("provenance"),
             "trust_level": trust_level,
-            "trust_score": TRUST_SCORES.get(trust_level, 0),
+            "trust_score": metadata.get("trust_score", TRUST_SCORES.get(trust_level, 0)),
             "supported_agents": metadata.get("supported_agents", []),
             "install_mode": install_mode,
+            "imported_from": imported_from,
             "updated_at": datetime.now(UTC).isoformat(),
         },
     )
@@ -1439,7 +1532,20 @@ def sync_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[st
     installed["sync_stdout"] = result.stdout.strip()
     installed["sync_stderr"] = result.stderr.strip()
     installed["resolved_revision"] = _git_revision(install_path)
+    installed["license"] = _detect_license(install_path)
     installed["normalized"] = normalization
+    installed["trust_score"] = normalization.get("trust_score", installed.get("trust_score", 0))
+    installed["provenance"] = _build_provenance_payload(
+        source=source,
+        install_path=install_path,
+        requested_ref=installed.get("requested_ref") if isinstance(installed.get("requested_ref"), str) or installed.get("requested_ref") is None else None,
+        resolved_revision=installed.get("resolved_revision") if isinstance(installed.get("resolved_revision"), str) or installed.get("resolved_revision") is None else None,
+        remote_url=_git_remote_url(install_path),
+        license_info=installed.get("license") if isinstance(installed.get("license"), dict) or installed.get("license") is None else None,
+        readme_info=normalization.get("readme") if isinstance(normalization.get("readme"), dict) or normalization.get("readme") is None else None,
+        install_mode=str(installed.get("install_mode", "manual")),
+        imported_from=str(installed.get("imported_from")) if installed.get("imported_from") is not None else None,
+    )
     manifest = _load_manifest(project_root)
     manifest["skills"] = sorted(
         [
@@ -1464,10 +1570,12 @@ def sync_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[st
             "active": lock_entry.get("active", False),
             "normalized": normalization,
             "license": installed.get("license"),
+            "provenance": installed.get("provenance"),
             "trust_level": installed.get("trust_level"),
-            "trust_score": installed.get("trust_score", TRUST_SCORES.get(str(installed.get("trust_level", "custom")), 0)),
+            "trust_score": installed.get("trust_score", normalization.get("trust_score", TRUST_SCORES.get(str(installed.get("trust_level", "custom")), 0))),
             "supported_agents": installed.get("supported_agents", []),
             "install_mode": installed.get("install_mode", "manual"),
+            "imported_from": installed.get("imported_from"),
             "updated_at": datetime.now(UTC).isoformat(),
         }
     )
@@ -1497,6 +1605,7 @@ def activate_external_skill(*, project_root: str | Path = ".", slug: str) -> dic
     lock_entry.setdefault("publisher", installed.get("publisher"))
     lock_entry.setdefault("category", installed.get("category"))
     lock_entry.setdefault("license", installed.get("license"))
+    lock_entry.setdefault("provenance", installed.get("provenance"))
     lock_entry.setdefault("trust_level", installed.get("trust_level"))
     lock_entry.setdefault("trust_score", installed.get("trust_score", TRUST_SCORES.get(str(installed.get("trust_level", "custom")), 0)))
     lock_entry.setdefault("supported_agents", installed.get("supported_agents", []))
@@ -1529,6 +1638,7 @@ def deactivate_external_skill(*, project_root: str | Path = ".", slug: str) -> d
     lock_entry.setdefault("publisher", installed.get("publisher"))
     lock_entry.setdefault("category", installed.get("category"))
     lock_entry.setdefault("license", installed.get("license"))
+    lock_entry.setdefault("provenance", installed.get("provenance"))
     lock_entry.setdefault("trust_level", installed.get("trust_level"))
     lock_entry.setdefault("trust_score", installed.get("trust_score", TRUST_SCORES.get(str(installed.get("trust_level", "custom")), 0)))
     lock_entry.setdefault("supported_agents", installed.get("supported_agents", []))
@@ -1564,4 +1674,149 @@ def remove_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[
         "slug": slug,
         "removed": True,
         "install_path": str(install_path),
+    }
+
+
+def import_external_skill_candidates(
+    *,
+    project_root: str | Path = ".",
+    slug: str,
+    limit: int = 5,
+    active: bool | None = None,
+) -> dict[str, object]:
+    installed = _installed_by_slug(project_root).get(slug)
+    if installed is None:
+        raise KeyError(f"External skill source is not installed: {slug}")
+    normalized = installed.get("normalized", {}) if isinstance(installed.get("normalized"), dict) else {}
+    repo_candidates = normalized.get("repo_candidates", []) if isinstance(normalized, dict) else []
+    if not isinstance(repo_candidates, list):
+        repo_candidates = []
+    imported: list[dict[str, object]] = []
+    skipped: list[dict[str, str]] = []
+    errors: list[dict[str, str]] = []
+    parent_trust = str(installed.get("trust_level", "directory"))
+    inherited_trust = "curated" if parent_trust == "curated" else "community"
+    for candidate in repo_candidates[: max(limit, 0)]:
+        if not isinstance(candidate, dict):
+            continue
+        repo = str(candidate.get("repo", "")).strip()
+        url = str(candidate.get("url", "")).strip()
+        if not repo or not url:
+            continue
+        candidate_name = repo.replace("/", "-")
+        candidate_slug = _normalize_slug(candidate_name)
+        if candidate_slug in _installed_by_slug(project_root):
+            skipped.append({"slug": candidate_slug, "reason": "already_installed"})
+            continue
+        try:
+            imported.append(
+                install_external_skill(
+                    project_root=project_root,
+                    git_url=url,
+                    name=candidate_name,
+                    install_mode="directory_import",
+                    active=active,
+                    ecosystem_override="imported",
+                    trust_level_override=inherited_trust,
+                    category_override="directory-import",
+                    publisher_override=repo.split("/", 1)[0],
+                    description_override=f"Imported from directory source '{slug}' via {repo}.",
+                    imported_from=slug,
+                )
+            )
+        except Exception as exc:  # pragma: no cover
+            errors.append({"repo": repo, "error": str(exc)})
+    return {
+        "source_slug": slug,
+        "imported_skills": imported,
+        "skipped": skipped,
+        "errors": errors,
+        "count": len(imported),
+    }
+
+
+def export_external_skill_lock(*, project_root: str | Path = ".", output_path: str | Path | None = None) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    lock = _load_lock(root)
+    destination = Path(output_path).resolve() if output_path is not None else _export_lock_path(root)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "exported_at": datetime.now(UTC).isoformat(),
+        "project_root": str(root),
+        "skills": lock.get("skills", []),
+    }
+    destination.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return {
+        "export_path": str(destination),
+        "count": len(payload["skills"]) if isinstance(payload["skills"], list) else 0,
+    }
+
+
+def import_external_skill_lock(
+    *,
+    project_root: str | Path = ".",
+    input_path: str | Path,
+    sync_existing: bool = False,
+) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    payload = json.loads(Path(input_path).resolve().read_text(encoding="utf-8"))
+    entries = payload.get("skills", [])
+    if not isinstance(entries, list):
+        entries = []
+    imported: list[dict[str, object]] = []
+    updated: list[dict[str, object]] = []
+    skipped: list[dict[str, str]] = []
+    errors: list[dict[str, str]] = []
+    installed = _installed_by_slug(root)
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        slug = str(entry.get("slug", "")).strip()
+        repo_url = str(entry.get("repository_url", "")).strip()
+        requested_ref = entry.get("requested_ref") if isinstance(entry.get("requested_ref"), str) or entry.get("requested_ref") is None else None
+        if not slug or not repo_url:
+            skipped.append({"slug": slug or "unknown", "reason": "missing_repository_url"})
+            continue
+        if slug in installed:
+            if sync_existing:
+                try:
+                    synced = sync_external_skill(project_root=root, slug=slug)
+                    desired_active = bool(entry.get("active", False))
+                    if desired_active:
+                        activate_external_skill(project_root=root, slug=slug)
+                    else:
+                        deactivate_external_skill(project_root=root, slug=slug)
+                    updated.append(synced)
+                except Exception as exc:  # pragma: no cover
+                    errors.append({"slug": slug, "error": str(exc)})
+            else:
+                skipped.append({"slug": slug, "reason": "already_installed"})
+            continue
+        try:
+            imported.append(
+                install_external_skill(
+                    project_root=root,
+                    slug=slug if _catalog_entry(slug) is not None else None,
+                    git_url=None if _catalog_entry(slug) is not None else repo_url,
+                    name=None if _catalog_entry(slug) is not None else str(entry.get("name", slug)),
+                    ref=requested_ref,
+                    active=bool(entry.get("active", False)),
+                    install_mode="lock_import",
+                    ecosystem_override=None if _catalog_entry(slug) is not None else str(entry.get("ecosystem", "imported")),
+                    trust_level_override=None if _catalog_entry(slug) is not None else str(entry.get("trust_level", "custom")),
+                    category_override=None if _catalog_entry(slug) is not None else str(entry.get("category", "lock-import")),
+                    publisher_override=None if _catalog_entry(slug) is not None else str(entry.get("publisher", "Imported")),
+                    docs_url_override=None if _catalog_entry(slug) is not None else str(entry.get("provenance", {}).get("docs_url", repo_url)) if isinstance(entry.get("provenance"), dict) else repo_url,
+                    description_override=None if _catalog_entry(slug) is not None else f"Imported from external skills lock for {slug}.",
+                    imported_from=str(entry.get("imported_from")) if entry.get("imported_from") is not None else None,
+                )
+            )
+        except Exception as exc:  # pragma: no cover
+            errors.append({"slug": slug, "error": str(exc)})
+    return {
+        "imported_skills": imported,
+        "updated_skills": updated,
+        "skipped": skipped,
+        "errors": errors,
+        "count": len(imported) + len(updated),
     }
