@@ -7,7 +7,6 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-
 from skilgen.core.config import load_config
 
 
@@ -612,6 +611,33 @@ def _detect_license(install_path: Path) -> dict[str, str] | None:
     return None
 
 
+def _readme_summary(install_path: Path) -> dict[str, str] | None:
+    for name in ("README.md", "README.txt", "README"):
+        path = install_path / name
+        if not path.exists():
+            continue
+        try:
+            lines = [line.strip() for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()]
+        except OSError:
+            continue
+        title = next((line.removeprefix("#").strip() for line in lines if line.startswith("#")), "")
+        summary = next(
+            (
+                line
+                for line in lines
+                if line
+                and not line.startswith("#")
+                and not line.startswith("![")
+                and not line.startswith("[!")
+                and len(line) > 20
+            ),
+            "",
+        )
+        if title or summary:
+            return {"path": path.relative_to(install_path).as_posix(), "title": title, "summary": summary}
+    return None
+
+
 def _adapter_for_source(source: ExternalSkillSource) -> str:
     if source.slug == "anthropic-skills":
         return "anthropic-skills"
@@ -731,6 +757,101 @@ def _collect_normalized_entries(
     return [entry for _, _, entry in decorated]
 
 
+def _extract_github_repo_candidates(install_path: Path) -> list[dict[str, str]]:
+    candidates: dict[str, dict[str, str]] = {}
+    pattern = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)")
+    for readme_name in ("README.md", "README.txt", "README"):
+        readme_path = install_path / readme_name
+        if not readme_path.exists():
+            continue
+        try:
+            text = readme_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for owner, repo in pattern.findall(text):
+            slug = f"{owner}/{repo}".rstrip(".git")
+            url = f"https://github.com/{slug}"
+            if url.rstrip("/") == str(readme_path):
+                continue
+            if slug.lower().startswith(("langchain-ai/awesome", "voltagent/awesome", "skillmatic-ai/awesome", "heilcheng/awesome", "prat011/awesome")):
+                continue
+            candidates.setdefault(
+                slug.lower(),
+                {
+                    "repo": slug,
+                    "url": url,
+                },
+            )
+    return sorted(candidates.values(), key=lambda item: item["repo"])[:50]
+
+
+def _group_entries_by_adapter(entries: list[dict[str, object]], adapter: str) -> list[dict[str, object]]:
+    grouped: dict[str, list[str]] = {}
+
+    def add(group: str, path: str) -> None:
+        grouped.setdefault(group, [])
+        if path not in grouped[group]:
+            grouped[group].append(path)
+
+    for entry in entries:
+        path = str(entry["path"])
+        lower = path.lower()
+        if adapter == "anthropic-skills":
+            parts = path.split("/")
+            group = parts[1] if len(parts) > 1 and parts[0] == "skills" else parts[0]
+            if "template" in lower:
+                group = "templates"
+            add(group or "root", path)
+        elif adapter == "langchain-skills":
+            if "langsmith" in lower:
+                add("langsmith", path)
+            elif "langgraph" in lower:
+                add("langgraph", path)
+            elif "deep-agent" in lower or "deep_agents" in lower:
+                add("deep-agents", path)
+            elif "rag" in lower:
+                add("rag", path)
+            else:
+                add("langchain-core", path)
+        elif adapter == "huggingface-skills":
+            if "dataset" in lower:
+                add("datasets", path)
+            elif "trainer" in lower or "train" in lower:
+                add("training", path)
+            elif "eval" in lower or "benchmark" in lower:
+                add("evaluation", path)
+            elif "hub" in lower:
+                add("hub", path)
+            else:
+                add("general", path)
+        elif adapter == "catalog-directory":
+            if "awesome" in lower:
+                add("directory-index", path)
+            elif "skill" in lower:
+                add("skill-guides", path)
+            else:
+                add("references", path)
+        elif adapter == "skill-spec":
+            if "spec" in lower:
+                add("spec", path)
+            else:
+                add("reference", path)
+        elif adapter == "benchmarks":
+            if "eval" in lower:
+                add("evaluation", path)
+            elif "benchmark" in lower:
+                add("benchmarks", path)
+            else:
+                add("supporting-docs", path)
+        else:
+            add("general", path)
+
+    return [
+        {"group": group, "paths": paths[:20], "count": len(paths)}
+        for group, paths in sorted(grouped.items())
+    ]
+
+
 def _normalize_external_skill_install(
     project_root: str | Path,
     *,
@@ -741,9 +862,13 @@ def _normalize_external_skill_install(
     normalized_root.mkdir(parents=True, exist_ok=True)
     adapter = _adapter_for_source(source)
     entries = _collect_normalized_entries(install_path, source.source_path, adapter=adapter)
+    groups = _group_entries_by_adapter(entries, adapter)
     entry_type_counts: dict[str, int] = {}
     for entry in entries:
         entry_type_counts[str(entry["type"])] = entry_type_counts.get(str(entry["type"]), 0) + 1
+    license_info = _detect_license(install_path)
+    readme_info = _readme_summary(install_path)
+    repo_candidates = _extract_github_repo_candidates(install_path) if adapter == "catalog-directory" else []
     payload = {
         "slug": source.slug,
         "adapter": adapter,
@@ -757,6 +882,10 @@ def _normalize_external_skill_install(
         "entry_count": len(entries),
         "entry_type_counts": entry_type_counts,
         "entrypoints": [entry["path"] for entry in entries if entry["entrypoint"]][:12],
+        "groups": groups,
+        "license": license_info,
+        "readme": readme_info,
+        "repo_candidates": repo_candidates,
         "entries": entries[:100],
     }
     index_path = normalized_root / "index.json"
@@ -774,6 +903,8 @@ def _normalize_external_skill_install(
         f"- Trust level: `{payload['trust_level']}` (score: {payload['trust_score']})",
         f"- Repository: {payload['repository_url']}",
         f"- Docs: {payload['docs_url']}",
+        f"- License: {(license_info or {}).get('summary', 'unknown')}",
+        f"- README summary: {(readme_info or {}).get('summary', 'none')}",
         f"- Entrypoints indexed: {len(payload['entrypoints'])}",
         f"- Entry types: {', '.join(f'{name}={count}' for name, count in sorted(entry_type_counts.items())) or 'none'}",
         f"- Supported agents: {', '.join(payload['supported_agents']) or 'unknown'}",
@@ -781,12 +912,28 @@ def _normalize_external_skill_install(
         "## Entrypoints",
         *entrypoint_lines,
     ]
+    if groups:
+        summary_lines.extend(["", "## Groups"])
+        summary_lines.extend(
+            f"- `{group['group']}` ({group['count']}): {', '.join(f'`{path}`' for path in group['paths'][:4])}"
+            for group in groups[:12]
+        )
+    if repo_candidates:
+        summary_lines.extend(["", "## Downstream Repo Candidates"])
+        summary_lines.extend(
+            f"- `{candidate['repo']}`: {candidate['url']}"
+            for candidate in repo_candidates[:12]
+        )
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
     return {
         "adapter": payload["adapter"],
         "entry_count": payload["entry_count"],
         "entry_type_counts": payload["entry_type_counts"],
         "entrypoints": payload["entrypoints"],
+        "groups": payload["groups"],
+        "license": payload["license"],
+        "readme": payload["readme"],
+        "repo_candidates": payload["repo_candidates"],
         "publisher": payload["publisher"],
         "trust_level": payload["trust_level"],
         "trust_score": payload["trust_score"],

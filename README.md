@@ -203,6 +203,12 @@ Installed packs are tracked with:
 - `lock.json` for resolved revisions, active/inactive state, and normalized entrypoint indexes
 - `normalized/<slug>/` for Skilgen-friendly adapter summaries
 
+Normalized adapter summaries now include:
+- grouped entrypoints by ecosystem
+- detected README title/summary
+- detected license metadata
+- downstream GitHub repo candidates for awesome-list and directory sources
+
 Skilgen also ranks active packs by:
 - repo detection signals
 - trust level

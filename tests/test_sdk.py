@@ -3,7 +3,11 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from skilgen.external_skills import detect_external_skill_sources, ensure_external_skills_for_project
+from skilgen.external_skills import (
+    _extract_github_repo_candidates,
+    detect_external_skill_sources,
+    ensure_external_skills_for_project,
+)
 from skilgen.sdk import (
     activate_skill_source,
     analyze_project,
@@ -121,7 +125,14 @@ class SdkTests(unittest.TestCase):
 
             source = root / "external-source"
             source.mkdir()
-            (source / "README.md").write_text("demo\n", encoding="utf-8")
+            (source / "README.md").write_text(
+                "# Demo Pack\n\nThis is a reusable demo skill pack.\n",
+                encoding="utf-8",
+            )
+            (source / "LICENSE").write_text("MIT License\n", encoding="utf-8")
+            (source / "skills").mkdir()
+            (source / "skills" / "demo-pack").mkdir(parents=True)
+            (source / "skills" / "demo-pack" / "SKILL.md").write_text("# Demo Skill\n", encoding="utf-8")
             subprocess.run(["git", "init", str(source)], text=True, capture_output=True, check=True)
             subprocess.run(["git", "-C", str(source), "config", "user.email", "tests@example.com"], text=True, capture_output=True, check=True)
             subprocess.run(["git", "-C", str(source), "config", "user.name", "Tests"], text=True, capture_output=True, check=True)
@@ -132,7 +143,10 @@ class SdkTests(unittest.TestCase):
             install_path = Path(installed["installed_skill"]["install_path"])
             self.assertTrue(install_path.exists())
 
-            (source / "README.md").write_text("demo v2\n", encoding="utf-8")
+            (source / "README.md").write_text(
+                "# Demo Pack\n\nThis is the updated demo skill pack.\n",
+                encoding="utf-8",
+            )
             subprocess.run(["git", "-C", str(source), "add", "."], text=True, capture_output=True, check=True)
             subprocess.run(["git", "-C", str(source), "commit", "-m", "update"], text=True, capture_output=True, check=True)
 
@@ -147,6 +161,9 @@ class SdkTests(unittest.TestCase):
             self.assertEqual(locked["skills"][0]["slug"], "demo-pack")
             self.assertIn("normalized", locked["skills"][0])
             self.assertIn("trust_score", locked["skills"][0])
+            self.assertEqual(locked["skills"][0]["normalized"]["license"]["summary"], "MIT License")
+            self.assertEqual(locked["skills"][0]["normalized"]["readme"]["title"], "Demo Pack")
+            self.assertTrue(locked["skills"][0]["normalized"]["groups"])
             ranked = rank_skill_sources(root)
             self.assertEqual(ranked["skills"][0]["slug"], "demo-pack")
             policy = skill_source_policy(root)
@@ -286,6 +303,24 @@ class SdkTests(unittest.TestCase):
             (root / "CLAUDE.md").write_text("Claude Code instructions\n", encoding="utf-8")
             detected = detect_skill_sources(root)
             self.assertTrue(detected["detected_skills"])
+
+    def test_directory_candidates_extract_downstream_repos_from_readme(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "README.md").write_text(
+                "\n".join(
+                    [
+                        "# Awesome Agent Skills",
+                        "- https://github.com/example/alpha-skills",
+                        "- https://github.com/example/beta-skills",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            candidates = _extract_github_repo_candidates(root)
+            repos = {entry["repo"] for entry in candidates}
+            self.assertIn("example/alpha-skills", repos)
+            self.assertIn("example/beta-skills", repos)
 
 
 if __name__ == "__main__":
