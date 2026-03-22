@@ -24,6 +24,7 @@ DEFAULT_CONFIG = SkilgenConfig(
     external_skills_allowlist=[],
     external_skills_denylist=[],
     external_skills_auto_activate=True,
+    external_skills_policy_mode="permissive",
 )
 
 
@@ -83,6 +84,7 @@ def load_config(project_root: Path) -> SkilgenConfig:
         "external_skills_allowlist": list(DEFAULT_CONFIG.external_skills_allowlist),
         "external_skills_denylist": list(DEFAULT_CONFIG.external_skills_denylist),
         "external_skills_auto_activate": DEFAULT_CONFIG.external_skills_auto_activate,
+        "external_skills_policy_mode": DEFAULT_CONFIG.external_skills_policy_mode,
     }
     current_list: str | None = None
 
@@ -128,6 +130,7 @@ def load_config(project_root: Path) -> SkilgenConfig:
         external_skills_allowlist=list(data.get("external_skills_allowlist", DEFAULT_CONFIG.external_skills_allowlist)),
         external_skills_denylist=list(data.get("external_skills_denylist", DEFAULT_CONFIG.external_skills_denylist)),
         external_skills_auto_activate=bool(data.get("external_skills_auto_activate", DEFAULT_CONFIG.external_skills_auto_activate)),
+        external_skills_policy_mode=str(data.get("external_skills_policy_mode", DEFAULT_CONFIG.external_skills_policy_mode)),
     )
 
 
@@ -175,4 +178,5 @@ external_skills_allowed_trust_levels:
 external_skills_allowlist:
 external_skills_denylist:
 external_skills_auto_activate: true
+external_skills_policy_mode: permissive
 """

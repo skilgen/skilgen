@@ -343,6 +343,14 @@ class CliTests(unittest.TestCase):
             self.assertIn("resolved_revision", locked.stdout)
             self.assertIn("normalized", locked.stdout)
 
+            policy = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "skills", "policy", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("policy_mode", policy.stdout)
+
             ranked = subprocess.run(
                 [sys.executable, "-m", "skilgen.cli.main", "skills", "rank", "--project-root", str(root)],
                 text=True,

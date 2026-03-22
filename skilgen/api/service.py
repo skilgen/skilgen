@@ -30,6 +30,7 @@ from skilgen.external_skills import (
     deactivate_external_skill,
     detect_external_skill_sources,
     external_skill_lock,
+    external_skill_policy,
     get_external_skill,
     install_external_skill,
     installed_external_skills,
@@ -274,6 +275,7 @@ def status_payload(project_root: str | Path) -> dict[str, object]:
             "active_external_skills": active_external_skills(root),
             "ranked_external_skills": ranked_external_skills(root),
             "external_skill_lock": external_skill_lock(root),
+            "external_skill_policy": external_skill_policy(root),
             "external_skill_recommendations": external_skill_detection["manual_recommendations"],
         }
     )
@@ -297,6 +299,10 @@ def skills_lock_payload(project_root: str | Path) -> dict[str, object]:
 
 def skills_rank_payload(project_root: str | Path) -> dict[str, object]:
     return _with_api_meta(ranked_external_skills(Path(project_root).resolve()))
+
+
+def skills_policy_payload(project_root: str | Path) -> dict[str, object]:
+    return _with_api_meta(external_skill_policy(Path(project_root).resolve()))
 
 
 def skills_show_payload(slug: str, project_root: str | Path) -> dict[str, object]:

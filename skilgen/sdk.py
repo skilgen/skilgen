@@ -27,6 +27,7 @@ from skilgen.external_skills import (
     active_external_skills,
     detect_external_skill_sources,
     external_skill_lock,
+    external_skill_policy,
     deactivate_external_skill,
     get_external_skill,
     install_external_skill,
@@ -185,6 +186,10 @@ def skill_source_lock(project_root: str | Path = ".") -> dict[str, object]:
 
 def rank_skill_sources(project_root: str | Path = ".") -> dict[str, object]:
     return ranked_external_skills(Path(project_root).resolve())
+
+
+def skill_source_policy(project_root: str | Path = ".") -> dict[str, object]:
+    return external_skill_policy(Path(project_root).resolve())
 
 
 def show_skill_source(slug: str, project_root: str | Path = ".") -> dict[str, object]:

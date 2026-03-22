@@ -40,6 +40,7 @@ class ConfigTests(unittest.TestCase):
                         "model_max_tokens: 2048",
                         "model_retry_attempts: 5",
                         "model_retry_base_delay_seconds: 2.5",
+                        "external_skills_policy_mode: review_required",
                     ]
                 ),
                 encoding="utf-8",
@@ -58,6 +59,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.model_max_tokens, 2048)
             self.assertEqual(config.model_retry_attempts, 5)
             self.assertEqual(config.model_retry_base_delay_seconds, 2.5)
+            self.assertEqual(config.external_skills_policy_mode, "review_required")
 
 
 if __name__ == "__main__":

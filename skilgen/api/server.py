@@ -29,6 +29,7 @@ from skilgen.api.service import (
     skills_install_payload,
     skills_list_payload,
     skills_lock_payload,
+    skills_policy_payload,
     skills_rank_payload,
     skills_remove_payload,
     skills_show_payload,
@@ -86,6 +87,9 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/skills/lock":
                 _json_response(self, 200, skills_lock_payload(query.get("project_root", ["."])[0]))
+                return
+            if parsed.path == "/skills/policy":
+                _json_response(self, 200, skills_policy_payload(query.get("project_root", ["."])[0]))
                 return
             if parsed.path == "/skills/rank":
                 _json_response(self, 200, skills_rank_payload(query.get("project_root", ["."])[0]))

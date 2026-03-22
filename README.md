@@ -182,6 +182,7 @@ Install a curated or custom external skill source into the local Skilgen-managed
 skilgen skills install anthropic-skills --project-root .
 skilgen skills active --project-root .
 skilgen skills lock --project-root .
+skilgen skills policy --project-root .
 skilgen skills rank --project-root .
 skilgen skills sync anthropic-skills --project-root .
 skilgen skills remove anthropic-skills --project-root .
@@ -208,6 +209,11 @@ Skilgen also ranks active packs by:
 - ecosystem fit
 - normalized entrypoint depth
 
+Policy modes:
+- `permissive`: use trust/allowlist/denylist as configured
+- `official_only`: only official/spec catalog sources can auto-install
+- `review_required`: matching packs can auto-install but stay inactive until you activate them explicitly
+
 ## Supported External Skills
 
 Skilgen can act as a one-stop shop for skill ecosystems by exposing them through the same interface:
@@ -221,6 +227,7 @@ skilgen skills activate <slug> --project-root .
 skilgen skills deactivate <slug> --project-root .
 skilgen skills active --project-root .
 skilgen skills lock --project-root .
+skilgen skills policy --project-root .
 skilgen skills rank --project-root .
 skilgen skills sync <slug> --project-root .
 skilgen skills sync --all --project-root .

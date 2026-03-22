@@ -18,6 +18,7 @@ from skilgen.external_skills import (
     active_external_skills,
     detect_external_skill_sources,
     external_skill_lock,
+    external_skill_policy,
     deactivate_external_skill,
     get_external_skill,
     install_external_skill,
@@ -116,6 +117,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     skills_lock = skills_subparsers.add_parser("lock", help="Show the resolved external-skills lockfile for this project.")
     skills_lock.add_argument("--project-root", default=".")
+
+    skills_policy = skills_subparsers.add_parser("policy", help="Show the external-skills policy currently applied to this project.")
+    skills_policy.add_argument("--project-root", default=".")
 
     skills_rank = skills_subparsers.add_parser("rank", help="Rank active external skill packs by trust and relevance for the current project.")
     skills_rank.add_argument("--project-root", default=".")
@@ -232,6 +236,10 @@ def main() -> None:
         if args.skills_command == "lock":
             emit_progress("Loading the resolved external-skills lockfile.")
             print(json.dumps(external_skill_lock(root), indent=2))
+            return
+        if args.skills_command == "policy":
+            emit_progress("Loading the external-skills policy for this project.")
+            print(json.dumps(external_skill_policy(root), indent=2))
             return
         if args.skills_command == "rank":
             emit_progress("Ranking active external skill packs by trust, detection signals, and repo fit.")

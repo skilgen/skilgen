@@ -6,6 +6,7 @@ from skilgen.deep_agents_core import run_deep_json
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state
 from skilgen.core.models import AgentDecision, RequirementsContext, RunMemory
 from skilgen.core.run_memory import load_current_run_memory
+from skilgen.external_skills import external_skill_policy, ranked_external_skills
 
 
 def build_agent_decision_native(
@@ -23,9 +24,21 @@ def build_agent_decision_native(
     ]
     if not top_level_skill_paths:
         top_level_skill_paths = [node.path for node in skill_tree if node.parent_skill is None]
-    memory_to_load = [".skilgen/memory/current_run.json", ".skilgen/state/freshness.json"]
+    ranked_external = ranked_external_skills(project_root).get("skills", [])
+    memory_to_load = [".skilgen/memory/current_run.json", ".skilgen/state/freshness.json", ".skilgen/external-skills/lock.json"]
     if current_run_memory is not None:
         memory_to_load.append(f".skilgen/memory/runs/{current_run_memory.run_id}.json")
+    for entry in ranked_external[:3]:
+        normalized = entry.get("lock_metadata", {}).get("normalized", {}) if isinstance(entry.get("lock_metadata"), dict) else {}
+        summary_path = normalized.get("summary_path")
+        if isinstance(summary_path, str):
+            try:
+                relative = Path(summary_path).resolve().relative_to(project_root).as_posix()
+            except ValueError:
+                relative = summary_path
+            memory_to_load.append(relative)
+            if relative not in top_level_skill_paths:
+                top_level_skill_paths.append(relative)
     should_refresh = freshness.reason != "no_source_changes"
     reason = (
         "Source changes were detected and the impacted domains should be refreshed before the next coding task."
@@ -36,6 +49,8 @@ def build_agent_decision_native(
     if should_refresh:
         next_actions.append("Refresh the impacted top-level skills before starting implementation work.")
     next_actions.append("Load AGENTS.md and the prioritized parent skills first.")
+    if ranked_external:
+        next_actions.append("Load the top ranked external skill pack summaries before using imported ecosystem skills.")
     if current_run_memory is not None and current_run_memory.recent_events:
         next_actions.append("Use the latest run memory to continue from the most recent execution context.")
     return AgentDecision(
@@ -58,6 +73,8 @@ def build_agent_decision(
     current_run_memory = load_current_run_memory(root)
     native = build_agent_decision_native(root, requirements, domain_graph, skill_tree, current_run_memory)
     freshness = compute_freshness_report(root, requirements, domain_graph, load_freshness_state(root))
+    policy = external_skill_policy(root)
+    ranked = ranked_external_skills(root)
     payload = run_deep_json(
         "agent decision planning",
         (
@@ -65,9 +82,11 @@ def build_agent_decision(
             "and which memory files an agent should load first. Return JSON with keys should_refresh, reason, "
             "prioritized_domains, prioritized_skill_paths, memory_to_load, next_actions. Optimize for agent usefulness: "
             "favor the smallest refresh that preserves correctness, choose skills that match the currently impacted "
-            "domains, and keep memory recommendations focused on the files most likely to help the next coding step.\n\n"
+            "domains, rank trusted external skill packs when they fit the repo, and keep memory recommendations focused on the files most likely to help the next coding step.\n\n"
             f"Project root: {root}\n"
             f"Freshness JSON: {freshness.__dict__}\n"
+            f"External skills policy JSON: {policy}\n"
+            f"Ranked external skills JSON: {ranked}\n"
             f"Current run memory: {current_run_memory.__dict__ if current_run_memory is not None else None}\n"
             f"Skill tree JSON: {[node.__dict__ for node in skill_tree]}\n"
             f"Native decision JSON: {native.__dict__}\n"

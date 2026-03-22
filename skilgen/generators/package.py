@@ -9,7 +9,7 @@ from skilgen.agents.requirements_parser import parse_project_intent
 from skilgen.deep_agents_core import run_deep_text
 from skilgen.core.config import render_default_config
 from skilgen.core.context import build_codebase_context
-from skilgen.external_skills import active_external_skills, detect_external_skill_sources, installed_external_skills, ranked_external_skills
+from skilgen.external_skills import active_external_skills, detect_external_skill_sources, external_skill_policy, installed_external_skills, ranked_external_skills
 from skilgen.core.models import RequirementsContext
 
 
@@ -258,10 +258,16 @@ def _render_project_report_native(context: RequirementsContext, project_root: Pa
     )
     if ranked_skill_packs:
         lines.append("- Preferred packs to load first:")
-        lines.extend(
-            f"  - `{entry['slug']}` (score {entry.get('priority_score', 0)}, trust `{entry.get('trust_level', 'unknown')}`)"
-            for entry in ranked_skill_packs[:5]
-        )
+        for entry in ranked_skill_packs[:5]:
+            lock_metadata = entry.get("lock_metadata", {})
+            if not isinstance(lock_metadata, dict):
+                lock_metadata = {}
+            license_payload = lock_metadata.get("license", {})
+            if not isinstance(license_payload, dict):
+                license_payload = {}
+            lines.append(
+                f"  - `{entry['slug']}` (score {entry.get('priority_score', 0)}, trust `{entry.get('trust_level', 'unknown')}`, license `{license_payload.get('summary', 'unknown')}`)"
+            )
     else:
         lines.append("- No active external skill packs have been ranked yet.")
     lines.append("")
@@ -610,6 +616,7 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
     installed_skill_packs = installed_external_skills(project_root)
     active_skill_packs = active_external_skills(project_root)
     ranked_skill_packs = ranked_external_skills(project_root).get("skills", [])
+    policy = external_skill_policy(project_root)
     external_skill_lines = [
         f"- `{entry['slug']}` ({entry.get('ecosystem', 'unknown')}, trust `{entry.get('trust_level', 'unknown')}`): installed at `{entry.get('install_path', '')}`"
         for entry in installed_skill_packs
@@ -661,6 +668,11 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
             "",
             "## Active External Skill Packs",
             *active_external_lines,
+            "",
+            "## External Skill Policy",
+            f"- Policy mode: `{policy['policy_mode']}`",
+            f"- Auto install enabled: `{policy['auto_install_enabled']}`",
+            f"- Auto activate enabled: `{policy['auto_activate_enabled']}`",
             "",
             "## Preferred External Skill Packs",
             *ranked_external_lines,

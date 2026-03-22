@@ -24,6 +24,7 @@ from skilgen.sdk import (
     preview_project,
     remove_skill_source,
     resume_job,
+    skill_source_policy,
     show_skill_source,
     skill_source_lock,
     start_deliver_job,
@@ -145,8 +146,11 @@ class SdkTests(unittest.TestCase):
             locked = skill_source_lock(root)
             self.assertEqual(locked["skills"][0]["slug"], "demo-pack")
             self.assertIn("normalized", locked["skills"][0])
+            self.assertIn("trust_score", locked["skills"][0])
             ranked = rank_skill_sources(root)
             self.assertEqual(ranked["skills"][0]["slug"], "demo-pack")
+            policy = skill_source_policy(root)
+            self.assertEqual(policy["policy_mode"], "permissive")
 
             deactivated = deactivate_skill_source("demo-pack", root)
             self.assertFalse(deactivated["deactivated_skill"]["active"])
@@ -219,6 +223,62 @@ class SdkTests(unittest.TestCase):
             self.assertEqual(install_mock.call_count, 2)
             slugs = {call.kwargs["slug"] for call in install_mock.call_args_list}
             self.assertEqual(slugs, {"anthropic-skills", "langchain-skills"})
+
+    def test_review_required_policy_auto_installs_without_activation(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "skilgen.yml").write_text(
+                "\n".join(
+                    [
+                        "external_skills_policy_mode: review_required",
+                        "external_skills_auto_activate: true",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "CLAUDE.md").write_text("Claude Code instructions\n", encoding="utf-8")
+
+            def fake_install(**kwargs: object) -> dict[str, object]:
+                project_root = Path(str(kwargs["project_root"]))
+                slug = str(kwargs["slug"])
+                install_path = project_root / ".skilgen" / "external-skills" / "sources" / slug
+                install_path.mkdir(parents=True, exist_ok=True)
+                metadata = {
+                    "slug": slug,
+                    "ecosystem": slug.split("-")[0],
+                    "install_path": str(install_path),
+                    "install_mode": kwargs.get("install_mode", "manual"),
+                    "active": kwargs.get("active"),
+                    "detection_reasons": kwargs.get("detection_reasons", []),
+                }
+                manifest_path = project_root / ".skilgen" / "external-skills" / "manifest.json"
+                manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                manifest_path.write_text(__import__("json").dumps({"skills": [metadata]}, indent=2), encoding="utf-8")
+                return metadata
+
+            with patch("skilgen.external_skills.install_external_skill", side_effect=fake_install) as install_mock:
+                result = ensure_external_skills_for_project(root)
+
+            self.assertTrue(result["newly_installed"])
+            self.assertFalse(result["newly_installed"][0]["active"])
+            self.assertFalse(install_mock.call_args.kwargs["active"])
+
+    def test_official_only_policy_blocks_community_auto_installs(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "skilgen.yml").write_text(
+                "\n".join(
+                    [
+                        "external_skills_policy_mode: official_only",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "workflow-n8n.json").write_text('{"name":"n8n workflow"}', encoding="utf-8")
+
+            result = ensure_external_skills_for_project(root)
+            blocked_slugs = {entry["slug"] for entry in result["blocked"]}
+            self.assertIn("n8n-mcp-patterns", blocked_slugs)
 
     def test_detect_skill_sources_sdk_wrapper(self) -> None:
         with TemporaryDirectory() as tmp:

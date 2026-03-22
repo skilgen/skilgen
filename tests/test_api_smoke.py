@@ -139,6 +139,8 @@ class ApiSmokeTests(unittest.TestCase):
 
                 lock = get_json(f"{base}/skills/lock?{urlencode({'project_root': str(root)})}")
                 self.assertTrue(lock["skills"])
+                policy = get_json(f"{base}/skills/policy?{urlencode({'project_root': str(root)})}")
+                self.assertEqual(policy["policy_mode"], "permissive")
                 ranked = get_json(f"{base}/skills/rank?{urlencode({'project_root': str(root)})}")
                 self.assertTrue(ranked["skills"])
 
@@ -168,6 +170,7 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertIn("active_external_skills", status)
                 self.assertIn("ranked_external_skills", status)
                 self.assertIn("external_skill_lock", status)
+                self.assertIn("external_skill_policy", status)
                 self.assertIn("external_skill_recommendations", status)
                 self.assertIn("pending_validations", status["current_run_memory"])
                 self.assertIn("resumable_steps", status["current_run_memory"])

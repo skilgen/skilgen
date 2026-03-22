@@ -81,6 +81,7 @@ class SkilgenConfig:
     external_skills_allowlist: list[str] = field(default_factory=list)
     external_skills_denylist: list[str] = field(default_factory=list)
     external_skills_auto_activate: bool = True
+    external_skills_policy_mode: str = "permissive"
 
 
 @dataclass(frozen=True)

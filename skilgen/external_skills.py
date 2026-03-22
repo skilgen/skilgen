@@ -593,6 +593,25 @@ def _git_remote_url(install_path: Path) -> str | None:
         return None
 
 
+def _detect_license(install_path: Path) -> dict[str, str] | None:
+    for name in ("LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE", "LICENCE.md", "COPYING"):
+        path = install_path / name
+        if not path.exists():
+            continue
+        try:
+            first_line = next(
+                (line.strip() for line in path.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()),
+                "",
+            )
+        except OSError:
+            first_line = ""
+        return {
+            "path": path.relative_to(install_path).as_posix(),
+            "summary": first_line or "License file present",
+        }
+    return None
+
+
 def _adapter_for_source(source: ExternalSkillSource) -> str:
     if source.slug == "anthropic-skills":
         return "anthropic-skills"
@@ -784,12 +803,15 @@ def _policy_allows_source(project_root: str | Path, source: ExternalSkillSource)
     allowlist = {slug for slug in config.external_skills_allowlist}
     denylist = {slug for slug in config.external_skills_denylist}
     allowed_trust = {trust for trust in config.external_skills_allowed_trust_levels}
+    policy_mode = config.external_skills_policy_mode
     if source.slug in denylist:
         return False, "source is denylisted by config"
     if allowlist and source.slug not in allowlist:
         return False, "source is not allowlisted by config"
     if allowed_trust and source.trust_level not in allowed_trust:
         return False, f"trust level '{source.trust_level}' is blocked by config"
+    if policy_mode == "official_only" and source.trust_level not in {"official", "spec"}:
+        return False, "policy mode official_only only permits official/spec sources"
     return True, None
 
 
@@ -843,6 +865,19 @@ def ranked_external_skills(project_root: str | Path = ".") -> dict[str, object]:
     return {
         "skills": items,
         "count": len(items),
+    }
+
+
+def external_skill_policy(project_root: str | Path = ".") -> dict[str, object]:
+    config = load_config(Path(project_root).resolve())
+    return {
+        "policy_mode": config.external_skills_policy_mode,
+        "auto_install_enabled": config.auto_install_external_skills,
+        "auto_activate_enabled": config.external_skills_auto_activate,
+        "allowed_trust_levels": list(config.external_skills_allowed_trust_levels),
+        "allowlist": list(config.external_skills_allowlist),
+        "denylist": list(config.external_skills_denylist),
+        "review_required_for_auto_activation": config.external_skills_policy_mode == "review_required",
     }
 
 
@@ -981,6 +1016,9 @@ def install_external_skill(
     remote_url = _git_remote_url(install_path)
     if remote_url is not None:
         metadata["repository_url"] = remote_url
+    license_info = _detect_license(install_path)
+    if license_info is not None:
+        metadata["license"] = license_info
 
     source = entry if slug is not None and entry is not None else ExternalSkillSource(
         slug=resolved_slug,
@@ -996,7 +1034,8 @@ def install_external_skill(
     )
     normalization = _normalize_external_skill_install(project_root, source=source, install_path=install_path)
     config = load_config(Path(project_root).resolve())
-    active_value = config.external_skills_auto_activate if active is None else active
+    auto_activate_allowed = config.external_skills_auto_activate and config.external_skills_policy_mode != "review_required"
+    active_value = auto_activate_allowed if active is None else active
     metadata["normalized"] = normalization
     metadata["active"] = active_value
 
@@ -1017,6 +1056,7 @@ def install_external_skill(
             "resolved_revision": resolved_revision,
             "active": active_value,
             "normalized": normalization,
+            "license": metadata.get("license"),
             "trust_level": trust_level,
             "trust_score": TRUST_SCORES.get(trust_level, 0),
             "supported_agents": metadata.get("supported_agents", []),
@@ -1048,7 +1088,8 @@ def ensure_external_skills_for_project(project_root: str | Path = ".") -> dict[s
             blocked.append({"slug": slug, "reason": reason or "blocked"})
             continue
         if slug in installed:
-            if config.external_skills_auto_activate:
+            auto_activate_allowed = config.external_skills_auto_activate and config.external_skills_policy_mode != "review_required"
+            if auto_activate_allowed:
                 lock_entry = locked.get(slug)
                 if isinstance(lock_entry, dict) and not lock_entry.get("active"):
                     lock_entry["active"] = True
@@ -1062,7 +1103,7 @@ def ensure_external_skills_for_project(project_root: str | Path = ".") -> dict[s
                 slug=slug,
                 install_mode="auto",
                 detection_reasons=[str(reason) for reason in detection.get("reasons", [])],
-                active=config.external_skills_auto_activate,
+                active=config.external_skills_auto_activate and config.external_skills_policy_mode != "review_required",
             )
             newly_installed.append(metadata)
             installed[slug] = metadata
@@ -1130,6 +1171,7 @@ def sync_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[st
             "resolved_revision": installed.get("resolved_revision"),
             "active": lock_entry.get("active", False),
             "normalized": normalization,
+            "license": installed.get("license"),
             "trust_level": installed.get("trust_level"),
             "trust_score": installed.get("trust_score", TRUST_SCORES.get(str(installed.get("trust_level", "custom")), 0)),
             "supported_agents": installed.get("supported_agents", []),
@@ -1162,6 +1204,7 @@ def activate_external_skill(*, project_root: str | Path = ".", slug: str) -> dic
     lock_entry["updated_at"] = datetime.now(UTC).isoformat()
     lock_entry.setdefault("publisher", installed.get("publisher"))
     lock_entry.setdefault("category", installed.get("category"))
+    lock_entry.setdefault("license", installed.get("license"))
     lock_entry.setdefault("trust_level", installed.get("trust_level"))
     lock_entry.setdefault("trust_score", installed.get("trust_score", TRUST_SCORES.get(str(installed.get("trust_level", "custom")), 0)))
     lock_entry.setdefault("supported_agents", installed.get("supported_agents", []))
@@ -1193,6 +1236,7 @@ def deactivate_external_skill(*, project_root: str | Path = ".", slug: str) -> d
     lock_entry["updated_at"] = datetime.now(UTC).isoformat()
     lock_entry.setdefault("publisher", installed.get("publisher"))
     lock_entry.setdefault("category", installed.get("category"))
+    lock_entry.setdefault("license", installed.get("license"))
     lock_entry.setdefault("trust_level", installed.get("trust_level"))
     lock_entry.setdefault("trust_score", installed.get("trust_score", TRUST_SCORES.get(str(installed.get("trust_level", "custom")), 0)))
     lock_entry.setdefault("supported_agents", installed.get("supported_agents", []))
