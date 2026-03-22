@@ -9,17 +9,21 @@ from skilgen.sdk import (
     deliver_project,
     get_job_status,
     init_project,
+    install_skill_source,
     list_project_jobs,
+    list_skill_sources,
     project_report,
     project_status,
     preview_project,
     resume_job,
+    show_skill_source,
     start_deliver_job,
     update_project,
     validate_project_outputs,
     watch_project,
 )
 import time
+import subprocess
 
 
 class SdkTests(unittest.TestCase):
@@ -91,6 +95,28 @@ class SdkTests(unittest.TestCase):
             self.assertIn(cancelled["status"], {"completed", "cancelled"})
             resumed = resume_job(job_id, root)
             self.assertIn(resumed.get("error", "ok"), {"resume_not_allowed", "ok"})
+
+    def test_sdk_external_skills_catalog_and_install(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = list_skill_sources(root)
+            self.assertTrue(catalog["skills"])
+            self.assertTrue(any(entry["slug"] == "anthropic-skills" for entry in catalog["skills"]))
+
+            details = show_skill_source("langchain-skills", root)
+            self.assertEqual(details["skill"]["ecosystem"], "langchain")
+
+            source = root / "external-source"
+            source.mkdir()
+            (source / "README.md").write_text("demo\n", encoding="utf-8")
+            subprocess.run(["git", "init", str(source)], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "config", "user.email", "tests@example.com"], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "config", "user.name", "Tests"], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "add", "."], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "init"], text=True, capture_output=True, check=True)
+
+            installed = install_skill_source(root, git_url=str(source), name="demo pack")
+            self.assertTrue(Path(installed["installed_skill"]["install_path"]).exists())
 
 
 if __name__ == "__main__":

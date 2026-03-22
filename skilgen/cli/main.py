@@ -13,6 +13,7 @@ from skilgen.agents.requirements_parser import parse_project_intent, parse_requi
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
+from skilgen.external_skills import get_external_skill, install_external_skill, list_external_skills
 
 
 def emit_progress(message: str) -> None:
@@ -82,6 +83,25 @@ def build_parser() -> argparse.ArgumentParser:
     decide.add_argument("--project-root", default=".")
     decide.add_argument("--requirements")
 
+    skills = subparsers.add_parser("skills", help="Discover and install external skill collections through Skilgen.")
+    skills_subparsers = skills.add_subparsers(dest="skills_command", required=True)
+
+    skills_list = skills_subparsers.add_parser("list", help="List curated external skill sources available through Skilgen.")
+    skills_list.add_argument("--project-root", default=".")
+    skills_list.add_argument("--ecosystem")
+    skills_list.add_argument("--search")
+
+    skills_show = skills_subparsers.add_parser("show", help="Show details for a curated external skill source.")
+    skills_show.add_argument("slug")
+    skills_show.add_argument("--project-root", default=".")
+
+    skills_install = skills_subparsers.add_parser("install", help="Install a curated or custom external skill source into the local project.")
+    skills_install.add_argument("slug", nargs="?")
+    skills_install.add_argument("--git-url")
+    skills_install.add_argument("--name")
+    skills_install.add_argument("--project-root", default=".")
+    skills_install.add_argument("--force", action="store_true")
+
     intent = subparsers.add_parser("intent", help="Parse a requirements file into a structured project intent.")
     intent.add_argument("--requirements", required=True)
     features = subparsers.add_parser("features", help="Extract a feature inventory from requirements and project context.")
@@ -147,6 +167,33 @@ def main() -> None:
         )
         print(json.dumps(decision_payload(root, Path(args.requirements).resolve() if args.requirements else None), indent=2))
         return
+    if args.command == "skills":
+        root = Path(args.project_root).resolve()
+        if args.skills_command == "list":
+            emit_progress("Loading the curated Skilgen skills catalog across supported ecosystems.")
+            print(json.dumps(list_external_skills(root, ecosystem=args.ecosystem, search=args.search), indent=2))
+            return
+        if args.skills_command == "show":
+            emit_progress(f"Loading details for the external skill source '{args.slug}'.")
+            print(json.dumps({"skill": get_external_skill(args.slug, root)}, indent=2))
+            return
+        if args.skills_command == "install":
+            emit_progress("Installing the external skill source into .skilgen/external-skills so it can be managed through Skilgen.")
+            print(
+                json.dumps(
+                    {
+                        "installed_skill": install_external_skill(
+                            project_root=root,
+                            slug=args.slug,
+                            git_url=args.git_url,
+                            name=args.name,
+                            force=args.force,
+                        )
+                    },
+                    indent=2,
+                )
+            )
+            return
     if args.command == "intent":
         result = parse_requirements_file(Path(args.requirements).resolve())
         print(

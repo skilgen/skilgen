@@ -22,6 +22,7 @@ from skilgen.api.service import (
 )
 from skilgen.core.config import render_default_config
 from skilgen.delivery import run_delivery, watch_delivery
+from skilgen.external_skills import get_external_skill, install_external_skill, list_external_skills
 
 
 def init_project(project_root: str | Path = ".") -> Path:
@@ -146,3 +147,35 @@ def get_job_status(job_id: str, project_root: str | Path | None = None) -> dict[
 
 def list_project_jobs(project_root: str | Path | None = None) -> dict[str, object]:
     return jobs_payload(Path(project_root).resolve() if project_root is not None else None)
+
+
+def list_skill_sources(
+    project_root: str | Path = ".",
+    *,
+    ecosystem: str | None = None,
+    search: str | None = None,
+) -> dict[str, object]:
+    return list_external_skills(Path(project_root).resolve(), ecosystem=ecosystem, search=search)
+
+
+def show_skill_source(slug: str, project_root: str | Path = ".") -> dict[str, object]:
+    return {"skill": get_external_skill(slug, Path(project_root).resolve())}
+
+
+def install_skill_source(
+    project_root: str | Path = ".",
+    *,
+    slug: str | None = None,
+    git_url: str | None = None,
+    name: str | None = None,
+    force: bool = False,
+) -> dict[str, object]:
+    return {
+        "installed_skill": install_external_skill(
+            project_root=Path(project_root).resolve(),
+            slug=slug,
+            git_url=git_url,
+            name=name,
+            force=force,
+        )
+    }

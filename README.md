@@ -39,6 +39,7 @@ Skilgen helps agents:
 - pick the right skill for the exact backend, frontend, or roadmap context
 - follow stronger engineering patterns instead of improvising with generic prompts
 - produce more consistent, more enterprise-ready code across the repo
+- use Skilgen as a one-stop shop to discover and manage external skill ecosystems
 
 The result is simple:
 - point Skilgen at a codebase
@@ -167,6 +168,20 @@ Build a roadmap:
 skilgen plan --requirements docs/product-requirements.docx --project-root .
 ```
 
+Discover consolidated external skill ecosystems through Skilgen:
+
+```bash
+skilgen skills list
+skilgen skills show anthropic-skills
+```
+
+Install a curated or custom external skill source into the local Skilgen-managed registry:
+
+```bash
+skilgen skills install anthropic-skills --project-root .
+skilgen skills install --git-url https://github.com/example/skills.git --name my-skill-pack --project-root .
+```
+
 Generate the full skills system from codebase + requirements:
 
 ```bash
@@ -243,6 +258,7 @@ Roadmap planning example:
 - `skilgen features` builds a feature inventory from a codebase, requirements, or both
 - `skilgen plan` generates a roadmap view from a codebase, requirements, or both
 - `skilgen decide` tells agents whether to refresh skills, which domains to prioritize, and which memory files to load
+- `skilgen skills` lists, inspects, and installs external skill ecosystems through a single Skilgen interface
 - `skilgen scan` generates docs and skills from the codebase and optionally a requirements file
 - `skilgen deliver` runs the main generation flow with or without a requirements file
 

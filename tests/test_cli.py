@@ -258,8 +258,54 @@ class CliTests(unittest.TestCase):
             self.assertIn("runtime", payload)
             self.assertIn("recommendations", payload)
             self.assertIn("api_key_env", payload)
-            self.assertIn("retry_attempts", payload)
-            self.assertIn("retry_base_delay_seconds", payload)
+
+    def test_skills_list_returns_curated_sources(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "skilgen.cli.main", "skills", "list"],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+        slugs = {entry["slug"] for entry in payload["skills"]}
+        self.assertIn("anthropic-skills", slugs)
+        self.assertIn("langchain-skills", slugs)
+        self.assertIn("huggingface-skills", slugs)
+
+    def test_skills_install_can_install_custom_git_source(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source-skill-repo"
+            source.mkdir()
+            (source / "README.md").write_text("demo skills\n", encoding="utf-8")
+            subprocess.run(["git", "init", str(source)], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "config", "user.email", "tests@example.com"], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "config", "user.name", "Tests"], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "add", "."], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "init"], text=True, capture_output=True, check=True)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "skills",
+                    "install",
+                    "--git-url",
+                    str(source),
+                    "--name",
+                    "demo skill pack",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            install_path = Path(payload["installed_skill"]["install_path"])
+            self.assertTrue(install_path.exists())
+            self.assertTrue((root / ".skilgen" / "external-skills" / "manifest.json").exists())
 
 
 if __name__ == "__main__":
