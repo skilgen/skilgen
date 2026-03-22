@@ -12,6 +12,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - In-flight run memory and agent decision planning
 - Provider-aware model runtime retries and diagnostics
 - External skills catalog with Skilgen-managed list/show/install flows across curated ecosystems
+- External skill sync/remove flows and expanded multi-ecosystem source coverage
 
 ### Changed
 - `AGENTS.md` generation now reflects inferred domains, prioritized skills, and memory loading guidance

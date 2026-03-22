@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 import json
 import shutil
 import subprocess
@@ -13,12 +13,15 @@ class ExternalSkillSource:
     slug: str
     name: str
     ecosystem: str
+    publisher: str
     description: str
     repository_url: str
     source_path: str | None
     docs_url: str
-    install_strategy: str = "git_clone"
+    category: str = "official"
     trust_level: str = "official"
+    supported_agents: tuple[str, ...] = ()
+    install_strategy: str = "git_clone"
     tags: tuple[str, ...] = ()
 
 
@@ -27,53 +30,227 @@ CATALOG: tuple[ExternalSkillSource, ...] = (
         slug="anthropic-skills",
         name="Anthropic Skills",
         ecosystem="anthropic",
-        description="Official Anthropic skills collection for Claude-style agents and workflows.",
+        publisher="Anthropic",
+        description="Official Anthropic skills collection with reference skills and SKILL template patterns.",
         repository_url="https://github.com/anthropics/skills.git",
         source_path="skills",
         docs_url="https://github.com/anthropics/skills/tree/main/skills",
+        supported_agents=("Claude Code",),
         tags=("official", "claude", "skills"),
     ),
     ExternalSkillSource(
         slug="langchain-skills",
         name="LangChain Skills",
         ecosystem="langchain",
-        description="LangChain and Deep Agents skill ecosystem for reusable agent capabilities.",
+        publisher="LangChain AI",
+        description="Official LangChain skills for LangChain, LangGraph, Deep Agents, RAG, and orchestration flows.",
         repository_url="https://github.com/langchain-ai/langchain-skills.git",
         source_path=None,
         docs_url="https://github.com/langchain-ai/langchain-skills",
+        supported_agents=("Claude Code", "Cursor", "Windsurf", "Codex"),
         tags=("official", "deep-agents", "langchain"),
+    ),
+    ExternalSkillSource(
+        slug="langsmith-skills",
+        name="LangSmith Skills",
+        ecosystem="langchain",
+        publisher="LangChain AI",
+        description="Official LangSmith skills for observability, evaluation, prompt engineering, and tracing workflows.",
+        repository_url="https://github.com/langchain-ai/langsmith-skills.git",
+        source_path=None,
+        docs_url="https://github.com/langchain-ai/langsmith-skills",
+        supported_agents=("Claude Code", "Cursor", "Codex"),
+        tags=("official", "langsmith", "evaluation", "observability"),
     ),
     ExternalSkillSource(
         slug="huggingface-skills",
         name="Hugging Face Skills",
         ecosystem="huggingface",
-        description="Official Hugging Face skills collection for portable agent workflows and tools.",
+        publisher="Hugging Face",
+        description="Official Hugging Face skills collection for hub, datasets, jobs, trainers, and evaluation workflows.",
         repository_url="https://github.com/huggingface/skills.git",
         source_path=None,
         docs_url="https://github.com/huggingface/skills",
+        supported_agents=("Claude Code", "Codex", "Gemini CLI", "Cursor"),
         tags=("official", "huggingface", "skills"),
     ),
     ExternalSkillSource(
-        slug="n8n-agent-templates",
-        name="n8n Agent Templates",
-        ecosystem="n8n",
-        description="High-signal n8n agent and workflow templates that can be adapted into Skilgen-managed skills.",
-        repository_url="https://github.com/n8n-io/n8n.git",
-        source_path="packages/@n8n/nodes-langchain",
-        docs_url="https://docs.n8n.io/advanced-ai/",
-        trust_level="adapter",
-        tags=("n8n", "templates", "workflow"),
+        slug="huggingface-upskill",
+        name="Hugging Face Upskill",
+        ecosystem="huggingface",
+        publisher="Hugging Face",
+        description="Official Hugging Face tool for auto-generating and benchmarking skills with teacher-student approaches.",
+        repository_url="https://github.com/huggingface/upskill.git",
+        source_path=None,
+        docs_url="https://github.com/huggingface/upskill",
+        supported_agents=("Claude Code", "Codex", "Gemini CLI"),
+        tags=("official", "huggingface", "generation", "benchmarking"),
     ),
     ExternalSkillSource(
-        slug="crewai-patterns",
-        name="CrewAI Patterns",
-        ecosystem="crewai",
-        description="CrewAI-compatible tools, knowledge, and reusable patterns normalized through Skilgen.",
-        repository_url="https://github.com/crewAIInc/crewAI.git",
+        slug="awesome-copilot",
+        name="Awesome Copilot",
+        ecosystem="github",
+        publisher="GitHub / Microsoft",
+        description="Official GitHub Copilot skill and workflow examples for Azure, AWS, BigQuery, IAM, and VS Code.",
+        repository_url="https://github.com/github/awesome-copilot.git",
         source_path=None,
-        docs_url="https://docs.crewai.com/en/concepts/tools",
-        trust_level="adapter",
-        tags=("crewai", "tools", "knowledge"),
+        docs_url="https://github.com/github/awesome-copilot",
+        supported_agents=("GitHub Copilot", "VS Code"),
+        tags=("official", "copilot", "workflows"),
+    ),
+    ExternalSkillSource(
+        slug="agentskills-spec",
+        name="AgentSkills Spec",
+        ecosystem="spec",
+        publisher="agentskills.io",
+        description="Open standard specification and documentation for the SKILL.md format.",
+        repository_url="https://github.com/agentskills/agentskills.git",
+        source_path=None,
+        docs_url="https://github.com/agentskills/agentskills",
+        category="spec",
+        trust_level="spec",
+        supported_agents=("All agents",),
+        tags=("spec", "skill-md", "standard"),
+    ),
+    ExternalSkillSource(
+        slug="n8n-mcp-patterns",
+        name="n8n MCP Patterns",
+        ecosystem="n8n",
+        publisher="czlonkowski",
+        description="n8n skills for code nodes, expressions, MCP tooling, workflow patterns, and validation.",
+        repository_url="https://github.com/czlonkowski/n8n-mcp.git",
+        source_path=None,
+        docs_url="https://github.com/czlonkowski/n8n-mcp",
+        category="framework",
+        trust_level="community",
+        supported_agents=("Claude Code", "Cursor", "Windsurf"),
+        tags=("n8n", "mcp", "workflow"),
+    ),
+    ExternalSkillSource(
+        slug="ai-research-skills",
+        name="AI Research Skills",
+        ecosystem="multi-framework",
+        publisher="Orchestra Research",
+        description="83+ research and coding skills for LangChain, LlamaIndex, CrewAI, fine-tuning, RLHF, and RAG.",
+        repository_url="https://github.com/Orchestra-Research/AI-Research-SKILLS.git",
+        source_path=None,
+        docs_url="https://github.com/Orchestra-Research/AI-Research-SKILLS",
+        category="framework",
+        trust_level="community",
+        supported_agents=("Claude Code", "Codex", "Cursor", "Gemini CLI"),
+        tags=("research", "multi-framework", "rag"),
+    ),
+    ExternalSkillSource(
+        slug="context-engineering-skills",
+        name="Context Engineering Skills",
+        ecosystem="framework",
+        publisher="muratcankoylan",
+        description="Context engineering, multi-agent architecture, memory patterns, and LLM-as-judge skills.",
+        repository_url="https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering.git",
+        source_path=None,
+        docs_url="https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering",
+        category="framework",
+        trust_level="community",
+        supported_agents=("Claude Code", "Codex", "Gemini CLI"),
+        tags=("context-engineering", "memory", "multi-agent"),
+    ),
+    ExternalSkillSource(
+        slug="skill-seekers",
+        name="Skill Seekers",
+        ecosystem="tooling",
+        publisher="yusufkaraaslan",
+        description="Tooling to convert docs, sites, repos, and PDFs into SKILL.md with RAG assets.",
+        repository_url="https://github.com/yusufkaraaslan/Skill_Seekers.git",
+        source_path=None,
+        docs_url="https://github.com/yusufkaraaslan/Skill_Seekers",
+        category="tooling",
+        trust_level="community",
+        supported_agents=("All agents",),
+        tags=("tooling", "conversion", "rag"),
+    ),
+    ExternalSkillSource(
+        slug="awesome-agent-skills-voltagent",
+        name="Awesome Agent Skills (VoltAgent)",
+        ecosystem="directory",
+        publisher="VoltAgent",
+        description="Large directory of official and community agent skills across Anthropic, Codex, LangChain, and n8n.",
+        repository_url="https://github.com/VoltAgent/awesome-agent-skills.git",
+        source_path=None,
+        docs_url="https://github.com/VoltAgent/awesome-agent-skills",
+        category="directory",
+        trust_level="directory",
+        supported_agents=("Claude Code", "Codex", "Gemini CLI", "Cursor"),
+        tags=("directory", "aggregator", "awesome-list"),
+    ),
+    ExternalSkillSource(
+        slug="awesome-agent-skills-skillmatic",
+        name="Awesome Agent Skills (skillmatic-ai)",
+        ecosystem="directory",
+        publisher="skillmatic-ai",
+        description="Directory of agent skills, authoring guides, scanners, and marketplace-style discovery links.",
+        repository_url="https://github.com/skillmatic-ai/awesome-agent-skills.git",
+        source_path=None,
+        docs_url="https://github.com/skillmatic-ai/awesome-agent-skills",
+        category="directory",
+        trust_level="directory",
+        supported_agents=("All agents",),
+        tags=("directory", "aggregator", "marketplace"),
+    ),
+    ExternalSkillSource(
+        slug="awesome-agent-skills-heilcheng",
+        name="Awesome Agent Skills (heilcheng)",
+        ecosystem="directory",
+        publisher="heilcheng",
+        description="Directory of skills for Claude, Codex, GitHub Copilot, VS Code, and Google Workspace agent workflows.",
+        repository_url="https://github.com/heilcheng/awesome-agent-skills.git",
+        source_path=None,
+        docs_url="https://github.com/heilcheng/awesome-agent-skills",
+        category="directory",
+        trust_level="directory",
+        supported_agents=("Claude Code", "Codex", "Copilot"),
+        tags=("directory", "workspace", "copilot"),
+    ),
+    ExternalSkillSource(
+        slug="awesome-llm-skills",
+        name="Awesome LLM Skills",
+        ecosystem="directory",
+        publisher="Prat011",
+        description="Directory covering Notion, Google Workspace, multi-agent, Gemini CLI, OpenCode, and Qwen-ready skills.",
+        repository_url="https://github.com/Prat011/awesome-llm-skills.git",
+        source_path=None,
+        docs_url="https://github.com/Prat011/awesome-llm-skills",
+        category="directory",
+        trust_level="directory",
+        supported_agents=("All agents",),
+        tags=("directory", "multi-agent", "workspace"),
+    ),
+    ExternalSkillSource(
+        slug="curated-ai-agent-skills",
+        name="Curated AI Agent Skills",
+        ecosystem="curated",
+        publisher="MoizIbnYousaf",
+        description="Curated personal library with trust metadata, provenance, and universal installation ideas.",
+        repository_url="https://github.com/MoizIbnYousaf/AI-Agent-Skills.git",
+        source_path=None,
+        docs_url="https://github.com/MoizIbnYousaf/AI-Agent-Skills",
+        category="curated",
+        trust_level="curated",
+        supported_agents=("Claude Code", "Codex", "cross-agent"),
+        tags=("curated", "provenance", "trust"),
+    ),
+    ExternalSkillSource(
+        slug="skills-benchmarks",
+        name="Skills Benchmarks",
+        ecosystem="benchmarks",
+        publisher="LangChain AI",
+        description="Benchmark suite for measuring skill quality and performance across LangChain and LangSmith tasks.",
+        repository_url="https://github.com/langchain-ai/skills-benchmarks.git",
+        source_path=None,
+        docs_url="https://github.com/langchain-ai/skills-benchmarks",
+        category="benchmarks",
+        trust_level="official",
+        supported_agents=("Claude Code", "Codex"),
+        tags=("benchmarks", "langchain", "evaluation"),
     ),
 )
 
@@ -126,6 +303,14 @@ def _catalog_entry(slug: str) -> ExternalSkillSource | None:
     return None
 
 
+def _serialize_entry(entry: ExternalSkillSource, installed: dict[str, object] | None) -> dict[str, object]:
+    payload = asdict(entry)
+    payload["installed"] = installed is not None
+    payload["install_path"] = installed.get("install_path") if installed else None
+    payload["installed_metadata"] = installed
+    return payload
+
+
 def list_external_skills(
     project_root: str | Path = ".",
     *,
@@ -138,13 +323,20 @@ def list_external_skills(
     for entry in CATALOG:
         if ecosystem and entry.ecosystem != ecosystem:
             continue
-        haystack = " ".join((entry.slug, entry.name, entry.ecosystem, entry.description, " ".join(entry.tags))).lower()
+        haystack = " ".join(
+            (
+                entry.slug,
+                entry.name,
+                entry.ecosystem,
+                entry.publisher,
+                entry.description,
+                " ".join(entry.tags),
+                " ".join(entry.supported_agents),
+            )
+        ).lower()
         if needle and needle not in haystack:
             continue
-        payload = asdict(entry)
-        payload["installed"] = entry.slug in installed
-        payload["install_path"] = installed.get(entry.slug, {}).get("install_path")
-        items.append(payload)
+        items.append(_serialize_entry(entry, installed.get(entry.slug)))
     return {
         "skills": items,
         "ecosystems": sorted({entry["ecosystem"] for entry in items}),
@@ -157,11 +349,33 @@ def get_external_skill(slug: str, project_root: str | Path = ".") -> dict[str, o
     if entry is None:
         raise KeyError(f"Unknown external skill source: {slug}")
     installed = _installed_by_slug(project_root).get(slug)
-    payload = asdict(entry)
-    payload["installed"] = installed is not None
-    payload["install_path"] = installed.get("install_path") if installed else None
-    payload["installed_metadata"] = installed
-    return payload
+    return _serialize_entry(entry, installed)
+
+
+def _build_install_metadata(
+    *,
+    slug: str,
+    name: str,
+    ecosystem: str,
+    repository_url: str,
+    source_path: str | None,
+    docs_url: str,
+    trust_level: str,
+    description: str,
+    install_path: Path,
+) -> dict[str, object]:
+    return {
+        "slug": slug,
+        "name": name,
+        "ecosystem": ecosystem,
+        "repository_url": repository_url,
+        "source_path": source_path,
+        "docs_url": docs_url,
+        "trust_level": trust_level,
+        "description": description,
+        "install_path": str(install_path),
+        "installed_at": datetime.now(UTC).isoformat(),
+    }
 
 
 def install_external_skill(
@@ -216,18 +430,17 @@ def install_external_skill(
         text=True,
     )
 
-    metadata = {
-        "slug": resolved_slug,
-        "name": resolved_name,
-        "ecosystem": ecosystem,
-        "repository_url": repository_url,
-        "source_path": source_path,
-        "docs_url": docs_url,
-        "trust_level": trust_level,
-        "description": description,
-        "install_path": str(install_path),
-        "installed_at": datetime.now(UTC).isoformat(),
-    }
+    metadata = _build_install_metadata(
+        slug=resolved_slug,
+        name=resolved_name,
+        ecosystem=ecosystem,
+        repository_url=repository_url,
+        source_path=source_path,
+        docs_url=docs_url,
+        trust_level=trust_level,
+        description=description,
+        install_path=install_path,
+    )
     (install_path / "skilgen-source.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     manifest = _load_manifest(project_root)
@@ -236,3 +449,52 @@ def install_external_skill(
     manifest["skills"] = sorted(skills, key=lambda entry: str(entry.get("slug", "")))
     _write_manifest(project_root, manifest)
     return metadata
+
+
+def sync_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[str, object]:
+    installed = _installed_by_slug(project_root).get(slug)
+    if installed is None:
+        raise KeyError(f"External skill source is not installed: {slug}")
+    install_path = Path(str(installed["install_path"]))
+    result = subprocess.run(
+        ["git", "-C", str(install_path), "pull", "--ff-only"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    installed["synced_at"] = datetime.now(UTC).isoformat()
+    installed["sync_stdout"] = result.stdout.strip()
+    installed["sync_stderr"] = result.stderr.strip()
+    manifest = _load_manifest(project_root)
+    manifest["skills"] = sorted(
+        [
+            installed if isinstance(entry, dict) and entry.get("slug") == slug else entry
+            for entry in manifest.get("skills", [])
+            if isinstance(entry, dict)
+        ],
+        key=lambda entry: str(entry.get("slug", "")),
+    )
+    _write_manifest(project_root, manifest)
+    (install_path / "skilgen-source.json").write_text(json.dumps(installed, indent=2), encoding="utf-8")
+    return installed
+
+
+def remove_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[str, object]:
+    installed = _installed_by_slug(project_root).get(slug)
+    if installed is None:
+        raise KeyError(f"External skill source is not installed: {slug}")
+    install_path = Path(str(installed["install_path"]))
+    if install_path.exists():
+        shutil.rmtree(install_path)
+    manifest = _load_manifest(project_root)
+    manifest["skills"] = [
+        entry
+        for entry in manifest.get("skills", [])
+        if isinstance(entry, dict) and entry.get("slug") != slug
+    ]
+    _write_manifest(project_root, manifest)
+    return {
+        "slug": slug,
+        "removed": True,
+        "install_path": str(install_path),
+    }

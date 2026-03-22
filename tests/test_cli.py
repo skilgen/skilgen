@@ -271,6 +271,9 @@ class CliTests(unittest.TestCase):
         self.assertIn("anthropic-skills", slugs)
         self.assertIn("langchain-skills", slugs)
         self.assertIn("huggingface-skills", slugs)
+        self.assertIn("langsmith-skills", slugs)
+        self.assertIn("awesome-agent-skills-voltagent", slugs)
+        self.assertGreaterEqual(payload["count"], 10)
 
     def test_skills_install_can_install_custom_git_source(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -306,6 +309,47 @@ class CliTests(unittest.TestCase):
             install_path = Path(payload["installed_skill"]["install_path"])
             self.assertTrue(install_path.exists())
             self.assertTrue((root / ".skilgen" / "external-skills" / "manifest.json").exists())
+
+            (source / "README.md").write_text("demo skills v2\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(source), "add", "."], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "update"], text=True, capture_output=True, check=True)
+
+            sync_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "skills",
+                    "sync",
+                    "demo-skill-pack",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            sync_payload = json.loads(sync_result.stdout)
+            self.assertIn("synced_at", sync_payload["synced_skill"])
+
+            remove_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "skills",
+                    "remove",
+                    "demo-skill-pack",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            remove_payload = json.loads(remove_result.stdout)
+            self.assertTrue(remove_payload["removed_skill"]["removed"])
+            self.assertFalse(install_path.exists())
 
 
 if __name__ == "__main__":

@@ -13,7 +13,13 @@ from skilgen.agents.requirements_parser import parse_project_intent, parse_requi
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
-from skilgen.external_skills import get_external_skill, install_external_skill, list_external_skills
+from skilgen.external_skills import (
+    get_external_skill,
+    install_external_skill,
+    list_external_skills,
+    remove_external_skill,
+    sync_external_skill,
+)
 
 
 def emit_progress(message: str) -> None:
@@ -101,6 +107,14 @@ def build_parser() -> argparse.ArgumentParser:
     skills_install.add_argument("--name")
     skills_install.add_argument("--project-root", default=".")
     skills_install.add_argument("--force", action="store_true")
+
+    skills_sync = skills_subparsers.add_parser("sync", help="Sync an installed external skill source with its upstream repository.")
+    skills_sync.add_argument("slug")
+    skills_sync.add_argument("--project-root", default=".")
+
+    skills_remove = skills_subparsers.add_parser("remove", help="Remove an installed external skill source from the local project.")
+    skills_remove.add_argument("slug")
+    skills_remove.add_argument("--project-root", default=".")
 
     intent = subparsers.add_parser("intent", help="Parse a requirements file into a structured project intent.")
     intent.add_argument("--requirements", required=True)
@@ -193,6 +207,14 @@ def main() -> None:
                     indent=2,
                 )
             )
+            return
+        if args.skills_command == "sync":
+            emit_progress(f"Syncing the external skill source '{args.slug}' with its upstream repository.")
+            print(json.dumps({"synced_skill": sync_external_skill(project_root=root, slug=args.slug)}, indent=2))
+            return
+        if args.skills_command == "remove":
+            emit_progress(f"Removing the external skill source '{args.slug}' from the local Skilgen registry.")
+            print(json.dumps({"removed_skill": remove_external_skill(project_root=root, slug=args.slug)}, indent=2))
             return
     if args.command == "intent":
         result = parse_requirements_file(Path(args.requirements).resolve())

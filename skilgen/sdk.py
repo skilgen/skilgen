@@ -22,7 +22,13 @@ from skilgen.api.service import (
 )
 from skilgen.core.config import render_default_config
 from skilgen.delivery import run_delivery, watch_delivery
-from skilgen.external_skills import get_external_skill, install_external_skill, list_external_skills
+from skilgen.external_skills import (
+    get_external_skill,
+    install_external_skill,
+    list_external_skills,
+    remove_external_skill,
+    sync_external_skill,
+)
 
 
 def init_project(project_root: str | Path = ".") -> Path:
@@ -179,3 +185,11 @@ def install_skill_source(
             force=force,
         )
     }
+
+
+def sync_skill_source(slug: str, project_root: str | Path = ".") -> dict[str, object]:
+    return {"synced_skill": sync_external_skill(project_root=Path(project_root).resolve(), slug=slug)}
+
+
+def remove_skill_source(slug: str, project_root: str | Path = ".") -> dict[str, object]:
+    return {"removed_skill": remove_external_skill(project_root=Path(project_root).resolve(), slug=slug)}

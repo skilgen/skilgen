@@ -15,9 +15,11 @@ from skilgen.sdk import (
     project_report,
     project_status,
     preview_project,
+    remove_skill_source,
     resume_job,
     show_skill_source,
     start_deliver_job,
+    sync_skill_source,
     update_project,
     validate_project_outputs,
     watch_project,
@@ -102,6 +104,7 @@ class SdkTests(unittest.TestCase):
             catalog = list_skill_sources(root)
             self.assertTrue(catalog["skills"])
             self.assertTrue(any(entry["slug"] == "anthropic-skills" for entry in catalog["skills"]))
+            self.assertTrue(any(entry["slug"] == "langsmith-skills" for entry in catalog["skills"]))
 
             details = show_skill_source("langchain-skills", root)
             self.assertEqual(details["skill"]["ecosystem"], "langchain")
@@ -116,7 +119,19 @@ class SdkTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(source), "commit", "-m", "init"], text=True, capture_output=True, check=True)
 
             installed = install_skill_source(root, git_url=str(source), name="demo pack")
-            self.assertTrue(Path(installed["installed_skill"]["install_path"]).exists())
+            install_path = Path(installed["installed_skill"]["install_path"])
+            self.assertTrue(install_path.exists())
+
+            (source / "README.md").write_text("demo v2\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(source), "add", "."], text=True, capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "update"], text=True, capture_output=True, check=True)
+
+            synced = sync_skill_source("demo-pack", root)
+            self.assertIn("synced_at", synced["synced_skill"])
+
+            removed = remove_skill_source("demo-pack", root)
+            self.assertTrue(removed["removed_skill"]["removed"])
+            self.assertFalse(install_path.exists())
 
 
 if __name__ == "__main__":
