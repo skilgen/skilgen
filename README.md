@@ -182,8 +182,11 @@ Install a curated or custom external skill source into the local Skilgen-managed
 skilgen skills install anthropic-skills --project-root .
 skilgen skills active --project-root .
 skilgen skills lock --project-root .
+skilgen skills lock-export --project-root .
+skilgen skills lock-import --project-root ./another-repo --input-path ./.skilgen/external-skills/export-lock.json
 skilgen skills policy --project-root .
 skilgen skills rank --project-root .
+skilgen skills import awesome-agent-skills-voltagent --project-root . --limit 5
 skilgen skills sync anthropic-skills --project-root .
 skilgen skills remove anthropic-skills --project-root .
 skilgen skills install --git-url https://github.com/example/skills.git --name my-skill-pack --project-root .
@@ -216,6 +219,11 @@ Skilgen also ranks active packs by:
 - ecosystem fit
 - normalized entrypoint depth
 
+Portable lockfiles and bulk import:
+- `skilgen skills lock-export` captures the exact external-skill setup for reuse in another repo
+- `skilgen skills lock-import` restores that setup, including active state
+- `skilgen skills import <directory-slug>` converts downstream directory candidates into first-class Skilgen-managed installs
+
 Policy modes:
 - `permissive`: use trust/allowlist/denylist as configured
 - `official_only`: only official/spec catalog sources can auto-install
@@ -234,8 +242,11 @@ skilgen skills activate <slug> --project-root .
 skilgen skills deactivate <slug> --project-root .
 skilgen skills active --project-root .
 skilgen skills lock --project-root .
+skilgen skills lock-export --project-root .
+skilgen skills lock-import --project-root . --input-path ./external-skills-lock.json
 skilgen skills policy --project-root .
 skilgen skills rank --project-root .
+skilgen skills import <directory-slug> --project-root . --limit 5
 skilgen skills sync <slug> --project-root .
 skilgen skills sync --all --project-root .
 skilgen skills remove <slug> --project-root .
@@ -372,6 +383,7 @@ Roadmap planning example:
 - `examples/codebase-only/README.md`: minimal repo scan without a requirements document
 - `examples/requirements-only/README.md`: requirements-driven generation from a spec alone
 - `examples/codebase-and-requirements/README.md`: combined high-fidelity generation flow
+- `examples/external-skills/README.md`: install, import, rank, and portable-lock workflows for external skills
 
 ## Model Configuration
 

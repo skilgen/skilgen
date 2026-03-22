@@ -98,6 +98,9 @@ def _render_traceability_report_native(context: RequirementsContext, project_roo
     intent = parse_project_intent(project_root, requirements_path)
     signals = analyze_codebase(project_root)
     codebase_context = build_codebase_context(project_root, context)
+    installed_skill_packs = installed_external_skills(project_root)
+    ranked_skill_packs = ranked_external_skills(project_root).get("skills", [])
+    policy = external_skill_policy(project_root)
     evidence_map = {
         "backend": [*signals.backend_routes[:3], *signals.services[:2], *signals.data_models[:2], *signals.auth_files[:1]],
         "frontend": [*signals.frontend_routes[:3], *signals.components[:2], *signals.state_files[:2], *signals.design_system_files[:1]],
@@ -164,6 +167,27 @@ def _render_traceability_report_native(context: RequirementsContext, project_roo
             "",
         ]
     )
+    lines.extend(["## External Skill Traceability"])
+    lines.append(f"- Policy mode: `{policy['policy_mode']}`")
+    if installed_skill_packs:
+        for entry in installed_skill_packs[:8]:
+            provenance = entry.get("provenance", {}) if isinstance(entry.get("provenance"), dict) else {}
+            license_payload = entry.get("license", {}) if isinstance(entry.get("license"), dict) else {}
+            lines.append(
+                f"- Installed `{entry.get('slug', 'unknown')}` from `{provenance.get('repository_url', entry.get('repository_url', 'unknown'))}`"
+            )
+            lines.append(f"  Trust: `{entry.get('trust_level', 'unknown')}` score `{entry.get('trust_score', 0)}`")
+            lines.append(f"  License: `{license_payload.get('summary', 'unknown')}`")
+            if provenance.get("imported_from"):
+                lines.append(f"  Imported from directory source: `{provenance['imported_from']}`")
+    else:
+        lines.append("- No external skill packs were installed for this run.")
+    if ranked_skill_packs:
+        lines.append("")
+        lines.append("### Preferred External Packs")
+        for entry in ranked_skill_packs[:5]:
+            lines.append(f"- `{entry['slug']}`: {entry.get('priority_reason', 'Ranked by trust and repo fit.')}")
+    lines.append("")
     gaps: list[str] = []
     if signals.backend_routes and not signals.tests:
         gaps.append("Backend routes exist but no tests were detected for endpoint validation.")
@@ -270,6 +294,28 @@ def _render_project_report_native(context: RequirementsContext, project_root: Pa
             )
     else:
         lines.append("- No active external skill packs have been ranked yet.")
+    imported_packs = [
+        entry
+        for entry in installed_external_skills(project_root)
+        if isinstance(entry.get("provenance"), dict) and entry["provenance"].get("imported_from")
+    ]
+    lines.extend(["", "## External Skill Provenance"])
+    if installed_external_skills(project_root):
+        for entry in installed_external_skills(project_root)[:8]:
+            provenance = entry.get("provenance", {}) if isinstance(entry.get("provenance"), dict) else {}
+            lines.append(
+                f"- `{entry.get('slug', 'unknown')}` from `{provenance.get('repository_url', entry.get('repository_url', 'unknown'))}` at `{provenance.get('resolved_revision', entry.get('resolved_revision', 'unknown'))}`"
+            )
+            if provenance.get("imported_from"):
+                lines.append(f"  Imported from: `{provenance['imported_from']}`")
+    else:
+        lines.append("- No external skill packs have been installed yet.")
+    if imported_packs:
+        lines.append("")
+        lines.append("### Imported Directory Candidates")
+        for entry in imported_packs[:8]:
+            provenance = entry.get("provenance", {}) if isinstance(entry.get("provenance"), dict) else {}
+            lines.append(f"- `{entry.get('slug', 'unknown')}` imported from `{provenance.get('imported_from', 'unknown')}`")
     lines.append("")
     return "\n".join(lines)
 

@@ -211,6 +211,63 @@ class DeliveryTests(unittest.TestCase):
             self.assertIn("langchain-skills", agents_text)
             self.assertIn("## Preferred External Skill Packs", agents_text)
 
+    def test_report_and_traceability_surface_external_skill_provenance(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "users.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            installed = [
+                {
+                    "slug": "candidate-pack",
+                    "ecosystem": "imported",
+                    "publisher": "example",
+                    "repository_url": "https://github.com/example/candidate-pack",
+                    "trust_level": "community",
+                    "trust_score": 6,
+                    "license": {"summary": "MIT License"},
+                    "provenance": {
+                        "repository_url": "https://github.com/example/candidate-pack",
+                        "resolved_revision": "abc123",
+                        "imported_from": "awesome-agent-skills-voltagent",
+                    },
+                    "install_path": str(root / ".skilgen" / "external-skills" / "sources" / "candidate-pack"),
+                }
+            ]
+            ranked = [
+                {
+                    "slug": "candidate-pack",
+                    "priority_score": 62,
+                    "priority_reason": "Detected repo fit from imported directory skills.",
+                    "trust_level": "community",
+                    "lock_metadata": {"license": {"summary": "MIT License"}},
+                }
+            ]
+            with patch(
+                "skilgen.generators.package.installed_external_skills",
+                return_value=installed,
+            ), patch(
+                "skilgen.generators.package.active_external_skills",
+                return_value=installed,
+            ), patch(
+                "skilgen.generators.package.ranked_external_skills",
+                return_value={"skills": ranked},
+            ), patch(
+                "skilgen.generators.package.external_skill_policy",
+                return_value={
+                    "policy_mode": "permissive",
+                    "auto_install_enabled": True,
+                    "auto_activate_enabled": True,
+                },
+            ):
+                run_delivery(None, root)
+
+            report_text = (root / "REPORT.md").read_text(encoding="utf-8")
+            traceability_text = (root / "TRACEABILITY.md").read_text(encoding="utf-8")
+            self.assertIn("## External Skill Provenance", report_text)
+            self.assertIn("awesome-agent-skills-voltagent", report_text)
+            self.assertIn("## External Skill Traceability", traceability_text)
+            self.assertIn("candidate-pack", traceability_text)
+
 
 if __name__ == "__main__":
     unittest.main()
