@@ -4,7 +4,9 @@ import unittest
 from unittest.mock import patch
 
 from skilgen.external_skills import (
+    ExternalSkillSource,
     _extract_github_repo_candidates,
+    _normalize_external_skill_install,
     detect_external_skill_sources,
     ensure_external_skills_for_project,
 )
@@ -319,6 +321,124 @@ class SdkTests(unittest.TestCase):
             )
             candidates = _extract_github_repo_candidates(root)
             repos = {entry["repo"] for entry in candidates}
+            self.assertIn("example/alpha-skills", repos)
+            self.assertIn("example/beta-skills", repos)
+
+    def test_native_normalization_extracts_anthropic_skill_families(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            install = root / "anthropic-pack"
+            (install / "skills" / "docs").mkdir(parents=True, exist_ok=True)
+            (install / "skills" / "pdf").mkdir(parents=True, exist_ok=True)
+            (install / "templates").mkdir(parents=True, exist_ok=True)
+            (install / "skills" / "docs" / "SKILL.md").write_text("# Docs Skill\n", encoding="utf-8")
+            (install / "skills" / "pdf" / "SKILL.md").write_text("# Pdf Skill\n", encoding="utf-8")
+            (install / "templates" / "SKILL_TEMPLATE.md").write_text("# Template\n", encoding="utf-8")
+            source = ExternalSkillSource(
+                slug="anthropic-skills",
+                name="Anthropic Skills",
+                ecosystem="anthropic",
+                publisher="Anthropic",
+                description="Official Anthropic skills collection.",
+                repository_url="https://github.com/anthropics/skills.git",
+                source_path=None,
+                docs_url="https://github.com/anthropics/skills/tree/main/skills",
+            )
+            normalized = _normalize_external_skill_install(root, source=source, install_path=install)
+            families = {item["name"] for item in normalized["native_view"]["skill_families"]}
+            self.assertIn("docs", families)
+            self.assertIn("pdf", families)
+            self.assertEqual(normalized["native_view"]["template_count"], 1)
+
+    def test_native_normalization_extracts_langchain_families(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            install = root / "langchain-pack"
+            (install / "langgraph").mkdir(parents=True, exist_ok=True)
+            (install / "deep-agents").mkdir(parents=True, exist_ok=True)
+            (install / "langsmith").mkdir(parents=True, exist_ok=True)
+            (install / "rag").mkdir(parents=True, exist_ok=True)
+            (install / "langgraph" / "README.md").write_text("# LangGraph\n", encoding="utf-8")
+            (install / "deep-agents" / "README.md").write_text("# Deep Agents\n", encoding="utf-8")
+            (install / "langsmith" / "README.md").write_text("# LangSmith\n", encoding="utf-8")
+            (install / "rag" / "README.md").write_text("# RAG\n", encoding="utf-8")
+            source = ExternalSkillSource(
+                slug="langchain-skills",
+                name="LangChain Skills",
+                ecosystem="langchain",
+                publisher="LangChain AI",
+                description="Official LangChain skills.",
+                repository_url="https://github.com/langchain-ai/langchain-skills.git",
+                source_path=None,
+                docs_url="https://github.com/langchain-ai/langchain-skills",
+            )
+            normalized = _normalize_external_skill_install(root, source=source, install_path=install)
+            families = {item["name"] for item in normalized["native_view"]["families"]}
+            self.assertIn("langgraph", families)
+            self.assertIn("deep-agents", families)
+            self.assertIn("langsmith", families)
+            self.assertIn("rag", families)
+
+    def test_native_normalization_extracts_huggingface_task_families(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            install = root / "hf-pack"
+            (install / "datasets").mkdir(parents=True, exist_ok=True)
+            (install / "trainer").mkdir(parents=True, exist_ok=True)
+            (install / "evaluation").mkdir(parents=True, exist_ok=True)
+            (install / "hub").mkdir(parents=True, exist_ok=True)
+            (install / "datasets" / "README.md").write_text("# Datasets\n", encoding="utf-8")
+            (install / "trainer" / "README.md").write_text("# Trainer\n", encoding="utf-8")
+            (install / "evaluation" / "README.md").write_text("# Evaluation\n", encoding="utf-8")
+            (install / "hub" / "README.md").write_text("# Hub\n", encoding="utf-8")
+            source = ExternalSkillSource(
+                slug="huggingface-skills",
+                name="Hugging Face Skills",
+                ecosystem="huggingface",
+                publisher="Hugging Face",
+                description="Official Hugging Face skills.",
+                repository_url="https://github.com/huggingface/skills.git",
+                source_path=None,
+                docs_url="https://github.com/huggingface/skills",
+            )
+            normalized = _normalize_external_skill_install(root, source=source, install_path=install)
+            families = {item["name"] for item in normalized["native_view"]["task_families"]}
+            self.assertIn("datasets", families)
+            self.assertIn("training", families)
+            self.assertIn("evaluation", families)
+            self.assertIn("hub", families)
+
+    def test_native_normalization_extracts_directory_repo_candidates(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            install = root / "directory-pack"
+            install.mkdir(parents=True, exist_ok=True)
+            (install / "README.md").write_text(
+                "\n".join(
+                    [
+                        "# Awesome Agent Skills",
+                        "This directory links many skills.",
+                        "- https://github.com/example/alpha-skills",
+                        "- https://github.com/example/beta-skills",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            source = ExternalSkillSource(
+                slug="awesome-agent-skills-voltagent",
+                name="Awesome Agent Skills",
+                ecosystem="directory",
+                publisher="VoltAgent",
+                description="Directory of skills.",
+                repository_url="https://github.com/VoltAgent/awesome-agent-skills.git",
+                source_path=None,
+                docs_url="https://github.com/VoltAgent/awesome-agent-skills",
+                category="directory",
+                trust_level="directory",
+            )
+            normalized = _normalize_external_skill_install(root, source=source, install_path=install)
+            self.assertEqual(normalized["native_view"]["repo_candidate_count"], 2)
+            repos = {item["repo"] for item in normalized["native_view"]["top_repo_candidates"]}
             self.assertIn("example/alpha-skills", repos)
             self.assertIn("example/beta-skills", repos)
 

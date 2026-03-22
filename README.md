@@ -208,6 +208,7 @@ Normalized adapter summaries now include:
 - detected README title/summary
 - detected license metadata
 - downstream GitHub repo candidates for awesome-list and directory sources
+- ecosystem-native views such as Anthropic skill families, LangChain/LangSmith families, and Hugging Face task families
 
 Skilgen also ranks active packs by:
 - repo detection signals

@@ -852,6 +852,131 @@ def _group_entries_by_adapter(entries: list[dict[str, object]], adapter: str) ->
     ]
 
 
+def _extract_anthropic_native_view(entries: list[dict[str, object]]) -> dict[str, object]:
+    skill_families: dict[str, list[str]] = {}
+    templates: list[str] = []
+    for entry in entries:
+        path = str(entry["path"])
+        parts = path.split("/")
+        lower = path.lower()
+        if "template" in lower:
+            templates.append(path)
+        if len(parts) >= 3 and parts[0] == "skills" and parts[-1].lower() == "skill.md":
+            family = parts[1]
+            skill_families.setdefault(family, []).append(path)
+    return {
+        "skill_families": [
+            {"name": name, "paths": sorted(paths)[:12], "count": len(paths)}
+            for name, paths in sorted(skill_families.items())
+        ],
+        "templates": sorted(templates)[:12],
+        "template_count": len(templates),
+    }
+
+
+def _extract_langchain_native_view(entries: list[dict[str, object]]) -> dict[str, object]:
+    families: dict[str, list[str]] = {
+        "langchain-core": [],
+        "langgraph": [],
+        "deep-agents": [],
+        "langsmith": [],
+        "rag": [],
+    }
+    for entry in entries:
+        path = str(entry["path"])
+        lower = path.lower()
+        if "langsmith" in lower:
+            families["langsmith"].append(path)
+        elif "langgraph" in lower:
+            families["langgraph"].append(path)
+        elif "deep-agent" in lower or "deep_agents" in lower:
+            families["deep-agents"].append(path)
+        elif "rag" in lower:
+            families["rag"].append(path)
+        else:
+            families["langchain-core"].append(path)
+    return {
+        "families": [
+            {"name": name, "paths": sorted(paths)[:12], "count": len(paths)}
+            for name, paths in families.items()
+            if paths
+        ],
+        "recommended_entry_family": max(
+            (
+                {"name": name, "count": len(paths)}
+                for name, paths in families.items()
+                if paths
+            ),
+            key=lambda item: item["count"],
+            default=None,
+        ),
+    }
+
+
+def _extract_huggingface_native_view(entries: list[dict[str, object]]) -> dict[str, object]:
+    task_families: dict[str, list[str]] = {
+        "hub": [],
+        "datasets": [],
+        "training": [],
+        "evaluation": [],
+        "general": [],
+    }
+    for entry in entries:
+        path = str(entry["path"])
+        lower = path.lower()
+        if "dataset" in lower:
+            task_families["datasets"].append(path)
+        elif "trainer" in lower or "train" in lower:
+            task_families["training"].append(path)
+        elif "eval" in lower or "benchmark" in lower:
+            task_families["evaluation"].append(path)
+        elif "hub" in lower:
+            task_families["hub"].append(path)
+        else:
+            task_families["general"].append(path)
+    return {
+        "task_families": [
+            {"name": name, "paths": sorted(paths)[:12], "count": len(paths)}
+            for name, paths in task_families.items()
+            if paths
+        ],
+        "recommended_task_family": max(
+            (
+                {"name": name, "count": len(paths)}
+                for name, paths in task_families.items()
+                if paths
+            ),
+            key=lambda item: item["count"],
+            default=None,
+        ),
+    }
+
+
+def _extract_directory_native_view(entries: list[dict[str, object]], repo_candidates: list[dict[str, str]]) -> dict[str, object]:
+    references = [str(entry["path"]) for entry in entries if str(entry["type"]) in {"readme", "doc"}]
+    return {
+        "reference_docs": references[:20],
+        "repo_candidate_count": len(repo_candidates),
+        "top_repo_candidates": repo_candidates[:12],
+    }
+
+
+def _extract_adapter_native_view(
+    adapter: str,
+    entries: list[dict[str, object]],
+    repo_candidates: list[dict[str, str]],
+) -> dict[str, object]:
+    if adapter == "anthropic-skills":
+        return _extract_anthropic_native_view(entries)
+    if adapter == "langchain-skills":
+        return _extract_langchain_native_view(entries)
+    if adapter == "huggingface-skills":
+        return _extract_huggingface_native_view(entries)
+    if adapter == "catalog-directory":
+        return _extract_directory_native_view(entries, repo_candidates)
+    return {}
+
+
 def _normalize_external_skill_install(
     project_root: str | Path,
     *,
@@ -869,6 +994,7 @@ def _normalize_external_skill_install(
     license_info = _detect_license(install_path)
     readme_info = _readme_summary(install_path)
     repo_candidates = _extract_github_repo_candidates(install_path) if adapter == "catalog-directory" else []
+    native_view = _extract_adapter_native_view(adapter, entries, repo_candidates)
     payload = {
         "slug": source.slug,
         "adapter": adapter,
@@ -886,6 +1012,7 @@ def _normalize_external_skill_install(
         "license": license_info,
         "readme": readme_info,
         "repo_candidates": repo_candidates,
+        "native_view": native_view,
         "entries": entries[:100],
     }
     index_path = normalized_root / "index.json"
@@ -924,6 +1051,23 @@ def _normalize_external_skill_install(
             f"- `{candidate['repo']}`: {candidate['url']}"
             for candidate in repo_candidates[:12]
         )
+    if native_view:
+        summary_lines.extend(["", "## Native View"])
+        for key, value in native_view.items():
+            if isinstance(value, list):
+                summary_lines.append(f"- `{key}`: {len(value)} item(s)")
+                for item in value[:6]:
+                    if isinstance(item, dict):
+                        name = item.get("name") or item.get("repo") or item.get("path") or "item"
+                        count = item.get("count")
+                        extra = f" ({count})" if count is not None else ""
+                        summary_lines.append(f"  - `{name}`{extra}")
+                    else:
+                        summary_lines.append(f"  - `{item}`")
+            elif isinstance(value, dict):
+                summary_lines.append(f"- `{key}`: {json.dumps(value, sort_keys=True)}")
+            else:
+                summary_lines.append(f"- `{key}`: {value}")
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
     return {
         "adapter": payload["adapter"],
@@ -934,6 +1078,7 @@ def _normalize_external_skill_install(
         "license": payload["license"],
         "readme": payload["readme"],
         "repo_candidates": payload["repo_candidates"],
+        "native_view": payload["native_view"],
         "publisher": payload["publisher"],
         "trust_level": payload["trust_level"],
         "trust_score": payload["trust_score"],
