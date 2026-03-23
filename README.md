@@ -19,32 +19,58 @@
   Let AI work for you: Skilgen uncovers the deep nuances of your codebase, identifies the strongest implementation patterns, and materializes the right <code>skills/</code> so coding agents can make better decisions from the start.
 </p>
 
-## Why Skilgen
+## What It Does
 
-Most AI workflows start from scratch.
+Skilgen turns your project into an agent-ready operating system.
 
-Skilgen starts from your project.
+Instead of starting every AI session from scratch, Skilgen reads your codebase, your requirements, or both, then generates the context, memory, and reusable skills that coding agents need to work well immediately.
 
-Instead of re-explaining architecture, features, constraints, and domain rules to every new agent, Skilgen generates a reusable operating system for the repo:
+In one pass, Skilgen can:
+- understand the real shape of your repo
+- infer domains, boundaries, and implementation patterns
+- generate `AGENTS.md`, `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
+- generate a reusable `skills/` tree for backend, frontend, roadmap, and dynamically inferred domains
+- decide when skills should refresh and what an agent should load first
+- discover, install, rank, and manage external skill ecosystems through one interface
+
+## Why It Matters
+
+Most AI workflows lose time on re-explaining context.
+
+Skilgen makes that context reusable.
+
+It gives agents:
+- project-specific guidance instead of generic prompting
+- stable memory and refresh signals instead of stale assumptions
+- stronger execution patterns instead of ad-hoc improvisation
+- a one-stop shop for both generated repo skills and external skill ecosystems
+
+That means agents do not just work faster. They work with better judgment.
+
+## At A Glance
+
+| You Have | Skilgen Produces | Why It Helps |
+| --- | --- | --- |
+| Existing codebase | domain graph, skills, reports, agent contract | agents understand the actual repo before changing it |
+| Requirements document | feature intent, roadmap, starter skills | agents can plan before implementation exists |
+| Codebase + requirements | highest-fidelity operating context | agents align shipped behavior with planned scope |
+| External skill ecosystems | installable, rankable, managed skill packs | agents can pull in trusted skills from one place |
+
+## What You Get Fast
+
+- `AGENTS.md` for the top-level agent contract
 - `FEATURES.md` for product behavior
 - `REPORT.md` for project-level understanding
 - `TRACEABILITY.md` for source-to-output reasoning
-- `skills/MANIFEST.md` for entry-point discovery
-- `skills/**/SKILL.md` for domain-specific guidance agents can execute immediately
+- `skills/MANIFEST.md` and `skills/**/SKILL.md` for execution-ready guidance
+- `.skilgen/state/` and `.skilgen/memory/` for freshness and continuity
 
-That means agents do not just write code faster. They write with better judgment.
+## Quick Mental Model
 
-Skilgen helps agents:
-- discover hidden implementation nuances before they make changes
-- pick the right skill for the exact backend, frontend, or roadmap context
-- follow stronger engineering patterns instead of improvising with generic prompts
-- produce more consistent, more enterprise-ready code across the repo
-- use Skilgen as a one-stop shop to discover and manage external skill ecosystems
-
-The result is simple:
-- point Skilgen at a codebase
-- point it at a requirements doc
-- or combine both for the highest-fidelity output
+- Skilgen reads your project
+- Skilgen materializes the right skills and docs
+- agents load those skills instead of guessing
+- external ecosystems can also be installed and managed through Skilgen
 
 ## What Skilgen Understands
 
