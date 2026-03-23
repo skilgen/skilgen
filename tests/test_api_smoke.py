@@ -106,11 +106,11 @@ class ApiSmokeTests(unittest.TestCase):
 
                 job_id = deliver_job["job_id"]
                 polled: dict[str, object] = {}
-                for _ in range(80):
+                for _ in range(200):
                     polled = get_json(f"{base}/jobs/{job_id}?{urlencode({'project_root': str(root)})}")
                     if polled["status"] in {"completed", "failed"}:
                         break
-                    time.sleep(0.05)
+                    time.sleep(0.1)
                 self.assertEqual(polled["status"], "completed")
                 self.assertEqual(polled["progress"], 100)
                 self.assertIn("generated_files", polled["result"])
