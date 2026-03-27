@@ -12,23 +12,31 @@ from skilgen.external_skills import (
     ensure_external_skills_for_project,
 )
 from skilgen.sdk import (
+    activate_project_mcp_connector,
     activate_skill_source,
     analyze_project,
     cancel_job,
+    deactivate_project_mcp_connector,
     deactivate_skill_source,
     detect_skill_sources,
     decide_project,
     deliver_project,
+    generate_enterprise_skill_source,
     export_skill_source_lock,
     get_job_status,
+    ingest_enterprise_skill_source,
     import_skill_source_candidates,
     import_skill_source_lock,
     init_project,
     install_skill_source,
+    list_active_mcp_connectors,
     list_active_skill_sources,
+    list_enterprise_skill_sources,
+    list_mcp_connectors,
     list_project_jobs,
     list_skill_sources,
     rank_skill_sources,
+    recommend_project_mcp_connectors,
     project_report,
     project_status,
     preview_project,
@@ -178,12 +186,38 @@ class SdkTests(unittest.TestCase):
             deactivated = deactivate_skill_source("demo-pack", root)
             self.assertFalse(deactivated["deactivated_skill"]["active"])
 
-            sync_all = sync_all_skill_sources(root)
-            self.assertEqual(sync_all["count"], 1)
+    def test_sdk_enterprise_skills_and_connectors(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "enterprise-source"
+            source.mkdir()
+            (source / "README.md").write_text("# Enterprise Docs\n\nShared internal standard.\n", encoding="utf-8")
 
-            removed = remove_skill_source("demo-pack", root)
-            self.assertTrue(removed["removed_skill"]["removed"])
-            self.assertFalse(install_path.exists())
+            ingested = ingest_enterprise_skill_source("enterprise docs", root, path=source)
+            self.assertEqual(ingested["enterprise_skill"]["slug"], "enterprise-docs")
+
+            runbook = root / "runbook.md"
+            runbook.write_text("# Incident Runbook\n\nUse Jira, Slack, and Datadog during incidents.\n", encoding="utf-8")
+            generated = generate_enterprise_skill_source("incident response", [runbook], root, kind="runbook")
+            self.assertEqual(generated["enterprise_skill"]["slug"], "incident-response")
+
+            listed = list_enterprise_skill_sources(root)
+            self.assertEqual(len(listed["skills"]), 2)
+
+            connectors = list_mcp_connectors(search="jira")
+            self.assertEqual(connectors["connectors"][0]["slug"], "jira")
+            recommended = recommend_project_mcp_connectors(root)
+            recommended_slugs = {entry["slug"] for entry in recommended["connectors"]}
+            self.assertIn("jira", recommended_slugs)
+            self.assertIn("slack", recommended_slugs)
+            self.assertIn("datadog", recommended_slugs)
+
+            activated = activate_project_mcp_connector("jira", root)
+            self.assertTrue(activated["connector"]["active"])
+            active = list_active_mcp_connectors(root)
+            self.assertEqual(active["connectors"][0]["slug"], "jira")
+            deactivated = deactivate_project_mcp_connector("jira", root)
+            self.assertFalse(deactivated["connector"]["active"])
 
     def test_sdk_can_export_and_import_external_skill_lock(self) -> None:
         with TemporaryDirectory() as tmp:

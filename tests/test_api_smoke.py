@@ -146,6 +146,36 @@ class ApiSmokeTests(unittest.TestCase):
                 ranked = get_json(f"{base}/skills/rank?{urlencode({'project_root': str(root)})}")
                 self.assertTrue(ranked["skills"])
 
+                enterprise_source = root / "enterprise-source"
+                enterprise_source.mkdir()
+                (enterprise_source / "README.md").write_text("# Enterprise Skill\n\nInternal engineering guidance.\n", encoding="utf-8")
+                enterprise_ingest = post_json(
+                    f"{base}/enterprise/ingest",
+                    {"project_root": str(root), "name": "enterprise skill", "path": str(enterprise_source)},
+                )
+                self.assertEqual(enterprise_ingest["enterprise_skill"]["slug"], "enterprise-skill")
+                enterprise_list = get_json(f"{base}/enterprise?{urlencode({'project_root': str(root)})}")
+                self.assertTrue(enterprise_list["skills"])
+
+                runbook = root / "incident-runbook.md"
+                runbook.write_text("# Incident\n\nUse Jira, Slack, and Datadog during incidents.\n", encoding="utf-8")
+                enterprise_generated = post_json(
+                    f"{base}/enterprise/generate",
+                    {"project_root": str(root), "name": "incident runbook", "source_paths": [str(runbook)], "kind": "runbook"},
+                )
+                self.assertEqual(enterprise_generated["enterprise_skill"]["slug"], "incident-runbook")
+
+                connectors = get_json(f"{base}/connectors?{urlencode({'search': 'jira'})}")
+                self.assertTrue(connectors["connectors"])
+                connector_recommend = get_json(f"{base}/connectors/recommend?{urlencode({'project_root': str(root)})}")
+                self.assertTrue(connector_recommend["connectors"])
+                connector_activated = post_json(f"{base}/connectors/activate", {"project_root": str(root), "slug": "jira"})
+                self.assertTrue(connector_activated["connector"]["active"])
+                connector_active = get_json(f"{base}/connectors/active?{urlencode({'project_root': str(root)})}")
+                self.assertTrue(connector_active["connectors"])
+                connector_deactivated = post_json(f"{base}/connectors/deactivate", {"project_root": str(root), "slug": "jira"})
+                self.assertFalse(connector_deactivated["connector"]["active"])
+
                 imported_root = root / "imported-project"
                 imported_root.mkdir()
                 imported_lock = post_json(

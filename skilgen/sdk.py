@@ -22,6 +22,17 @@ from skilgen.api.service import (
 )
 from skilgen.core.config import render_default_config
 from skilgen.delivery import run_delivery, watch_delivery
+from skilgen.enterprise_skills import (
+    activate_mcp_connector,
+    active_enterprise_skills,
+    active_mcp_connectors,
+    connector_catalog,
+    deactivate_mcp_connector,
+    generate_enterprise_skill,
+    ingest_enterprise_skill,
+    list_enterprise_skills,
+    recommend_mcp_connectors,
+)
 from skilgen.external_skills import (
     activate_external_skill,
     active_external_skills,
@@ -216,6 +227,72 @@ def rank_skill_sources(project_root: str | Path = ".") -> dict[str, object]:
 
 def skill_source_policy(project_root: str | Path = ".") -> dict[str, object]:
     return external_skill_policy(Path(project_root).resolve())
+
+
+def list_enterprise_skill_sources(project_root: str | Path = ".") -> dict[str, object]:
+    return {"skills": list_enterprise_skills(Path(project_root).resolve())}
+
+
+def ingest_enterprise_skill_source(
+    name: str,
+    project_root: str | Path = ".",
+    *,
+    path: str | Path | None = None,
+    git_url: str | None = None,
+    ref: str | None = None,
+    activate: bool | None = None,
+    kind: str = "enterprise",
+) -> dict[str, object]:
+    return {
+        "enterprise_skill": ingest_enterprise_skill(
+            Path(project_root).resolve(),
+            name=name,
+            path=path,
+            git_url=git_url,
+            ref=ref,
+            activate=activate,
+            kind=kind,
+        )
+    }
+
+
+def generate_enterprise_skill_source(
+    name: str,
+    source_paths: list[str | Path],
+    project_root: str | Path = ".",
+    *,
+    kind: str = "domain",
+    activate: bool = True,
+) -> dict[str, object]:
+    return {
+        "enterprise_skill": generate_enterprise_skill(
+            Path(project_root).resolve(),
+            name=name,
+            source_paths=source_paths,
+            kind=kind,
+            activate=activate,
+        )
+    }
+
+
+def list_mcp_connectors(*, system: str | None = None, search: str | None = None) -> dict[str, object]:
+    return connector_catalog(system=system, search=search)
+
+
+def recommend_project_mcp_connectors(project_root: str | Path = ".") -> dict[str, object]:
+    return recommend_mcp_connectors(Path(project_root).resolve())
+
+
+def list_active_mcp_connectors(project_root: str | Path = ".") -> dict[str, object]:
+    return {"connectors": active_mcp_connectors(Path(project_root).resolve())}
+
+
+def activate_project_mcp_connector(slug: str, project_root: str | Path = ".") -> dict[str, object]:
+    return {"connector": activate_mcp_connector(Path(project_root).resolve(), slug)}
+
+
+def deactivate_project_mcp_connector(slug: str, project_root: str | Path = ".") -> dict[str, object]:
+    return {"connector": deactivate_mcp_connector(Path(project_root).resolve(), slug)}
 
 
 def show_skill_source(slug: str, project_root: str | Path = ".") -> dict[str, object]:

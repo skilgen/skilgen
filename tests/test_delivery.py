@@ -268,6 +268,39 @@ class DeliveryTests(unittest.TestCase):
             self.assertIn("## External Skill Traceability", traceability_text)
             self.assertIn("candidate-pack", traceability_text)
 
+    def test_run_delivery_ingests_configured_enterprise_skills_and_connectors(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            enterprise_source = root / "internal-platform"
+            enterprise_source.mkdir(parents=True)
+            (enterprise_source / "README.md").write_text("# Platform Skill\n\nUse Jira and Confluence for delivery.\n", encoding="utf-8")
+            (root / "ops.md").write_text("Terraform provisions infra and Jira tracks work.\n", encoding="utf-8")
+            (root / "skilgen.yml").write_text(
+                "\n".join(
+                    [
+                        "enterprise_skill_paths:",
+                        f"  - {enterprise_source}",
+                        "auto_activate_mcp_connectors: true",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            run_delivery(None, root)
+
+            agents_text = (root / "AGENTS.md").read_text(encoding="utf-8")
+            traceability_text = (root / "TRACEABILITY.md").read_text(encoding="utf-8")
+            self.assertIn("## Enterprise Skill Packs", agents_text)
+            self.assertIn("internal-platform", agents_text)
+            self.assertIn("## MCP Connectors", agents_text)
+            self.assertIn("jira", agents_text)
+            self.assertIn("## Enterprise Skill Traceability", traceability_text)
+            self.assertIn("internal-platform", traceability_text)
+            self.assertIn("## MCP Connector Traceability", traceability_text)
+            self.assertTrue((root / ".skilgen" / "enterprise-skills" / "manifest.json").exists())
+            self.assertTrue((root / ".skilgen" / "connectors" / "manifest.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

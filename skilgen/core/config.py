@@ -25,6 +25,11 @@ DEFAULT_CONFIG = SkilgenConfig(
     external_skills_denylist=[],
     external_skills_auto_activate=True,
     external_skills_policy_mode="permissive",
+    auto_activate_mcp_connectors=True,
+    mcp_connector_allowlist=[],
+    mcp_connector_denylist=[],
+    enterprise_skill_paths=[],
+    enterprise_skill_git_urls=[],
 )
 
 
@@ -85,6 +90,11 @@ def load_config(project_root: Path) -> SkilgenConfig:
         "external_skills_denylist": list(DEFAULT_CONFIG.external_skills_denylist),
         "external_skills_auto_activate": DEFAULT_CONFIG.external_skills_auto_activate,
         "external_skills_policy_mode": DEFAULT_CONFIG.external_skills_policy_mode,
+        "auto_activate_mcp_connectors": DEFAULT_CONFIG.auto_activate_mcp_connectors,
+        "mcp_connector_allowlist": list(DEFAULT_CONFIG.mcp_connector_allowlist),
+        "mcp_connector_denylist": list(DEFAULT_CONFIG.mcp_connector_denylist),
+        "enterprise_skill_paths": list(DEFAULT_CONFIG.enterprise_skill_paths),
+        "enterprise_skill_git_urls": list(DEFAULT_CONFIG.enterprise_skill_git_urls),
     }
     current_list: str | None = None
 
@@ -131,6 +141,11 @@ def load_config(project_root: Path) -> SkilgenConfig:
         external_skills_denylist=list(data.get("external_skills_denylist", DEFAULT_CONFIG.external_skills_denylist)),
         external_skills_auto_activate=bool(data.get("external_skills_auto_activate", DEFAULT_CONFIG.external_skills_auto_activate)),
         external_skills_policy_mode=str(data.get("external_skills_policy_mode", DEFAULT_CONFIG.external_skills_policy_mode)),
+        auto_activate_mcp_connectors=bool(data.get("auto_activate_mcp_connectors", DEFAULT_CONFIG.auto_activate_mcp_connectors)),
+        mcp_connector_allowlist=list(data.get("mcp_connector_allowlist", DEFAULT_CONFIG.mcp_connector_allowlist)),
+        mcp_connector_denylist=list(data.get("mcp_connector_denylist", DEFAULT_CONFIG.mcp_connector_denylist)),
+        enterprise_skill_paths=list(data.get("enterprise_skill_paths", DEFAULT_CONFIG.enterprise_skill_paths)),
+        enterprise_skill_git_urls=list(data.get("enterprise_skill_git_urls", DEFAULT_CONFIG.enterprise_skill_git_urls)),
     )
 
 
@@ -179,4 +194,9 @@ external_skills_allowlist:
 external_skills_denylist:
 external_skills_auto_activate: true
 external_skills_policy_mode: permissive
+auto_activate_mcp_connectors: true
+mcp_connector_allowlist:
+mcp_connector_denylist:
+enterprise_skill_paths:
+enterprise_skill_git_urls:
 """

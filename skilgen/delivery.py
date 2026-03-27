@@ -11,6 +11,7 @@ from skilgen.core.freshness import compute_freshness_report, load_freshness_stat
 from skilgen.core.models import RunMemory
 from skilgen.core.run_memory import append_run_event, create_run_memory, finalize_run_memory
 from skilgen.deep_agents_core import current_runtime_mode
+from skilgen.enterprise_skills import ensure_enterprise_skills_for_project
 from skilgen.external_skills import ensure_external_skills_for_project
 from skilgen.core.requirements import load_project_context
 from skilgen.generators.package import project_doc_paths, write_project_docs
@@ -47,6 +48,16 @@ def run_delivery(
         elif external_skill_summary["already_installed"]:
             names = ", ".join(entry["slug"] for entry in external_skill_summary["already_installed"][:4])
             _emit(progress_callback, f"Using already-installed external skill packs: {names}.")
+    enterprise_summary = ensure_enterprise_skills_for_project(root)
+    if enterprise_summary["installed_skills"]:
+        names = ", ".join(entry["slug"] for entry in enterprise_summary["installed_skills"][:4])
+        _emit(progress_callback, f"Ingested configured enterprise skill packs: {names}.")
+    elif enterprise_summary["already_present_skills"]:
+        names = ", ".join(entry["slug"] for entry in enterprise_summary["already_present_skills"][:4])
+        _emit(progress_callback, f"Using configured enterprise skill packs: {names}.")
+    if enterprise_summary["auto_activated_connectors"]:
+        names = ", ".join(entry["slug"] for entry in enterprise_summary["auto_activated_connectors"][:4])
+        _emit(progress_callback, f"Activated recommended MCP connectors: {names}.")
     _emit(progress_callback, "Building project context so agents can understand the repo structure and delivery scope.")
     context = load_project_context(root, Path(requirements_path).resolve() if requirements_path is not None else None)
     _emit(progress_callback, "Inspecting the codebase to identify frameworks, domains, and implementation patterns.")

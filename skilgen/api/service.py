@@ -20,6 +20,17 @@ from skilgen.deep_agents_runtime import (
     native_validate_payload,
 )
 from skilgen.delivery import run_delivery
+from skilgen.enterprise_skills import (
+    activate_mcp_connector,
+    active_enterprise_skills,
+    active_mcp_connectors,
+    connector_catalog,
+    deactivate_mcp_connector,
+    generate_enterprise_skill,
+    ingest_enterprise_skill,
+    list_enterprise_skills,
+    recommend_mcp_connectors,
+)
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state
 from skilgen.core.context import build_codebase_context
 from skilgen.core.requirements import load_project_context
@@ -280,6 +291,10 @@ def status_payload(project_root: str | Path) -> dict[str, object]:
             "external_skill_lock": external_skill_lock(root),
             "external_skill_policy": external_skill_policy(root),
             "external_skill_recommendations": external_skill_detection["manual_recommendations"],
+            "enterprise_skills": list_enterprise_skills(root),
+            "active_enterprise_skills": active_enterprise_skills(root),
+            "recommended_mcp_connectors": recommend_mcp_connectors(root),
+            "active_mcp_connectors": active_mcp_connectors(root),
         }
     )
 
@@ -374,6 +389,76 @@ def skills_activate_payload(project_root: str | Path, slug: str) -> dict[str, ob
 
 def skills_deactivate_payload(project_root: str | Path, slug: str) -> dict[str, object]:
     return _with_api_meta({"deactivated_skill": deactivate_external_skill(project_root=Path(project_root).resolve(), slug=slug)})
+
+
+def enterprise_list_payload(project_root: str | Path) -> dict[str, object]:
+    return _with_api_meta({"skills": list_enterprise_skills(Path(project_root).resolve())})
+
+
+def enterprise_ingest_payload(
+    project_root: str | Path,
+    *,
+    name: str,
+    path: str | Path | None = None,
+    git_url: str | None = None,
+    ref: str | None = None,
+    activate: bool | None = None,
+    kind: str = "enterprise",
+) -> dict[str, object]:
+    return _with_api_meta(
+        {
+            "enterprise_skill": ingest_enterprise_skill(
+                Path(project_root).resolve(),
+                name=name,
+                path=path,
+                git_url=git_url,
+                ref=ref,
+                activate=activate,
+                kind=kind,
+            )
+        }
+    )
+
+
+def enterprise_generate_payload(
+    project_root: str | Path,
+    *,
+    name: str,
+    source_paths: list[str | Path],
+    kind: str = "domain",
+    activate: bool = True,
+) -> dict[str, object]:
+    return _with_api_meta(
+        {
+            "enterprise_skill": generate_enterprise_skill(
+                Path(project_root).resolve(),
+                name=name,
+                source_paths=source_paths,
+                kind=kind,
+                activate=activate,
+            )
+        }
+    )
+
+
+def connectors_list_payload(system: str | None = None, search: str | None = None) -> dict[str, object]:
+    return _with_api_meta(connector_catalog(system=system, search=search))
+
+
+def connectors_recommend_payload(project_root: str | Path) -> dict[str, object]:
+    return _with_api_meta(recommend_mcp_connectors(Path(project_root).resolve()))
+
+
+def connectors_active_payload(project_root: str | Path) -> dict[str, object]:
+    return _with_api_meta({"connectors": active_mcp_connectors(Path(project_root).resolve())})
+
+
+def connectors_activate_payload(project_root: str | Path, slug: str) -> dict[str, object]:
+    return _with_api_meta({"connector": activate_mcp_connector(Path(project_root).resolve(), slug)})
+
+
+def connectors_deactivate_payload(project_root: str | Path, slug: str) -> dict[str, object]:
+    return _with_api_meta({"connector": deactivate_mcp_connector(Path(project_root).resolve(), slug)})
 
 
 def report_payload(project_root: str | Path) -> dict[str, object]:

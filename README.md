@@ -32,6 +32,7 @@ In one pass, Skilgen can:
 - generate a reusable `skills/` tree for backend, frontend, roadmap, and dynamically inferred domains
 - decide when skills should refresh and what an agent should load first
 - discover, install, rank, and manage external skill ecosystems through one interface
+- ingest enterprise-wide skill packs and recommend MCP connectors for real operating systems like Jira, Confluence, Slack, Datadog, Sentry, and Kubernetes
 
 ## Why It Matters
 
@@ -71,6 +72,52 @@ That means agents do not just work faster. They work with better judgment.
 - Skilgen materializes the right skills and docs
 - agents load those skills instead of guessing
 - external ecosystems can also be installed and managed through Skilgen
+- enterprise skills and approved MCP connectors can be layered in alongside repo-native skills
+
+## Enterprise Skills And MCP Connectors
+
+Skilgen can now do three things at once:
+
+- generate project-native skills from your repo and requirements
+- ingest enterprise-wide skills that already exist in shared repos, runbooks, or internal docs
+- recommend and activate approved MCP connectors so coding agents can operate through enterprise systems safely
+
+That means Codex, Claude Code, and similar agents can start with:
+- repo-specific implementation context
+- organization-wide standards and playbooks
+- approved tool access for systems like Jira, Confluence, Slack, Datadog, Sentry, GitHub Enterprise, Kubernetes, Terraform, Snowflake, Postgres, and Okta
+
+### Common Enterprise Flows
+
+| Goal | Command | Outcome |
+| --- | --- | --- |
+| Ingest an existing enterprise skill pack | `skilgen enterprise ingest --project-root . --name platform-engineering --path ./internal-skills/platform` | Adds a reusable enterprise skill into `.skilgen/enterprise-skills/` |
+| Generate an enterprise skill from runbooks or docs | `skilgen enterprise generate --project-root . --name incident-response --source-path ./runbooks/incident.md --kind runbook` | Creates a new enterprise skill pack from internal source material |
+| See which enterprise connectors fit the repo | `skilgen connectors recommend --project-root .` | Suggests MCP connectors based on repo signals and config policy |
+| Activate an approved connector | `skilgen connectors activate jira --project-root .` | Marks the connector active so agents can use it as approved capability context |
+
+### Configuring Enterprise Sources
+
+Add shared enterprise skill locations directly to `skilgen.yml` so normal `deliver` runs can ingest them automatically:
+
+```yaml
+enterprise_skill_paths:
+  - ./internal-skills/platform
+  - ./runbooks/shared-guidance
+enterprise_skill_git_urls:
+  - git@github.company.com:ai/platform-skills.git
+auto_activate_mcp_connectors: true
+mcp_connector_allowlist:
+  - jira
+  - confluence
+  - kubernetes
+```
+
+When these are configured, `skilgen deliver` will:
+- ingest configured enterprise skills
+- recommend MCP connectors from repo evidence
+- activate allowed connectors when policy permits
+- surface all of that in `AGENTS.md`, `REPORT.md`, and `TRACEABILITY.md`
 
 ## What Skilgen Understands
 
@@ -216,6 +263,19 @@ skilgen skills import awesome-agent-skills-voltagent --project-root . --limit 5
 skilgen skills sync anthropic-skills --project-root .
 skilgen skills remove anthropic-skills --project-root .
 skilgen skills install --git-url https://github.com/example/skills.git --name my-skill-pack --project-root .
+```
+
+Manage enterprise-wide skills and MCP connectors through Skilgen:
+
+```bash
+skilgen enterprise list --project-root .
+skilgen enterprise ingest --project-root . --name platform-engineering --path ./internal-skills/platform
+skilgen enterprise generate --project-root . --name oncall-playbook --source-path ./runbooks/oncall.md --kind runbook
+skilgen connectors list --search jira
+skilgen connectors recommend --project-root .
+skilgen connectors active --project-root .
+skilgen connectors activate jira --project-root .
+skilgen connectors deactivate jira --project-root .
 ```
 
 When Skilgen runs on an existing repository, it also looks for strong ecosystem hints such as:

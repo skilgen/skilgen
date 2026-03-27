@@ -239,6 +239,54 @@ class CliTests(unittest.TestCase):
             self.assertTrue(payload["generated_files"])
             self.assertTrue((root / "FEATURES.md").exists())
 
+    def test_enterprise_ingest_and_connector_recommend(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "enterprise-pack"
+            source.mkdir()
+            (source / "README.md").write_text("# Platform Skill\n\nShared platform guidance.\n", encoding="utf-8")
+            ingest = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "enterprise",
+                    "ingest",
+                    "--project-root",
+                    str(root),
+                    "--name",
+                    "platform skill",
+                    "--path",
+                    str(source),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            ingest_payload = json.loads(ingest.stdout)
+            self.assertEqual(ingest_payload["enterprise_skill"]["slug"], "platform-skill")
+
+            (root / "ops.md").write_text("Use Jira and Confluence for delivery. Terraform runs production infra.\n", encoding="utf-8")
+            connectors = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "connectors",
+                    "recommend",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            connector_payload = json.loads(connectors.stdout)
+            slugs = {entry["slug"] for entry in connector_payload["connectors"]}
+            self.assertIn("jira", slugs)
+            self.assertIn("confluence", slugs)
+            self.assertIn("terraform", slugs)
+
     def test_doctor_outputs_runtime_diagnostics(self) -> None:
         with TemporaryDirectory() as tmp:
             result = subprocess.run(
