@@ -208,6 +208,10 @@ class SdkTests(unittest.TestCase):
             self.assertEqual(connectors["connectors"][0]["slug"], "jira")
             self.assertTrue(connectors["connectors"][0]["official_source_url"])
             self.assertEqual(connectors["connectors"][0]["auth_scheme"], "oauth2")
+            sharepoint = list_mcp_connectors(search="sharepoint")
+            self.assertEqual(sharepoint["connectors"][0]["slug"], "sharepoint")
+            self.assertEqual(sharepoint["connectors"][0]["source_status"], "community")
+            self.assertIsNone(sharepoint["connectors"][0]["official_source_url"])
             recommended = recommend_project_mcp_connectors(root)
             recommended_slugs = {entry["slug"] for entry in recommended["connectors"]}
             self.assertIn("jira", recommended_slugs)

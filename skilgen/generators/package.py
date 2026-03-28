@@ -206,13 +206,27 @@ def _render_traceability_report_native(context: RequirementsContext, project_roo
     if active_connectors:
         for entry in active_connectors[:8]:
             lines.append(f"- Active connector `{entry.get('slug', 'unknown')}` ({entry.get('system', 'unknown')}): {entry.get('description', '')}")
+            lines.append(
+                f"  Source status: `{entry.get('source_status', 'unknown')}`; auth: `{entry.get('auth_scheme', 'unknown')}`; "
+                f"official source verified: `{entry.get('official_source_verified', False)}`"
+            )
+            authorization = entry.get("authorization", {})
+            if authorization:
+                lines.append(f"  Authorization status: `{authorization.get('status', 'unknown')}`")
+            if entry.get("official_source_url"):
+                lines.append(f"  Official source: `{entry['official_source_url']}`")
+            elif entry.get("recommended_source_url"):
+                lines.append(f"  Recommended source: `{entry['recommended_source_url']}`")
     else:
         lines.append("- No MCP connectors are currently active.")
     if recommended_connectors:
         lines.append("")
         lines.append("### Recommended MCP Connectors")
         for entry in recommended_connectors[:6]:
-            lines.append(f"- `{entry['slug']}`: {'; '.join(entry.get('reasons', []))}")
+            lines.append(
+                f"- `{entry['slug']}` (`{entry.get('source_status', 'unknown')}`, oauth `{entry.get('oauth_supported', False)}`): "
+                f"{'; '.join(entry.get('reasons', []))}"
+            )
     lines.append("")
     gaps: list[str] = []
     if signals.backend_routes and not signals.tests:
@@ -713,11 +727,18 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
         for entry in enterprise_skill_packs
     ] or ["- No enterprise skill packs are currently active."]
     connector_lines = [
-        f"- `{entry['slug']}` ({entry.get('system', 'unknown')}): {entry.get('description', '')}"
+        (
+            f"- `{entry['slug']}` ({entry.get('system', 'unknown')}, "
+            f"source `{entry.get('source_status', 'unknown')}`, auth `{entry.get('auth_scheme', 'unknown')}`): "
+            f"{entry.get('description', '')}"
+        )
         for entry in active_connectors
     ] or ["- No MCP connectors are currently active."]
     recommended_connector_lines = [
-        f"- `{entry['slug']}`: {'; '.join(entry.get('reasons', []))}"
+        (
+            f"- `{entry['slug']}` (source `{entry.get('source_status', 'unknown')}`, "
+            f"oauth `{entry.get('oauth_supported', False)}`): {'; '.join(entry.get('reasons', []))}"
+        )
         for entry in recommended_connectors
     ] or ["- No MCP connectors were recommended."]
     priority_lines = [
