@@ -19,20 +19,118 @@ class MCPConnector:
     description: str
     tags: tuple[str, ...] = ()
     default_mode: str = "read-only"
+    official_source_url: str | None = None
+    official_source_label: str | None = None
+    auth_scheme: str = "manual"
+    oauth_supported: bool = False
+    oauth_principles: tuple[str, ...] = ()
+    enterprise_ready: bool = False
+    setup_notes: tuple[str, ...] = ()
 
 
 CONNECTOR_CATALOG: tuple[MCPConnector, ...] = (
-    MCPConnector("jira", "Jira", "Atlassian", "Track issues, delivery state, and engineering workflows.", ("tickets", "planning", "enterprise")),
-    MCPConnector("confluence", "Confluence", "Atlassian", "Search and read internal documentation, playbooks, and architecture notes.", ("docs", "wiki", "enterprise")),
-    MCPConnector("slack", "Slack", "Slack", "Read team communication context and incident coordination threads.", ("chat", "incident", "ops")),
+    MCPConnector(
+        "jira",
+        "Jira",
+        "Atlassian",
+        "Track issues, delivery state, and engineering workflows.",
+        ("tickets", "planning", "enterprise"),
+        official_source_url="https://www.atlassian.com/platform/remote-mcp-server",
+        official_source_label="Atlassian Remote MCP Server",
+        auth_scheme="oauth2",
+        oauth_supported=True,
+        oauth_principles=("least-privilege scopes", "workspace-bound consent", "token rotation"),
+        enterprise_ready=True,
+        setup_notes=("Use Atlassian-managed remote MCP.", "Prefer read-only scopes unless a workflow explicitly requires writes."),
+    ),
+    MCPConnector(
+        "confluence",
+        "Confluence",
+        "Atlassian",
+        "Search and read internal documentation, playbooks, and architecture notes.",
+        ("docs", "wiki", "enterprise"),
+        official_source_url="https://www.atlassian.com/platform/remote-mcp-server",
+        official_source_label="Atlassian Remote MCP Server",
+        auth_scheme="oauth2",
+        oauth_supported=True,
+        oauth_principles=("least-privilege scopes", "workspace-bound consent", "token rotation"),
+        enterprise_ready=True,
+        setup_notes=("Use Atlassian-managed remote MCP.", "Prefer page-read scopes before enabling edits."),
+    ),
+    MCPConnector(
+        "slack",
+        "Slack",
+        "Slack",
+        "Read team communication context and incident coordination threads.",
+        ("chat", "incident", "ops"),
+        official_source_url="https://api.slack.com/automation/mcp",
+        official_source_label="Slack MCP",
+        auth_scheme="oauth2",
+        oauth_supported=True,
+        oauth_principles=("workspace consent", "scoped bot tokens", "token rotation"),
+        enterprise_ready=True,
+        setup_notes=("Provision a Slack app with only the channels and read scopes your agent needs.",),
+    ),
     MCPConnector("servicenow", "ServiceNow", "ServiceNow", "Work with enterprise tickets, service requests, and incident records.", ("itsm", "incident", "enterprise")),
-    MCPConnector("datadog", "Datadog", "Datadog", "Inspect metrics, traces, monitors, and production signals.", ("observability", "metrics", "ops")),
+    MCPConnector(
+        "datadog",
+        "Datadog",
+        "Datadog",
+        "Inspect metrics, traces, monitors, and production signals.",
+        ("observability", "metrics", "ops"),
+        official_source_url="https://docs.datadoghq.com/llm_observability/instrumentation/mcp/",
+        official_source_label="Datadog MCP",
+        auth_scheme="oauth2",
+        oauth_supported=True,
+        oauth_principles=("org-scoped consent", "short-lived access tokens", "auditable scopes"),
+        enterprise_ready=True,
+        setup_notes=("Bind Datadog access to the minimum set of org permissions and dashboards needed by the agent.",),
+    ),
     MCPConnector("sentry", "Sentry", "Sentry", "Inspect application errors, releases, and issue trends.", ("errors", "observability", "ops")),
-    MCPConnector("github-enterprise", "GitHub Enterprise", "GitHub", "Read enterprise repositories, pull requests, and actions state.", ("code", "git", "devex")),
-    MCPConnector("gitlab", "GitLab", "GitLab", "Read merge requests, CI pipelines, and source repos.", ("code", "ci", "devex")),
+    MCPConnector(
+        "github-enterprise",
+        "GitHub Enterprise",
+        "GitHub",
+        "Read enterprise repositories, pull requests, and actions state.",
+        ("code", "git", "devex"),
+        official_source_url="https://docs.github.com/en/copilot/customizing-copilot/extending-copilot-chat-with-mcp",
+        official_source_label="GitHub MCP integration docs",
+        auth_scheme="oauth2",
+        oauth_supported=True,
+        oauth_principles=("org approval", "repo-scoped access", "token rotation"),
+        enterprise_ready=True,
+        setup_notes=("Use GitHub App or enterprise-approved OAuth app credentials.", "Limit repo and workflow scopes to the agent's duties."),
+    ),
+    MCPConnector(
+        "gitlab",
+        "GitLab",
+        "GitLab",
+        "Read merge requests, CI pipelines, and source repos.",
+        ("code", "ci", "devex"),
+        official_source_url="https://docs.gitlab.com/user/gitlab_duo/mcp_server/",
+        official_source_label="GitLab Duo MCP Server",
+        auth_scheme="oauth2",
+        oauth_supported=True,
+        oauth_principles=("group-scoped consent", "least-privilege scopes", "token rotation"),
+        enterprise_ready=True,
+        setup_notes=("Prefer group-level allowlists and read-only scopes for CI and repo inspection.",),
+    ),
     MCPConnector("kubernetes", "Kubernetes", "Cloud Native", "Inspect cluster resources, workloads, rollout state, and runtime incidents.", ("infra", "ops", "deployments")),
     MCPConnector("terraform", "Terraform", "HashiCorp", "Inspect infrastructure definitions, plans, and cloud rollout workflows.", ("infra", "iac", "cloud")),
-    MCPConnector("snowflake", "Snowflake", "Snowflake", "Work with enterprise data warehouse context and SQL operations.", ("data", "warehouse", "analytics")),
+    MCPConnector(
+        "snowflake",
+        "Snowflake",
+        "Snowflake",
+        "Work with enterprise data warehouse context and SQL operations.",
+        ("data", "warehouse", "analytics"),
+        official_source_url="https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-run",
+        official_source_label="Snowflake Cortex agent tooling docs",
+        auth_scheme="oauth2",
+        oauth_supported=True,
+        oauth_principles=("role-based access", "warehouse-scoped credentials", "token rotation"),
+        enterprise_ready=True,
+        setup_notes=("Bind roles to read-only warehouses first and require role review for write access.",),
+    ),
     MCPConnector("postgres", "Postgres", "PostgreSQL", "Inspect schemas, queries, and transactional application data.", ("database", "sql", "data")),
     MCPConnector("notion", "Notion", "Notion", "Read shared docs, product specs, and operational notes.", ("docs", "planning", "workspace")),
     MCPConnector("okta", "Okta", "Okta", "Understand enterprise identity, auth, and access-management flows.", ("identity", "security", "enterprise")),
@@ -284,6 +382,10 @@ def connector_catalog(system: str | None = None, search: str | None = None) -> d
     return {"connectors": entries, "count": len(entries)}
 
 
+def _catalog_connector(slug: str) -> MCPConnector | None:
+    return next((item for item in CONNECTOR_CATALOG if item.slug == slug), None)
+
+
 def _connector_keywords() -> dict[str, tuple[str, ...]]:
     return {
         "jira": ("jira", "atlassian"),
@@ -323,9 +425,19 @@ def recommend_mcp_connectors(project_root: str | Path) -> dict[str, object]:
             continue
         if allow and connector.slug not in allow:
             continue
+        if config.mcp_connectors_require_official_source and not connector.official_source_url:
+            continue
+        if config.mcp_connectors_require_oauth and not connector.oauth_supported:
+            continue
         matches = [keyword for keyword in _connector_keywords().get(connector.slug, ()) if keyword in blob]
         if matches:
-            detected.append({**asdict(connector), "reasons": [f"Detected connector keywords: {', '.join(matches[:3])}."]})
+            detected.append(
+                {
+                    **asdict(connector),
+                    "official_source_verified": bool(connector.official_source_url),
+                    "reasons": [f"Detected connector keywords: {', '.join(matches[:3])}."],
+                }
+            )
     return {"connectors": detected, "count": len(detected)}
 
 
@@ -336,14 +448,28 @@ def active_mcp_connectors(project_root: str | Path) -> list[dict[str, object]]:
 
 def activate_mcp_connector(project_root: str | Path, slug: str) -> dict[str, object]:
     root = Path(project_root).resolve()
+    config = load_config(root)
     now = datetime.now(UTC).isoformat()
-    connector = next((asdict(item) for item in CONNECTOR_CATALOG if item.slug == slug), None)
-    if connector is None:
+    catalog_connector = _catalog_connector(slug)
+    if catalog_connector is None:
         raise ValueError(f"Unknown MCP connector: {slug}")
+    if config.mcp_connectors_require_official_source and not catalog_connector.official_source_url:
+        raise ValueError(f"MCP connector `{slug}` does not have a verified official source configured.")
+    if config.mcp_connectors_require_oauth and not catalog_connector.oauth_supported:
+        raise ValueError(f"MCP connector `{slug}` does not meet the project's OAuth requirements.")
+    connector = asdict(catalog_connector)
     manifest = _load_connector_manifest(root)
     connectors = [entry for entry in manifest.get("connectors", []) if entry.get("slug") != slug]
     connector["active"] = True
     connector["activated_at"] = now
+    connector["official_source_verified"] = bool(catalog_connector.official_source_url)
+    connector["authorization"] = {
+        "scheme": catalog_connector.auth_scheme,
+        "oauth_supported": catalog_connector.oauth_supported,
+        "status": "pending_oauth" if catalog_connector.oauth_supported else "manual_setup_required",
+        "principles": list(catalog_connector.oauth_principles),
+    }
+    connector["runtime_ready"] = bool(catalog_connector.official_source_url and catalog_connector.oauth_supported)
     connectors.append(connector)
     manifest["connectors"] = sorted(connectors, key=lambda item: str(item.get("slug", "")))
     _write_connector_manifest(root, manifest)

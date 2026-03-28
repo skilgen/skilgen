@@ -87,6 +87,13 @@ That means Codex, Claude Code, and similar agents can start with:
 - organization-wide standards and playbooks
 - approved tool access for systems like Jira, Confluence, Slack, Datadog, Sentry, GitHub Enterprise, Kubernetes, Terraform, Snowflake, Postgres, and Okta
 
+MCP connectors in Skilgen are now treated as enterprise integrations, not loose suggestions. Each connector carries:
+- an official source URL when Skilgen has a vendor-backed MCP reference
+- an auth scheme, with OAuth2 required by default for enterprise-ready activation
+- security guidance around least-privilege scopes, consent boundaries, and token rotation
+
+If a connector does not have a verified official source or does not meet the repo's OAuth policy, Skilgen will not auto-activate it.
+
 ### Common Enterprise Flows
 
 | Goal | Command | Outcome |
@@ -107,6 +114,8 @@ enterprise_skill_paths:
 enterprise_skill_git_urls:
   - git@github.company.com:ai/platform-skills.git
 auto_activate_mcp_connectors: true
+mcp_connectors_require_official_source: true
+mcp_connectors_require_oauth: true
 mcp_connector_allowlist:
   - jira
   - confluence
@@ -116,7 +125,7 @@ mcp_connector_allowlist:
 When these are configured, `skilgen deliver` will:
 - ingest configured enterprise skills
 - recommend MCP connectors from repo evidence
-- activate allowed connectors when policy permits
+- activate only connectors that satisfy the official-source and OAuth policy gates
 - surface all of that in `AGENTS.md`, `REPORT.md`, and `TRACEABILITY.md`
 
 ## What Skilgen Understands

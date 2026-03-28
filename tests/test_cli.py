@@ -282,10 +282,30 @@ class CliTests(unittest.TestCase):
                 check=True,
             )
             connector_payload = json.loads(connectors.stdout)
-            slugs = {entry["slug"] for entry in connector_payload["connectors"]}
-            self.assertIn("jira", slugs)
-            self.assertIn("confluence", slugs)
-            self.assertIn("terraform", slugs)
+            jira = connector_payload["connectors"][0]
+            self.assertEqual(jira["slug"], "jira")
+            self.assertTrue(jira["official_source_url"])
+            self.assertEqual(jira["auth_scheme"], "oauth2")
+
+    def test_connectors_activate_rejects_unverified_connector(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "connectors",
+                    "activate",
+                    "kubernetes",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("official source", result.stderr.lower())
 
     def test_doctor_outputs_runtime_diagnostics(self) -> None:
         with TemporaryDirectory() as tmp:

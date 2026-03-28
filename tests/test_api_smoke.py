@@ -167,10 +167,13 @@ class ApiSmokeTests(unittest.TestCase):
 
                 connectors = get_json(f"{base}/connectors?{urlencode({'search': 'jira'})}")
                 self.assertTrue(connectors["connectors"])
+                self.assertTrue(connectors["connectors"][0]["official_source_url"])
+                self.assertEqual(connectors["connectors"][0]["auth_scheme"], "oauth2")
                 connector_recommend = get_json(f"{base}/connectors/recommend?{urlencode({'project_root': str(root)})}")
                 self.assertTrue(connector_recommend["connectors"])
                 connector_activated = post_json(f"{base}/connectors/activate", {"project_root": str(root), "slug": "jira"})
                 self.assertTrue(connector_activated["connector"]["active"])
+                self.assertEqual(connector_activated["connector"]["authorization"]["status"], "pending_oauth")
                 connector_active = get_json(f"{base}/connectors/active?{urlencode({'project_root': str(root)})}")
                 self.assertTrue(connector_active["connectors"])
                 connector_deactivated = post_json(f"{base}/connectors/deactivate", {"project_root": str(root), "slug": "jira"})
