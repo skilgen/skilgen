@@ -839,5 +839,7 @@ def write_project_docs(context: RequirementsContext, project_root: Path) -> list
     written.append(ensure_file(project_root / "FEATURES.md", features))
     written.append(ensure_file(project_root / "REPORT.md", report))
     written.append(ensure_file(project_root / "TRACEABILITY.md", traceability))
-    written.append(ensure_file(project_root / "skilgen.yml", render_default_config()))
+    config_path = project_root / "skilgen.yml"
+    if not config_path.exists():
+        written.append(ensure_file(config_path, render_default_config()))
     return written

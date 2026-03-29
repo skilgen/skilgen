@@ -301,6 +301,24 @@ class DeliveryTests(unittest.TestCase):
             self.assertTrue((root / ".skilgen" / "enterprise-skills" / "manifest.json").exists())
             self.assertTrue((root / ".skilgen" / "connectors" / "manifest.json").exists())
 
+    def test_run_delivery_preserves_existing_skilgen_config(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "users.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            config_text = "\n".join(
+                [
+                    "update_trigger: auto",
+                    "enterprise_skill_paths:",
+                    "  - ./internal-skills/platform",
+                ]
+            ) + "\n"
+            (root / "skilgen.yml").write_text(config_text, encoding="utf-8")
+
+            run_delivery(None, root)
+
+            self.assertEqual((root / "skilgen.yml").read_text(encoding="utf-8"), config_text)
+
 
 if __name__ == "__main__":
     unittest.main()
