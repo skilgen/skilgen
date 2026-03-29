@@ -99,13 +99,13 @@ flowchart TD
     A["Repo Code + Optional Requirements"] --> B["Skilgen Operating System"]
     B --> C["AGENTS.md"]
     B --> D["skills/MANIFEST.md"]
-    B --> E["skills/backend/SKILL.md"]
-    B --> F["skills/frontend/SKILL.md"]
-    B --> G["skills/roadmap/SKILL.md"]
+    B --> E["Domain-specific skills/**/SKILL.md"]
+    B --> F["FEATURES.md / REPORT.md / TRACEABILITY.md"]
+    B --> G[".skilgen/state + memory"]
     B --> H["FEATURES.md"]
     B --> I["REPORT.md"]
     B --> J["TRACEABILITY.md"]
-    B --> K[".skilgen/state + memory"]
+    B --> K["Ranked external skills + enterprise skills + official MCPs"]
     L["External Skills"] --> B
     M["Enterprise Skills"] --> B
     N["Official MCP Connectors"] --> B
@@ -113,11 +113,12 @@ flowchart TD
 
 From a real OpenAI-backed run, Skilgen generated:
 - `AGENTS.md` with inferred domains, start order, external skill packs, policy, and decision memory
-- `skills/backend/SKILL.md`
-- `skills/frontend/SKILL.md`
-- `skills/roadmap/SKILL.md`
+- a dynamic `skills/` tree based on the actual repo shape and inferred domains
+- domain-specific `skills/**/SKILL.md` files for whatever the codebase needs
 - `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
 - `.skilgen/` state and memory for continuity and refresh decisions
+
+Depending on the repo, those generated domains might include backend, frontend, data, platform, design-system, operations, roadmap, or other repo-specific areas inferred by Skilgen.
 
 Example of what the generated `AGENTS.md` contains:
 
