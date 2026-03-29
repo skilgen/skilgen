@@ -11,6 +11,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("model_provider:", rendered)
         self.assertNotIn("model_provider: openai", rendered)
         self.assertIn("# openai / gpt-4.1-mini / OPENAI_API_KEY", rendered)
+        self.assertIn("update_trigger: auto", rendered)
 
     def test_render_default_config_can_scaffold_provider_defaults(self) -> None:
         rendered = render_default_config("gemini")

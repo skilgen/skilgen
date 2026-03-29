@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from skilgen.api.server import run_server
+from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
 from skilgen.api.service import analyze_payload, decision_payload, doctor_payload, preview_payload, report_payload, status_payload, validate_payload
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
@@ -89,6 +90,24 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--interval", type=float, default=2.0)
     watch.add_argument("--cycles", type=int, default=0)
     watch.add_argument("--once", action="store_true")
+
+    autoupdate = subparsers.add_parser("autoupdate", help="Manage Skilgen's background skill auto-update worker.")
+    autoupdate_subparsers = autoupdate.add_subparsers(dest="autoupdate_command", required=True)
+
+    autoupdate_enable = autoupdate_subparsers.add_parser("enable", help="Start the repo-local auto-update worker.")
+    autoupdate_enable.add_argument("--project-root", default=".")
+    autoupdate_enable.add_argument("--requirements")
+    autoupdate_enable.add_argument("--interval", type=float, default=2.0)
+
+    autoupdate_status_parser = autoupdate_subparsers.add_parser("status", help="Show the current auto-update worker status.")
+    autoupdate_status_parser.add_argument("--project-root", default=".")
+
+    autoupdate_disable = autoupdate_subparsers.add_parser("disable", help="Stop the repo-local auto-update worker.")
+    autoupdate_disable.add_argument("--project-root", default=".")
+
+    autoupdate_worker = autoupdate_subparsers.add_parser("worker", help=argparse.SUPPRESS)
+    autoupdate_worker.add_argument("--project-root", default=".")
+    autoupdate_worker.add_argument("--interval", type=float, default=2.0)
 
     preview = subparsers.add_parser("preview", help="Preview which generated files would be written without changing the project.")
     preview.add_argument("--requirements")
@@ -257,8 +276,28 @@ def main() -> None:
         config_path = project_root / "skilgen.yml"
         if not config_path.exists():
             config_path.write_text(render_default_config(args.provider), encoding="utf-8")
-        print(json.dumps({"config_path": str(config_path)}, indent=2))
+        worker = ensure_auto_update_worker(project_root)
+        print(json.dumps({"config_path": str(config_path), "auto_update": worker}, indent=2))
         return
+    if args.command == "autoupdate":
+        root = Path(args.project_root).resolve()
+        if args.autoupdate_command == "enable":
+            payload = ensure_auto_update_worker(
+                root,
+                requirements_path=Path(args.requirements).resolve() if args.requirements else None,
+                interval_seconds=args.interval,
+            )
+            print(json.dumps(payload, indent=2))
+            return
+        if args.autoupdate_command == "status":
+            print(json.dumps(auto_update_status(root), indent=2))
+            return
+        if args.autoupdate_command == "disable":
+            print(json.dumps(stop_auto_update_worker(root), indent=2))
+            return
+        if args.autoupdate_command == "worker":
+            run_auto_update_worker(root, interval_seconds=args.interval)
+            return
     if args.command == "fingerprint":
         result = fingerprint_project(Path(args.project_root).resolve())
         print(
@@ -533,6 +572,7 @@ def main() -> None:
         return
 
     root = Path(args.project_root).resolve()
+    ensure_auto_update_worker(root, requirements_path=Path(args.requirements).resolve() if args.requirements else None)
     diagnostics = runtime_diagnostics(root)
     emit_progress(
         f"Starting delivery with the {current_runtime_mode(root)} runtime. This may take a bit while Skilgen builds project context and generates the final skill tree."

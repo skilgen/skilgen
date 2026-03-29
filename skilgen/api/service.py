@@ -5,6 +5,7 @@ from typing import Callable
 
 from skilgen.api.jobs import get_job, job_payload, list_jobs, request_cancel, submit_job
 from skilgen.agents.decision_planner import build_agent_decision
+from skilgen.autoupdate import auto_update_status
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.deep_agents_runtime import (
     DeepAgentsRuntime,
@@ -295,6 +296,7 @@ def status_payload(project_root: str | Path) -> dict[str, object]:
             "active_enterprise_skills": active_enterprise_skills(root),
             "recommended_mcp_connectors": recommend_mcp_connectors(root),
             "active_mcp_connectors": active_mcp_connectors(root),
+            "auto_update": auto_update_status(root),
         }
     )
 

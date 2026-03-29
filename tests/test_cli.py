@@ -21,6 +21,13 @@ class CliTests(unittest.TestCase):
             config_text = config_path.read_text(encoding="utf-8")
             self.assertIn("model_provider:", config_text)
             self.assertNotIn("model_provider: openai", config_text)
+            self.assertEqual(payload["auto_update"]["update_trigger"], "auto")
+            subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "autoupdate", "disable", "--project-root", tmp],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
 
     def test_init_can_scaffold_provider_specific_defaults(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -44,6 +51,12 @@ class CliTests(unittest.TestCase):
             self.assertIn("model_provider: anthropic", config_text)
             self.assertIn("model: claude-sonnet-4-5", config_text)
             self.assertIn("api_key_env: ANTHROPIC_API_KEY", config_text)
+            subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "autoupdate", "disable", "--project-root", tmp],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
 
     def test_version_outputs_package_version(self) -> None:
         result = subprocess.run(
@@ -306,6 +319,32 @@ class CliTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("official source", result.stderr.lower())
+
+    def test_autoupdate_status_and_disable(self) -> None:
+        with TemporaryDirectory() as tmp:
+            subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "init", "--project-root", tmp],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            status = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "autoupdate", "status", "--project-root", tmp],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(status.stdout)
+            self.assertEqual(payload["update_trigger"], "auto")
+            self.assertTrue(payload["enabled"])
+            disable = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "autoupdate", "disable", "--project-root", tmp],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            disabled_payload = json.loads(disable.stdout)
+            self.assertFalse(disabled_payload["running"])
 
     def test_doctor_outputs_runtime_diagnostics(self) -> None:
         with TemporaryDirectory() as tmp:

@@ -1,6 +1,7 @@
 """Skilgen package."""
 
 from skilgen.agents import fingerprint_project
+from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, stop_auto_update_worker
 from skilgen.delivery import run_delivery
 from skilgen.sdk import (
     activate_project_mcp_connector,
@@ -12,6 +13,7 @@ from skilgen.sdk import (
     detect_skill_sources,
     deliver_project,
     generate_enterprise_skill_source,
+    get_auto_update_status,
     get_job_status,
     ingest_enterprise_skill_source,
     init_project,
@@ -34,7 +36,9 @@ from skilgen.sdk import (
     show_skill_source,
     skill_source_lock,
     skill_source_policy,
+    start_auto_update,
     start_deliver_job,
+    stop_auto_update,
     sync_all_skill_sources,
     sync_skill_source,
     update_project,
@@ -49,6 +53,7 @@ __all__ = [
     "activate_project_mcp_connector",
     "activate_skill_source",
     "analyze_project",
+    "auto_update_status",
     "cancel_job",
     "deactivate_project_mcp_connector",
     "deactivate_skill_source",
@@ -56,6 +61,7 @@ __all__ = [
     "deliver_project",
     "fingerprint_project",
     "generate_enterprise_skill_source",
+    "get_auto_update_status",
     "get_job_status",
     "ingest_enterprise_skill_source",
     "init_project",
@@ -76,10 +82,14 @@ __all__ = [
     "remove_skill_source",
     "resume_job",
     "run_delivery",
+    "ensure_auto_update_worker",
     "show_skill_source",
     "skill_source_lock",
     "skill_source_policy",
+    "start_auto_update",
     "start_deliver_job",
+    "stop_auto_update",
+    "stop_auto_update_worker",
     "sync_all_skill_sources",
     "sync_skill_source",
     "update_project",

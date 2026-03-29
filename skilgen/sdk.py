@@ -20,6 +20,7 @@ from skilgen.api.service import (
     status_payload,
     validate_payload,
 )
+from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, stop_auto_update_worker
 from skilgen.core.config import render_default_config
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.enterprise_skills import (
@@ -59,6 +60,7 @@ def init_project(project_root: str | Path = ".") -> Path:
     config_path = root / "skilgen.yml"
     if not config_path.exists():
         config_path.write_text(render_default_config(), encoding="utf-8")
+    ensure_auto_update_worker(root)
     return config_path
 
 
@@ -147,6 +149,19 @@ def watch_project(
 
 def project_status(project_root: str | Path = ".") -> dict[str, object]:
     return status_payload(Path(project_root).resolve())
+
+
+def start_auto_update(project_root: str | Path = ".", requirements: str | Path | None = None) -> dict[str, object]:
+    resolved_requirements = Path(requirements).resolve() if requirements is not None else None
+    return ensure_auto_update_worker(Path(project_root).resolve(), requirements_path=resolved_requirements)
+
+
+def stop_auto_update(project_root: str | Path = ".") -> dict[str, object]:
+    return stop_auto_update_worker(Path(project_root).resolve())
+
+
+def get_auto_update_status(project_root: str | Path = ".") -> dict[str, object]:
+    return auto_update_status(Path(project_root).resolve())
 
 
 def project_report(project_root: str | Path = ".") -> dict[str, object]:

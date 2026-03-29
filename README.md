@@ -28,6 +28,7 @@
 - ingests enterprise-wide skills from internal repos, docs, and runbooks
 - discovers official MCP connectors from repo signals
 - auto-activates only MCP connectors that pass official-source and OAuth policy checks
+- starts a repo-local auto-update worker so skills stay current as Codex, Claude Code, Cursor, or humans change the code
 - gives Codex, Claude Code, and similar agents one unified operating context
 
 ## What It Does
@@ -88,6 +89,7 @@ On a normal `skilgen deliver` run, it can automatically:
 - ingest configured enterprise skill packs from `skilgen.yml`
 - recommend MCP connectors from real repo evidence
 - auto-activate only connectors that are both officially sourced and OAuth-ready when policy allows
+- keep watching the repo in the background when auto-update is enabled so changed code triggers a refresh without a manual `deliver`
 - surface the final operating context in `AGENTS.md`, `REPORT.md`, and `TRACEABILITY.md`
 
 ## Quick Mental Model
@@ -250,6 +252,8 @@ skilgen init --project-root .
 
 `skilgen init` now writes a provider-neutral `skilgen.yml` by default, so it does not assume OpenAI unless you explicitly want that.
 
+It also enables repo-local auto-update by default. After `init`, Skilgen can keep skills fresh in the background as code changes land in the repo.
+
 If you want provider-specific starter values:
 
 ```bash
@@ -257,6 +261,14 @@ skilgen init --project-root . --provider openai
 skilgen init --project-root . --provider anthropic
 skilgen init --project-root . --provider gemini
 skilgen init --project-root . --provider huggingface
+```
+
+Check the background auto-update worker:
+
+```bash
+skilgen autoupdate status --project-root .
+skilgen autoupdate disable --project-root .
+skilgen autoupdate enable --project-root .
 ```
 
 Analyze a codebase:

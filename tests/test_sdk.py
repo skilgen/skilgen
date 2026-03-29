@@ -23,6 +23,7 @@ from skilgen.sdk import (
     deliver_project,
     generate_enterprise_skill_source,
     export_skill_source_lock,
+    get_auto_update_status,
     get_job_status,
     ingest_enterprise_skill_source,
     import_skill_source_candidates,
@@ -46,6 +47,7 @@ from skilgen.sdk import (
     show_skill_source,
     skill_source_lock,
     start_deliver_job,
+    stop_auto_update,
     sync_all_skill_sources,
     sync_skill_source,
     update_project,
@@ -67,6 +69,7 @@ class SdkTests(unittest.TestCase):
 
             config_path = init_project(root)
             self.assertTrue(config_path.exists())
+            self.assertEqual(get_auto_update_status(root)["update_trigger"], "auto")
 
             analysis = analyze_project(root, requirements)
             self.assertIn("signals", analysis)
@@ -125,6 +128,7 @@ class SdkTests(unittest.TestCase):
             self.assertIn(cancelled["status"], {"completed", "cancelled"})
             resumed = resume_job(job_id, root)
             self.assertIn(resumed.get("error", "ok"), {"resume_not_allowed", "ok"})
+            stop_auto_update(root)
 
     def test_sdk_external_skills_catalog_and_install(self) -> None:
         with TemporaryDirectory() as tmp:

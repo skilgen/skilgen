@@ -10,7 +10,7 @@ DEFAULT_CONFIG = SkilgenConfig(
     exclude_paths=[".git", "__pycache__", ".venv", "node_modules", ".skilgen"],
     domains_override=[],
     skill_depth=2,
-    update_trigger="manual",
+    update_trigger="auto",
     langsmith_project=None,
     model_provider="openai",
     model="gpt-4.1-mini",
@@ -183,7 +183,7 @@ exclude_paths:
   - .skilgen
 domains_override:
 skill_depth: 2
-update_trigger: manual
+update_trigger: auto
 langsmith_project:
 {provider_comment}model_provider: {provider_key or ""}
 model: {model}
