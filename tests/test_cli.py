@@ -65,7 +65,7 @@ class CliTests(unittest.TestCase):
             capture_output=True,
             check=True,
         )
-        self.assertIn("0.3.0", result.stdout)
+        self.assertIn("0.4.0", result.stdout)
 
     def test_analyze_outputs_signal_payload(self) -> None:
         with TemporaryDirectory() as tmp:

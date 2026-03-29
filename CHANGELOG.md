@@ -4,9 +4,13 @@ All notable changes to Skilgen will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
-## [0.2.0] - Unreleased
+## [0.4.0] - Unreleased
 
 ### Added
+- Enterprise skill ingestion and generation workflows
+- Official OAuth-ready MCP connector catalog, recommendations, and activation policy gates
+- Automatic repo-local skill refresh worker enabled through `skilgen init`
+- Improved README onboarding with quick start, repo-local flow, and generated-skill-system examples
 - Deep-Agents-driven dynamic domain graph planning
 - Skill freshness state and selective refresh behavior
 - In-flight run memory and agent decision planning
