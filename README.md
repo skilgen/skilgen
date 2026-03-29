@@ -27,11 +27,33 @@ Install Skilgen:
 python -m pip install skilgen
 ```
 
+Choose a model provider and export its API key:
+
+```bash
+export OPENAI_API_KEY="your_openai_key"
+```
+
+```bash
+export ANTHROPIC_API_KEY="your_anthropic_key"
+```
+
+```bash
+export HUGGINGFACEHUB_API_TOKEN="your_huggingface_token"
+```
+
 Go to your repo and initialize it:
 
 ```bash
 cd your-repo
 skilgen init --project-root .
+```
+
+If you want provider-specific starter config:
+
+```bash
+skilgen init --project-root . --provider openai
+skilgen init --project-root . --provider anthropic
+skilgen init --project-root . --provider huggingface
 ```
 
 Generate the repo-local skill system:
@@ -50,9 +72,10 @@ skilgen doctor --project-root .
 
 That is the core experience:
 1. install Skilgen
-2. run it in a repo
-3. let it create `AGENTS.md`, `skills/`, reports, and `.skilgen/` state
-4. keep coding while Skilgen keeps the skill system current
+2. export your provider key
+3. run it in a repo
+4. let it create `AGENTS.md`, `skills/`, reports, and `.skilgen/` state
+5. keep coding while Skilgen keeps the skill system current
 
 ## Quick Start Flow
 
