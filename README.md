@@ -96,7 +96,7 @@ This is the shape Skilgen creates for a real repo after `skilgen deliver`.
 
 ```mermaid
 flowchart TD
-    A["Repo Code + Optional Requirements"] --> B["Deep Agents + Skilgen Planning"]
+    A["Repo Code + Optional Requirements"] --> B["Skilgen Operating System"]
     B --> C["AGENTS.md"]
     B --> D["skills/MANIFEST.md"]
     B --> E["skills/backend/SKILL.md"]
