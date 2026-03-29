@@ -19,6 +19,17 @@
   Let AI work for you: Skilgen uncovers the deep nuances of your codebase, identifies the strongest implementation patterns, and materializes the right <code>skills/</code> so coding agents can make better decisions from the start.
 </p>
 
+## Feature Highlights
+
+- generates project-native skills from code, requirements, or both
+- builds `AGENTS.md`, `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
+- tracks freshness, memory, and agent load order automatically
+- imports external skill ecosystems from one place
+- ingests enterprise-wide skills from internal repos, docs, and runbooks
+- discovers official MCP connectors from repo signals
+- auto-activates only MCP connectors that pass official-source and OAuth policy checks
+- gives Codex, Claude Code, and similar agents one unified operating context
+
 ## What It Does
 
 Skilgen turns your project into an agent-ready operating system.
@@ -56,6 +67,7 @@ That means agents do not just work faster. They work with better judgment.
 | Requirements document | feature intent, roadmap, starter skills | agents can plan before implementation exists |
 | Codebase + requirements | highest-fidelity operating context | agents align shipped behavior with planned scope |
 | External skill ecosystems | installable, rankable, managed skill packs | agents can pull in trusted skills from one place |
+| Enterprise skills + MCP tools | approved skills and official connectors | agents can work inside enterprise boundaries without unsafe guesswork |
 
 ## What You Get Fast
 
@@ -65,6 +77,18 @@ That means agents do not just work faster. They work with better judgment.
 - `TRACEABILITY.md` for source-to-output reasoning
 - `skills/MANIFEST.md` and `skills/**/SKILL.md` for execution-ready guidance
 - `.skilgen/state/` and `.skilgen/memory/` for freshness and continuity
+
+## What Skilgen Handles Automatically
+
+Skilgen is designed so that a coding agent does not need to figure the environment out from scratch.
+
+On a normal `skilgen deliver` run, it can automatically:
+- inspect the repo and infer the right project skill structure
+- detect external skill ecosystems that fit the repo
+- ingest configured enterprise skill packs from `skilgen.yml`
+- recommend MCP connectors from real repo evidence
+- auto-activate only connectors that are both officially sourced and OAuth-ready when policy allows
+- surface the final operating context in `AGENTS.md`, `REPORT.md`, and `TRACEABILITY.md`
 
 ## Quick Mental Model
 
@@ -93,6 +117,33 @@ MCP connectors in Skilgen are now treated as enterprise integrations, not loose 
 - security guidance around least-privilege scopes, consent boundaries, and token rotation
 
 If a connector does not have a verified official source or does not meet the repo's OAuth policy, Skilgen will not auto-activate it.
+
+### Official MCPs Skilgen Can Manage
+
+Skilgen can now catalog and reason about official MCP sources such as:
+- Atlassian: Jira, Confluence, Compass
+- Slack
+- GitHub Enterprise
+- GitLab
+- Azure and Azure Kubernetes
+- Terraform
+- MongoDB
+- Notion
+- Microsoft Learn
+- Stripe
+- Figma
+- Elasticsearch
+- Sentry
+- Chrome DevTools
+- Playwright
+
+Skilgen also tracks enterprise-relevant connectors like SharePoint, Snowflake, Postgres, and generic Kubernetes sources, but marks them separately when an official MCP source has not been verified yet.
+
+That means Skilgen does more than list connectors. It tells the agent:
+- which connectors are official
+- which connectors are only community-tracked
+- which ones satisfy enterprise OAuth policy
+- which ones are safe to activate automatically
 
 ### Common Enterprise Flows
 
