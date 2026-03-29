@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from skilgen.api.server import run_server
+from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
 from skilgen.api.service import analyze_payload, decision_payload, doctor_payload, preview_payload, report_payload, status_payload, validate_payload
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
@@ -13,6 +14,16 @@ from skilgen.agents.requirements_parser import parse_project_intent, parse_requi
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
+from skilgen.enterprise_skills import (
+    activate_mcp_connector,
+    active_mcp_connectors,
+    connector_catalog,
+    deactivate_mcp_connector,
+    generate_enterprise_skill,
+    ingest_enterprise_skill,
+    list_enterprise_skills,
+    recommend_mcp_connectors,
+)
 from skilgen.external_skills import (
     activate_external_skill,
     active_external_skills,
@@ -79,6 +90,24 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--interval", type=float, default=2.0)
     watch.add_argument("--cycles", type=int, default=0)
     watch.add_argument("--once", action="store_true")
+
+    autoupdate = subparsers.add_parser("autoupdate", help="Manage Skilgen's background skill auto-update worker.")
+    autoupdate_subparsers = autoupdate.add_subparsers(dest="autoupdate_command", required=True)
+
+    autoupdate_enable = autoupdate_subparsers.add_parser("enable", help="Start the repo-local auto-update worker.")
+    autoupdate_enable.add_argument("--project-root", default=".")
+    autoupdate_enable.add_argument("--requirements")
+    autoupdate_enable.add_argument("--interval", type=float, default=2.0)
+
+    autoupdate_status_parser = autoupdate_subparsers.add_parser("status", help="Show the current auto-update worker status.")
+    autoupdate_status_parser.add_argument("--project-root", default=".")
+
+    autoupdate_disable = autoupdate_subparsers.add_parser("disable", help="Stop the repo-local auto-update worker.")
+    autoupdate_disable.add_argument("--project-root", default=".")
+
+    autoupdate_worker = autoupdate_subparsers.add_parser("worker", help=argparse.SUPPRESS)
+    autoupdate_worker.add_argument("--project-root", default=".")
+    autoupdate_worker.add_argument("--interval", type=float, default=2.0)
 
     preview = subparsers.add_parser("preview", help="Preview which generated files would be written without changing the project.")
     preview.add_argument("--requirements")
@@ -168,6 +197,49 @@ def build_parser() -> argparse.ArgumentParser:
     skills_deactivate.add_argument("slug")
     skills_deactivate.add_argument("--project-root", default=".")
 
+    enterprise = subparsers.add_parser("enterprise", help="Ingest and generate enterprise-wide skill packs for coding agents.")
+    enterprise_subparsers = enterprise.add_subparsers(dest="enterprise_command", required=True)
+
+    enterprise_list = enterprise_subparsers.add_parser("list", help="List enterprise skill packs installed for this project.")
+    enterprise_list.add_argument("--project-root", default=".")
+
+    enterprise_ingest = enterprise_subparsers.add_parser("ingest", help="Ingest an existing enterprise skill pack from a local path or git repo.")
+    enterprise_ingest.add_argument("--project-root", default=".")
+    enterprise_ingest.add_argument("--name", required=True)
+    enterprise_ingest.add_argument("--path")
+    enterprise_ingest.add_argument("--git-url")
+    enterprise_ingest.add_argument("--ref")
+    enterprise_ingest.add_argument("--kind", default="enterprise")
+    enterprise_ingest.add_argument("--activate", action=argparse.BooleanOptionalAction, default=None)
+
+    enterprise_generate = enterprise_subparsers.add_parser("generate", help="Generate an enterprise skill from docs, code, or runbooks.")
+    enterprise_generate.add_argument("--project-root", default=".")
+    enterprise_generate.add_argument("--name", required=True)
+    enterprise_generate.add_argument("--kind", default="domain")
+    enterprise_generate.add_argument("--source-path", action="append", required=True)
+    enterprise_generate.add_argument("--activate", action=argparse.BooleanOptionalAction, default=True)
+
+    connectors = subparsers.add_parser("connectors", help="Discover and manage approved MCP connector capabilities.")
+    connectors_subparsers = connectors.add_subparsers(dest="connectors_command", required=True)
+
+    connectors_list = connectors_subparsers.add_parser("list", help="List supported MCP connectors.")
+    connectors_list.add_argument("--system")
+    connectors_list.add_argument("--search")
+
+    connectors_recommend = connectors_subparsers.add_parser("recommend", help="Recommend MCP connectors for the current project.")
+    connectors_recommend.add_argument("--project-root", default=".")
+
+    connectors_active = connectors_subparsers.add_parser("active", help="List active MCP connectors for the current project.")
+    connectors_active.add_argument("--project-root", default=".")
+
+    connectors_activate = connectors_subparsers.add_parser("activate", help="Activate an MCP connector for this project.")
+    connectors_activate.add_argument("slug")
+    connectors_activate.add_argument("--project-root", default=".")
+
+    connectors_deactivate = connectors_subparsers.add_parser("deactivate", help="Deactivate an MCP connector for this project.")
+    connectors_deactivate.add_argument("slug")
+    connectors_deactivate.add_argument("--project-root", default=".")
+
     intent = subparsers.add_parser("intent", help="Parse a requirements file into a structured project intent.")
     intent.add_argument("--requirements", required=True)
     features = subparsers.add_parser("features", help="Extract a feature inventory from requirements and project context.")
@@ -204,8 +276,28 @@ def main() -> None:
         config_path = project_root / "skilgen.yml"
         if not config_path.exists():
             config_path.write_text(render_default_config(args.provider), encoding="utf-8")
-        print(json.dumps({"config_path": str(config_path)}, indent=2))
+        worker = ensure_auto_update_worker(project_root)
+        print(json.dumps({"config_path": str(config_path), "auto_update": worker}, indent=2))
         return
+    if args.command == "autoupdate":
+        root = Path(args.project_root).resolve()
+        if args.autoupdate_command == "enable":
+            payload = ensure_auto_update_worker(
+                root,
+                requirements_path=Path(args.requirements).resolve() if args.requirements else None,
+                interval_seconds=args.interval,
+            )
+            print(json.dumps(payload, indent=2))
+            return
+        if args.autoupdate_command == "status":
+            print(json.dumps(auto_update_status(root), indent=2))
+            return
+        if args.autoupdate_command == "disable":
+            print(json.dumps(stop_auto_update_worker(root), indent=2))
+            return
+        if args.autoupdate_command == "worker":
+            run_auto_update_worker(root, interval_seconds=args.interval)
+            return
     if args.command == "fingerprint":
         result = fingerprint_project(Path(args.project_root).resolve())
         print(
@@ -314,6 +406,70 @@ def main() -> None:
             emit_progress(f"Deactivating the external skill source '{args.slug}' for agent loading.")
             print(json.dumps({"deactivated_skill": deactivate_external_skill(project_root=root, slug=args.slug)}, indent=2))
             return
+    if args.command == "enterprise":
+        root = Path(args.project_root).resolve()
+        if args.enterprise_command == "list":
+            emit_progress("Loading enterprise skill packs installed for this project.")
+            print(json.dumps({"skills": list_enterprise_skills(root)}, indent=2))
+            return
+        if args.enterprise_command == "ingest":
+            emit_progress("Ingesting an existing enterprise skill pack into .skilgen/enterprise-skills.")
+            print(
+                json.dumps(
+                    {
+                        "enterprise_skill": ingest_enterprise_skill(
+                            root,
+                            name=args.name,
+                            path=args.path,
+                            git_url=args.git_url,
+                            ref=args.ref,
+                            activate=args.activate,
+                            kind=args.kind,
+                        )
+                    },
+                    indent=2,
+                )
+            )
+            return
+        if args.enterprise_command == "generate":
+            emit_progress("Generating a reusable enterprise skill from the provided docs, code, or runbooks.")
+            print(
+                json.dumps(
+                    {
+                        "enterprise_skill": generate_enterprise_skill(
+                            root,
+                            name=args.name,
+                            source_paths=args.source_path,
+                            kind=args.kind,
+                            activate=args.activate,
+                        )
+                    },
+                    indent=2,
+                )
+            )
+            return
+    if args.command == "connectors":
+        root = Path(args.project_root).resolve() if hasattr(args, "project_root") else Path(".").resolve()
+        if args.connectors_command == "list":
+            emit_progress("Loading supported MCP connectors for enterprise coding workflows.")
+            print(json.dumps(connector_catalog(system=args.system, search=args.search), indent=2))
+            return
+        if args.connectors_command == "recommend":
+            emit_progress("Scanning the repo for enterprise systems and recommending useful MCP connectors.")
+            print(json.dumps(recommend_mcp_connectors(root), indent=2))
+            return
+        if args.connectors_command == "active":
+            emit_progress("Listing active MCP connectors configured for this project.")
+            print(json.dumps({"connectors": active_mcp_connectors(root)}, indent=2))
+            return
+        if args.connectors_command == "activate":
+            emit_progress(f"Activating the MCP connector '{args.slug}' for this project.")
+            print(json.dumps({"connector": activate_mcp_connector(root, args.slug)}, indent=2))
+            return
+        if args.connectors_command == "deactivate":
+            emit_progress(f"Deactivating the MCP connector '{args.slug}' for this project.")
+            print(json.dumps({"connector": deactivate_mcp_connector(root, args.slug)}, indent=2))
+            return
     if args.command == "intent":
         result = parse_requirements_file(Path(args.requirements).resolve())
         print(
@@ -416,6 +572,7 @@ def main() -> None:
         return
 
     root = Path(args.project_root).resolve()
+    ensure_auto_update_worker(root, requirements_path=Path(args.requirements).resolve() if args.requirements else None)
     diagnostics = runtime_diagnostics(root)
     emit_progress(
         f"Starting delivery with the {current_runtime_mode(root)} runtime. This may take a bit while Skilgen builds project context and generates the final skill tree."

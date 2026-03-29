@@ -10,7 +10,7 @@ DEFAULT_CONFIG = SkilgenConfig(
     exclude_paths=[".git", "__pycache__", ".venv", "node_modules", ".skilgen"],
     domains_override=[],
     skill_depth=2,
-    update_trigger="manual",
+    update_trigger="auto",
     langsmith_project=None,
     model_provider="openai",
     model="gpt-4.1-mini",
@@ -25,6 +25,13 @@ DEFAULT_CONFIG = SkilgenConfig(
     external_skills_denylist=[],
     external_skills_auto_activate=True,
     external_skills_policy_mode="permissive",
+    auto_activate_mcp_connectors=True,
+    mcp_connectors_require_official_source=True,
+    mcp_connectors_require_oauth=True,
+    mcp_connector_allowlist=[],
+    mcp_connector_denylist=[],
+    enterprise_skill_paths=[],
+    enterprise_skill_git_urls=[],
 )
 
 
@@ -85,6 +92,13 @@ def load_config(project_root: Path) -> SkilgenConfig:
         "external_skills_denylist": list(DEFAULT_CONFIG.external_skills_denylist),
         "external_skills_auto_activate": DEFAULT_CONFIG.external_skills_auto_activate,
         "external_skills_policy_mode": DEFAULT_CONFIG.external_skills_policy_mode,
+        "auto_activate_mcp_connectors": DEFAULT_CONFIG.auto_activate_mcp_connectors,
+        "mcp_connectors_require_official_source": DEFAULT_CONFIG.mcp_connectors_require_official_source,
+        "mcp_connectors_require_oauth": DEFAULT_CONFIG.mcp_connectors_require_oauth,
+        "mcp_connector_allowlist": list(DEFAULT_CONFIG.mcp_connector_allowlist),
+        "mcp_connector_denylist": list(DEFAULT_CONFIG.mcp_connector_denylist),
+        "enterprise_skill_paths": list(DEFAULT_CONFIG.enterprise_skill_paths),
+        "enterprise_skill_git_urls": list(DEFAULT_CONFIG.enterprise_skill_git_urls),
     }
     current_list: str | None = None
 
@@ -131,6 +145,15 @@ def load_config(project_root: Path) -> SkilgenConfig:
         external_skills_denylist=list(data.get("external_skills_denylist", DEFAULT_CONFIG.external_skills_denylist)),
         external_skills_auto_activate=bool(data.get("external_skills_auto_activate", DEFAULT_CONFIG.external_skills_auto_activate)),
         external_skills_policy_mode=str(data.get("external_skills_policy_mode", DEFAULT_CONFIG.external_skills_policy_mode)),
+        auto_activate_mcp_connectors=bool(data.get("auto_activate_mcp_connectors", DEFAULT_CONFIG.auto_activate_mcp_connectors)),
+        mcp_connectors_require_official_source=bool(
+            data.get("mcp_connectors_require_official_source", DEFAULT_CONFIG.mcp_connectors_require_official_source)
+        ),
+        mcp_connectors_require_oauth=bool(data.get("mcp_connectors_require_oauth", DEFAULT_CONFIG.mcp_connectors_require_oauth)),
+        mcp_connector_allowlist=list(data.get("mcp_connector_allowlist", DEFAULT_CONFIG.mcp_connector_allowlist)),
+        mcp_connector_denylist=list(data.get("mcp_connector_denylist", DEFAULT_CONFIG.mcp_connector_denylist)),
+        enterprise_skill_paths=list(data.get("enterprise_skill_paths", DEFAULT_CONFIG.enterprise_skill_paths)),
+        enterprise_skill_git_urls=list(data.get("enterprise_skill_git_urls", DEFAULT_CONFIG.enterprise_skill_git_urls)),
     )
 
 
@@ -160,7 +183,7 @@ exclude_paths:
   - .skilgen
 domains_override:
 skill_depth: 2
-update_trigger: manual
+update_trigger: auto
 langsmith_project:
 {provider_comment}model_provider: {provider_key or ""}
 model: {model}
@@ -179,4 +202,11 @@ external_skills_allowlist:
 external_skills_denylist:
 external_skills_auto_activate: true
 external_skills_policy_mode: permissive
+auto_activate_mcp_connectors: true
+mcp_connectors_require_official_source: true
+mcp_connectors_require_oauth: true
+mcp_connector_allowlist:
+mcp_connector_denylist:
+enterprise_skill_paths:
+enterprise_skill_git_urls:
 """

@@ -21,6 +21,13 @@ class CliTests(unittest.TestCase):
             config_text = config_path.read_text(encoding="utf-8")
             self.assertIn("model_provider:", config_text)
             self.assertNotIn("model_provider: openai", config_text)
+            self.assertEqual(payload["auto_update"]["update_trigger"], "auto")
+            subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "autoupdate", "disable", "--project-root", tmp],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
 
     def test_init_can_scaffold_provider_specific_defaults(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -44,6 +51,12 @@ class CliTests(unittest.TestCase):
             self.assertIn("model_provider: anthropic", config_text)
             self.assertIn("model: claude-sonnet-4-5", config_text)
             self.assertIn("api_key_env: ANTHROPIC_API_KEY", config_text)
+            subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "autoupdate", "disable", "--project-root", tmp],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
 
     def test_version_outputs_package_version(self) -> None:
         result = subprocess.run(
@@ -52,7 +65,7 @@ class CliTests(unittest.TestCase):
             capture_output=True,
             check=True,
         )
-        self.assertIn("0.3.0", result.stdout)
+        self.assertIn("0.4.0", result.stdout)
 
     def test_analyze_outputs_signal_payload(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -238,6 +251,100 @@ class CliTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertTrue(payload["generated_files"])
             self.assertTrue((root / "FEATURES.md").exists())
+
+    def test_enterprise_ingest_and_connector_recommend(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "enterprise-pack"
+            source.mkdir()
+            (source / "README.md").write_text("# Platform Skill\n\nShared platform guidance.\n", encoding="utf-8")
+            ingest = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "enterprise",
+                    "ingest",
+                    "--project-root",
+                    str(root),
+                    "--name",
+                    "platform skill",
+                    "--path",
+                    str(source),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            ingest_payload = json.loads(ingest.stdout)
+            self.assertEqual(ingest_payload["enterprise_skill"]["slug"], "platform-skill")
+
+            (root / "ops.md").write_text("Use Jira and Confluence for delivery. Terraform runs production infra.\n", encoding="utf-8")
+            connectors = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "connectors",
+                    "recommend",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            connector_payload = json.loads(connectors.stdout)
+            jira = connector_payload["connectors"][0]
+            self.assertEqual(jira["slug"], "jira")
+            self.assertTrue(jira["official_source_url"])
+            self.assertEqual(jira["auth_scheme"], "oauth2")
+
+    def test_connectors_activate_rejects_unverified_connector(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "connectors",
+                    "activate",
+                    "kubernetes",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("official source", result.stderr.lower())
+
+    def test_autoupdate_status_and_disable(self) -> None:
+        with TemporaryDirectory() as tmp:
+            subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "init", "--project-root", tmp],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            status = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "autoupdate", "status", "--project-root", tmp],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(status.stdout)
+            self.assertEqual(payload["update_trigger"], "auto")
+            self.assertTrue(payload["enabled"])
+            disable = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "autoupdate", "disable", "--project-root", tmp],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            disabled_payload = json.loads(disable.stdout)
+            self.assertFalse(disabled_payload["running"])
 
     def test_doctor_outputs_runtime_diagnostics(self) -> None:
         with TemporaryDirectory() as tmp:

@@ -5,7 +5,7 @@
 <h1 align="center">Skilgen</h1>
 
 <p align="center">
-  Turn a codebase, a requirements document, or both into a living skills system for AI coding agents.
+  Give coding agents a living skill system that stays current as your repo changes.
 </p>
 
 <p align="center">
@@ -16,14 +16,177 @@
 </p>
 
 <p align="center">
-  Let AI work for you: Skilgen uncovers the deep nuances of your codebase, identifies the strongest implementation patterns, and materializes the right <code>skills/</code> so coding agents can make better decisions from the start.
+  Skilgen reads your codebase, builds the right skills and agent docs, keeps them updated automatically, and layers in trusted external, enterprise, and official MCP capabilities so Codex, Claude Code, Cursor, and other agents can work with real context instead of guesswork.
 </p>
+
+## Quick Start
+
+Install Skilgen:
+
+```bash
+python -m pip install skilgen
+```
+
+Choose a model provider and export its API key:
+
+```bash
+export OPENAI_API_KEY="your_openai_key"
+```
+
+```bash
+export ANTHROPIC_API_KEY="your_anthropic_key"
+```
+
+```bash
+export HUGGINGFACEHUB_API_TOKEN="your_huggingface_token"
+```
+
+Go to your repo and initialize it:
+
+```bash
+cd your-repo
+skilgen init --project-root .
+```
+
+If you want provider-specific starter config:
+
+```bash
+skilgen init --project-root . --provider openai
+skilgen init --project-root . --provider anthropic
+skilgen init --project-root . --provider huggingface
+```
+
+Generate the repo-local skill system:
+
+```bash
+skilgen deliver --project-root .
+```
+
+Check what Skilgen is doing:
+
+```bash
+skilgen status --project-root .
+skilgen decide --project-root .
+skilgen doctor --project-root .
+```
+
+That is the core experience:
+1. install Skilgen
+2. export your provider key
+3. run it in a repo
+4. let it create `AGENTS.md`, `skills/`, reports, and `.skilgen/` state
+5. keep coding while Skilgen keeps the skill system current
+
+## Quick Start Flow
+
+```mermaid
+flowchart TD
+    A["pip install skilgen"] --> B["Run skilgen init in a repo"]
+    B --> C["Run skilgen deliver once"]
+    C --> D["Skilgen writes AGENTS.md, skills/, reports, and .skilgen state"]
+    D --> E["Codex / Claude Code / Cursor read the repo-local files"]
+    E --> F["Developer or agent changes code"]
+    F --> G["Skilgen detects changes and refreshes skills automatically"]
+    G --> D
+```
+
+## What The Generated Skill System Looks Like
+
+This is the shape Skilgen creates for a real repo after `skilgen deliver`.
+
+```mermaid
+flowchart TD
+    A["Repo Code + Optional Requirements"] --> B["Skilgen Operating System"]
+    B --> C["AGENTS.md"]
+    B --> D["skills/MANIFEST.md"]
+    B --> E["Domain-specific skills/**/SKILL.md"]
+    B --> F["FEATURES.md / REPORT.md / TRACEABILITY.md"]
+    B --> G[".skilgen/state + memory"]
+    B --> H["FEATURES.md"]
+    B --> I["REPORT.md"]
+    B --> J["TRACEABILITY.md"]
+    B --> K["Ranked external skills + enterprise skills + official MCPs"]
+    L["External Skills"] --> B
+    M["Enterprise Skills"] --> B
+    N["Official MCP Connectors"] --> B
+```
+
+From a real OpenAI-backed run, Skilgen generated:
+- `AGENTS.md` with inferred domains, start order, external skill packs, policy, and decision memory
+- a dynamic `skills/` tree based on the actual repo shape and inferred domains
+- domain-specific `skills/**/SKILL.md` files for whatever the codebase needs
+- `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
+- `.skilgen/` state and memory for continuity and refresh decisions
+
+Depending on the repo, those generated domains might include backend, frontend, data, platform, design-system, operations, roadmap, or other repo-specific areas inferred by Skilgen.
+
+Example of what the generated `AGENTS.md` contains:
+
+| Section | What the agent learns |
+| --- | --- |
+| Project Overview | whether the run came from code, requirements, or both |
+| Inferred Domains | backend, frontend, roadmap, and other detected domains |
+| Skill Entry Points | exactly which `SKILL.md` files to read first |
+| External Skill Packs | which trusted external skills were installed |
+| Preferred External Skill Packs | which packs to load first and why |
+| Enterprise Skill Packs | which company-wide skills are active |
+| MCP Connectors | which approved official connectors are active |
+| Recommended Start Order | the exact loading order for skills and memory |
+| Execution Rules | the repo-specific operating contract for the agent |
+
+In practice, that means the agent does not guess.
+Skilgen gives it a real operating system built from the repo, then keeps that system updated dynamically.
+
+## Skilgen As The Agent Operating System
+
+Skilgen is the operating layer that prepares your repo for AI coding agents and keeps that context fresh.
+
+Instead of asking agents to rediscover your architecture, patterns, tools, and standards every session, Skilgen:
+- builds the right project skills from your code, requirements, or both
+- generates the docs agents actually need to work well
+- watches for repo changes and refreshes skills automatically
+- brings in external and enterprise skill packs when they matter
+- connects agents to approved official MCP capabilities safely
+
+That means agents do not have to manage their own skills manually.
+Skilgen handles that system for them.
+
+## How It Fits With Codex And Claude Code
+
+Skilgen is not a replacement for `~/.codex`.
+
+Instead, Skilgen prepares the **repository itself** so Codex, Claude Code, Cursor, and similar agents can work with the right local context.
+
+There are two layers:
+
+- `~/.codex`
+  - your global Codex home, personal defaults, and Codex-specific setup
+- `your-repo/AGENTS.md`, `your-repo/skills/`, and `your-repo/.skilgen/`
+  - the repo-local skill system that Skilgen generates and keeps updated
+
+So the workflow is simple:
+1. install Skilgen in your Python environment
+2. run it inside a repository
+3. let Skilgen generate and refresh repo-local skills and docs
+4. let your coding agent use those repo-local files while it works
+
+## Core Capabilities
+
+- generates project-native skills from code, requirements, or both
+- builds `AGENTS.md`, `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
+- tracks freshness, memory, and agent load order automatically
+- keeps skills current automatically as Codex, Claude Code, Cursor, or humans change the repo
+- imports external skill ecosystems from one place
+- ingests enterprise-wide skills from internal repos, docs, and runbooks
+- discovers official MCP connectors from repo signals
+- auto-activates only MCP connectors that pass official-source and OAuth policy checks
+- gives Codex, Claude Code, and similar agents one unified operating context
 
 ## What It Does
 
-Skilgen turns your project into an agent-ready operating system.
+Skilgen turns your repo into a self-maintaining skills system for coding agents.
 
-Instead of starting every AI session from scratch, Skilgen reads your codebase, your requirements, or both, then generates the context, memory, and reusable skills that coding agents need to work well immediately.
+It reads your codebase, your requirements, or both, then generates the context, memory, reusable skills, and approved capability layer that agents need to work well immediately.
 
 In one pass, Skilgen can:
 - understand the real shape of your repo
@@ -31,21 +194,23 @@ In one pass, Skilgen can:
 - generate `AGENTS.md`, `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
 - generate a reusable `skills/` tree for backend, frontend, roadmap, and dynamically inferred domains
 - decide when skills should refresh and what an agent should load first
+- keep those skills refreshed automatically after setup
 - discover, install, rank, and manage external skill ecosystems through one interface
+- ingest enterprise-wide skill packs and recommend MCP connectors for real operating systems like Jira, Confluence, Slack, Datadog, Sentry, and Kubernetes
 
 ## Why It Matters
 
-Most AI workflows lose time on re-explaining context.
+Most AI workflows break down because context gets stale fast.
 
-Skilgen makes that context reusable.
+Skilgen keeps that context reusable and current.
 
 It gives agents:
 - project-specific guidance instead of generic prompting
 - stable memory and refresh signals instead of stale assumptions
 - stronger execution patterns instead of ad-hoc improvisation
-- a one-stop shop for both generated repo skills and external skill ecosystems
+- a one-stop shop for generated repo skills, external skills, enterprise skills, and official MCP connectors
 
-That means agents do not just work faster. They work with better judgment.
+That means agents do not just work faster. They work with better judgment, safer tooling, and less manual setup.
 
 ## At A Glance
 
@@ -55,9 +220,12 @@ That means agents do not just work faster. They work with better judgment.
 | Requirements document | feature intent, roadmap, starter skills | agents can plan before implementation exists |
 | Codebase + requirements | highest-fidelity operating context | agents align shipped behavior with planned scope |
 | External skill ecosystems | installable, rankable, managed skill packs | agents can pull in trusted skills from one place |
+| Enterprise skills + MCP tools | approved skills and official connectors | agents can work inside enterprise boundaries without unsafe guesswork |
 
 ## What You Get Fast
 
+- repo-local agent context that Codex and Claude Code can use immediately
+- automatic skill upkeep after installation
 - `AGENTS.md` for the top-level agent contract
 - `FEATURES.md` for product behavior
 - `REPORT.md` for project-level understanding
@@ -65,12 +233,115 @@ That means agents do not just work faster. They work with better judgment.
 - `skills/MANIFEST.md` and `skills/**/SKILL.md` for execution-ready guidance
 - `.skilgen/state/` and `.skilgen/memory/` for freshness and continuity
 
+## What Skilgen Handles Automatically
+
+Skilgen is designed so that a coding agent does not need to figure the environment out from scratch.
+
+Once installed and initialized, Skilgen can automatically:
+- inspect the repo and infer the right project skill structure
+- detect external skill ecosystems that fit the repo
+- ingest configured enterprise skill packs from `skilgen.yml`
+- recommend MCP connectors from real repo evidence
+- auto-activate only connectors that are both officially sourced and OAuth-ready when policy allows
+- keep watching the repo in the background so changed code triggers a refresh without a manual `deliver`
+- surface the final operating context in `AGENTS.md`, `REPORT.md`, and `TRACEABILITY.md`
+
+For most teams, the desired experience is:
+
+1. install Skilgen
+2. run `skilgen init`
+3. keep coding
+4. let Skilgen keep agent skills up to date
+
 ## Quick Mental Model
 
 - Skilgen reads your project
-- Skilgen materializes the right skills and docs
+- Skilgen materializes the right skills, docs, and capability context
+- Skilgen keeps that context fresh as the repo changes
 - agents load those skills instead of guessing
 - external ecosystems can also be installed and managed through Skilgen
+- enterprise skills and approved MCP connectors can be layered in alongside repo-native skills
+
+## Enterprise Skills And MCP Connectors
+
+Skilgen can now do three things at once:
+
+- generate project-native skills from your repo and requirements
+- ingest enterprise-wide skills that already exist in shared repos, runbooks, or internal docs
+- recommend and activate approved MCP connectors so coding agents can operate through enterprise systems safely
+
+That means Codex, Claude Code, and similar agents can start with:
+- repo-specific implementation context
+- organization-wide standards and playbooks
+- approved tool access for systems like Jira, Confluence, Slack, Datadog, Sentry, GitHub Enterprise, Kubernetes, Terraform, Snowflake, Postgres, and Okta
+
+MCP connectors in Skilgen are now treated as enterprise integrations, not loose suggestions. Each connector carries:
+- an official source URL when Skilgen has a vendor-backed MCP reference
+- an auth scheme, with OAuth2 required by default for enterprise-ready activation
+- security guidance around least-privilege scopes, consent boundaries, and token rotation
+
+If a connector does not have a verified official source or does not meet the repo's OAuth policy, Skilgen will not auto-activate it.
+
+### Official MCPs Skilgen Can Manage
+
+Skilgen can now catalog and reason about official MCP sources such as:
+- Atlassian: Jira, Confluence, Compass
+- Slack
+- GitHub Enterprise
+- GitLab
+- Azure and Azure Kubernetes
+- Terraform
+- MongoDB
+- Notion
+- Microsoft Learn
+- Stripe
+- Figma
+- Elasticsearch
+- Sentry
+- Chrome DevTools
+- Playwright
+
+Skilgen also tracks enterprise-relevant connectors like SharePoint, Snowflake, Postgres, and generic Kubernetes sources, but marks them separately when an official MCP source has not been verified yet.
+
+That means Skilgen does more than list connectors. It tells the agent:
+- which connectors are official
+- which connectors are only community-tracked
+- which ones satisfy enterprise OAuth policy
+- which ones are safe to activate automatically
+
+### Common Enterprise Flows
+
+| Goal | Command | Outcome |
+| --- | --- | --- |
+| Ingest an existing enterprise skill pack | `skilgen enterprise ingest --project-root . --name platform-engineering --path ./internal-skills/platform` | Adds a reusable enterprise skill into `.skilgen/enterprise-skills/` |
+| Generate an enterprise skill from runbooks or docs | `skilgen enterprise generate --project-root . --name incident-response --source-path ./runbooks/incident.md --kind runbook` | Creates a new enterprise skill pack from internal source material |
+| See which enterprise connectors fit the repo | `skilgen connectors recommend --project-root .` | Suggests MCP connectors based on repo signals and config policy |
+| Activate an approved connector | `skilgen connectors activate jira --project-root .` | Marks the connector active so agents can use it as approved capability context |
+
+### Configuring Enterprise Sources
+
+Add shared enterprise skill locations directly to `skilgen.yml` so normal `deliver` runs can ingest them automatically:
+
+```yaml
+enterprise_skill_paths:
+  - ./internal-skills/platform
+  - ./runbooks/shared-guidance
+enterprise_skill_git_urls:
+  - git@github.company.com:ai/platform-skills.git
+auto_activate_mcp_connectors: true
+mcp_connectors_require_official_source: true
+mcp_connectors_require_oauth: true
+mcp_connector_allowlist:
+  - jira
+  - confluence
+  - kubernetes
+```
+
+When these are configured, `skilgen deliver` will:
+- ingest configured enterprise skills
+- recommend MCP connectors from repo evidence
+- activate only connectors that satisfy the official-source and OAuth policy gates
+- surface all of that in `AGENTS.md`, `REPORT.md`, and `TRACEABILITY.md`
 
 ## What Skilgen Understands
 
@@ -143,6 +414,8 @@ skilgen init --project-root .
 
 `skilgen init` now writes a provider-neutral `skilgen.yml` by default, so it does not assume OpenAI unless you explicitly want that.
 
+It also enables repo-local auto-update by default. After `init`, Skilgen can keep skills fresh in the background as code changes land in the repo.
+
 If you want provider-specific starter values:
 
 ```bash
@@ -150,6 +423,14 @@ skilgen init --project-root . --provider openai
 skilgen init --project-root . --provider anthropic
 skilgen init --project-root . --provider gemini
 skilgen init --project-root . --provider huggingface
+```
+
+Check the background auto-update worker:
+
+```bash
+skilgen autoupdate status --project-root .
+skilgen autoupdate disable --project-root .
+skilgen autoupdate enable --project-root .
 ```
 
 Analyze a codebase:
@@ -216,6 +497,19 @@ skilgen skills import awesome-agent-skills-voltagent --project-root . --limit 5
 skilgen skills sync anthropic-skills --project-root .
 skilgen skills remove anthropic-skills --project-root .
 skilgen skills install --git-url https://github.com/example/skills.git --name my-skill-pack --project-root .
+```
+
+Manage enterprise-wide skills and MCP connectors through Skilgen:
+
+```bash
+skilgen enterprise list --project-root .
+skilgen enterprise ingest --project-root . --name platform-engineering --path ./internal-skills/platform
+skilgen enterprise generate --project-root . --name oncall-playbook --source-path ./runbooks/oncall.md --kind runbook
+skilgen connectors list --search jira
+skilgen connectors recommend --project-root .
+skilgen connectors active --project-root .
+skilgen connectors activate jira --project-root .
+skilgen connectors deactivate jira --project-root .
 ```
 
 When Skilgen runs on an existing repository, it also looks for strong ecosystem hints such as:

@@ -7,10 +7,18 @@ from urllib.parse import parse_qs, urlparse
 from skilgen.api.service import (
     analyze_payload,
     cancel_job_payload,
+    connectors_activate_payload,
+    connectors_active_payload,
+    connectors_deactivate_payload,
+    connectors_list_payload,
+    connectors_recommend_payload,
     decision_payload,
     create_deliver_job,
     deliver_payload,
     doctor_payload,
+    enterprise_generate_payload,
+    enterprise_ingest_payload,
+    enterprise_list_payload,
     features_payload,
     fingerprint_payload,
     health_payload,
@@ -103,6 +111,18 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/skills/rank":
                 _json_response(self, 200, skills_rank_payload(query.get("project_root", ["."])[0]))
+                return
+            if parsed.path == "/enterprise":
+                _json_response(self, 200, enterprise_list_payload(query.get("project_root", ["."])[0]))
+                return
+            if parsed.path == "/connectors":
+                _json_response(self, 200, connectors_list_payload(query.get("system", [None])[0], query.get("search", [None])[0]))
+                return
+            if parsed.path == "/connectors/recommend":
+                _json_response(self, 200, connectors_recommend_payload(query.get("project_root", ["."])[0]))
+                return
+            if parsed.path == "/connectors/active":
+                _json_response(self, 200, connectors_active_payload(query.get("project_root", ["."])[0]))
                 return
             if parsed.path.startswith("/skills/"):
                 _json_response(self, 200, skills_show_payload(parsed.path.split("/")[-1], query.get("project_root", ["."])[0]))
@@ -233,6 +253,40 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                 return
             if self.path == "/skills/deactivate":
                 _json_response(self, 200, skills_deactivate_payload(str(data.get("project_root", ".")), str(data["slug"])))
+                return
+            if self.path == "/enterprise/ingest":
+                _json_response(
+                    self,
+                    200,
+                    enterprise_ingest_payload(
+                        str(data.get("project_root", ".")),
+                        name=str(data["name"]),
+                        path=str(data["path"]) if "path" in data and data.get("path") is not None else None,
+                        git_url=str(data["git_url"]) if "git_url" in data and data.get("git_url") is not None else None,
+                        ref=str(data["ref"]) if "ref" in data and data.get("ref") is not None else None,
+                        activate=data.get("activate") if isinstance(data.get("activate"), bool) else None,
+                        kind=str(data.get("kind", "enterprise")),
+                    ),
+                )
+                return
+            if self.path == "/enterprise/generate":
+                _json_response(
+                    self,
+                    200,
+                    enterprise_generate_payload(
+                        str(data.get("project_root", ".")),
+                        name=str(data["name"]),
+                        source_paths=[str(item) for item in data.get("source_paths", [])],
+                        kind=str(data.get("kind", "domain")),
+                        activate=bool(data.get("activate", True)),
+                    ),
+                )
+                return
+            if self.path == "/connectors/activate":
+                _json_response(self, 200, connectors_activate_payload(str(data.get("project_root", ".")), str(data["slug"])))
+                return
+            if self.path == "/connectors/deactivate":
+                _json_response(self, 200, connectors_deactivate_payload(str(data.get("project_root", ".")), str(data["slug"])))
                 return
             if self.path == "/jobs/deliver":
                 _json_response(self, 202, create_deliver_job(str(data["requirements"]) if "requirements" in data else None, str(data.get("project_root", "."))))

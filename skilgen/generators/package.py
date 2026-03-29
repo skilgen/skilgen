@@ -9,6 +9,7 @@ from skilgen.agents.requirements_parser import parse_project_intent
 from skilgen.deep_agents_core import run_deep_text
 from skilgen.core.config import render_default_config
 from skilgen.core.context import build_codebase_context
+from skilgen.enterprise_skills import active_enterprise_skills, active_mcp_connectors, recommend_mcp_connectors
 from skilgen.external_skills import active_external_skills, detect_external_skill_sources, external_skill_policy, installed_external_skills, ranked_external_skills
 from skilgen.core.models import RequirementsContext
 
@@ -100,6 +101,9 @@ def _render_traceability_report_native(context: RequirementsContext, project_roo
     codebase_context = build_codebase_context(project_root, context)
     installed_skill_packs = installed_external_skills(project_root)
     ranked_skill_packs = ranked_external_skills(project_root).get("skills", [])
+    enterprise_skill_packs = active_enterprise_skills(project_root)
+    active_connectors = active_mcp_connectors(project_root)
+    recommended_connectors = recommend_mcp_connectors(project_root).get("connectors", [])
     policy = external_skill_policy(project_root)
     evidence_map = {
         "backend": [*signals.backend_routes[:3], *signals.services[:2], *signals.data_models[:2], *signals.auth_files[:1]],
@@ -187,6 +191,42 @@ def _render_traceability_report_native(context: RequirementsContext, project_roo
         lines.append("### Preferred External Packs")
         for entry in ranked_skill_packs[:5]:
             lines.append(f"- `{entry['slug']}`: {entry.get('priority_reason', 'Ranked by trust and repo fit.')}")
+    lines.append("")
+    lines.append("## Enterprise Skill Traceability")
+    if enterprise_skill_packs:
+        for entry in enterprise_skill_packs[:8]:
+            lines.append(f"- Enterprise skill `{entry.get('slug', 'unknown')}` from `{entry.get('install_path', 'unknown')}`")
+            lines.append(f"  Kind: `{entry.get('kind', 'enterprise')}`")
+            if entry.get("readme"):
+                lines.append(f"  Summary: {entry['readme'].get('summary', 'No summary available.')}")
+    else:
+        lines.append("- No active enterprise skills were installed for this run.")
+    lines.append("")
+    lines.append("## MCP Connector Traceability")
+    if active_connectors:
+        for entry in active_connectors[:8]:
+            lines.append(f"- Active connector `{entry.get('slug', 'unknown')}` ({entry.get('system', 'unknown')}): {entry.get('description', '')}")
+            lines.append(
+                f"  Source status: `{entry.get('source_status', 'unknown')}`; auth: `{entry.get('auth_scheme', 'unknown')}`; "
+                f"official source verified: `{entry.get('official_source_verified', False)}`"
+            )
+            authorization = entry.get("authorization", {})
+            if authorization:
+                lines.append(f"  Authorization status: `{authorization.get('status', 'unknown')}`")
+            if entry.get("official_source_url"):
+                lines.append(f"  Official source: `{entry['official_source_url']}`")
+            elif entry.get("recommended_source_url"):
+                lines.append(f"  Recommended source: `{entry['recommended_source_url']}`")
+    else:
+        lines.append("- No MCP connectors are currently active.")
+    if recommended_connectors:
+        lines.append("")
+        lines.append("### Recommended MCP Connectors")
+        for entry in recommended_connectors[:6]:
+            lines.append(
+                f"- `{entry['slug']}` (`{entry.get('source_status', 'unknown')}`, oauth `{entry.get('oauth_supported', False)}`): "
+                f"{'; '.join(entry.get('reasons', []))}"
+            )
     lines.append("")
     gaps: list[str] = []
     if signals.backend_routes and not signals.tests:
@@ -662,6 +702,9 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
     installed_skill_packs = installed_external_skills(project_root)
     active_skill_packs = active_external_skills(project_root)
     ranked_skill_packs = ranked_external_skills(project_root).get("skills", [])
+    enterprise_skill_packs = active_enterprise_skills(project_root)
+    active_connectors = active_mcp_connectors(project_root)
+    recommended_connectors = recommend_mcp_connectors(project_root).get("connectors", [])
     policy = external_skill_policy(project_root)
     external_skill_lines = [
         f"- `{entry['slug']}` ({entry.get('ecosystem', 'unknown')}, trust `{entry.get('trust_level', 'unknown')}`): installed at `{entry.get('install_path', '')}`"
@@ -679,6 +722,25 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
         f"- `{entry['slug']}`: {'; '.join(entry.get('reasons', []))}"
         for entry in detect_external_skill_sources(project_root).get("manual_recommendations", [])
     ] or ["- No additional external skill recommendations were inferred."]
+    enterprise_skill_lines = [
+        f"- `{entry['slug']}` ({entry.get('kind', 'enterprise')}): installed at `{entry.get('install_path', '')}`"
+        for entry in enterprise_skill_packs
+    ] or ["- No enterprise skill packs are currently active."]
+    connector_lines = [
+        (
+            f"- `{entry['slug']}` ({entry.get('system', 'unknown')}, "
+            f"source `{entry.get('source_status', 'unknown')}`, auth `{entry.get('auth_scheme', 'unknown')}`): "
+            f"{entry.get('description', '')}"
+        )
+        for entry in active_connectors
+    ] or ["- No MCP connectors are currently active."]
+    recommended_connector_lines = [
+        (
+            f"- `{entry['slug']}` (source `{entry.get('source_status', 'unknown')}`, "
+            f"oauth `{entry.get('oauth_supported', False)}`): {'; '.join(entry.get('reasons', []))}"
+        )
+        for entry in recommended_connectors
+    ] or ["- No MCP connectors were recommended."]
     priority_lines = [
         f"- `{path}`"
         for path in decision.prioritized_skill_paths
@@ -722,6 +784,15 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
             "",
             "## Preferred External Skill Packs",
             *ranked_external_lines,
+            "",
+            "## Enterprise Skill Packs",
+            *enterprise_skill_lines,
+            "",
+            "## MCP Connectors",
+            *connector_lines,
+            "",
+            "## Recommended MCP Connectors",
+            *recommended_connector_lines,
             "",
             "## Suggested External Skill Packs",
             *recommended_external_lines,
@@ -768,5 +839,7 @@ def write_project_docs(context: RequirementsContext, project_root: Path) -> list
     written.append(ensure_file(project_root / "FEATURES.md", features))
     written.append(ensure_file(project_root / "REPORT.md", report))
     written.append(ensure_file(project_root / "TRACEABILITY.md", traceability))
-    written.append(ensure_file(project_root / "skilgen.yml", render_default_config()))
+    config_path = project_root / "skilgen.yml"
+    if not config_path.exists():
+        written.append(ensure_file(config_path, render_default_config()))
     return written

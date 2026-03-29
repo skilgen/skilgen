@@ -82,6 +82,13 @@ class SkilgenConfig:
     external_skills_denylist: list[str] = field(default_factory=list)
     external_skills_auto_activate: bool = True
     external_skills_policy_mode: str = "permissive"
+    auto_activate_mcp_connectors: bool = True
+    mcp_connectors_require_official_source: bool = True
+    mcp_connectors_require_oauth: bool = True
+    mcp_connector_allowlist: list[str] = field(default_factory=list)
+    mcp_connector_denylist: list[str] = field(default_factory=list)
+    enterprise_skill_paths: list[str] = field(default_factory=list)
+    enterprise_skill_git_urls: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

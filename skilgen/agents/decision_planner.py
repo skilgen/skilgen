@@ -6,6 +6,7 @@ from skilgen.deep_agents_core import run_deep_json
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state
 from skilgen.core.models import AgentDecision, RequirementsContext, RunMemory
 from skilgen.core.run_memory import load_current_run_memory
+from skilgen.enterprise_skills import active_enterprise_skills, active_mcp_connectors
 from skilgen.external_skills import external_skill_policy, ranked_external_skills
 
 
@@ -25,6 +26,8 @@ def build_agent_decision_native(
     if not top_level_skill_paths:
         top_level_skill_paths = [node.path for node in skill_tree if node.parent_skill is None]
     ranked_external = ranked_external_skills(project_root).get("skills", [])
+    enterprise_skills = active_enterprise_skills(project_root)
+    connectors = active_mcp_connectors(project_root)
     memory_to_load = [".skilgen/memory/current_run.json", ".skilgen/state/freshness.json", ".skilgen/external-skills/lock.json"]
     preferred_external: list[str] = []
     if current_run_memory is not None:
@@ -48,6 +51,20 @@ def build_agent_decision_native(
             except ValueError:
                 relative_index = index_path
             memory_to_load.append(relative_index)
+    for entry in enterprise_skills[:5]:
+        skill_path = entry.get("skill_path") or entry.get("install_path")
+        summary_path = entry.get("summary_path")
+        for candidate in (skill_path, summary_path):
+            if not isinstance(candidate, str):
+                continue
+            try:
+                relative = Path(candidate).resolve().relative_to(project_root).as_posix()
+            except ValueError:
+                relative = candidate
+            if relative not in top_level_skill_paths:
+                top_level_skill_paths.append(relative)
+            if relative not in memory_to_load:
+                memory_to_load.append(relative)
     should_refresh = freshness.reason != "no_source_changes"
     reason = (
         "Source changes were detected and the impacted domains should be refreshed before the next coding task."
@@ -63,6 +80,14 @@ def build_agent_decision_native(
             f"Load the top ranked external skill packs first: {', '.join(slug for slug in preferred_external if slug) or 'external summaries'}."
         )
         next_actions.append("Use each external pack's normalized index and summary before loading lower-ranked imports.")
+    if enterprise_skills:
+        next_actions.append(
+            f"Load active enterprise skills next: {', '.join(str(entry.get('slug')) for entry in enterprise_skills[:5])}."
+        )
+    if connectors:
+        next_actions.append(
+            f"Use approved MCP connectors only when needed: {', '.join(str(entry.get('slug')) for entry in connectors[:5])}."
+        )
     if current_run_memory is not None and current_run_memory.recent_events:
         next_actions.append("Use the latest run memory to continue from the most recent execution context.")
     return AgentDecision(
@@ -87,6 +112,8 @@ def build_agent_decision(
     freshness = compute_freshness_report(root, requirements, domain_graph, load_freshness_state(root))
     policy = external_skill_policy(root)
     ranked = ranked_external_skills(root)
+    enterprise = active_enterprise_skills(root)
+    connectors = active_mcp_connectors(root)
     payload = run_deep_json(
         "agent decision planning",
         (
@@ -99,6 +126,8 @@ def build_agent_decision(
             f"Freshness JSON: {freshness.__dict__}\n"
             f"External skills policy JSON: {policy}\n"
             f"Ranked external skills JSON: {ranked}\n"
+            f"Active enterprise skills JSON: {enterprise}\n"
+            f"Active MCP connectors JSON: {connectors}\n"
             f"Current run memory: {current_run_memory.__dict__ if current_run_memory is not None else None}\n"
             f"Skill tree JSON: {[node.__dict__ for node in skill_tree]}\n"
             f"Native decision JSON: {native.__dict__}\n"

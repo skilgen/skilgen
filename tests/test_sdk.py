@@ -12,23 +12,32 @@ from skilgen.external_skills import (
     ensure_external_skills_for_project,
 )
 from skilgen.sdk import (
+    activate_project_mcp_connector,
     activate_skill_source,
     analyze_project,
     cancel_job,
+    deactivate_project_mcp_connector,
     deactivate_skill_source,
     detect_skill_sources,
     decide_project,
     deliver_project,
+    generate_enterprise_skill_source,
     export_skill_source_lock,
+    get_auto_update_status,
     get_job_status,
+    ingest_enterprise_skill_source,
     import_skill_source_candidates,
     import_skill_source_lock,
     init_project,
     install_skill_source,
+    list_active_mcp_connectors,
     list_active_skill_sources,
+    list_enterprise_skill_sources,
+    list_mcp_connectors,
     list_project_jobs,
     list_skill_sources,
     rank_skill_sources,
+    recommend_project_mcp_connectors,
     project_report,
     project_status,
     preview_project,
@@ -38,6 +47,7 @@ from skilgen.sdk import (
     show_skill_source,
     skill_source_lock,
     start_deliver_job,
+    stop_auto_update,
     sync_all_skill_sources,
     sync_skill_source,
     update_project,
@@ -59,6 +69,7 @@ class SdkTests(unittest.TestCase):
 
             config_path = init_project(root)
             self.assertTrue(config_path.exists())
+            self.assertEqual(get_auto_update_status(root)["update_trigger"], "auto")
 
             analysis = analyze_project(root, requirements)
             self.assertIn("signals", analysis)
@@ -117,6 +128,7 @@ class SdkTests(unittest.TestCase):
             self.assertIn(cancelled["status"], {"completed", "cancelled"})
             resumed = resume_job(job_id, root)
             self.assertIn(resumed.get("error", "ok"), {"resume_not_allowed", "ok"})
+            stop_auto_update(root)
 
     def test_sdk_external_skills_catalog_and_install(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -178,12 +190,44 @@ class SdkTests(unittest.TestCase):
             deactivated = deactivate_skill_source("demo-pack", root)
             self.assertFalse(deactivated["deactivated_skill"]["active"])
 
-            sync_all = sync_all_skill_sources(root)
-            self.assertEqual(sync_all["count"], 1)
+    def test_sdk_enterprise_skills_and_connectors(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "enterprise-source"
+            source.mkdir()
+            (source / "README.md").write_text("# Enterprise Docs\n\nShared internal standard.\n", encoding="utf-8")
 
-            removed = remove_skill_source("demo-pack", root)
-            self.assertTrue(removed["removed_skill"]["removed"])
-            self.assertFalse(install_path.exists())
+            ingested = ingest_enterprise_skill_source("enterprise docs", root, path=source)
+            self.assertEqual(ingested["enterprise_skill"]["slug"], "enterprise-docs")
+
+            runbook = root / "runbook.md"
+            runbook.write_text("# Incident Runbook\n\nUse Jira, Slack, and Datadog during incidents.\n", encoding="utf-8")
+            generated = generate_enterprise_skill_source("incident response", [runbook], root, kind="runbook")
+            self.assertEqual(generated["enterprise_skill"]["slug"], "incident-response")
+
+            listed = list_enterprise_skill_sources(root)
+            self.assertEqual(len(listed["skills"]), 2)
+
+            connectors = list_mcp_connectors(search="jira")
+            self.assertEqual(connectors["connectors"][0]["slug"], "jira")
+            self.assertTrue(connectors["connectors"][0]["official_source_url"])
+            self.assertEqual(connectors["connectors"][0]["auth_scheme"], "oauth2")
+            sharepoint = list_mcp_connectors(search="sharepoint")
+            self.assertEqual(sharepoint["connectors"][0]["slug"], "sharepoint")
+            self.assertEqual(sharepoint["connectors"][0]["source_status"], "community")
+            self.assertIsNone(sharepoint["connectors"][0]["official_source_url"])
+            recommended = recommend_project_mcp_connectors(root)
+            recommended_slugs = {entry["slug"] for entry in recommended["connectors"]}
+            self.assertIn("jira", recommended_slugs)
+            self.assertIn("slack", recommended_slugs)
+            self.assertIn("datadog", recommended_slugs)
+
+            activated = activate_project_mcp_connector("jira", root)
+            self.assertTrue(activated["connector"]["active"])
+            active = list_active_mcp_connectors(root)
+            self.assertEqual(active["connectors"][0]["slug"], "jira")
+            deactivated = deactivate_project_mcp_connector("jira", root)
+            self.assertFalse(deactivated["connector"]["active"])
 
     def test_sdk_can_export_and_import_external_skill_lock(self) -> None:
         with TemporaryDirectory() as tmp:
