@@ -19,7 +19,55 @@
   Skilgen reads your codebase, builds the right skills and agent docs, keeps them updated automatically, and layers in trusted external, enterprise, and official MCP capabilities so Codex, Claude Code, Cursor, and other agents can work with real context instead of guesswork.
 </p>
 
-## What Skilgen Does For Agents
+## Quick Start
+
+Install Skilgen:
+
+```bash
+python -m pip install skilgen
+```
+
+Go to your repo and initialize it:
+
+```bash
+cd your-repo
+skilgen init --project-root .
+```
+
+Generate the repo-local skill system:
+
+```bash
+skilgen deliver --project-root .
+```
+
+Check what Skilgen is doing:
+
+```bash
+skilgen status --project-root .
+skilgen decide --project-root .
+skilgen doctor --project-root .
+```
+
+That is the core experience:
+1. install Skilgen
+2. run it in a repo
+3. let it create `AGENTS.md`, `skills/`, reports, and `.skilgen/` state
+4. keep coding while Skilgen keeps the skill system current
+
+## Quick Start Flow
+
+```mermaid
+flowchart TD
+    A["pip install skilgen"] --> B["Run skilgen init in a repo"]
+    B --> C["Run skilgen deliver once"]
+    C --> D["Skilgen writes AGENTS.md, skills/, reports, and .skilgen state"]
+    D --> E["Codex / Claude Code / Cursor read the repo-local files"]
+    E --> F["Developer or agent changes code"]
+    F --> G["Skilgen detects changes and refreshes skills automatically"]
+    G --> D
+```
+
+## Skilgen As The Agent Operating System
 
 Skilgen is the operating layer that prepares your repo for AI coding agents and keeps that context fresh.
 
@@ -51,20 +99,6 @@ So the workflow is simple:
 2. run it inside a repository
 3. let Skilgen generate and refresh repo-local skills and docs
 4. let your coding agent use those repo-local files while it works
-
-## Quick Start Flow
-
-```mermaid
-flowchart TD
-    A["Install Skilgen"] --> B["Run skilgen init in a repo"]
-    B --> C["Skilgen creates repo-local config and starts auto-update"]
-    C --> D["Skilgen analyzes code, requirements, enterprise skills, and MCP signals"]
-    D --> E["Skilgen writes AGENTS.md, skills/, reports, and .skilgen state"]
-    E --> F["Codex / Claude Code / Cursor read the repo-local files"]
-    F --> G["Developer or agent changes code"]
-    G --> H["Skilgen detects changes and refreshes skills automatically"]
-    H --> E
-```
 
 ## Core Capabilities
 
