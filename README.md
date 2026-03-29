@@ -33,6 +33,39 @@ Instead of asking agents to rediscover your architecture, patterns, tools, and s
 That means agents do not have to manage their own skills manually.
 Skilgen handles that system for them.
 
+## How It Fits With Codex And Claude Code
+
+Skilgen is not a replacement for `~/.codex`.
+
+Instead, Skilgen prepares the **repository itself** so Codex, Claude Code, Cursor, and similar agents can work with the right local context.
+
+There are two layers:
+
+- `~/.codex`
+  - your global Codex home, personal defaults, and Codex-specific setup
+- `your-repo/AGENTS.md`, `your-repo/skills/`, and `your-repo/.skilgen/`
+  - the repo-local skill system that Skilgen generates and keeps updated
+
+So the workflow is simple:
+1. install Skilgen in your Python environment
+2. run it inside a repository
+3. let Skilgen generate and refresh repo-local skills and docs
+4. let your coding agent use those repo-local files while it works
+
+## Quick Start Flow
+
+```mermaid
+flowchart TD
+    A["Install Skilgen"] --> B["Run skilgen init in a repo"]
+    B --> C["Skilgen creates repo-local config and starts auto-update"]
+    C --> D["Skilgen analyzes code, requirements, enterprise skills, and MCP signals"]
+    D --> E["Skilgen writes AGENTS.md, skills/, reports, and .skilgen state"]
+    E --> F["Codex / Claude Code / Cursor read the repo-local files"]
+    F --> G["Developer or agent changes code"]
+    G --> H["Skilgen detects changes and refreshes skills automatically"]
+    H --> E
+```
+
 ## Core Capabilities
 
 - generates project-native skills from code, requirements, or both
@@ -87,6 +120,7 @@ That means agents do not just work faster. They work with better judgment, safer
 
 ## What You Get Fast
 
+- repo-local agent context that Codex and Claude Code can use immediately
 - automatic skill upkeep after installation
 - `AGENTS.md` for the top-level agent contract
 - `FEATURES.md` for product behavior
