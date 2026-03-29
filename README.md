@@ -90,6 +90,52 @@ flowchart TD
     G --> D
 ```
 
+## What The Generated Skill System Looks Like
+
+This is the shape Skilgen creates for a real repo after `skilgen deliver`.
+
+```mermaid
+flowchart TD
+    A["Repo Code + Optional Requirements"] --> B["Deep Agents + Skilgen Planning"]
+    B --> C["AGENTS.md"]
+    B --> D["skills/MANIFEST.md"]
+    B --> E["skills/backend/SKILL.md"]
+    B --> F["skills/frontend/SKILL.md"]
+    B --> G["skills/roadmap/SKILL.md"]
+    B --> H["FEATURES.md"]
+    B --> I["REPORT.md"]
+    B --> J["TRACEABILITY.md"]
+    B --> K[".skilgen/state + memory"]
+    L["External Skills"] --> B
+    M["Enterprise Skills"] --> B
+    N["Official MCP Connectors"] --> B
+```
+
+From a real OpenAI-backed run, Skilgen generated:
+- `AGENTS.md` with inferred domains, start order, external skill packs, policy, and decision memory
+- `skills/backend/SKILL.md`
+- `skills/frontend/SKILL.md`
+- `skills/roadmap/SKILL.md`
+- `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
+- `.skilgen/` state and memory for continuity and refresh decisions
+
+Example of what the generated `AGENTS.md` contains:
+
+| Section | What the agent learns |
+| --- | --- |
+| Project Overview | whether the run came from code, requirements, or both |
+| Inferred Domains | backend, frontend, roadmap, and other detected domains |
+| Skill Entry Points | exactly which `SKILL.md` files to read first |
+| External Skill Packs | which trusted external skills were installed |
+| Preferred External Skill Packs | which packs to load first and why |
+| Enterprise Skill Packs | which company-wide skills are active |
+| MCP Connectors | which approved official connectors are active |
+| Recommended Start Order | the exact loading order for skills and memory |
+| Execution Rules | the repo-specific operating contract for the agent |
+
+In practice, that means the agent does not guess.
+Skilgen gives it a real operating system built from the repo, then keeps that system updated dynamically.
+
 ## Skilgen As The Agent Operating System
 
 Skilgen is the operating layer that prepares your repo for AI coding agents and keeps that context fresh.
