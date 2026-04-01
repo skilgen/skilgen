@@ -4,7 +4,13 @@ All notable changes to Skilgen will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
-## [0.4.0] - Unreleased
+## [0.4.1] - Unreleased
+
+### Changed
+- Refreshed the README to present Skilgen more clearly as a living skill system for coding agents
+- Simplified onboarding and product positioning around self-updating skills, drift detection, enterprise MCP connectors, and external skill governance
+
+## [0.4.0] - Released
 
 ### Added
 - Enterprise skill ingestion and generation workflows
