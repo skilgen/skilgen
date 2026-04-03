@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skilgen"
-version = "0.4.1"
+version = "0.5.0"
 description = "Generate agent-readable project skills and starter scaffolds from requirements documents."
 readme = "README.md"
 requires-python = ">=3.11"

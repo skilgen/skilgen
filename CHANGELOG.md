@@ -4,7 +4,29 @@ All notable changes to Skilgen will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
-## [0.4.1] - Unreleased
+## [0.5.0] - Unreleased
+
+### Added
+- `Skilgen Score`, a repo-level quality standard for skill trees with groundedness, coverage, freshness, and structure subscores
+- Opinionated score quality gates so stale, weakly grounded, low-coverage, or structurally incomplete skill systems cannot score artificially high
+- Dynamic drill-down scoring for:
+  - repo score
+  - materialized domain scores
+  - per-`SKILL.md` scores
+  - inferred-only domains as a separate planning signal
+- Score surfaces across the product:
+  - `skilgen score`
+  - `/score`
+  - `/badge.svg`
+  - eval scaffold and compare helpers
+  - `skilgen-sync` GitHub Action
+
+### Changed
+- Refreshed the README to present Skilgen more clearly as a living skill system for coding agents
+- Simplified onboarding and product positioning around self-updating skills, drift detection, enterprise MCP connectors, and external skill governance
+- Made repo-local watcher and auto-update behavior git-aware so Skilgen can classify manual edits, head changes, merges, rebases, and related repository events
+
+## [0.4.1] - Released
 
 ### Changed
 - Refreshed the README to present Skilgen more clearly as a living skill system for coding agents
