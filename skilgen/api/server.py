@@ -30,6 +30,8 @@ from skilgen.api.service import (
     preview_payload,
     resume_job_payload,
     report_payload,
+    score_badge_payload,
+    score_payload,
     skills_activate_payload,
     skills_active_payload,
     skills_deactivate_payload,
@@ -59,6 +61,15 @@ def _json_response(handler: BaseHTTPRequestHandler, status_code: int, payload: d
     handler.wfile.write(body)
 
 
+def _svg_response(handler: BaseHTTPRequestHandler, status_code: int, body: str) -> None:
+    payload = body.encode("utf-8")
+    handler.send_response(status_code)
+    handler.send_header("Content-Type", "image/svg+xml")
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.end_headers()
+    handler.wfile.write(payload)
+
+
 def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, object]:
     length = int(handler.headers.get("Content-Length", "0"))
     body = handler.rfile.read(length) if length else b"{}"
@@ -75,6 +86,16 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/status":
                 _json_response(self, 200, status_payload(query.get("project_root", ["."])[0]))
+                return
+            if parsed.path == "/score":
+                _json_response(
+                    self,
+                    200,
+                    score_payload(query.get("project_root", ["."])[0], query.get("badge_file", [None])[0]),
+                )
+                return
+            if parsed.path == "/badge.svg":
+                _svg_response(self, 200, score_badge_payload(query.get("project_root", ["."])[0]))
                 return
             if parsed.path == "/doctor":
                 _json_response(self, 200, doctor_payload(query.get("project_root", ["."])[0]))

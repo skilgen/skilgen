@@ -34,6 +34,7 @@ from skilgen.enterprise_skills import (
 )
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state
 from skilgen.core.context import build_codebase_context
+from skilgen.core.score import compute_skillgen_score, render_score_badge_svg, write_score_badge
 from skilgen.core.requirements import load_project_context
 from skilgen.core.run_memory import load_current_run_memory
 from skilgen.external_skills import (
@@ -297,8 +298,21 @@ def status_payload(project_root: str | Path) -> dict[str, object]:
             "recommended_mcp_connectors": recommend_mcp_connectors(root),
             "active_mcp_connectors": active_mcp_connectors(root),
             "auto_update": auto_update_status(root),
+            "skilgen_score": compute_skillgen_score(root),
         }
     )
+
+
+def score_payload(project_root: str | Path, badge_file: str | Path | None = None) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    payload = compute_skillgen_score(root)
+    if badge_file is not None:
+        payload["badge_file"] = write_score_badge(root, badge_file)
+    return _with_api_meta(payload)
+
+
+def score_badge_payload(project_root: str | Path) -> str:
+    return render_score_badge_svg(compute_skillgen_score(Path(project_root).resolve()))
 
 
 def skills_list_payload(project_root: str | Path, ecosystem: str | None = None, search: str | None = None) -> dict[str, object]:
@@ -478,10 +492,10 @@ def report_payload(project_root: str | Path) -> dict[str, object]:
 def validate_payload(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root).resolve()
     runtime = DeepAgentsRuntime(root)
-    return _with_api_meta(
-        runtime.run(
+    payload = runtime.run(
             "validate",
             f"Validate project_root={root}. Return JSON with valid, errors, warnings, coverage, and completeness_score.",
             lambda: native_validate_payload(root),
         )
-    )
+    payload["skilgen_score"] = compute_skillgen_score(root)
+    return _with_api_meta(payload)

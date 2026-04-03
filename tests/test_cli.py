@@ -162,6 +162,28 @@ class CliTests(unittest.TestCase):
             self.assertEqual(len(payload["runs"]), 1)
             self.assertTrue(payload["runs"][0])
 
+    def test_score_command_exposes_quality_gates(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "app.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "score",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertIn("raw_score", payload)
+            self.assertIn("quality_gates", payload)
+
     def test_features_works_with_codebase_only(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -251,6 +273,80 @@ class CliTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertTrue(payload["generated_files"])
             self.assertTrue((root / "FEATURES.md").exists())
+
+    def test_score_outputs_subscores_and_badge_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "scan.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "deliver", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            badge_path = root / "badge.svg"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "score",
+                    "--project-root",
+                    str(root),
+                    "--badge-file",
+                    str(badge_path),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertIn("score", payload)
+            self.assertIn("subscores", payload)
+            self.assertIn("groundedness", payload["subscores"])
+            self.assertTrue(badge_path.exists())
+            self.assertIn("<svg", badge_path.read_text(encoding="utf-8"))
+
+    def test_eval_scaffold_and_compare_work(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scaffold = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "eval",
+                    "scaffold",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(scaffold.stdout)
+            output_dir = Path(payload["output_dir"])
+            self.assertTrue((output_dir / "tasks" / "example-task.json").exists())
+            comparison = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "eval",
+                    "compare",
+                    "--baseline",
+                    str(output_dir / "results" / "baseline.example.json"),
+                    "--skilgen",
+                    str(output_dir / "results" / "skilgen.example.json"),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            compared = json.loads(comparison.stdout)
+            self.assertIn("comparison", compared)
+            self.assertIn("headline", compared)
 
     def test_enterprise_ingest_and_connector_recommend(self) -> None:
         with TemporaryDirectory() as tmp:

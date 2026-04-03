@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from skilgen.core.config import load_config
+from skilgen.core.repo_state import classify_repo_change, git_repo_state
 from skilgen.delivery import run_delivery
 
 
@@ -82,7 +83,7 @@ def _record_requirements_path(project_root: Path, requirements_path: str | Path 
     path.write_text("" if requirements_path is None else str(Path(requirements_path).resolve()), encoding="utf-8")
 
 
-def _snapshot(project_root: Path) -> dict[str, int]:
+def _file_snapshot(project_root: Path) -> dict[str, int]:
     tracked: dict[str, int] = {}
     for path in project_root.rglob("*"):
         if not path.is_file():
@@ -94,6 +95,13 @@ def _snapshot(project_root: Path) -> dict[str, int]:
             continue
         tracked[relative] = path.stat().st_mtime_ns
     return tracked
+
+
+def _snapshot(project_root: Path) -> dict[str, object]:
+    return {
+        "files": _file_snapshot(project_root),
+        "git": git_repo_state(project_root),
+    }
 
 
 def ensure_auto_update_worker(
@@ -189,12 +197,14 @@ def run_auto_update_worker(project_root: str | Path, *, interval_seconds: float 
         current = _snapshot(root)
         if current == previous:
             continue
+        change = classify_repo_change(previous, current)
         requirements = _requirements_path_for_worker(root)
         run_delivery(requirements, root)
         payload = {
             **payload,
             "last_run_at": _timestamp(),
-            "last_event": "repository_changed",
+            "last_event": change["event_type"],
+            "last_change_summary": change,
         }
         _write_state(root, payload)
         previous = current

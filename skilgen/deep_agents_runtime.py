@@ -17,6 +17,7 @@ from skilgen.core.config import load_config
 from skilgen.core.context import build_codebase_context
 from skilgen.core.requirements import load_project_context, load_requirements
 from skilgen.core.validation import validate_project
+from skilgen.core.score import compute_skillgen_score
 from skilgen.generators.package import (
     project_doc_paths,
     render_analysis_report,
@@ -370,6 +371,7 @@ def native_report_payload(project_root: str | Path) -> dict[str, Any]:
     skill_domains = sorted({Path(path).parts[1] for path in status["skill_files"]}) if status["skill_files"] else []
     return {
         "status": status,
+        "skilgen_score": compute_skillgen_score(root),
         "domains": skill_domains,
         "signal_counts": {
             "backend_routes": len(signals.backend_routes),
