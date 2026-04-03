@@ -28,6 +28,7 @@ from skilgen.sdk import (
     plan_project,
     preview_project,
     project_report,
+    project_score,
     project_status,
     rank_skill_sources,
     recommend_project_mcp_connectors,
@@ -44,6 +45,8 @@ from skilgen.sdk import (
     update_project,
     validate_project_outputs,
     watch_project,
+    scaffold_eval,
+    compare_evals,
 )
 
 __version__ = "0.4.1"
@@ -76,6 +79,7 @@ __all__ = [
     "plan_project",
     "preview_project",
     "project_report",
+    "project_score",
     "project_status",
     "rank_skill_sources",
     "recommend_project_mcp_connectors",
@@ -95,4 +99,6 @@ __all__ = [
     "update_project",
     "validate_project_outputs",
     "watch_project",
+    "scaffold_eval",
+    "compare_evals",
 ]

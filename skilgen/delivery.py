@@ -9,6 +9,7 @@ from skilgen.core.config import load_config
 from skilgen.core.context import build_codebase_context
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state, save_freshness_state, snapshot_freshness_state
 from skilgen.core.models import RunMemory
+from skilgen.core.repo_state import classify_repo_change, git_repo_state
 from skilgen.core.run_memory import append_run_event, create_run_memory, finalize_run_memory
 from skilgen.deep_agents_core import current_runtime_mode
 from skilgen.enterprise_skills import ensure_enterprise_skills_for_project
@@ -193,7 +194,7 @@ def watch_delivery(
 ) -> list[list[Path]]:
     root = Path(project_root).resolve()
 
-    def snapshot() -> dict[str, int]:
+    def snapshot() -> dict[str, object]:
         tracked: dict[str, int] = {}
         for path in root.rglob("*"):
             if not path.is_file():
@@ -204,7 +205,10 @@ def watch_delivery(
             if path.name in {"ANALYSIS.md", "FEATURES.md", "REPORT.md"}:
                 continue
             tracked[relative] = path.stat().st_mtime_ns
-        return tracked
+        return {
+            "files": tracked,
+            "git": git_repo_state(root),
+        }
 
     results = [
         run_delivery(
@@ -224,7 +228,8 @@ def watch_delivery(
         time.sleep(interval_seconds)
         current = snapshot()
         if current != previous:
-            _emit(progress_callback, "Detected repository changes. Refreshing the generated docs and skills.")
+            change = classify_repo_change(previous, current)
+            _emit(progress_callback, f"Detected {change['event_type'].replace('_', ' ')}. Refreshing the generated docs and skills.")
             results.append(
                 run_delivery(
                     requirements_path,

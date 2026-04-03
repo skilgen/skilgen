@@ -99,6 +99,14 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertTrue(deliver["generated_files"])
                 self.assertIn("runtime_diagnostics", deliver)
 
+                score = get_json(f"{base}/score?{urlencode({'project_root': str(root)})}")
+                self.assertIn("score", score)
+                self.assertIn("subscores", score)
+
+                with urlopen(f"{base}/badge.svg?{urlencode({'project_root': str(root)})}") as response:  # noqa: S310
+                    badge = response.read().decode("utf-8")
+                self.assertIn("<svg", badge)
+
                 deliver_job = post_json(f"{base}/jobs/deliver", {"requirements": str(requirements), "project_root": str(root)})
                 self.assertIn(deliver_job["status"], {"queued", "running", "completed"})
                 self.assertEqual(deliver_job["job_type"], "deliver")
@@ -245,6 +253,7 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertIn("external_skill_lock", status)
                 self.assertIn("external_skill_policy", status)
                 self.assertIn("external_skill_recommendations", status)
+                self.assertIn("skilgen_score", status)
                 self.assertIn("pending_validations", status["current_run_memory"])
                 self.assertIn("resumable_steps", status["current_run_memory"])
 
@@ -259,6 +268,7 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertIn("coverage", validate)
                 self.assertIn("completeness_score", validate)
                 self.assertIn("recommendations", validate)
+                self.assertIn("skilgen_score", validate)
             finally:
                 server.shutdown()
                 server.server_close()

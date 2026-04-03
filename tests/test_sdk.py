@@ -39,6 +39,7 @@ from skilgen.sdk import (
     rank_skill_sources,
     recommend_project_mcp_connectors,
     project_report,
+    project_score,
     project_status,
     preview_project,
     remove_skill_source,
@@ -53,6 +54,8 @@ from skilgen.sdk import (
     update_project,
     validate_project_outputs,
     watch_project,
+    scaffold_eval,
+    compare_evals,
 )
 import time
 import subprocess
@@ -114,6 +117,11 @@ class SdkTests(unittest.TestCase):
             self.assertIn("agent_decision", status)
             self.assertIn("pending_validations", status["current_run_memory"])
             self.assertIn("resumable_steps", status["current_run_memory"])
+            self.assertIn("skilgen_score", status)
+
+            score = project_score(root)
+            self.assertIn("score", score)
+            self.assertIn("subscores", score)
 
             report = project_report(root)
             self.assertIn("summary", report)
@@ -123,12 +131,26 @@ class SdkTests(unittest.TestCase):
             self.assertIn("valid", validation)
             self.assertIn("warnings", validation)
             self.assertIn("completeness_score", validation)
+            self.assertIn("skilgen_score", validation)
 
             cancelled = cancel_job(job_id, root)
             self.assertIn(cancelled["status"], {"completed", "cancelled"})
             resumed = resume_job(job_id, root)
             self.assertIn(resumed.get("error", "ok"), {"resume_not_allowed", "ok"})
             stop_auto_update(root)
+
+    def test_sdk_can_scaffold_and_compare_evals(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = scaffold_eval(root)
+            output_dir = Path(payload["output_dir"])
+            self.assertTrue((output_dir / "tasks" / "example-task.json").exists())
+            compared = compare_evals(
+                output_dir / "results" / "baseline.example.json",
+                output_dir / "results" / "skilgen.example.json",
+            )
+            self.assertIn("comparison", compared)
+            self.assertGreater(compared["comparison"]["success_rate_delta"], 0)
 
     def test_sdk_external_skills_catalog_and_install(self) -> None:
         with TemporaryDirectory() as tmp:

@@ -1,0 +1,61 @@
+name: Skilgen Sync
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+jobs:
+  skilgen-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Skilgen
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+      - name: Initialize config if needed
+        run: |
+          if [ ! -f skilgen.yml ]; then
+            python -m skilgen.cli.main init --project-root .
+          fi
+      - name: Deliver latest skills
+        run: python -m skilgen.cli.main deliver --project-root .
+      - name: Validate generated outputs
+        run: python -m skilgen.cli.main validate --project-root . > skilgen-validate.json
+      - name: Compute Skilgen Score
+        run: python -m skilgen.cli.main score --project-root . --badge-file skilgen-score.svg > skilgen-score.json
+      - name: Upload score and validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: skilgen-quality
+          path: |
+            skilgen-score.json
+            skilgen-score.svg
+            skilgen-validate.json
+      - name: Append workflow summary
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          score = json.loads(Path("skilgen-score.json").read_text())
+          validate = json.loads(Path("skilgen-validate.json").read_text())
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write(f"## Skilgen Score: {int(round(score['score']))}/100\n\n")
+              handle.write(f"- Groundedness: {score['subscores']['groundedness']['score']}/25\n")
+              handle.write(f"- Coverage: {score['subscores']['coverage']['score']}/25\n")
+              handle.write(f"- Freshness: {score['subscores']['freshness']['score']}/25\n")
+              handle.write(f"- Structure: {score['subscores']['structure']['score']}/25\n")
+              handle.write(f"- Validation warnings: {len(validate['warnings'])}\n")
+              handle.write(f"- Validation errors: {len(validate['errors'])}\n")
+          PY

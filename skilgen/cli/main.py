@@ -7,11 +7,12 @@ from pathlib import Path
 
 from skilgen.api.server import run_server
 from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
-from skilgen.api.service import analyze_payload, decision_payload, doctor_payload, preview_payload, report_payload, status_payload, validate_payload
+from skilgen.api.service import analyze_payload, decision_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
+from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
 from skilgen.enterprise_skills import (
@@ -248,6 +249,19 @@ def build_parser() -> argparse.ArgumentParser:
     plan = subparsers.add_parser("plan", help="Build a roadmap plan from requirements and model config.")
     plan.add_argument("--requirements")
     plan.add_argument("--project-root", default=".")
+
+    score = subparsers.add_parser("score", help="Compute the Skilgen Score quality metric for the current skill tree.")
+    score.add_argument("--project-root", default=".")
+    score.add_argument("--badge-file")
+
+    eval_cmd = subparsers.add_parser("eval", help="Scaffold or compare Skilgen evaluation runs.")
+    eval_subparsers = eval_cmd.add_subparsers(dest="eval_command", required=True)
+    eval_scaffold = eval_subparsers.add_parser("scaffold", help="Create a starter eval framework for with-vs-without-Skilgen comparisons.")
+    eval_scaffold.add_argument("--project-root", default=".")
+    eval_scaffold.add_argument("--output-dir")
+    eval_compare = eval_subparsers.add_parser("compare", help="Compare baseline and Skilgen eval results.")
+    eval_compare.add_argument("--baseline", required=True)
+    eval_compare.add_argument("--skilgen", required=True)
 
     status = subparsers.add_parser("status", help="Show the current generated output status for a project root.")
     status.add_argument("--project-root", default=".")
@@ -519,6 +533,19 @@ def main() -> None:
             )
         )
         return
+    if args.command == "score":
+        emit_progress("Computing the Skilgen Score from groundedness, coverage, freshness, and structure signals.")
+        print(json.dumps(score_payload(Path(args.project_root).resolve(), args.badge_file), indent=2))
+        return
+    if args.command == "eval":
+        if args.eval_command == "scaffold":
+            emit_progress("Creating a starter eval framework for baseline-vs-Skilgen comparisons.")
+            print(json.dumps(scaffold_eval_framework(Path(args.project_root).resolve(), args.output_dir), indent=2))
+            return
+        if args.eval_command == "compare":
+            emit_progress("Comparing baseline and Skilgen eval results.")
+            print(json.dumps(compare_eval_results(args.baseline, args.skilgen), indent=2))
+            return
     if args.command == "status":
         print(json.dumps(status_payload(Path(args.project_root).resolve()), indent=2))
         return
