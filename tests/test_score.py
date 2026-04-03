@@ -50,6 +50,8 @@ class ScoreTests(unittest.TestCase):
             self.assertTrue(payload["skills"])
             self.assertIn("domain", payload["domains"][0])
             self.assertIn("path", payload["skills"][0])
+            self.assertEqual(payload["materialized_domains"], ["backend"])
+            self.assertIn("backend-api", payload["inferred_only_domains"])
 
     def test_classify_repo_change_detects_manual_edits(self) -> None:
         previous = {

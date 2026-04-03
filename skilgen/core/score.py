@@ -91,6 +91,10 @@ def _skill_domain(skill: Path, project_root: Path) -> str | None:
     return relative.parts[0] if relative.parts else None
 
 
+def _materialized_domains(project_root: Path) -> list[str]:
+    return sorted({domain for skill in _skill_files(project_root) if (domain := _skill_domain(skill, project_root))})
+
+
 def _nodes_by_domain(project_root: Path) -> dict[str, list[object]]:
     context = load_project_context(project_root, None)
     codebase_context = build_codebase_context(project_root, context)
@@ -555,8 +559,10 @@ def _domain_scorecards(project_root: Path) -> list[dict[str, object]]:
     codebase_context = build_codebase_context(project_root, context)
     freshness = compute_freshness_report(project_root, context, codebase_context.domain_graph, previous)
     all_skills = _skill_files(project_root)
+    materialized_domains = _materialized_domains(project_root)
     scorecards: list[dict[str, object]] = []
-    for domain, key_files in sorted(domain_files.items()):
+    for domain in materialized_domains:
+        key_files = domain_files.get(domain, [])
         domain_skills = [skill for skill in all_skills if _skill_domain(skill, project_root) == domain]
         groundedness_score, groundedness = _groundedness_score_for_skills(project_root, domain_skills, domain_files)
         coverage_ratio = min(1.0, len(key_files) / max(1, len(_iter_source_files(project_root))))
@@ -592,6 +598,7 @@ def _domain_scorecards(project_root: Path) -> list[dict[str, object]]:
                     "domain": domain,
                     "skill_count": len(domain_skills),
                     "key_file_count": len(key_files),
+                    "materialized": True,
                 },
             )
         )
@@ -649,6 +656,7 @@ def _skill_scorecards(project_root: Path) -> list[dict[str, object]]:
 
 def compute_skillgen_score(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root).resolve()
+    domain_files = _domain_key_files(root)
     groundedness_score, groundedness = _groundedness_score(root)
     coverage_score, coverage = _coverage_score(root)
     freshness_score, freshness = _freshness_score(root)
@@ -666,6 +674,8 @@ def compute_skillgen_score(project_root: str | Path) -> dict[str, object]:
     )
     scorecard["domains"] = _domain_scorecards(root)
     scorecard["skills"] = _skill_scorecards(root)
+    scorecard["materialized_domains"] = [entry["domain"] for entry in scorecard["domains"]]
+    scorecard["inferred_only_domains"] = sorted(set(domain_files) - set(scorecard["materialized_domains"]))
     scorecard["badge"] = {
         "label": "Skilgen Score",
         "message": f"{int(round(scorecard['score']))}/100",
