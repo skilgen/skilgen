@@ -91,6 +91,58 @@ def _skill_domain(skill: Path, project_root: Path) -> str | None:
     return relative.parts[0] if relative.parts else None
 
 
+def _nodes_by_domain(project_root: Path) -> dict[str, list[object]]:
+    context = load_project_context(project_root, None)
+    codebase_context = build_codebase_context(project_root, context)
+    grouped: dict[str, list[object]] = {}
+    for node in codebase_context.domain_graph.nodes:
+        grouped.setdefault(node.name, []).append(node)
+    return grouped
+
+
+def _domain_key_files(project_root: Path) -> dict[str, list[str]]:
+    grouped = _nodes_by_domain(project_root)
+    return {
+        domain: list(dict.fromkeys(file for node in nodes for file in node.key_files))
+        for domain, nodes in grouped.items()
+    }
+
+
+def _skill_content(skill: Path) -> str:
+    return skill.read_text(encoding="utf-8").lower()
+
+
+def _evidence_hits_for_skill(skill: Path, project_root: Path, key_files: list[str]) -> dict[str, int]:
+    content = _skill_content(skill)
+    references = _parse_references(skill)
+    checks = _parse_check_paths(skill)
+    valid_references = sum(1 for ref in references if (skill.parent / ref).resolve().exists())
+    valid_checks = sum(1 for check in checks if _resolve_placeholder_path(check, project_root, skill).exists())
+    evidence_targets = min(3, len(key_files))
+    evidence_mentions = 0
+    covered_key_files: set[str] = set()
+    for key_file in key_files:
+        file_name = Path(key_file).name.lower()
+        if key_file.lower() in content or file_name in content:
+            covered_key_files.add(key_file)
+    for key_file in key_files[:3]:
+        file_name = Path(key_file).name.lower()
+        if key_file.lower() in content or file_name in content:
+            evidence_mentions += 1
+    generic_markers = sum(content.count(marker) for marker in GENERIC_MARKERS)
+    return {
+        "valid_references": valid_references,
+        "total_references": len(references),
+        "valid_check_paths": valid_checks,
+        "total_check_paths": len(checks),
+        "evidence_mentions": evidence_mentions,
+        "evidence_targets": evidence_targets,
+        "generic_advice_markers": generic_markers,
+        "covered_key_files": len(covered_key_files),
+        "total_key_files": len(key_files),
+    }
+
+
 def _groundedness_score(project_root: Path) -> tuple[float, dict[str, object]]:
     skill_files = _skill_files(project_root)
     if not skill_files:
@@ -159,6 +211,46 @@ def _groundedness_score(project_root: Path) -> tuple[float, dict[str, object]]:
     }
 
 
+def _groundedness_score_for_skills(project_root: Path, skill_files: list[Path], domain_key_files: dict[str, list[str]]) -> tuple[float, dict[str, object]]:
+    if not skill_files:
+        return 0.0, {
+            "score": 0.0,
+            "max_score": 25,
+            "valid_references": 0,
+            "total_references": 0,
+            "valid_check_paths": 0,
+            "total_check_paths": 0,
+            "evidence_mentions": 0,
+            "evidence_targets": 0,
+            "generic_advice_markers": 0,
+        }
+
+    totals = {
+        "valid_references": 0,
+        "total_references": 0,
+        "valid_check_paths": 0,
+        "total_check_paths": 0,
+        "evidence_mentions": 0,
+        "evidence_targets": 0,
+        "generic_advice_markers": 0,
+    }
+    for skill in skill_files:
+        domain = _skill_domain(skill, project_root) or ""
+        hits = _evidence_hits_for_skill(skill, project_root, domain_key_files.get(domain, []))
+        for key in totals:
+            totals[key] += hits[key]
+
+    possible = totals["total_references"] + totals["total_check_paths"] + totals["evidence_targets"]
+    raw_ratio = (totals["valid_references"] + totals["valid_check_paths"] + totals["evidence_mentions"]) / max(1, possible)
+    generic_penalty = min(0.35, totals["generic_advice_markers"] / max(20, len(skill_files) * 12))
+    score = max(0.0, min(25.0, round(25 * raw_ratio * (1 - generic_penalty), 2)))
+    return score, {
+        "score": score,
+        "max_score": 25,
+        **totals,
+    }
+
+
 def _coverage_score(project_root: Path) -> tuple[float, dict[str, object]]:
     source_files = _iter_source_files(project_root)
     if not source_files:
@@ -220,6 +312,32 @@ def _freshness_score(project_root: Path) -> tuple[float, dict[str, object]]:
     }
 
 
+def _freshness_score_for_skill(
+    skill_path: Path,
+    changed_files: list[str],
+    stale_skill_paths: list[str],
+    domain_key_files: list[str],
+    project_root: Path,
+    base_reason: str,
+) -> tuple[float, dict[str, object]]:
+    relative_skill = skill_path.relative_to(project_root).as_posix()
+    stale = relative_skill in stale_skill_paths
+    domain_changed = sum(1 for path in changed_files if path in set(domain_key_files))
+    if base_reason == "missing_freshness_state":
+        score = 5.0
+    elif not stale and domain_changed == 0:
+        score = 25.0
+    else:
+        score = max(0.0, round(25 - (8.0 if stale else 0.0) - min(17.0, domain_changed * 4.0), 2))
+    return score, {
+        "score": score,
+        "max_score": 25,
+        "reason": base_reason if base_reason == "missing_freshness_state" else ("stale" if stale else "changed_domain"),
+        "domain_changed_files": domain_changed,
+        "stale": stale,
+    }
+
+
 def _structure_score(project_root: Path) -> tuple[float, dict[str, object]]:
     validation = validate_project(project_root)
     requirements = load_project_context(project_root, None)
@@ -249,6 +367,36 @@ def _structure_score(project_root: Path) -> tuple[float, dict[str, object]]:
         "cross_reference_density": round(density, 4),
         "validation_errors": structure_errors,
         "validation_warnings": structure_warnings,
+    }
+
+
+def _structure_score_for_skills(project_root: Path, skill_files: list[Path]) -> tuple[float, dict[str, object]]:
+    if not skill_files:
+        return 0.0, {
+            "score": 0.0,
+            "max_score": 25,
+            "skill_count": 0,
+            "cross_reference_density": 0.0,
+            "summary_siblings_present": 0,
+        }
+    cross_reference_count = 0
+    summary_siblings_present = 0
+    for skill in skill_files:
+        refs = _parse_references(skill)
+        cross_reference_count += len(refs)
+        if (skill.parent / "SUMMARY.md").exists():
+            summary_siblings_present += 1
+    density = cross_reference_count / max(1, len(skill_files))
+    density_bonus = min(10.0, round(density * 4, 2))
+    summary_bonus = min(10.0, round((summary_siblings_present / len(skill_files)) * 10, 2))
+    base = 5.0
+    score = max(0.0, min(25.0, round(base + density_bonus + summary_bonus, 2)))
+    return score, {
+        "score": score,
+        "max_score": 25,
+        "skill_count": len(skill_files),
+        "cross_reference_density": round(density, 4),
+        "summary_siblings_present": summary_siblings_present,
     }
 
 
@@ -313,7 +461,9 @@ def _quality_gates(subscores: dict[str, object]) -> tuple[list[dict[str, object]
             }
         )
 
-    if structure["required_artifacts_present"] < structure["required_artifacts_total"]:
+    required_present = structure.get("required_artifacts_present", structure.get("summary_siblings_present", 0))
+    required_total = structure.get("required_artifacts_total", structure.get("skill_count", 0))
+    if required_total > 0 and required_present < required_total:
         gates.append(
             {
                 "name": "structure_gate",
@@ -321,7 +471,7 @@ def _quality_gates(subscores: dict[str, object]) -> tuple[list[dict[str, object]
                 "reason": "Core skill-system artifacts are missing, so the tree is not structurally complete.",
             }
         )
-    elif structure["validation_errors"] > 0:
+    elif structure.get("validation_errors", 0) > 0:
         gates.append(
             {
                 "name": "validation_gate",
@@ -370,41 +520,156 @@ def build_score_recommendations(scorecard: dict[str, object]) -> list[str]:
     return recommendations
 
 
+def _assemble_scorecard(
+    *,
+    score_scope: str,
+    score_id: str,
+    project_root: Path,
+    subscores: dict[str, object],
+    extra: dict[str, object] | None = None,
+) -> dict[str, object]:
+    raw_total = round(sum(component["score"] for component in subscores.values()), 2)
+    gates, cap = _quality_gates(subscores)
+    total = raw_total if cap is None else round(min(raw_total, cap), 2)
+    scorecard = {
+        "scope": score_scope,
+        "id": score_id,
+        "project_root": str(project_root),
+        "score": total,
+        "raw_score": raw_total,
+        "max_score": 100,
+        "rating": _score_rating(total),
+        "subscores": subscores,
+        "quality_gates": gates,
+    }
+    if extra:
+        scorecard.update(extra)
+    scorecard["recommendations"] = build_score_recommendations(scorecard)
+    return scorecard
+
+
+def _domain_scorecards(project_root: Path) -> list[dict[str, object]]:
+    domain_files = _domain_key_files(project_root)
+    previous = load_freshness_state(project_root)
+    context = load_project_context(project_root, None)
+    codebase_context = build_codebase_context(project_root, context)
+    freshness = compute_freshness_report(project_root, context, codebase_context.domain_graph, previous)
+    all_skills = _skill_files(project_root)
+    scorecards: list[dict[str, object]] = []
+    for domain, key_files in sorted(domain_files.items()):
+        domain_skills = [skill for skill in all_skills if _skill_domain(skill, project_root) == domain]
+        groundedness_score, groundedness = _groundedness_score_for_skills(project_root, domain_skills, domain_files)
+        coverage_ratio = min(1.0, len(key_files) / max(1, len(_iter_source_files(project_root))))
+        coverage = {
+            "score": round(25 * coverage_ratio, 2),
+            "max_score": 25,
+            "source_file_count": len(key_files),
+            "mapped_file_count": len(key_files),
+            "coverage_ratio": round(coverage_ratio, 4),
+        }
+        stale_domain_skills = [path for path in freshness.stale_skill_paths if path.startswith(f"skills/{domain}/")]
+        freshness_score = max(0.0, round(25 - min(10.0, len(stale_domain_skills) * 4.0), 2))
+        freshness_payload = {
+            "score": freshness_score,
+            "max_score": 25,
+            "reason": freshness.reason if stale_domain_skills else "current",
+            "changed_files": sum(1 for file in freshness.changed_files if file in set(key_files)),
+            "stale_skill_paths": len(stale_domain_skills),
+        }
+        structure_score, structure = _structure_score_for_skills(project_root, domain_skills)
+        scorecards.append(
+            _assemble_scorecard(
+                score_scope="domain",
+                score_id=domain,
+                project_root=project_root,
+                subscores={
+                    "groundedness": groundedness,
+                    "coverage": coverage,
+                    "freshness": freshness_payload,
+                    "structure": structure,
+                },
+                extra={
+                    "domain": domain,
+                    "skill_count": len(domain_skills),
+                    "key_file_count": len(key_files),
+                },
+            )
+        )
+    return scorecards
+
+
+def _skill_scorecards(project_root: Path) -> list[dict[str, object]]:
+    domain_files = _domain_key_files(project_root)
+    previous = load_freshness_state(project_root)
+    context = load_project_context(project_root, None)
+    codebase_context = build_codebase_context(project_root, context)
+    freshness = compute_freshness_report(project_root, context, codebase_context.domain_graph, previous)
+    scorecards: list[dict[str, object]] = []
+    for skill in _skill_files(project_root):
+        domain = _skill_domain(skill, project_root) or "unscoped"
+        key_files = domain_files.get(domain, [])
+        groundedness_score, groundedness = _groundedness_score_for_skills(project_root, [skill], domain_files)
+        hits = _evidence_hits_for_skill(skill, project_root, key_files)
+        coverage_ratio = hits["covered_key_files"] / max(1, hits["total_key_files"])
+        coverage = {
+            "score": round(25 * coverage_ratio, 2),
+            "max_score": 25,
+            "source_file_count": hits["total_key_files"],
+            "mapped_file_count": hits["covered_key_files"],
+            "coverage_ratio": round(coverage_ratio, 4),
+        }
+        freshness_score, freshness_payload = _freshness_score_for_skill(
+            skill,
+            freshness.changed_files,
+            freshness.stale_skill_paths,
+            key_files,
+            project_root,
+            freshness.reason,
+        )
+        structure_score, structure = _structure_score_for_skills(project_root, [skill])
+        scorecards.append(
+            _assemble_scorecard(
+                score_scope="skill",
+                score_id=skill.relative_to(project_root).as_posix(),
+                project_root=project_root,
+                subscores={
+                    "groundedness": groundedness,
+                    "coverage": coverage,
+                    "freshness": freshness_payload,
+                    "structure": structure,
+                },
+                extra={
+                    "path": skill.relative_to(project_root).as_posix(),
+                    "domain": domain,
+                },
+            )
+        )
+    return scorecards
+
+
 def compute_skillgen_score(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root).resolve()
     groundedness_score, groundedness = _groundedness_score(root)
     coverage_score, coverage = _coverage_score(root)
     freshness_score, freshness = _freshness_score(root)
     structure_score, structure = _structure_score(root)
-    raw_total = round(groundedness_score + coverage_score + freshness_score + structure_score, 2)
-    gates, cap = _quality_gates(
-        {
-            "groundedness": groundedness,
-            "coverage": coverage,
-            "freshness": freshness,
-            "structure": structure,
-        }
-    )
-    total = raw_total if cap is None else round(min(raw_total, cap), 2)
-    scorecard = {
-        "project_root": str(root),
-        "score": total,
-        "raw_score": raw_total,
-        "max_score": 100,
-        "rating": _score_rating(total),
-        "subscores": {
+    scorecard = _assemble_scorecard(
+        score_scope="repo",
+        score_id="repo",
+        project_root=root,
+        subscores={
             "groundedness": groundedness,
             "coverage": coverage,
             "freshness": freshness,
             "structure": structure,
         },
-        "quality_gates": gates,
-    }
-    scorecard["recommendations"] = build_score_recommendations(scorecard)
+    )
+    scorecard["domains"] = _domain_scorecards(root)
+    scorecard["skills"] = _skill_scorecards(root)
     scorecard["badge"] = {
         "label": "Skilgen Score",
-        "message": f"{int(round(total))}/100",
-        "color": _badge_color(total),
+        "message": f"{int(round(scorecard['score']))}/100",
+        "color": _badge_color(scorecard["score"]),
         "markdown_example": "![Skilgen Score](https://skilgen.com/badge/your-repo)",
     }
     return scorecard
