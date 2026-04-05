@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from skilgen.api.server import run_server
-from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
+from skilgen.autoupdate import auto_update_status, diff_history as diff_history_payload, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
 from skilgen.api.service import analyze_payload, decision_payload, diff_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
@@ -257,6 +257,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     diff = subparsers.add_parser("diff", help="Show what changed since the last Skilgen generation and which skills are stale.")
     diff.add_argument("--project-root", default=".")
+    diff.add_argument("--history", action="store_true")
+    diff.add_argument("--limit", type=int, default=10)
     diff.add_argument("--json", action="store_true")
 
     eval_cmd = subparsers.add_parser("eval", help="Scaffold or compare Skilgen evaluation runs.")
@@ -543,6 +545,26 @@ def main() -> None:
         print(json.dumps(score_payload(Path(args.project_root).resolve(), args.badge_file), indent=2))
         return
     if args.command == "diff":
+        if args.history:
+            history = diff_history_payload(Path(args.project_root).resolve(), limit=args.limit)
+            if args.json:
+                print(json.dumps(history, indent=2))
+                return
+            print(f"Skilgen Diff History — last {history['entry_count']} events\n")
+            if not history["entries"]:
+                print("  No diff history found yet.\n")
+                print("  Let Skilgen auto-update or run `skilgen deliver` after code changes to start the timeline.")
+                return
+            for entry in history["entries"]:
+                stale_count = len(entry.get("stale_skill_paths", []))
+                changed_count = entry.get("changed_file_count", 0)
+                freshness = f"{int(round(entry.get('freshness_score', 0)))} / {entry.get('freshness_max', 25)}"
+                print(
+                    f"  {entry.get('timestamp', '-')}: {entry.get('reason', 'unknown')} | "
+                    f"{entry.get('git', {}).get('event_type', 'unknown')} | "
+                    f"{changed_count} changed | {stale_count} stale | Freshness {freshness}"
+                )
+            return
         payload = compute_diff(Path(args.project_root).resolve())
         if args.json:
             print(json.dumps(payload, indent=2))

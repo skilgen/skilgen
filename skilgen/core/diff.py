@@ -9,8 +9,7 @@ from skilgen.core.requirements import load_project_context
 from skilgen.core.score import freshness_subscore
 
 
-def _current_git_event(project_root: Path) -> str:
-    state = git_repo_state(project_root)
+def _current_git_event(state: dict[str, object]) -> str:
     if not state.get("is_git_repo"):
         return "not_git_repo"
     if state.get("merge_in_progress"):
@@ -24,6 +23,16 @@ def _current_git_event(project_root: Path) -> str:
     if state.get("untracked_files", 0) > 0:
         return "new_untracked_files"
     return "clean"
+
+
+def _git_payload(project_root: Path) -> dict[str, object]:
+    state = git_repo_state(project_root)
+    return {
+        "is_git_repo": state.get("is_git_repo", False),
+        "head": state.get("head"),
+        "branch": state.get("branch"),
+        "event_type": _current_git_event(state),
+    }
 
 
 def _classify_changed_files(previous_hashes: dict[str, str], current_hashes: dict[str, str]) -> list[dict[str, str]]:
@@ -72,12 +81,7 @@ def compute_diff(project_root: str | Path) -> dict[str, object]:
             "reason": "missing_freshness_state",
             "freshness_score": freshness_score,
             "freshness_max": freshness_payload["max_score"],
-            "git": {
-                "is_git_repo": git_repo_state(root).get("is_git_repo", False),
-                "head": git_repo_state(root).get("head"),
-                "branch": git_repo_state(root).get("branch"),
-                "event_type": _current_git_event(root),
-            },
+            "git": _git_payload(root),
         }
 
     changed_files = _classify_changed_files(previous_state.source_hashes, current_state.source_hashes)
@@ -91,7 +95,6 @@ def compute_diff(project_root: str | Path) -> dict[str, object]:
         stale_skill_paths = freshness.stale_skill_paths
         current_domains = [domain for domain in top_level_domains if domain not in set(impacted_domains)]
 
-    git_state = git_repo_state(root)
     return {
         "changed_files": changed_files,
         "changed_file_count": len(changed_files),
@@ -102,10 +105,5 @@ def compute_diff(project_root: str | Path) -> dict[str, object]:
         "reason": freshness.reason,
         "freshness_score": freshness_score,
         "freshness_max": freshness_payload["max_score"],
-        "git": {
-            "is_git_repo": git_state.get("is_git_repo", False),
-            "head": git_state.get("head"),
-            "branch": git_state.get("branch"),
-            "event_type": _current_git_event(root),
-        },
+        "git": _git_payload(root),
     }

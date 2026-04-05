@@ -21,6 +21,7 @@ from skilgen.sdk import (
     detect_skill_sources,
     decide_project,
     deliver_project,
+    diff_history,
     generate_enterprise_skill_source,
     export_skill_source_lock,
     get_auto_update_status,
@@ -151,6 +152,25 @@ class SdkTests(unittest.TestCase):
             )
             self.assertIn("comparison", compared)
             self.assertGreater(compared["comparison"]["success_rate_delta"], 0)
+
+    def test_sdk_diff_history_returns_recent_entries(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            history_path = root / ".skilgen" / "state" / "diff-history.jsonl"
+            history_path.parent.mkdir(parents=True, exist_ok=True)
+            history_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"timestamp": "2026-04-05T10:00:00+00:00", "reason": "source_changes_detected"}),
+                        json.dumps({"timestamp": "2026-04-05T10:05:00+00:00", "reason": "no_source_changes"}),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            payload = diff_history(root, limit=1)
+            self.assertEqual(payload["entry_count"], 1)
+            self.assertEqual(payload["entries"][0]["reason"], "no_source_changes")
 
     def test_sdk_external_skills_catalog_and_install(self) -> None:
         with TemporaryDirectory() as tmp:

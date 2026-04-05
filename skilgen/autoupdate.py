@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from skilgen.core.config import load_config
+from skilgen.core.diff import compute_diff
 from skilgen.core.repo_state import classify_repo_change, git_repo_state
 from skilgen.delivery import run_delivery
 
@@ -24,6 +25,10 @@ def _state_path(project_root: str | Path) -> Path:
 
 def _requirements_record_path(project_root: str | Path) -> Path:
     return _state_dir(project_root) / "autoupdate-requirements.txt"
+
+
+def _diff_history_path(project_root: str | Path) -> Path:
+    return _state_dir(project_root) / "diff-history.jsonl"
 
 
 def _timestamp() -> str:
@@ -81,6 +86,39 @@ def _record_requirements_path(project_root: Path, requirements_path: str | Path 
     path = _requirements_record_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("" if requirements_path is None else str(Path(requirements_path).resolve()), encoding="utf-8")
+
+
+def _append_diff_history(project_root: Path, diff_payload: dict[str, object], *, max_entries: int = 1000) -> None:
+    path = _diff_history_path(project_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    entry = {"timestamp": _timestamp(), **diff_payload}
+    lines.append(json.dumps(entry, sort_keys=True))
+    if len(lines) > max_entries:
+        lines = lines[-max_entries:]
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def diff_history(project_root: str | Path, limit: int = 10) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    path = _diff_history_path(root)
+    if not path.exists():
+        return {
+            "history_path": str(path),
+            "limit": max(0, limit),
+            "entries": [],
+            "entry_count": 0,
+        }
+
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    selected = lines[-max(0, limit) :] if limit > 0 else []
+    entries = [json.loads(line) for line in selected]
+    return {
+        "history_path": str(path),
+        "limit": max(0, limit),
+        "entries": entries,
+        "entry_count": len(entries),
+    }
 
 
 def _file_snapshot(project_root: Path) -> dict[str, int]:
@@ -199,6 +237,7 @@ def run_auto_update_worker(project_root: str | Path, *, interval_seconds: float 
             continue
         change = classify_repo_change(previous, current)
         requirements = _requirements_path_for_worker(root)
+        _append_diff_history(root, compute_diff(root))
         run_delivery(requirements, root)
         payload = {
             **payload,

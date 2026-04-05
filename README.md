@@ -58,7 +58,9 @@ When you run Skilgen in a repo, it can:
 - generate and refresh `AGENTS.md`, `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
 - generate and refresh a project `skills/` tree
 - detect changed code and refresh skills automatically
+- show exactly what changed and what went stale with `skilgen diff`
 - score the quality of the skill tree with a verifiable `Skilgen Score`
+- emit a score badge and scaffold evals so teams can track quality in CI
 - ingest enterprise-wide skill packs
 - install and rank external skill ecosystems
 - recommend and activate approved official MCP connectors
@@ -91,6 +93,12 @@ Run it like this:
 
 ```bash
 skilgen score --project-root .
+```
+
+Badge example:
+
+```md
+![Skilgen Score](https://skilgen.com/badge/your-repo)
 ```
 
 Skilgen Score is intentionally opinionated:
@@ -165,6 +173,7 @@ flowchart TD
 | Repo-native skill system | Generates `AGENTS.md`, `skills/`, and supporting docs directly inside the repo |
 | Automatic upkeep | Detects code changes and refreshes skills without repeated manual runs |
 | Quality standard | Computes a `Skilgen Score` that grades the health of the skill tree |
+| Change intelligence | Shows which files changed, which domains are impacted, and which skills are stale with `skilgen diff` |
 | Project understanding | Builds domain graphs, reports, feature maps, and refresh priorities |
 | Enterprise skills | Ingests and manages organization-wide skill packs |
 | External skills | Installs, ranks, activates, and syncs public skill ecosystems |
@@ -199,6 +208,7 @@ That means agents do not just work faster. They work with better judgment.
 
 Once initialized in a repo, Skilgen can automatically:
 - detect repository changes and refresh skills
+- classify git-aware changes such as manual edits, merges, rebases, and head changes
 - preserve existing `skilgen.yml` config instead of overwriting it
 - keep repo-local agent context current for Codex, Claude Code, and Cursor
 - detect ecosystem signals such as LangChain, Anthropic, Hugging Face, and more
@@ -209,11 +219,12 @@ Once initialized in a repo, Skilgen can automatically:
 
 ## What You Get Fast
 
+- 25 CLI commands and 50 SDK functions
 - `AGENTS.md` for the top-level agent contract
 - `FEATURES.md` for product behavior
 - `REPORT.md` for project-level understanding
 - `TRACEABILITY.md` for source-to-output reasoning
-- `skills/MANIFEST.md` and `skills/**/SKILL.md` for execution-ready guidance
+- `skills/MANIFEST.md`, `skills/GRAPH.md`, and `skills/**/SKILL.md` for execution-ready guidance
 - `.skilgen/state/` and `.skilgen/memory/` for freshness and continuity
 
 ## Quick Mental Model
@@ -240,6 +251,20 @@ Once initialized in a repo, Skilgen can automatically:
 
 The goal is not just to generate more files.
 The goal is to keep a high-confidence, high-quality skill system that agents can trust.
+
+## Eval Framework
+
+Skilgen can scaffold a simple with-vs-without-Skilgen evaluation setup so teams can measure:
+- success rate
+- token usage
+- error count
+
+Commands:
+
+```bash
+skilgen eval scaffold --project-root .
+skilgen eval compare --baseline baseline.json --skilgen skilgen.json
+```
 
 ## What Skilgen Understands
 

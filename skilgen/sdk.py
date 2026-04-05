@@ -21,7 +21,7 @@ from skilgen.api.service import (
     status_payload,
     validate_payload,
 )
-from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, stop_auto_update_worker
+from skilgen.autoupdate import auto_update_status, diff_history as auto_update_diff_history, ensure_auto_update_worker, stop_auto_update_worker
 from skilgen.core.config import render_default_config
 from skilgen.core.diff import compute_diff
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
@@ -160,6 +160,10 @@ def project_score(project_root: str | Path = ".", badge_file: str | Path | None 
 
 def project_diff(project_root: str | Path = ".") -> dict[str, object]:
     return compute_diff(Path(project_root).resolve())
+
+
+def diff_history(project_root: str | Path = ".", limit: int = 10) -> dict[str, object]:
+    return auto_update_diff_history(Path(project_root).resolve(), limit=limit)
 
 
 def start_auto_update(project_root: str | Path = ".", requirements: str | Path | None = None) -> dict[str, object]:

@@ -442,6 +442,35 @@ class CliTests(unittest.TestCase):
             disabled_payload = json.loads(disable.stdout)
             self.assertFalse(disabled_payload["running"])
 
+    def test_diff_history_outputs_recent_entries(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            history_path = root / ".skilgen" / "state" / "diff-history.jsonl"
+            history_path.parent.mkdir(parents=True, exist_ok=True)
+            history_path.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-04-05T10:00:00+00:00",
+                        "reason": "source_changes_detected",
+                        "changed_file_count": 2,
+                        "stale_skill_paths": ["skills/backend/SKILL.md"],
+                        "freshness_score": 18.0,
+                        "freshness_max": 25,
+                        "git": {"event_type": "manual_edit"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "diff", "--project-root", str(root), "--history"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("Skilgen Diff History", result.stdout)
+            self.assertIn("source_changes_detected", result.stdout)
+
     def test_doctor_outputs_runtime_diagnostics(self) -> None:
         with TemporaryDirectory() as tmp:
             result = subprocess.run(
