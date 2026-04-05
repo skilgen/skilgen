@@ -7,12 +7,13 @@ from pathlib import Path
 
 from skilgen.api.server import run_server
 from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
-from skilgen.api.service import analyze_payload, decision_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
+from skilgen.api.service import analyze_payload, decision_payload, diff_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
+from skilgen.core.diff import compute_diff
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
 from skilgen.enterprise_skills import (
@@ -253,6 +254,10 @@ def build_parser() -> argparse.ArgumentParser:
     score = subparsers.add_parser("score", help="Compute the Skilgen Score quality metric for the current skill tree.")
     score.add_argument("--project-root", default=".")
     score.add_argument("--badge-file")
+
+    diff = subparsers.add_parser("diff", help="Show what changed since the last Skilgen generation and which skills are stale.")
+    diff.add_argument("--project-root", default=".")
+    diff.add_argument("--json", action="store_true")
 
     eval_cmd = subparsers.add_parser("eval", help="Scaffold or compare Skilgen evaluation runs.")
     eval_subparsers = eval_cmd.add_subparsers(dest="eval_command", required=True)
@@ -536,6 +541,38 @@ def main() -> None:
     if args.command == "score":
         emit_progress("Computing the Skilgen Score from groundedness, coverage, freshness, and structure signals.")
         print(json.dumps(score_payload(Path(args.project_root).resolve(), args.badge_file), indent=2))
+        return
+    if args.command == "diff":
+        payload = compute_diff(Path(args.project_root).resolve())
+        if args.json:
+            print(json.dumps(payload, indent=2))
+            return
+        if payload["reason"] == "no_source_changes":
+            print("Skilgen Diff — no source changes detected\n")
+            print(f"  All skills are current. Freshness: {int(round(payload['freshness_score']))}/{payload['freshness_max']}")
+            return
+        if payload["reason"] == "missing_freshness_state":
+            print("Skilgen Diff — no previous generation found\n")
+            print("  Run `skilgen deliver` first to establish a baseline.")
+            return
+
+        print(f"Skilgen Diff — {payload['changed_file_count']} files changed since last generation\n")
+        if payload["changed_files"]:
+            print("  Changed files:")
+            for entry in payload["changed_files"]:
+                print(f"    {entry['change_type']:<9} {entry['path']}")
+            print()
+        if payload["impacted_domain_details"]:
+            print("  Impacted domains:")
+            for entry in payload["impacted_domain_details"]:
+                status = "STALE" if entry.get("stale") else "IMPACTED"
+                skill_path = entry.get("skill_path") or "-"
+                print(f"    {entry['domain']:<15} → {skill_path:<36} {status}")
+            print()
+        current = ", ".join(payload["current_domains"]) or "none"
+        print(f"  Current:\n    {current}\n")
+        print(f"  Freshness: {int(round(payload['freshness_score']))}/{payload['freshness_max']}\n")
+        print("  Run `skilgen deliver` to refresh stale skills.")
         return
     if args.command == "eval":
         if args.eval_command == "scaffold":

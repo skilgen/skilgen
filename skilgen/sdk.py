@@ -23,6 +23,7 @@ from skilgen.api.service import (
 )
 from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, stop_auto_update_worker
 from skilgen.core.config import render_default_config
+from skilgen.core.diff import compute_diff
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.enterprise_skills import (
@@ -155,6 +156,10 @@ def project_status(project_root: str | Path = ".") -> dict[str, object]:
 
 def project_score(project_root: str | Path = ".", badge_file: str | Path | None = None) -> dict[str, object]:
     return score_payload(Path(project_root).resolve(), badge_file)
+
+
+def project_diff(project_root: str | Path = ".") -> dict[str, object]:
+    return compute_diff(Path(project_root).resolve())
 
 
 def start_auto_update(project_root: str | Path = ".", requirements: str | Path | None = None) -> dict[str, object]:

@@ -15,6 +15,7 @@ from skilgen.api.service import (
     decision_payload,
     create_deliver_job,
     deliver_payload,
+    diff_payload,
     doctor_payload,
     enterprise_generate_payload,
     enterprise_ingest_payload,
@@ -93,6 +94,9 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     200,
                     score_payload(query.get("project_root", ["."])[0], query.get("badge_file", [None])[0]),
                 )
+                return
+            if parsed.path == "/diff":
+                _json_response(self, 200, diff_payload(query.get("project_root", ["."])[0]))
                 return
             if parsed.path == "/badge.svg":
                 _svg_response(self, 200, score_badge_payload(query.get("project_root", ["."])[0]))

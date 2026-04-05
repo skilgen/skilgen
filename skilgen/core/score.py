@@ -316,6 +316,10 @@ def _freshness_score(project_root: Path) -> tuple[float, dict[str, object]]:
     }
 
 
+def freshness_subscore(project_root: str | Path) -> tuple[float, dict[str, object]]:
+    return _freshness_score(Path(project_root).resolve())
+
+
 def _freshness_score_for_skill(
     skill_path: Path,
     changed_files: list[str],

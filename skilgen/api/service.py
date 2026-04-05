@@ -34,6 +34,7 @@ from skilgen.enterprise_skills import (
 )
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state
 from skilgen.core.context import build_codebase_context
+from skilgen.core.diff import compute_diff
 from skilgen.core.score import compute_skillgen_score, render_score_badge_svg, write_score_badge
 from skilgen.core.requirements import load_project_context
 from skilgen.core.run_memory import load_current_run_memory
@@ -309,6 +310,10 @@ def score_payload(project_root: str | Path, badge_file: str | Path | None = None
     if badge_file is not None:
         payload["badge_file"] = write_score_badge(root, badge_file)
     return _with_api_meta(payload)
+
+
+def diff_payload(project_root: str | Path) -> dict[str, object]:
+    return _with_api_meta(compute_diff(Path(project_root).resolve()))
 
 
 def score_badge_payload(project_root: str | Path) -> str:

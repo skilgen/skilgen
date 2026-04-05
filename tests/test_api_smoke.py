@@ -103,6 +103,10 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertIn("score", score)
                 self.assertIn("subscores", score)
 
+                diff = get_json(f"{base}/diff?{urlencode({'project_root': str(root)})}")
+                self.assertIn("reason", diff)
+                self.assertIn("freshness_score", diff)
+
                 with urlopen(f"{base}/badge.svg?{urlencode({'project_root': str(root)})}") as response:  # noqa: S310
                     badge = response.read().decode("utf-8")
                 self.assertIn("<svg", badge)
