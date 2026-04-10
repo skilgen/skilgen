@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import re
 from pathlib import Path
 
 from skilgen.core.models import CodebaseSignals
@@ -209,6 +211,103 @@ def _snippet_lines(text: str, *, limit: int = 12) -> list[str]:
     return lines
 
 
+def _python_structure(path: Path) -> list[str]:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
+    except (OSError, SyntaxError, ValueError):
+        return []
+    lines: list[str] = []
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            lines.append(f"class {node.name}")
+        elif isinstance(node, ast.FunctionDef):
+            lines.append(f"function {node.name}")
+        elif isinstance(node, ast.AsyncFunctionDef):
+            lines.append(f"async function {node.name}")
+        elif isinstance(node, ast.Import):
+            names = ", ".join(alias.name for alias in node.names[:4])
+            lines.append(f"imports {names}")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or "."
+            names = ", ".join(alias.name for alias in node.names[:4])
+            lines.append(f"from {module} import {names}")
+        if len(lines) >= 10:
+            break
+    return lines
+
+
+def _regex_structure(text: str, patterns: list[tuple[str, str]], *, limit: int = 10) -> list[str]:
+    lines: list[str] = []
+    seen: set[str] = set()
+    for label, pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.MULTILINE):
+            value = match.group(1).strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            lines.append(f"{label} {value}")
+            if len(lines) >= limit:
+                return lines
+    return lines
+
+
+def _language_structure(path: Path, text: str) -> list[str]:
+    suffix = path.suffix.lower()
+    if suffix == ".py":
+        return _python_structure(path)
+    if suffix in {".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte"}:
+        return _regex_structure(
+            text,
+            [
+                ("function", r"(?:export\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)"),
+                ("class", r"class\s+([A-Za-z_][A-Za-z0-9_]*)"),
+                ("component", r"(?:const|let|var)\s+([A-Z][A-Za-z0-9_]*)\s*=\s*\("),
+                ("route", r"(?:app|router)\.(?:get|post|put|delete|patch)\(\s*[\"'`]([^\"'`]+)"),
+            ],
+        )
+    if suffix == ".java":
+        return _regex_structure(
+            text,
+            [
+                ("class", r"class\s+([A-Za-z_][A-Za-z0-9_]*)"),
+                ("interface", r"interface\s+([A-Za-z_][A-Za-z0-9_]*)"),
+                ("method", r"(?:public|private|protected)\s+(?:static\s+)?[A-Za-z0-9_<>\[\]]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\("),
+            ],
+        )
+    if suffix == ".go":
+        return _regex_structure(
+            text,
+            [
+                ("package", r"package\s+([A-Za-z_][A-Za-z0-9_]*)"),
+                ("type", r"type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct"),
+                ("function", r"func\s+(?:\([^)]+\)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\("),
+            ],
+        )
+    if suffix == ".rs":
+        return _regex_structure(
+            text,
+            [
+                ("struct", r"struct\s+([A-Za-z_][A-Za-z0-9_]*)"),
+                ("enum", r"enum\s+([A-Za-z_][A-Za-z0-9_]*)"),
+                ("function", r"fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\("),
+                ("trait", r"trait\s+([A-Za-z_][A-Za-z0-9_]*)"),
+            ],
+        )
+    if suffix in COBOL_EXTENSIONS:
+        return _regex_structure(
+            text,
+            [
+                ("program", r"PROGRAM-ID\.\s+([A-Za-z0-9_-]+)"),
+                ("division", r"^\s*([A-Z-]+\s+DIVISION)\."),
+                ("section", r"^\s*([A-Z0-9-]+\s+SECTION)\."),
+                ("copy", r"^\s*COPY\s+([A-Z0-9-]+)"),
+            ],
+        )
+    if suffix in COPYBOOK_EXTENSIONS:
+        return _regex_structure(text, [("record", r"^\s*\d+\s+([A-Z0-9-]+)\.")])
+    return []
+
+
 def collect_code_evidence(project_root: Path, *, limit: int = 12) -> list[dict[str, object]]:
     root = project_root.resolve()
     signals = analyze_codebase(root)
@@ -281,6 +380,32 @@ def collect_code_evidence(project_root: Path, *, limit: int = 12) -> list[dict[s
                 "snippet": snippet,
             }
         )
+    return evidence
+
+
+def collect_structural_evidence(project_root: Path, *, limit: int = 16) -> list[dict[str, object]]:
+    root = project_root.resolve()
+    evidence: list[dict[str, object]] = []
+    for path in _iter_code_files(root):
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        structure = _language_structure(path, text)
+        if not structure:
+            continue
+        relative = path.relative_to(root).as_posix()
+        evidence.append(
+            {
+                "path": relative,
+                "language": _language_for_path(path),
+                "kind": "structure",
+                "tags": ["structural-evidence"],
+                "snippet": structure[:10],
+            }
+        )
+        if len(evidence) >= limit:
+            break
     return evidence
 
 

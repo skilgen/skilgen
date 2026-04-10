@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence
+from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence
 from skilgen.agents.relationship_mapper import build_import_graph
 from skilgen.core.models import EvidenceGraph, EvidenceItem, RequirementsContext
 
@@ -90,6 +90,17 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
         )
         for item in collect_code_evidence(root)
     ]
+    structural_items = [
+        EvidenceItem(
+            path=str(item["path"]),
+            kind="structure",
+            language=str(item["language"]) if item.get("language") is not None else None,
+            tags=[str(tag) for tag in item.get("tags", [])],
+            snippet=[str(line) for line in item.get("snippet", [])],
+            related_imports=import_graph.get(str(item["path"]), []),
+        )
+        for item in collect_structural_evidence(root)
+    ]
     doc_items = _collect_document_items(root)
     config_items = _collect_config_items(root)
     requirements_item = EvidenceItem(
@@ -99,7 +110,7 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
         tags=["requirements"],
         snippet=requirements.summary[:8],
     )
-    items = [requirements_item, *source_items, *doc_items, *config_items]
+    items = [requirements_item, *source_items, *structural_items, *doc_items, *config_items]
     dominant_languages = [name for name, _count in sorted(signals.language_inventory.items(), key=lambda item: (-item[1], item[0]))[:3]]
     recommendations = [
         "Use high-signal source evidence to define domain boundaries before generating skills.",
@@ -109,6 +120,8 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
         recommendations.append("Preserve copybook-backed data contracts as first-class skill evidence for legacy domains.")
     if signals.language_inventory:
         recommendations.append(f"Optimize skill synthesis around the dominant languages: {', '.join(dominant_languages)}.")
+    if structural_items:
+        recommendations.append("Use structural evidence such as functions, classes, divisions, and sections to refine skill boundaries.")
     return EvidenceGraph(
         language_inventory=signals.language_inventory,
         dominant_languages=dominant_languages,

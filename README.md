@@ -392,6 +392,7 @@ From those inputs, Skilgen synthesizes:
 Generated outputs can include:
 - `AGENTS.md`
 - `ANALYSIS.md`
+- `ARCHITECTURE.md`
 - `FEATURES.md`
 - `REPORT.md`
 - `TRACEABILITY.md`

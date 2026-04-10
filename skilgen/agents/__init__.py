@@ -1,4 +1,4 @@
-from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence
+from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence
 from skilgen.agents.architecture_planner import build_architecture_blueprint
 from skilgen.agents.evidence_graph import build_evidence_graph
 from skilgen.agents.decision_planner import build_agent_decision
@@ -18,6 +18,7 @@ __all__ = [
     "build_evidence_graph",
     "build_import_graph",
     "collect_code_evidence",
+    "collect_structural_evidence",
     "extract_features",
     "fingerprint_project",
     "parse_requirements_file",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence
+from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence
 from skilgen.agents.requirements_parser import parse_project_intent_native
 from skilgen.deep_agents_core import run_deep_json
 from skilgen.core.models import CodebaseSignals, DomainGraph, DomainGraphNode, RequirementsContext
@@ -372,6 +372,7 @@ def build_domain_graph(project_root: Path, requirements: RequirementsContext) ->
     requirements_path = requirements.requirements_path if requirements.requirements_path.exists() else None
     signals = analyze_codebase(root)
     code_evidence = collect_code_evidence(root)
+    structural_evidence = collect_structural_evidence(root)
     intent = parse_project_intent_native(root, requirements_path)
     payload = run_deep_json(
         "dynamic domain graph planning",
@@ -390,6 +391,7 @@ def build_domain_graph(project_root: Path, requirements: RequirementsContext) ->
             f"Intent JSON: {intent.__dict__}\n"
             f"Signals JSON: {signals.__dict__}\n"
             f"Code evidence JSON: {code_evidence}\n"
+            f"Structural evidence JSON: {structural_evidence}\n"
             f"Native graph JSON: { {'nodes': [node.__dict__ for node in native_graph.nodes], 'recommendations': native_graph.recommendations} }\n"
         ),
         lambda: {

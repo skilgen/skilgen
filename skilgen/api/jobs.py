@@ -57,7 +57,10 @@ def _load_job_from_disk(job_id: str, project_root: str | Path) -> JobRecord | No
     job_path = Path(project_root).resolve() / ".skilgen" / "jobs" / f"{job_id}.json"
     if not job_path.exists():
         return None
-    payload = json.loads(job_path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(job_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
     return JobRecord(
         job_id=payload["job_id"],
         job_type=payload["job_type"],

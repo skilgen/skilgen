@@ -2,7 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence
+from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence
 
 
 class CodebaseSignalsTests(unittest.TestCase):
@@ -93,6 +93,30 @@ class CodebaseSignalsTests(unittest.TestCase):
             self.assertTrue(evidence)
             self.assertEqual(evidence[0]["language"], "cobol")
             self.assertIn("PROGRAM-ID. CUSTOMER-LOOKUP.", evidence[0]["snippet"])
+
+    def test_collect_structural_evidence_extracts_symbols_and_sections(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "services").mkdir(parents=True)
+            (root / "services" / "users_service.py").write_text(
+                "import os\n\nclass UserService:\n    pass\n\ndef run_sync():\n    return True\n",
+                encoding="utf-8",
+            )
+            (root / "cobol").mkdir(parents=True)
+            (root / "cobol" / "billing.cbl").write_text(
+                "IDENTIFICATION DIVISION.\nPROGRAM-ID. BILLING.\nWORKING-STORAGE SECTION.\nPROCEDURE DIVISION.\nCOPY CUSTOMER-REC.\n",
+                encoding="utf-8",
+            )
+
+            evidence = collect_structural_evidence(root, limit=10)
+
+            evidence_by_path = {item["path"]: item for item in evidence}
+            self.assertIn("services/users_service.py", evidence_by_path)
+            self.assertIn("cobol/billing.cbl", evidence_by_path)
+            self.assertIn("class UserService", evidence_by_path["services/users_service.py"]["snippet"])
+            self.assertIn("function run_sync", evidence_by_path["services/users_service.py"]["snippet"])
+            self.assertIn("program BILLING", evidence_by_path["cobol/billing.cbl"]["snippet"])
+            self.assertIn("copy CUSTOMER-REC", evidence_by_path["cobol/billing.cbl"]["snippet"])
 
 
 if __name__ == "__main__":

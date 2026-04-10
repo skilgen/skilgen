@@ -4,10 +4,12 @@ import os
 from datetime import date
 from pathlib import Path
 
+from skilgen.agents.architecture_planner import build_architecture_blueprint
 from skilgen.agents.codebase_signals import analyze_codebase
 from skilgen.agents.requirements_parser import parse_project_intent
 from skilgen.agents.roadmap_planner import build_roadmap_plan
 from skilgen.core.config import load_config
+from skilgen.core.models import ArchitectureBlueprint, ArchitectureDomain
 from skilgen.core.context import build_codebase_context
 from skilgen.core.models import RequirementsContext, SkillSpec
 from skilgen.deep_agents_core import run_deep_text
@@ -42,11 +44,24 @@ def _parent_reference_map(context: RequirementsContext, project_root: Path) -> d
     }
 
 
+def _architecture_domain_map(context: RequirementsContext, project_root: Path) -> dict[str, ArchitectureDomain]:
+    blueprint = build_architecture_blueprint(project_root, context)
+    domain_map: dict[str, ArchitectureDomain] = {}
+    for domain in blueprint.domains:
+        domain_map[domain.name] = domain
+        if domain.recommended_skill_path:
+            normalized = domain.recommended_skill_path.removeprefix("skills/").removesuffix("/SKILL.md")
+            domain_map.setdefault(normalized, domain)
+    return domain_map
+
+
 def _dynamic_parent_specs(context: RequirementsContext, project_root: Path) -> list[SkillSpec]:
     codebase_context = build_codebase_context(project_root, context)
+    architecture_domains = _architecture_domain_map(context, project_root)
     parent_nodes = [node for node in codebase_context.domain_graph.nodes if node.parent_domain is None and node.skill_path]
     specs: list[SkillSpec] = []
     for node in parent_nodes:
+        architecture = architecture_domains.get(node.name)
         references = []
         for related in node.related_domains:
             related_node = next((item for item in codebase_context.domain_graph.nodes if item.name == related and item.skill_path), None)
@@ -57,23 +72,41 @@ def _dynamic_parent_specs(context: RequirementsContext, project_root: Path) -> l
             if child_node is not None:
                 references.append(_relative_skill_ref(node.skill_path, child_node.skill_path))
         references = list(dict.fromkeys(references))
+        overview = architecture.summary if architecture is not None else node.summary
+        checks = (
+            [f"{{{{project_root}}}}/{item}" for item in architecture.evidence_paths[:4]]
+            if architecture is not None and architecture.evidence_paths
+            else [f"{{{{project_root}}}}/{Path(item).parts[0]}/" if "/" in item else f"{{{{project_root}}}}/{item}" for item in node.key_files[:3]]
+        ) or ["{{project_root}}/"]
+        patterns = [
+            ("Inferred domain patterns", node.key_patterns or ["Use the inferred project structure before introducing a new top-level convention."]),
+            ("Dynamic topology", ["This parent skill was inferred from the current repo and may expand or contract as the codebase evolves."]),
+        ]
+        if architecture is not None and architecture.responsibilities:
+            patterns.insert(0, ("Architecture responsibilities", architecture.responsibilities[:4]))
+        if architecture is not None and architecture.evidence_paths:
+            patterns.append(("Architecture evidence", [f"Evidence: `{item}`" for item in architecture.evidence_paths[:5]]))
+        how_to = [
+            "Start from the nearest evidence file in this inferred domain.",
+            "Reuse the current structure before creating a new sibling domain or folder.",
+            "Refresh this parent skill when the planner says the domain topology has changed.",
+        ]
+        if architecture is not None:
+            how_to = [
+                "Start from the architecture evidence paths before broadening the scope of the change.",
+                "Use the listed responsibilities to keep changes inside the right domain boundary.",
+                "Refresh this parent skill whenever the architecture blueprint or top evidence files change materially.",
+            ]
         specs.append(
             SkillSpec(
                 path=node.skill_path.removeprefix("skills/"),
                 name=_slug_name(node.name),
                 domain=node.name,
                 sub_domain="platform",
-                overview=node.summary,
-                checks=[f"{{{{project_root}}}}/{Path(item).parts[0]}/" if "/" in item else f"{{{{project_root}}}}/{item}" for item in node.key_files[:3]] or ["{{project_root}}/"],
-                patterns=[
-                    ("Inferred domain patterns", node.key_patterns or ["Use the inferred project structure before introducing a new top-level convention."]),
-                    ("Dynamic topology", ["This parent skill was inferred from the current repo and may expand or contract as the codebase evolves."]),
-                ],
-                how_to=[
-                    "Start from the nearest evidence file in this inferred domain.",
-                    "Reuse the current structure before creating a new sibling domain or folder.",
-                    "Refresh this parent skill when the planner says the domain topology has changed.",
-                ],
+                overview=overview,
+                checks=checks,
+                patterns=patterns,
+                how_to=how_to,
                 references=references,
             )
         )
@@ -426,13 +459,25 @@ def render_manifest(specs: list[SkillSpec], source_hash: str) -> str:
     return "\n".join(lines)
 
 
-def render_graph(specs: list[SkillSpec]) -> str:
+def render_graph(specs: list[SkillSpec], architecture: ArchitectureBlueprint | None = None) -> str:
     lines = [
         "# Skill Graph",
         "",
         "This file summarizes the generated skill tree and cross references.",
         "",
     ]
+    if architecture is not None:
+        lines.extend(
+            [
+                "## Architecture Blueprint",
+                f"- Headline: {architecture.headline}",
+                f"- Summary: {architecture.system_summary}",
+            ]
+        )
+        if architecture.hotspots:
+            lines.append("- Hotspots:")
+            lines.extend(f"  - {item}" for item in architecture.hotspots[:5])
+        lines.append("")
     for spec in specs:
         lines.append(f"## {spec.path}")
         lines.append(f"- domain: `{spec.domain}`")
@@ -508,6 +553,7 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
     selected = selected_domains or set()
     specs = _select_specs(build_skill_specs(context, output_dir), selected)
     signals = analyze_codebase(output_dir.parent)
+    architecture = build_architecture_blueprint(output_dir.parent, context)
     written: list[Path] = []
     for spec in specs:
         target = output_dir / spec.path
@@ -520,7 +566,7 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
     written.append(manifest)
 
     graph = output_dir / "GRAPH.md"
-    graph.write_text(render_graph(specs), encoding="utf-8")
+    graph.write_text(render_graph(specs, architecture), encoding="utf-8")
     written.append(graph)
 
     summary_map: dict[str, list[tuple[str, list[str]]]] = {
@@ -534,6 +580,7 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
         "roadmap": [("Roadmap Context", context.summary)],
     }
     codebase_context = build_codebase_context(output_dir.parent, context)
+    architecture_domains = {domain.name: domain for domain in architecture.domains}
     for node in codebase_context.domain_graph.nodes:
         if node.parent_domain is not None or not node.skill_path:
             continue
@@ -541,8 +588,16 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
             continue
         summary_path = output_dir / Path(node.skill_path.removeprefix("skills/")).parent / "SUMMARY.md"
         summary_path.parent.mkdir(parents=True, exist_ok=True)
+        architecture_domain = architecture_domains.get(node.name)
+        sections = summary_map.get(node.name, [("Key Files", node.key_files)])
+        if architecture_domain is not None:
+            sections = [
+                ("Architecture responsibilities", architecture_domain.responsibilities),
+                ("Evidence paths", [f"`{item}`" for item in architecture_domain.evidence_paths]),
+                *sections,
+            ]
         summary_path.write_text(
-            render_domain_summary(f"{node.name.replace('-', ' ').title()} Summary", summary_map.get(node.name, [("Key Files", node.key_files)])),
+            render_domain_summary(f"{node.name.replace('-', ' ').title()} Summary", sections),
             encoding="utf-8",
         )
         written.append(summary_path)

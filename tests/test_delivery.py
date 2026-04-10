@@ -16,6 +16,7 @@ class DeliveryTests(unittest.TestCase):
             generated = run_delivery(requirements, root)
 
             self.assertTrue((root / "ANALYSIS.md").exists())
+            self.assertTrue((root / "ARCHITECTURE.md").exists())
             self.assertTrue((root / "FEATURES.md").exists())
             self.assertTrue((root / "skills" / "MANIFEST.md").exists())
             self.assertTrue((root / "skills" / "requirements" / "SKILL.md").exists())
@@ -43,6 +44,7 @@ class DeliveryTests(unittest.TestCase):
             generated = run_delivery(requirements, root)
 
             self.assertTrue((root / "ANALYSIS.md").exists())
+            self.assertTrue((root / "ARCHITECTURE.md").exists())
             self.assertTrue((root / "FEATURES.md").exists())
             self.assertTrue((root / "REPORT.md").exists())
             self.assertTrue((root / "TRACEABILITY.md").exists())
@@ -91,6 +93,7 @@ class DeliveryTests(unittest.TestCase):
             generated = run_delivery(None, root)
 
             self.assertTrue((root / "ANALYSIS.md").exists())
+            self.assertTrue((root / "ARCHITECTURE.md").exists())
             self.assertTrue((root / "FEATURES.md").exists())
             self.assertTrue((root / "skills" / "MANIFEST.md").exists())
             self.assertTrue((root / "skills" / "backend" / "SKILL.md").exists())
@@ -150,10 +153,14 @@ class DeliveryTests(unittest.TestCase):
             run_delivery(None, root)
 
             agents_text = (root / "AGENTS.md").read_text(encoding="utf-8")
+            architecture_text = (root / "ARCHITECTURE.md").read_text(encoding="utf-8")
+            graph_text = (root / "skills" / "GRAPH.md").read_text(encoding="utf-8")
             self.assertIn("## Inferred Domains", agents_text)
             self.assertIn("Decision planner refresh recommendation", agents_text)
             self.assertIn("Load these prioritized skills first:", agents_text)
             self.assertIn("skills/backend/SKILL.md", agents_text)
+            self.assertIn("## Architecture Domains", architecture_text)
+            self.assertIn("## Architecture Blueprint", graph_text)
 
     def test_run_delivery_generates_freeform_top_level_domain_skills(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -263,10 +270,12 @@ class DeliveryTests(unittest.TestCase):
 
             report_text = (root / "REPORT.md").read_text(encoding="utf-8")
             traceability_text = (root / "TRACEABILITY.md").read_text(encoding="utf-8")
+            architecture_text = (root / "ARCHITECTURE.md").read_text(encoding="utf-8")
             self.assertIn("## External Skill Provenance", report_text)
             self.assertIn("awesome-agent-skills-voltagent", report_text)
             self.assertIn("## External Skill Traceability", traceability_text)
             self.assertIn("candidate-pack", traceability_text)
+            self.assertIn("## Architecture Domains", architecture_text)
 
     def test_run_delivery_ingests_configured_enterprise_skills_and_connectors(self) -> None:
         with TemporaryDirectory() as tmp:

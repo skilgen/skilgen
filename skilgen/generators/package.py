@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from skilgen.agents import analyze_codebase, build_agent_decision, build_import_graph, fingerprint_project
+from skilgen.agents import analyze_codebase, build_agent_decision, build_architecture_blueprint, build_evidence_graph, build_import_graph, fingerprint_project
 from skilgen.agents.feature_extractor import extract_features
 from skilgen.agents.requirements_parser import parse_project_intent
 from skilgen.deep_agents_core import run_deep_text
@@ -24,6 +24,7 @@ def project_doc_paths(project_root: Path) -> list[Path]:
     return [
         project_root / "AGENTS.md",
         project_root / "ANALYSIS.md",
+        project_root / "ARCHITECTURE.md",
         project_root / "FEATURES.md",
         project_root / "REPORT.md",
         project_root / "TRACEABILITY.md",
@@ -75,6 +76,8 @@ def render_analysis_report(context: RequirementsContext, project_root: Path) -> 
     signals = analyze_codebase(project_root)
     import_graph = build_import_graph(project_root)
     codebase_context = build_codebase_context(project_root, context)
+    evidence_graph = build_evidence_graph(project_root, context)
+    architecture = build_architecture_blueprint(project_root, context)
     payload = {
         "framework_fingerprint": {
             "frontend": fingerprint.frontend.__dict__ if fingerprint.frontend else None,
@@ -90,8 +93,51 @@ def render_analysis_report(context: RequirementsContext, project_root: Path) -> 
         "detected_domains": [record.__dict__ for record in codebase_context.detected_domains],
         "skill_tree": [node.__dict__ for node in codebase_context.skill_tree],
         "import_graph": import_graph,
+        "evidence_graph": evidence_graph.__dict__ | {"items": [item.__dict__ for item in evidence_graph.items]},
+        "architecture": architecture.__dict__ | {"domains": [domain.__dict__ for domain in architecture.domains]},
     }
     return "\n".join(["# Analysis", "", "```json", json.dumps(payload, indent=2), "```", ""])
+
+
+def render_architecture_report(context: RequirementsContext, project_root: Path) -> str:
+    evidence_graph = build_evidence_graph(project_root, context)
+    architecture = build_architecture_blueprint(project_root, context)
+    dominant_languages = [f"- `{language}`" for language in evidence_graph.dominant_languages] or ["- none"]
+    lines = [
+        "# Architecture",
+        "",
+        f"## {architecture.headline}",
+        "",
+        architecture.system_summary,
+        "",
+        "## Dominant Languages",
+        *dominant_languages,
+        "",
+        "## Architecture Domains",
+    ]
+    for domain in architecture.domains:
+        lines.append(f"### {domain.name}")
+        lines.append(f"- Confidence: `{domain.confidence:.2f}`")
+        lines.append(f"- Summary: {domain.summary}")
+        if domain.responsibilities:
+            lines.append("- Responsibilities:")
+            lines.extend(f"  - {item}" for item in domain.responsibilities[:5])
+        if domain.evidence_paths:
+            lines.append("- Evidence paths:")
+            lines.extend(f"  - `{item}`" for item in domain.evidence_paths[:6])
+        if domain.related_domains:
+            lines.append(f"- Related domains: {', '.join(f'`{item}`' for item in domain.related_domains)}")
+        if domain.recommended_skill_path:
+            lines.append(f"- Recommended skill path: `{domain.recommended_skill_path}`")
+        lines.append("")
+    lines.extend(["## Evidence Graph Recommendations"])
+    lines.extend(f"- {item}" for item in evidence_graph.recommendations[:8])
+    lines.append("")
+    if architecture.hotspots:
+        lines.append("## Hotspots")
+        lines.extend(f"- {item}" for item in architecture.hotspots[:8])
+        lines.append("")
+    return "\n".join(lines)
 
 
 def _render_traceability_report_native(context: RequirementsContext, project_root: Path) -> str:
@@ -99,6 +145,7 @@ def _render_traceability_report_native(context: RequirementsContext, project_roo
     intent = parse_project_intent(project_root, requirements_path)
     signals = analyze_codebase(project_root)
     codebase_context = build_codebase_context(project_root, context)
+    architecture = build_architecture_blueprint(project_root, context)
     installed_skill_packs = installed_external_skills(project_root)
     ranked_skill_packs = ranked_external_skills(project_root).get("skills", [])
     enterprise_skill_packs = active_enterprise_skills(project_root)
@@ -160,10 +207,19 @@ def _render_traceability_report_native(context: RequirementsContext, project_roo
         lines.append(f"- Sub-domains: {', '.join(record.sub_domains) if record.sub_domains else 'none'}")
         lines.append("")
 
+    lines.extend(["## Architecture Traceability", ""])
+    for domain in architecture.domains[:10]:
+        lines.append(f"### {domain.name}")
+        lines.append(f"- Summary: {domain.summary}")
+        lines.append(f"- Evidence paths: {', '.join(f'`{item}`' for item in domain.evidence_paths) if domain.evidence_paths else 'none'}")
+        lines.append(f"- Recommended skill path: `{domain.recommended_skill_path or 'none'}`")
+        lines.append("")
+
     lines.extend(
         [
             "## Generated Outputs",
             "- `ANALYSIS.md` for full machine-readable project analysis",
+            "- `ARCHITECTURE.md` for evidence-backed domain architecture",
             "- `FEATURES.md` for detected and planned feature inventory",
             "- `REPORT.md` for human-readable summary",
             "- `skills/MANIFEST.md` and `skills/GRAPH.md` for skill discovery",
@@ -270,6 +326,7 @@ def _render_project_report_native(context: RequirementsContext, project_root: Pa
     requirements_path = context.requirements_path if context.requirements_path.exists() else None
     features = extract_features(requirements_path, project_root)
     codebase_context = build_codebase_context(project_root, context)
+    architecture = build_architecture_blueprint(project_root, context)
     ranked_skill_packs = ranked_external_skills(project_root).get("skills", [])
     domain_names = ", ".join(record.name for record in codebase_context.detected_domains)
     lines = [
@@ -289,9 +346,11 @@ def _render_project_report_native(context: RequirementsContext, project_root: Pa
         f"- Auth files: {len(signals.auth_files)}",
         f"- State files: {len(signals.state_files)}",
         f"- Design system files: {len(signals.design_system_files)}",
+        f"- Architecture domains: {len(architecture.domains)}",
         "",
         "## Generated Outputs",
         "- ANALYSIS.md",
+        "- ARCHITECTURE.md",
         "- FEATURES.md",
         "- REPORT.md",
         "- TRACEABILITY.md",
@@ -312,6 +371,10 @@ def _render_project_report_native(context: RequirementsContext, project_root: Pa
         lines.append(f"- Components: start from `{signals.components[0]}`")
     if not any([signals.backend_routes, signals.services, signals.frontend_routes, signals.components]):
         lines.append("- No concrete route/service/component files were detected yet; start from the requirements and roadmap skills.")
+    if architecture.domains:
+        lines.extend(["", "## Architecture Highlights"])
+        for domain in architecture.domains[:5]:
+            lines.append(f"- `{domain.name}`: {domain.summary}")
     lines.extend(
         [
             "",
@@ -831,11 +894,13 @@ def write_project_docs(context: RequirementsContext, project_root: Path) -> list
     written = []
     agents = render_agents_contract(context, project_root)
     analysis = render_analysis_report(context, project_root)
+    architecture = render_architecture_report(context, project_root)
     features = render_feature_inventory(context)
     report = render_project_report(context, project_root)
     traceability = render_traceability_report(context, project_root)
     written.append(ensure_file(project_root / "AGENTS.md", agents))
     written.append(ensure_file(project_root / "ANALYSIS.md", analysis))
+    written.append(ensure_file(project_root / "ARCHITECTURE.md", architecture))
     written.append(ensure_file(project_root / "FEATURES.md", features))
     written.append(ensure_file(project_root / "REPORT.md", report))
     written.append(ensure_file(project_root / "TRACEABILITY.md", traceability))
