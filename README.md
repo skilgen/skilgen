@@ -92,6 +92,20 @@ Skilgen currently accepts:
 - `.md`
 - `.txt`
 - `.docx`
+- `.pdf`
+- `.html`
+- `.htm`
+- `.json`
+- `.yaml`
+- `.yml`
+- `.csv`
+- `.tsv`
+- `.xml`
+- `.xlsx`
+- `.pptx`
+- `.toml`
+- `.ini`
+- `.cfg`
 - no requirements file at all, in which case it runs in codebase-only mode
 
 ### Source code formats for repo scanning and evidence extraction

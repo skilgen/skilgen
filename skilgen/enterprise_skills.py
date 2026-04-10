@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 from skilgen.core.config import load_config
+from skilgen.core.document_ingestion import extract_document_text
 
 
 @dataclass(frozen=True)
@@ -526,7 +527,7 @@ def generate_enterprise_skill(
     sections = []
     for path in existing[:8]:
         if path.is_file():
-            text = path.read_text(encoding="utf-8", errors="ignore")
+            text = extract_document_text(path)
             lines = [line.strip() for line in text.splitlines() if line.strip()]
             snippet = next((line for line in lines if not line.startswith("#")), "")[:220]
             sections.append(f"- `{path.name}`: {snippet or 'Source file included for enterprise context.'}")

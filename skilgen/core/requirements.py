@@ -1,22 +1,14 @@
 from __future__ import annotations
 
 import hashlib
-import html
-import re
-import zipfile
 from pathlib import Path
 
+from skilgen.core.document_ingestion import extract_document_text
 from skilgen.core.models import ProjectIntent, RequirementsContext
 
 
 def extract_text(path: Path) -> str:
-    if path.suffix.lower() == ".docx":
-        with zipfile.ZipFile(path) as archive:
-            xml = archive.read("word/document.xml").decode("utf-8")
-        xml = re.sub(r"</w:p>", "\n", xml)
-        xml = re.sub(r"<[^>]+>", "", xml)
-        return html.unescape(xml)
-    return path.read_text(encoding="utf-8")
+    return extract_document_text(path)
 
 
 def normalize_lines(text: str) -> list[str]:
