@@ -178,6 +178,48 @@ class CodebaseSignals:
     auth_files: list[str]
     state_files: list[str]
     design_system_files: list[str]
+    legacy_programs: list[str] = field(default_factory=list)
+    copybooks: list[str] = field(default_factory=list)
+    language_inventory: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EvidenceItem:
+    path: str
+    kind: str
+    language: str | None
+    tags: list[str]
+    snippet: list[str]
+    related_imports: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class EvidenceGraph:
+    language_inventory: dict[str, int]
+    dominant_languages: list[str]
+    import_graph: dict[str, list[str]]
+    items: list[EvidenceItem]
+    recommendations: list[str]
+
+
+@dataclass(frozen=True)
+class ArchitectureDomain:
+    name: str
+    summary: str
+    confidence: float
+    responsibilities: list[str]
+    evidence_paths: list[str]
+    related_domains: list[str]
+    recommended_skill_path: str | None = None
+
+
+@dataclass(frozen=True)
+class ArchitectureBlueprint:
+    headline: str
+    system_summary: str
+    domains: list[ArchitectureDomain]
+    hotspots: list[str]
+    recommendations: list[str]
 
 
 @dataclass

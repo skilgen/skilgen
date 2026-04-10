@@ -15,6 +15,7 @@ from skilgen.sdk import (
     activate_project_mcp_connector,
     activate_skill_source,
     analyze_project,
+    architecture_project,
     cancel_job,
     deactivate_project_mcp_connector,
     deactivate_skill_source,
@@ -77,6 +78,12 @@ class SdkTests(unittest.TestCase):
             analysis = analyze_project(root, requirements)
             self.assertIn("signals", analysis)
             self.assertEqual(analysis["api_version"], "1.0")
+            self.assertIn("evidence_graph", analysis)
+
+            architecture = architecture_project(root, requirements)
+            self.assertIn("architecture", architecture)
+            self.assertIn("evidence_graph", architecture)
+            self.assertTrue(architecture["architecture"]["domains"])
 
             decision = decide_project(root, requirements)
             self.assertIn("should_refresh", decision)

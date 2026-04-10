@@ -77,8 +77,14 @@ class ApiSmokeTests(unittest.TestCase):
 
                 analysis = post_json(f"{base}/analyze", {"project_root": str(root), "requirements": str(requirements)})
                 self.assertIn("signals", analysis)
+                self.assertIn("evidence_graph", analysis)
                 self.assertIn("domain_graph", analysis)
                 self.assertEqual(analysis["api_version"], "1.0")
+
+                architecture = get_json(f"{base}/architecture?{urlencode({'project_root': str(root), 'requirements': str(requirements)})}")
+                self.assertIn("architecture", architecture)
+                self.assertIn("evidence_graph", architecture)
+                self.assertTrue(architecture["architecture"]["domains"])
 
                 intent = post_json(f"{base}/intent", {"requirements": str(requirements)})
                 self.assertTrue(intent["features"])

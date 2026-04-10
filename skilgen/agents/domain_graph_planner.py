@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from skilgen.agents.codebase_signals import analyze_codebase
+from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence
 from skilgen.agents.requirements_parser import parse_project_intent_native
 from skilgen.deep_agents_core import run_deep_json
 from skilgen.core.models import CodebaseSignals, DomainGraph, DomainGraphNode, RequirementsContext
@@ -69,10 +69,12 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
     backend_children = ["backend-api", "backend-testing"]
     if signals.backend_routes:
         backend_children.append("backend-routes")
-    if signals.services:
+    if signals.services or signals.legacy_programs:
         backend_children.append("backend-services")
     if signals.data_models or signals.persistence_layers:
         backend_children.append("backend-data")
+    if signals.copybooks:
+        backend_children.append("backend-copybooks")
     if signals.auth_files:
         backend_children.append("backend-auth")
     if signals.background_jobs:
@@ -102,7 +104,15 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
         )
 
     backend_detected = any(
-        [signals.backend_routes, signals.services, signals.data_models, signals.persistence_layers, signals.auth_files]
+        [
+            signals.backend_routes,
+            signals.services,
+            signals.data_models,
+            signals.persistence_layers,
+            signals.auth_files,
+            signals.legacy_programs,
+            signals.copybooks,
+        ]
     )
     if requirements.domains.get("backend") or backend_detected:
         nodes.append(
@@ -111,7 +121,14 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
                 summary="Server-side delivery domain covering route handlers, services, persistence, and verification of backend changes.",
                 confidence=0.88,
                 key_files=_top_file(
-                    [*signals.backend_routes, *signals.services, *signals.data_models, *signals.auth_files],
+                    [
+                        *signals.backend_routes,
+                        *signals.services,
+                        *signals.data_models,
+                        *signals.auth_files,
+                        *signals.legacy_programs,
+                        *signals.copybooks,
+                    ],
                     ["api/", "services/"],
                 ),
                 key_patterns=["endpoint quality gate", "service boundaries", "transport-to-domain separation"],
@@ -180,7 +197,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
-    if signals.background_jobs and not (signals.backend_routes or signals.services):
+    if signals.background_jobs and not (signals.backend_routes or signals.services or signals.legacy_programs):
         nodes.append(
             _node(
                 "operations",
@@ -193,13 +210,15 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
-    if (signals.data_models or signals.persistence_layers) and not (signals.backend_routes or signals.services):
+    if (signals.data_models or signals.persistence_layers or signals.copybooks) and not (
+        signals.backend_routes or signals.services or signals.legacy_programs
+    ):
         nodes.append(
             _node(
                 "data-platform",
                 summary="Standalone data platform domain inferred from data models, schemas, or persistence layers without a stronger application-service boundary.",
                 confidence=0.8,
-                key_files=_top_file([*signals.data_models, *signals.persistence_layers], ["models/", "db/"]),
+                key_files=_top_file([*signals.data_models, *signals.persistence_layers, *signals.copybooks], ["models/", "db/"]),
                 key_patterns=["schema discipline", "repository boundaries", "data contracts"],
                 related_domains=["roadmap", "requirements"],
                 skill_path="skills/data-platform/SKILL.md",
@@ -230,17 +249,24 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
         ),
         (
             "backend-services",
-            "Service and use-case guidance for existing orchestration and business logic modules.",
-            _top_file(signals.services, ["services/"]),
-            ["service boundaries", "orchestration separation", "reusable business logic"],
+            "Service and use-case guidance for existing orchestration, business logic modules, and legacy programs.",
+            _top_file([*signals.services, *signals.legacy_programs], ["services/", "cobol/"]),
+            ["service boundaries", "orchestration separation", "reusable business logic", "legacy program boundaries"],
             "skills/backend/services/SKILL.md",
         ),
         (
             "backend-data",
             "Data models, repositories, and persistence guidance inferred from backend storage layers.",
-            _top_file([*signals.data_models, *signals.persistence_layers], ["models/", "db/"]),
+            _top_file([*signals.data_models, *signals.persistence_layers, *signals.copybooks], ["models/", "db/"]),
             ["data contracts", "repository boundaries", "schema-to-domain alignment"],
             "skills/backend/data/SKILL.md",
+        ),
+        (
+            "backend-copybooks",
+            "Copybook and record-layout guidance inferred from COBOL copybooks and shared record definitions.",
+            _top_file(signals.copybooks, ["copybooks/"]),
+            ["copybook contracts", "record layouts", "shared data definitions"],
+            "skills/backend/copybooks/SKILL.md",
         ),
         (
             "backend-auth",
@@ -345,6 +371,7 @@ def build_domain_graph(project_root: Path, requirements: RequirementsContext) ->
     native_graph = build_domain_graph_native(root, requirements)
     requirements_path = requirements.requirements_path if requirements.requirements_path.exists() else None
     signals = analyze_codebase(root)
+    code_evidence = collect_code_evidence(root)
     intent = parse_project_intent_native(root, requirements_path)
     payload = run_deep_json(
         "dynamic domain graph planning",
@@ -362,6 +389,7 @@ def build_domain_graph(project_root: Path, requirements: RequirementsContext) ->
             f"Requirements domains: {requirements.domains}\n"
             f"Intent JSON: {intent.__dict__}\n"
             f"Signals JSON: {signals.__dict__}\n"
+            f"Code evidence JSON: {code_evidence}\n"
             f"Native graph JSON: { {'nodes': [node.__dict__ for node in native_graph.nodes], 'recommendations': native_graph.recommendations} }\n"
         ),
         lambda: {

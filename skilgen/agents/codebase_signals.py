@@ -5,8 +5,39 @@ from pathlib import Path
 from skilgen.core.models import CodebaseSignals
 
 
-CODE_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte"}
+CODE_EXTENSIONS = {
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".vue",
+    ".svelte",
+    ".cbl",
+    ".cob",
+    ".cpy",
+    ".java",
+    ".go",
+    ".rs",
+}
 UI_EXTENSIONS = {".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte"}
+COBOL_EXTENSIONS = {".cbl", ".cob"}
+COPYBOOK_EXTENSIONS = {".cpy"}
+LANGUAGE_BY_EXTENSION = {
+    ".py": "python",
+    ".js": "javascript",
+    ".jsx": "javascript-react",
+    ".ts": "typescript",
+    ".tsx": "typescript-react",
+    ".vue": "vue",
+    ".svelte": "svelte",
+    ".cbl": "cobol",
+    ".cob": "cobol",
+    ".cpy": "copybook",
+    ".java": "java",
+    ".go": "go",
+    ".rs": "rust",
+}
 IGNORED_PARTS = {
     ".git",
     ".venv",
@@ -18,8 +49,11 @@ IGNORED_PARTS = {
     ".next",
     ".idea",
     ".pytest_cache",
-    ".skilgen",
 }
+
+
+def _relative_parts(path: Path, project_root: Path) -> set[str]:
+    return {part.lower() for part in path.relative_to(project_root).parts}
 
 
 def _iter_code_files(project_root: Path) -> list[Path]:
@@ -29,8 +63,7 @@ def _iter_code_files(project_root: Path) -> list[Path]:
             continue
         if path.suffix.lower() not in CODE_EXTENSIONS:
             continue
-        relative_parts = set(path.relative_to(project_root).parts)
-        if relative_parts & IGNORED_PARTS:
+        if _relative_parts(path, project_root) & IGNORED_PARTS:
             continue
         files.append(path)
     return sorted(files)
@@ -38,8 +71,14 @@ def _iter_code_files(project_root: Path) -> list[Path]:
 
 def _is_backend_route(relative_path: str, parts: tuple[str, ...], name: str) -> bool:
     lowered_parts = {part.lower() for part in parts}
-    route_markers = {"api", "routes", "route", "controllers", "controller", "handlers", "handler"}
-    return bool(lowered_parts & route_markers) or relative_path.startswith("app/api/") or "router" in name.lower()
+    route_markers = {"api", "routes", "route", "controllers", "controller", "handlers", "handler", "cics", "transactions", "transaction"}
+    lowered_name = name.lower()
+    return (
+        bool(lowered_parts & route_markers)
+        or relative_path.startswith("app/api/")
+        or "router" in lowered_name
+        or lowered_name.startswith(("txn", "trn"))
+    )
 
 
 def _is_frontend_route(relative_path: str, parts: tuple[str, ...], name: str) -> bool:
@@ -59,7 +98,7 @@ def _is_component(parts: tuple[str, ...], stem: str) -> bool:
 
 def _is_service(parts: tuple[str, ...], name: str) -> bool:
     lowered_parts = {part.lower() for part in parts}
-    service_markers = {"services", "service", "usecases", "usecase", "domain"}
+    service_markers = {"services", "service", "usecases", "usecase", "domain", "programs", "program", "business"}
     return bool(lowered_parts & service_markers) or "service" in name.lower()
 
 
@@ -76,9 +115,9 @@ def _is_test(relative_path: str, stem: str) -> bool:
 
 def _is_data_model(parts: tuple[str, ...], stem: str, name: str) -> bool:
     lowered_parts = {part.lower() for part in parts}
-    model_markers = {"models", "model", "schemas", "schema", "entities", "entity", "dto", "dtos"}
+    model_markers = {"models", "model", "schemas", "schema", "entities", "entity", "dto", "dtos", "copybook", "copybooks", "record", "records"}
     lowered_name = name.lower()
-    return bool(lowered_parts & model_markers) or lowered_name.endswith(("model.py", "schema.py", "entity.py"))
+    return bool(lowered_parts & model_markers) or lowered_name.endswith(("model.py", "schema.py", "entity.py", ".cpy"))
 
 
 def _is_persistence_layer(parts: tuple[str, ...], name: str) -> bool:
@@ -92,19 +131,23 @@ def _is_persistence_layer(parts: tuple[str, ...], name: str) -> bool:
         "migrations",
         "orm",
         "prisma",
+        "vsam",
+        "db2",
+        "sql",
+        "copybooks",
     }
     lowered_name = name.lower()
     return bool(lowered_parts & persistence_markers) or any(
-        marker in lowered_name for marker in ("repository", "migration", "database", "db", "prisma")
+        marker in lowered_name for marker in ("repository", "migration", "database", "db", "prisma", "vsam", "db2", "sql")
     )
 
 
 def _is_background_job(parts: tuple[str, ...], name: str) -> bool:
     lowered_parts = {part.lower() for part in parts}
-    job_markers = {"jobs", "job", "workers", "worker", "queues", "queue", "tasks", "task", "cron"}
+    job_markers = {"jobs", "job", "workers", "worker", "queues", "queue", "tasks", "task", "cron", "batch", "jcl"}
     lowered_name = name.lower()
     return bool(lowered_parts & job_markers) or any(
-        marker in lowered_name for marker in ("job", "worker", "task", "queue", "cron")
+        marker in lowered_name for marker in ("job", "worker", "task", "queue", "cron", "batch", "jcl")
     )
 
 
@@ -135,6 +178,112 @@ def _is_design_system_file(parts: tuple[str, ...], name: str) -> bool:
     )
 
 
+def _is_copybook(path: Path, parts: tuple[str, ...]) -> bool:
+    lowered_parts = {part.lower() for part in parts}
+    return path.suffix.lower() in COPYBOOK_EXTENSIONS or bool(lowered_parts & {"copybook", "copybooks", "copy"})
+
+
+def _is_legacy_program(path: Path, parts: tuple[str, ...], name: str) -> bool:
+    lowered_parts = {part.lower() for part in parts}
+    lowered_name = name.lower()
+    return path.suffix.lower() in COBOL_EXTENSIONS or bool(
+        lowered_parts & {"cobol", "cics", "batch", "program", "programs", "transactions", "bms"}
+    ) or any(marker in lowered_name for marker in ("txn", "cics", "batch", "program"))
+
+
+def _language_for_path(path: Path) -> str:
+    return LANGUAGE_BY_EXTENSION.get(path.suffix.lower(), path.suffix.lower().lstrip(".") or "text")
+
+
+def _snippet_lines(text: str, *, limit: int = 12) -> list[str]:
+    lines: list[str] = []
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(("*", "//", "/*", "#", "--")) and len(lines) > 2:
+            continue
+        lines.append(stripped[:180])
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def collect_code_evidence(project_root: Path, *, limit: int = 12) -> list[dict[str, object]]:
+    root = project_root.resolve()
+    signals = analyze_codebase(root)
+    prioritized_paths = [
+        *signals.backend_routes,
+        *signals.services,
+        *signals.data_models,
+        *signals.persistence_layers,
+        *signals.auth_files,
+        *signals.background_jobs,
+        *signals.copybooks,
+        *signals.legacy_programs,
+        *signals.frontend_routes,
+        *signals.components,
+    ]
+    seen: set[str] = set()
+    evidence_paths: list[Path] = []
+    for relative in prioritized_paths:
+        if relative in seen:
+            continue
+        candidate = root / relative
+        if candidate.exists() and candidate.is_file():
+            evidence_paths.append(candidate)
+            seen.add(relative)
+        if len(evidence_paths) >= limit:
+            break
+    if len(evidence_paths) < limit:
+        for path in _iter_code_files(root):
+            relative = path.relative_to(root).as_posix()
+            if relative in seen:
+                continue
+            evidence_paths.append(path)
+            seen.add(relative)
+            if len(evidence_paths) >= limit:
+                break
+
+    evidence: list[dict[str, object]] = []
+    for path in evidence_paths:
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        snippet = _snippet_lines(text)
+        if not snippet:
+            continue
+        relative = path.relative_to(root).as_posix()
+        tags = []
+        for name, bucket in [
+            ("backend_routes", signals.backend_routes),
+            ("frontend_routes", signals.frontend_routes),
+            ("components", signals.components),
+            ("services", signals.services),
+            ("tests", signals.tests),
+            ("data_models", signals.data_models),
+            ("persistence_layers", signals.persistence_layers),
+            ("background_jobs", signals.background_jobs),
+            ("auth_files", signals.auth_files),
+            ("state_files", signals.state_files),
+            ("design_system_files", signals.design_system_files),
+            ("legacy_programs", signals.legacy_programs),
+            ("copybooks", signals.copybooks),
+        ]:
+            if relative in bucket:
+                tags.append(name)
+        evidence.append(
+            {
+                "path": relative,
+                "language": _language_for_path(path),
+                "tags": tags,
+                "snippet": snippet,
+            }
+        )
+    return evidence
+
+
 def analyze_codebase(project_root: Path) -> CodebaseSignals:
     root = project_root.resolve()
     backend_routes: list[str] = []
@@ -148,6 +297,9 @@ def analyze_codebase(project_root: Path) -> CodebaseSignals:
     auth_files: list[str] = []
     state_files: list[str] = []
     design_system_files: list[str] = []
+    legacy_programs: list[str] = []
+    copybooks: list[str] = []
+    language_inventory: dict[str, int] = {}
 
     for path in _iter_code_files(root):
         relative_path = path.relative_to(root)
@@ -155,6 +307,9 @@ def analyze_codebase(project_root: Path) -> CodebaseSignals:
         parts = tuple(relative_path.parts)
         name = path.name
         stem = path.stem
+
+        language = _language_for_path(path)
+        language_inventory[language] = language_inventory.get(language, 0) + 1
 
         if _is_test(relative, stem):
             tests.append(relative)
@@ -164,9 +319,9 @@ def analyze_codebase(project_root: Path) -> CodebaseSignals:
             backend_routes.append(relative)
         if path.suffix.lower() in UI_EXTENSIONS and _is_component(parts, stem):
             components.append(relative)
-        if _is_service(parts, name):
+        if _is_service(parts, name) or _is_legacy_program(path, parts, name):
             services.append(relative)
-        if _is_data_model(parts, stem, name):
+        if _is_data_model(parts, stem, name) or _is_copybook(path, parts):
             data_models.append(relative)
         if _is_persistence_layer(parts, name):
             persistence_layers.append(relative)
@@ -178,6 +333,10 @@ def analyze_codebase(project_root: Path) -> CodebaseSignals:
             state_files.append(relative)
         if path.suffix.lower() in UI_EXTENSIONS and _is_design_system_file(parts, name):
             design_system_files.append(relative)
+        if _is_legacy_program(path, parts, name):
+            legacy_programs.append(relative)
+        if _is_copybook(path, parts):
+            copybooks.append(relative)
 
     return CodebaseSignals(
         backend_routes=sorted(set(backend_routes)),
@@ -191,4 +350,7 @@ def analyze_codebase(project_root: Path) -> CodebaseSignals:
         auth_files=sorted(set(auth_files)),
         state_files=sorted(set(state_files)),
         design_system_files=sorted(set(design_system_files)),
+        legacy_programs=sorted(set(legacy_programs)),
+        copybooks=sorted(set(copybooks)),
+        language_inventory=dict(sorted(language_inventory.items())),
     )

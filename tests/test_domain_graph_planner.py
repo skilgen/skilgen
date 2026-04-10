@@ -1,0 +1,46 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+from unittest.mock import patch
+
+from skilgen.agents.domain_graph_planner import build_domain_graph
+from skilgen.core.requirements import load_requirements
+
+
+class DomainGraphPlannerTests(unittest.TestCase):
+    def test_build_domain_graph_passes_code_evidence_to_llm_prompt(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requirements = root / "requirements.md"
+            requirements.write_text("Support COBOL transaction flows.\n", encoding="utf-8")
+            (root / "cobol" / "transactions").mkdir(parents=True)
+            (root / "cobol" / "transactions" / "customer_lookup.cbl").write_text(
+                "IDENTIFICATION DIVISION.\nPROGRAM-ID. CUSTOMER-LOOKUP.\nPROCEDURE DIVISION.\nDISPLAY 'OK'.\n",
+                encoding="utf-8",
+            )
+            (root / "copybooks").mkdir(parents=True)
+            (root / "copybooks" / "customer_record.cpy").write_text(
+                "01 CUSTOMER-RECORD.\n   05 CUSTOMER-ID PIC X(10).\n",
+                encoding="utf-8",
+            )
+
+            captured: dict[str, str] = {}
+
+            def fake_run_deep_json(task: str, prompt: str, fallback, *, project_root: str | Path = ".") -> dict[str, object]:
+                captured["task"] = task
+                captured["prompt"] = prompt
+                return fallback()
+
+            with patch("skilgen.agents.domain_graph_planner.run_deep_json", side_effect=fake_run_deep_json):
+                graph = build_domain_graph(root, load_requirements(requirements))
+
+            graph_names = {node.name for node in graph.nodes}
+            self.assertIn("backend", graph_names)
+            self.assertIn("backend-copybooks", graph_names)
+            self.assertIn("Code evidence JSON:", captured["prompt"])
+            self.assertIn("PROGRAM-ID. CUSTOMER-LOOKUP.", captured["prompt"])
+            self.assertIn("customer_record.cpy", captured["prompt"])
+
+
+if __name__ == "__main__":
+    unittest.main()

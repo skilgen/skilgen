@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlparse
 
 from skilgen.api.service import (
     analyze_payload,
+    architecture_payload,
     cancel_job_payload,
     connectors_activate_payload,
     connectors_active_payload,
@@ -155,6 +156,13 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     decision_payload(query.get("project_root", ["."])[0], query.get("requirements", [None])[0]),
                 )
                 return
+            if parsed.path == "/architecture":
+                _json_response(
+                    self,
+                    200,
+                    architecture_payload(query.get("project_root", ["."])[0], query.get("requirements", [None])[0]),
+                )
+                return
             if parsed.path == "/jobs":
                 _json_response(self, 200, jobs_payload(query.get("project_root", [None])[0]))
                 return
@@ -182,6 +190,13 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     self,
                     200,
                     analyze_payload(str(data.get("project_root", ".")), str(data["requirements"]) if "requirements" in data else None),
+                )
+                return
+            if self.path == "/architecture":
+                _json_response(
+                    self,
+                    200,
+                    architecture_payload(str(data.get("project_root", ".")), str(data["requirements"]) if "requirements" in data else None),
                 )
                 return
             if self.path == "/decide":

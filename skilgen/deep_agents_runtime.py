@@ -6,7 +6,9 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from skilgen.agents.architecture_planner import build_architecture_blueprint
 from skilgen.agents.codebase_signals import analyze_codebase
+from skilgen.agents.evidence_graph import build_evidence_graph
 from skilgen.agents.feature_extractor import extract_features, extract_features_native
 from skilgen.agents.framework_fingerprint import fingerprint_project
 from skilgen.agents.model_registry import resolve_model_settings
@@ -276,11 +278,22 @@ def native_analyze_payload(project_root: str | Path, requirements: str | Path | 
     }
     if requirements is not None:
         context = load_requirements(Path(requirements).resolve())
+        payload["evidence_graph"] = _serialize(build_evidence_graph(root, context))
         codebase_context = build_codebase_context(root, context)
         payload["domain_graph"] = _serialize(codebase_context.domain_graph)
         payload["detected_domains"] = _serialize(codebase_context.detected_domains)
         payload["skill_tree"] = _serialize(codebase_context.skill_tree)
     return payload
+
+
+def native_architecture_payload(project_root: str | Path, requirements: str | Path | None = None) -> dict[str, Any]:
+    root = Path(project_root).resolve()
+    context = load_project_context(root, Path(requirements).resolve() if requirements is not None else None)
+    return {
+        "requirements_context": _serialize(context),
+        "evidence_graph": _serialize(build_evidence_graph(root, context)),
+        "architecture": _serialize(build_architecture_blueprint(root, context)),
+    }
 
 
 def native_intent_payload(requirements: str | Path) -> dict[str, Any]:

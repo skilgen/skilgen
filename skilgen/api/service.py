@@ -10,6 +10,7 @@ from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.deep_agents_runtime import (
     DeepAgentsRuntime,
     native_analyze_payload,
+    native_architecture_payload,
     native_features_payload,
     native_fingerprint_payload,
     native_intent_payload,
@@ -138,6 +139,19 @@ def analyze_payload(project_root: str | Path, requirements: str | Path | None = 
             "analyze",
             f"Analyze project_root={root} requirements={req} and return JSON with project_root, framework_fingerprint, signals, import_graph, and optional detected_domains/skill_tree.",
             lambda: native_analyze_payload(root, req),
+        )
+    )
+
+
+def architecture_payload(project_root: str | Path, requirements: str | Path | None = None) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    req = Path(requirements).resolve() if requirements is not None else None
+    runtime = DeepAgentsRuntime(root)
+    return _with_api_meta(
+        runtime.run(
+            "architecture",
+            f"Synthesize an evidence-backed architecture blueprint for project_root={root} requirements={req}. Return JSON with requirements_context, evidence_graph, and architecture.",
+            lambda: native_architecture_payload(root, req),
         )
     )
 

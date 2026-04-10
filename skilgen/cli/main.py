@@ -7,7 +7,7 @@ from pathlib import Path
 
 from skilgen.api.server import run_server
 from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
-from skilgen.api.service import analyze_payload, decision_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
+from skilgen.api.service import analyze_payload, architecture_payload, decision_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
@@ -125,6 +125,10 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = subparsers.add_parser("analyze", help="Assemble framework, signal, and relationship analysis for the project.")
     analyze.add_argument("--project-root", default=".")
     analyze.add_argument("--requirements")
+
+    architecture = subparsers.add_parser("architecture", help="Synthesize an evidence-backed architecture blueprint for the project.")
+    architecture.add_argument("--project-root", default=".")
+    architecture.add_argument("--requirements")
 
     decide = subparsers.add_parser("decide", help="Recommend whether to refresh skills, which skills to prioritize, and which run memory to load.")
     decide.add_argument("--project-root", default=".")
@@ -331,6 +335,13 @@ def main() -> None:
         return
     if args.command == "analyze":
         print(json.dumps(analyze_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None), indent=2))
+        return
+    if args.command == "architecture":
+        root = Path(args.project_root).resolve()
+        emit_progress(
+            f"Collecting code, config, and requirements evidence with the {current_runtime_mode(root)} runtime before synthesizing the architecture blueprint."
+        )
+        print(json.dumps(architecture_payload(root, Path(args.requirements).resolve() if args.requirements else None), indent=2))
         return
     if args.command == "decide":
         root = Path(args.project_root).resolve()
