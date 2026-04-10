@@ -134,14 +134,92 @@ class DocumentIngestionTests(unittest.TestCase):
             self.assertEqual(detect_document_type(docx_file), "docx")
             self.assertEqual(detect_document_type(yaml_file), "yaml")
 
-    def test_load_requirements_supports_pdf_inputs(self) -> None:
+    def test_load_requirements_supports_all_documented_formats(self) -> None:
         with TemporaryDirectory() as tmp:
-            path = Path(tmp) / "requirements.pdf"
-            _write_pdf(path, "Backend API endpoints and frontend routes")
-            context = load_requirements(path)
-            self.assertTrue(context.domains["backend"])
-            self.assertTrue(context.domains["frontend"])
-            self.assertIn("Backend API endpoints and frontend routes", context.raw_text)
+            root = Path(tmp)
+
+            def make_source(path: Path) -> None:
+                suffix = path.suffix.lower()
+                if suffix in {".md", ".txt"}:
+                    path.write_text("Backend API endpoints\nFrontend routes\n", encoding="utf-8")
+                    return
+                if suffix == ".docx":
+                    _write_docx(path, "Backend API endpoints\nFrontend routes")
+                    return
+                if suffix == ".pdf":
+                    _write_pdf(path, "Backend API endpoints and frontend routes")
+                    return
+                if suffix in {".html", ".htm"}:
+                    path.write_text("<html><body><p>Backend API endpoints</p><p>Frontend routes</p></body></html>", encoding="utf-8")
+                    return
+                if suffix == ".json":
+                    path.write_text('{"backend":"API endpoints","frontend":"routes"}', encoding="utf-8")
+                    return
+                if suffix in {".yaml", ".yml"}:
+                    path.write_text("backend: API endpoints\nfrontend: routes\n", encoding="utf-8")
+                    return
+                if suffix == ".csv":
+                    path.write_text("domain,detail\nbackend,API endpoints\nfrontend,routes\n", encoding="utf-8")
+                    return
+                if suffix == ".tsv":
+                    path.write_text("domain\tdetail\nbackend\tAPI endpoints\nfrontend\troutes\n", encoding="utf-8")
+                    return
+                if suffix == ".xml":
+                    path.write_text("<root><backend>API endpoints</backend><frontend>routes</frontend></root>", encoding="utf-8")
+                    return
+                if suffix == ".xlsx":
+                    workbook = Workbook()
+                    sheet = workbook.active
+                    sheet.title = "Requirements"
+                    sheet.append(["domain", "detail"])
+                    sheet.append(["backend", "API endpoints"])
+                    sheet.append(["frontend", "routes"])
+                    workbook.save(path)
+                    return
+                if suffix == ".pptx":
+                    presentation = Presentation()
+                    slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+                    slide.shapes.title.text = "Requirements"
+                    slide.placeholders[1].text = "Backend API endpoints\nFrontend routes"
+                    presentation.save(path)
+                    return
+                if suffix == ".toml":
+                    path.write_text('backend = "API endpoints"\nfrontend = "routes"\n', encoding="utf-8")
+                    return
+                if suffix in {".ini", ".cfg"}:
+                    path.write_text("[requirements]\nbackend = API endpoints\nfrontend = routes\n", encoding="utf-8")
+                    return
+                raise AssertionError(f"Unhandled suffix: {suffix}")
+
+            paths = [
+                root / "requirements.md",
+                root / "requirements.txt",
+                root / "requirements.docx",
+                root / "requirements.pdf",
+                root / "requirements.html",
+                root / "requirements.htm",
+                root / "requirements.json",
+                root / "requirements.yaml",
+                root / "requirements.yml",
+                root / "requirements.csv",
+                root / "requirements.tsv",
+                root / "requirements.xml",
+                root / "requirements.xlsx",
+                root / "requirements.pptx",
+                root / "requirements.toml",
+                root / "requirements.ini",
+                root / "requirements.cfg",
+            ]
+            for path in paths:
+                make_source(path)
+
+            for path in paths:
+                with self.subTest(path=path.suffix.lower()):
+                    context = load_requirements(path)
+                    self.assertTrue(context.raw_text.strip())
+                    self.assertTrue(context.summary)
+                    self.assertTrue(context.domains["backend"])
+                    self.assertTrue(context.domains["frontend"])
 
 
 if __name__ == "__main__":
