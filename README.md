@@ -45,24 +45,86 @@ skilgen deliver --project-root .
 skilgen status --project-root .
 ```
 
-That’s the whole idea:
+Useful next commands:
+
+```bash
+skilgen architecture --project-root . --requirements docs/product-requirements.docx
+skilgen score --project-root .
+skilgen doctor --project-root .
+```
+
+That is the core workflow:
 1. install Skilgen
 2. run it once in a repo
-3. let Skilgen keep the repo-local agent context fresh as code changes
+3. let it generate and maintain the repo-local skill system your agents actually use
 
-## What Skilgen Does
+## What Skilgen Is
 
-Skilgen turns your repository into an agent-ready operating system that stays current as the code changes.
+Skilgen turns a codebase, a requirements document, or both into a living operating system for coding agents.
+
+It does not just generate a few markdown files once. It continuously builds:
+- a repo-local agent contract in `AGENTS.md`
+- a navigable `skills/` tree with manifests, summaries, and graph structure
+- project reports and traceability docs
+- freshness, memory, and status state under `.skilgen/`
+- quality signals such as `Skilgen Score`
+- architecture views derived from real code evidence and requirements intent
+
+## What Skilgen Can Do
 
 When you run Skilgen in a repo, it can:
 - generate and refresh `AGENTS.md`, `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
-- generate and refresh a project `skills/` tree
+- generate and refresh a dynamic `skills/` tree with `MANIFEST.md` and `GRAPH.md`
+- analyze the repo and synthesize an evidence-backed architecture blueprint
 - detect changed code and refresh skills automatically
 - score the quality of the skill tree with a verifiable `Skilgen Score`
 - ingest enterprise-wide skill packs
 - install and rank external skill ecosystems
 - recommend and activate approved official MCP connectors
 - decide what an agent should load first before it starts working
+- keep repo-local state and run memory so generation stays continuous instead of stateless
+
+## Supported Inputs And Formats
+
+### Requirements and planning inputs
+
+Skilgen currently accepts:
+- `.md`
+- `.txt`
+- `.docx`
+- no requirements file at all, in which case it runs in codebase-only mode
+
+### Source code formats for repo scanning and evidence extraction
+
+Skilgen currently scans and reasons over these source extensions:
+- `.py`
+- `.js`
+- `.jsx`
+- `.ts`
+- `.tsx`
+- `.vue`
+- `.svelte`
+- `.java`
+- `.go`
+- `.rs`
+- `.cbl`
+- `.cob`
+- `.cpy`
+
+That means Skilgen now supports:
+- modern web and backend repos
+- Python-heavy agent frameworks
+- Java, Go, and Rust codebases
+- COBOL systems and copybook-based legacy estates
+
+### Generated outputs
+
+Skilgen generates and maintains:
+- markdown outputs such as `AGENTS.md`, `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
+- markdown skill files under `skills/**/SKILL.md`
+- `skills/MANIFEST.md` and `skills/GRAPH.md`
+- JSON state under `.skilgen/state/` and `.skilgen/memory/`
+- SVG score badges through the badge endpoint
 
 ## Why Teams Use It
 
@@ -71,8 +133,27 @@ Most AI coding sessions fail for the same reasons:
 - guidance gets stale after code changes
 - enterprise knowledge is scattered across docs, runbooks, and tribal memory
 - tool access is not governed or consistent
+- generic code understanding tools stop at parsing, not agent-ready synthesis
 
-Skilgen fixes that by giving the repo a living skill system instead of a one-time prompt.
+Skilgen fixes that by turning raw repository evidence into a living skill system instead of a one-time prompt.
+
+## What Makes Skilgen Different
+
+Skilgen is not just a code graph or file-tree indexer.
+
+It combines:
+- deterministic repository signals
+- real source-code evidence snippets
+- requirements understanding
+- domain graph synthesis
+- architecture synthesis
+- skill materialization
+- freshness tracking
+- quality scoring
+- enterprise skills and MCP governance
+
+So the end result is not just “we understood the repo.”
+It is “we generated the operating context that agents should actually use.”
 
 ## Skilgen Score
 
@@ -100,6 +181,36 @@ Skilgen Score is intentionally opinionated:
 - missing `AGENTS.md`, `TRACEABILITY.md`, `MANIFEST.md`, or `GRAPH.md` caps the score
 
 That means a high score signals real quality, not just lots of generated files.
+
+## Architecture Mode
+
+Skilgen can now synthesize an evidence-backed architecture blueprint from:
+- requirements intent
+- file structure
+- relationship mapping
+- real source snippets from supported languages
+- inferred domain graph evidence
+
+Run it like this:
+
+```bash
+skilgen architecture --project-root . --requirements docs/product-requirements.docx
+```
+
+The output includes:
+- `evidence_graph`
+- dominant languages
+- architecture domains
+- responsibilities
+- evidence paths
+- recommended skill paths
+- hotspots and recommendations
+
+This gives you a much stronger answer than “what files exist?”:
+- what the real architecture is
+- what domain boundaries matter
+- what should become first-class skills
+- what agents should understand before editing the codebase
 
 ## What Agents Get Immediately
 
@@ -163,6 +274,8 @@ flowchart TD
 | Capability | What Skilgen Does |
 | --- | --- |
 | Repo-native skill system | Generates `AGENTS.md`, `skills/`, and supporting docs directly inside the repo |
+| Evidence graph | Reads repo evidence, requirements, relationships, and source snippets to build a richer architecture view |
+| Architecture synthesis | Produces an evidence-backed architecture blueprint that can drive better skill boundaries |
 | Automatic upkeep | Detects code changes and refreshes skills without repeated manual runs |
 | Quality standard | Computes a `Skilgen Score` that grades the health of the skill tree |
 | Project understanding | Builds domain graphs, reports, feature maps, and refresh priorities |
@@ -251,6 +364,7 @@ Skilgen can work from:
 From those inputs, Skilgen synthesizes:
 - feature intent
 - entities and domain boundaries
+- architecture domains and evidence-backed responsibilities
 - backend endpoints and service areas
 - frontend flows and component zones
 - roadmap phases
