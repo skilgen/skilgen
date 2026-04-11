@@ -7,7 +7,7 @@ from pathlib import Path
 
 from skilgen.api.server import run_server
 from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
-from skilgen.api.service import analyze_payload, architecture_payload, decision_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
+from skilgen.api.service import analytics_payload, analyze_payload, architecture_payload, decision_payload, diff_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
@@ -126,9 +126,16 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--project-root", default=".")
     analyze.add_argument("--requirements")
 
+    diff = subparsers.add_parser("diff", help="Show what changed since the last generation and which skills are stale.")
+    diff.add_argument("--project-root", default=".")
+    diff.add_argument("--json", action="store_true")
+
     architecture = subparsers.add_parser("architecture", help="Synthesize an evidence-backed architecture blueprint for the project.")
     architecture.add_argument("--project-root", default=".")
     architecture.add_argument("--requirements")
+    architecture.add_argument("--json", action="store_true", help="Emit the raw architecture payload as JSON.")
+    architecture.add_argument("--graph-file", help="Write the architecture graph export to a file.")
+    architecture.add_argument("--graph-format", choices=["mermaid", "json"], default="mermaid")
 
     decide = subparsers.add_parser("decide", help="Recommend whether to refresh skills, which skills to prioritize, and which run memory to load.")
     decide.add_argument("--project-root", default=".")
@@ -213,6 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     enterprise_ingest.add_argument("--name", required=True)
     enterprise_ingest.add_argument("--path")
     enterprise_ingest.add_argument("--git-url")
+    enterprise_ingest.add_argument("--url")
     enterprise_ingest.add_argument("--ref")
     enterprise_ingest.add_argument("--kind", default="enterprise")
     enterprise_ingest.add_argument("--activate", action=argparse.BooleanOptionalAction, default=None)
@@ -257,6 +265,8 @@ def build_parser() -> argparse.ArgumentParser:
     score = subparsers.add_parser("score", help="Compute the Skilgen Score quality metric for the current skill tree.")
     score.add_argument("--project-root", default=".")
     score.add_argument("--badge-file")
+    score.add_argument("--history", action="store_true", help="Show recent score history and score trends instead of only the current score.")
+    score.add_argument("--history-limit", type=int, default=10)
 
     eval_cmd = subparsers.add_parser("eval", help="Scaffold or compare Skilgen evaluation runs.")
     eval_subparsers = eval_cmd.add_subparsers(dest="eval_command", required=True)
@@ -272,6 +282,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     report = subparsers.add_parser("report", help="Show a summary report for a project root.")
     report.add_argument("--project-root", default=".")
+
+    analytics = subparsers.add_parser("analytics", help="Summarize generated skill usage and load history.")
+    analytics.add_argument("--project-root", default=".")
+    analytics.add_argument("--limit", type=int, default=10)
 
     validate = subparsers.add_parser("validate", help="Validate generated outputs and skill references.")
     validate.add_argument("--project-root", default=".")
@@ -336,12 +350,68 @@ def main() -> None:
     if args.command == "analyze":
         print(json.dumps(analyze_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None), indent=2))
         return
+    if args.command == "diff":
+        payload = diff_payload(Path(args.project_root).resolve())
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        elif payload["reason"] == "no_source_changes":
+            print(
+                "\n".join(
+                    [
+                        "Skilgen Diff - no source changes detected",
+                        "",
+                        f"  All skills are current. Freshness: {int(round(payload['freshness_score']))}/{payload['freshness_max']}",
+                    ]
+                )
+            )
+        elif payload["reason"] == "missing_freshness_state":
+            print(
+                "\n".join(
+                    [
+                        "Skilgen Diff - no previous generation found",
+                        "",
+                        "  Run `skilgen deliver` first to establish a baseline.",
+                    ]
+                )
+            )
+        else:
+            lines = [f"Skilgen Diff - {payload['changed_file_count']} files changed since last generation", ""]
+            lines.append("  Changed files:")
+            for item in payload["changed_files"]:
+                lines.append(f"    {item['change_type']:<9} {item['path']}")
+            lines.append("")
+            lines.append("  Impacted domains:")
+            for item in payload["impacted_domain_details"]:
+                if item["domain"] not in payload["impacted_domains"]:
+                    continue
+                marker = "STALE" if item["stale"] else "CURRENT"
+                path = item["skill_path"] or "-"
+                lines.append(f"    {item['domain']:<16} -> {path:<36} {marker}")
+            lines.append("")
+            lines.append(f"  Current: {', '.join(payload['current_domains']) or 'none'}")
+            lines.append(f"  Freshness: {int(round(payload['freshness_score']))}/{payload['freshness_max']}")
+            lines.append("")
+            lines.append("  Run `skilgen deliver` to refresh stale skills.")
+            print("\n".join(lines))
+        return
     if args.command == "architecture":
         root = Path(args.project_root).resolve()
         emit_progress(
             f"Collecting code, config, and requirements evidence with the {current_runtime_mode(root)} runtime before synthesizing the architecture blueprint."
         )
-        print(json.dumps(architecture_payload(root, Path(args.requirements).resolve() if args.requirements else None), indent=2))
+        payload = architecture_payload(root, Path(args.requirements).resolve() if args.requirements else None)
+        if args.graph_file:
+            graph_content = payload["graph_export"][args.graph_format]
+            graph_path = Path(args.graph_file).resolve()
+            graph_path.parent.mkdir(parents=True, exist_ok=True)
+            if args.graph_format == "json":
+                graph_path.write_text(json.dumps(graph_content, indent=2), encoding="utf-8")
+            else:
+                graph_path.write_text(str(graph_content), encoding="utf-8")
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(payload["report_markdown"])
         return
     if args.command == "decide":
         root = Path(args.project_root).resolve()
@@ -447,6 +517,7 @@ def main() -> None:
                             name=args.name,
                             path=args.path,
                             git_url=args.git_url,
+                            url=args.url,
                             ref=args.ref,
                             activate=args.activate,
                             kind=args.kind,
@@ -546,7 +617,7 @@ def main() -> None:
         return
     if args.command == "score":
         emit_progress("Computing the Skilgen Score from groundedness, coverage, freshness, and structure signals.")
-        print(json.dumps(score_payload(Path(args.project_root).resolve(), args.badge_file), indent=2))
+        print(json.dumps(score_payload(Path(args.project_root).resolve(), args.badge_file, history=args.history, history_limit=args.history_limit), indent=2))
         return
     if args.command == "eval":
         if args.eval_command == "scaffold":
@@ -562,6 +633,9 @@ def main() -> None:
         return
     if args.command == "report":
         print(json.dumps(report_payload(Path(args.project_root).resolve()), indent=2))
+        return
+    if args.command == "analytics":
+        print(json.dumps(analytics_payload(Path(args.project_root).resolve(), limit=args.limit), indent=2))
         return
     if args.command == "doctor":
         payload = doctor_payload(Path(args.project_root).resolve())

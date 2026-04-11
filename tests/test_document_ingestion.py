@@ -8,7 +8,7 @@ import zipfile
 from openpyxl import Workbook
 from pptx import Presentation
 
-from skilgen.core.document_ingestion import detect_document_type, extract_document_text
+from skilgen.core.document_ingestion import detect_document_type, extract_document_text, normalize_extracted_text
 from skilgen.core.requirements import load_requirements
 
 
@@ -220,6 +220,13 @@ class DocumentIngestionTests(unittest.TestCase):
                     self.assertTrue(context.summary)
                     self.assertTrue(context.domains["backend"])
                     self.assertTrue(context.domains["frontend"])
+
+    def test_normalize_extracted_text_collapses_duplicate_noise(self) -> None:
+        text = "Header\nHeader\n\n\nBackend API endpoints\n\x00Frontend routes\n"
+        normalized = normalize_extracted_text(text)
+        self.assertNotIn("\x00", normalized)
+        self.assertIn("Backend API endpoints", normalized)
+        self.assertIn("Frontend routes", normalized)
 
 
 if __name__ == "__main__":

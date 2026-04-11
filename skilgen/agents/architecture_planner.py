@@ -57,7 +57,9 @@ def _native_architecture(project_root: Path, domain_graph: DomainGraph, evidence
     headline = "Evidence-backed architecture blueprint for the codebase"
     system_summary = (
         f"Skilgen identified {len(domains)} top-level architecture domains from {len(evidence_graph.items)} evidence items "
-        f"and {len(domain_graph.nodes)} domain graph nodes."
+        f"and {len(domain_graph.nodes)} domain graph nodes. "
+        f"Source comprehension currently tracks {len(evidence_graph.symbol_graph)} symbol-bearing files, "
+        f"{len(evidence_graph.call_graph)} call-bearing files, and {len(evidence_graph.test_mapping)} mapped tests."
     )
     return ArchitectureBlueprint(
         headline=headline,

@@ -7,7 +7,7 @@ import unittest
 
 
 class ArchitectureCliTests(unittest.TestCase):
-    def test_architecture_command_outputs_blueprint(self) -> None:
+    def test_architecture_command_outputs_markdown_and_json_export(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             requirements = root / "requirements.md"
@@ -22,19 +22,40 @@ class ArchitectureCliTests(unittest.TestCase):
                     sys.executable,
                     "-m",
                     "skilgen.cli.main",
-                    "architecture",
-                    "--project-root",
-                    str(root),
-                    "--requirements",
-                    str(requirements),
+                "architecture",
+                "--project-root",
+                str(root),
+                "--requirements",
+                str(requirements),
+                "--graph-file",
+                str(root / "architecture.mmd"),
                 ],
                 text=True,
                 capture_output=True,
                 check=True,
             )
-            payload = json.loads(result.stdout)
+            self.assertIn("# Architecture", result.stdout)
+            self.assertTrue((root / "architecture.mmd").exists())
+            json_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "architecture",
+                    "--project-root",
+                    str(root),
+                    "--requirements",
+                    str(requirements),
+                    "--json",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(json_result.stdout)
             self.assertIn("architecture", payload)
             self.assertIn("evidence_graph", payload)
+            self.assertIn("graph_export", payload)
             self.assertTrue(payload["architecture"]["domains"])
 
 

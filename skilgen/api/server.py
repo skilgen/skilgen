@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from skilgen.api.service import (
+    analytics_payload,
     analyze_payload,
     architecture_payload,
     cancel_job_payload,
@@ -14,6 +15,7 @@ from skilgen.api.service import (
     connectors_list_payload,
     connectors_recommend_payload,
     decision_payload,
+    diff_payload,
     create_deliver_job,
     deliver_payload,
     doctor_payload,
@@ -92,14 +94,25 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                 _json_response(
                     self,
                     200,
-                    score_payload(query.get("project_root", ["."])[0], query.get("badge_file", [None])[0]),
+                    score_payload(
+                        query.get("project_root", ["."])[0],
+                        query.get("badge_file", [None])[0],
+                        history=query.get("history", ["0"])[0] not in {"0", "false", "False", ""},
+                        history_limit=int(query.get("history_limit", ["10"])[0]),
+                    ),
                 )
+                return
+            if parsed.path == "/analytics":
+                _json_response(self, 200, analytics_payload(query.get("project_root", ["."])[0], limit=int(query.get("limit", ["10"])[0])))
                 return
             if parsed.path == "/badge.svg":
                 _svg_response(self, 200, score_badge_payload(query.get("project_root", ["."])[0]))
                 return
             if parsed.path == "/doctor":
                 _json_response(self, 200, doctor_payload(query.get("project_root", ["."])[0]))
+                return
+            if parsed.path == "/diff":
+                _json_response(self, 200, diff_payload(query.get("project_root", ["."])[0]))
                 return
             if parsed.path == "/skills":
                 _json_response(
@@ -299,6 +312,7 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                         name=str(data["name"]),
                         path=str(data["path"]) if "path" in data and data.get("path") is not None else None,
                         git_url=str(data["git_url"]) if "git_url" in data and data.get("git_url") is not None else None,
+                        url=str(data["url"]) if "url" in data and data.get("url") is not None else None,
                         ref=str(data["ref"]) if "ref" in data and data.get("ref") is not None else None,
                         activate=data.get("activate") if isinstance(data.get("activate"), bool) else None,
                         kind=str(data.get("kind", "enterprise")),

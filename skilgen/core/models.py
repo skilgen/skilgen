@@ -87,8 +87,10 @@ class SkilgenConfig:
     mcp_connectors_require_oauth: bool = True
     mcp_connector_allowlist: list[str] = field(default_factory=list)
     mcp_connector_denylist: list[str] = field(default_factory=list)
+    mcp_policy_pack_path: str | None = None
     enterprise_skill_paths: list[str] = field(default_factory=list)
     enterprise_skill_git_urls: list[str] = field(default_factory=list)
+    enterprise_skill_urls: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -200,6 +202,10 @@ class EvidenceGraph:
     import_graph: dict[str, list[str]]
     items: list[EvidenceItem]
     recommendations: list[str]
+    symbol_graph: dict[str, list[str]] = field(default_factory=dict)
+    call_graph: dict[str, list[str]] = field(default_factory=dict)
+    config_runtime_graph: dict[str, list[str]] = field(default_factory=dict)
+    test_mapping: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

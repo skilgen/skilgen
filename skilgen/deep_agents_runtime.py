@@ -22,6 +22,9 @@ from skilgen.core.validation import validate_project
 from skilgen.core.score import compute_skillgen_score
 from skilgen.generators.package import (
     project_doc_paths,
+    render_architecture_graph_json,
+    render_architecture_graph_mermaid,
+    render_architecture_report,
     render_analysis_report,
     render_feature_inventory,
     render_project_report,
@@ -294,6 +297,11 @@ def native_architecture_payload(project_root: str | Path, requirements: str | Pa
         "requirements_context": _serialize(context),
         "evidence_graph": _serialize(build_evidence_graph(root, context)),
         "architecture": _serialize(build_architecture_blueprint(root, context)),
+        "graph_export": {
+            "mermaid": render_architecture_graph_mermaid(context, root),
+            "json": render_architecture_graph_json(context, root),
+        },
+        "report_markdown": render_architecture_report(context, root),
     }
 
 

@@ -28,6 +28,8 @@ from skilgen.sdk import (
     map_codebase,
     plan_project,
     preview_project,
+    project_diff,
+    project_analytics,
     project_report,
     project_score,
     project_status,
@@ -50,7 +52,7 @@ from skilgen.sdk import (
     compare_evals,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "__version__",
@@ -80,6 +82,8 @@ __all__ = [
     "map_codebase",
     "plan_project",
     "preview_project",
+    "project_diff",
+    "project_analytics",
     "project_report",
     "project_score",
     "project_status",

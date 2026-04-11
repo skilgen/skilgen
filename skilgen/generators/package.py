@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from skilgen.agents import analyze_codebase, build_agent_decision, build_architecture_blueprint, build_evidence_graph, build_import_graph, fingerprint_project
@@ -12,6 +13,45 @@ from skilgen.core.context import build_codebase_context
 from skilgen.enterprise_skills import active_enterprise_skills, active_mcp_connectors, recommend_mcp_connectors
 from skilgen.external_skills import active_external_skills, detect_external_skill_sources, external_skill_policy, installed_external_skills, ranked_external_skills
 from skilgen.core.models import RequirementsContext
+
+
+def _node_id(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_")
+    return cleaned.lower() or "node"
+
+
+def render_architecture_graph_mermaid(context: RequirementsContext, project_root: Path) -> str:
+    evidence_graph = build_evidence_graph(project_root, context)
+    architecture = build_architecture_blueprint(project_root, context)
+    lines = ["graph TD"]
+    for domain in architecture.domains:
+        domain_id = _node_id(domain.name)
+        lines.append(f'  {domain_id}["{domain.name}"]')
+        for related in domain.related_domains[:4]:
+            related_id = _node_id(related)
+            lines.append(f'  {domain_id} --> {related_id}["{related}"]')
+        for evidence_path in domain.evidence_paths[:3]:
+            evidence_id = _node_id(f"{domain.name}_{evidence_path}")
+            lines.append(f'  {domain_id} -. evidence .-> {evidence_id}["{evidence_path}"]')
+    for path, symbols in list(evidence_graph.symbol_graph.items())[:6]:
+        file_id = _node_id(path)
+        lines.append(f'  {file_id}["{path}"]')
+        for symbol in symbols[:2]:
+            symbol_id = _node_id(f"{path}_{symbol}")
+            lines.append(f'  {file_id} --> {symbol_id}["{symbol}"]')
+    return "\n".join(lines)
+
+
+def render_architecture_graph_json(context: RequirementsContext, project_root: Path) -> dict[str, object]:
+    evidence_graph = build_evidence_graph(project_root, context)
+    architecture = build_architecture_blueprint(project_root, context)
+    return {
+        "domains": [domain.__dict__ for domain in architecture.domains],
+        "symbol_graph": evidence_graph.symbol_graph,
+        "call_graph": evidence_graph.call_graph,
+        "config_runtime_graph": evidence_graph.config_runtime_graph,
+        "test_mapping": evidence_graph.test_mapping,
+    }
 
 
 def ensure_file(path: Path, content: str) -> Path:
@@ -103,6 +143,12 @@ def render_architecture_report(context: RequirementsContext, project_root: Path)
     evidence_graph = build_evidence_graph(project_root, context)
     architecture = build_architecture_blueprint(project_root, context)
     dominant_languages = [f"- `{language}`" for language in evidence_graph.dominant_languages] or ["- none"]
+    source_summary = [
+        f"- Symbol graph files: `{len(evidence_graph.symbol_graph)}`",
+        f"- Call graph files: `{len(evidence_graph.call_graph)}`",
+        f"- Config/runtime files: `{len(evidence_graph.config_runtime_graph)}`",
+        f"- Tests mapped to code: `{len(evidence_graph.test_mapping)}`",
+    ]
     lines = [
         "# Architecture",
         "",
@@ -110,11 +156,53 @@ def render_architecture_report(context: RequirementsContext, project_root: Path)
         "",
         architecture.system_summary,
         "",
+        "## Visual Overview",
+        "```mermaid",
+        render_architecture_graph_mermaid(context, project_root),
+        "```",
+        "",
         "## Dominant Languages",
         *dominant_languages,
         "",
-        "## Architecture Domains",
+        "## Source Comprehension",
+        *source_summary,
+        "",
+        "### Example Symbol Surfaces",
     ]
+    if evidence_graph.symbol_graph:
+        for path, symbols in list(evidence_graph.symbol_graph.items())[:8]:
+            lines.append(f"- `{path}`: {', '.join(f'`{symbol}`' for symbol in symbols[:4])}")
+    else:
+        lines.append("- No symbol graph entries were extracted.")
+    lines.extend(
+        [
+            "",
+            "### Example Config And Runtime Signals",
+        ]
+    )
+    if evidence_graph.config_runtime_graph:
+        for path, entries in list(evidence_graph.config_runtime_graph.items())[:8]:
+            lines.append(f"- `{path}`: {', '.join(f'`{entry}`' for entry in entries[:5])}")
+    else:
+        lines.append("- No config/runtime graph entries were extracted.")
+    lines.extend(
+        [
+            "",
+            "### Example Test Mapping",
+        ]
+    )
+    if evidence_graph.test_mapping:
+        for path, targets in list(evidence_graph.test_mapping.items())[:8]:
+            lines.append(f"- `{path}` -> {', '.join(f'`{target}`' for target in targets[:4])}")
+    else:
+        lines.append("- No test-to-code mappings were extracted.")
+    lines.extend(
+        [
+            "",
+            "## Architecture Domains",
+        ]
+    )
+    
     for domain in architecture.domains:
         lines.append(f"### {domain.name}")
         lines.append(f"- Confidence: `{domain.confidence:.2f}`")

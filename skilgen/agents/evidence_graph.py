@@ -4,6 +4,7 @@ from pathlib import Path
 
 from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence
 from skilgen.agents.relationship_mapper import build_import_graph
+from skilgen.agents.source_graphs import build_call_graph, build_config_runtime_graph, build_symbol_graph, build_test_mapping
 from skilgen.core.models import EvidenceGraph, EvidenceItem, RequirementsContext
 
 
@@ -79,6 +80,10 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
     root = project_root.resolve()
     signals = analyze_codebase(root)
     import_graph = build_import_graph(root)
+    symbol_graph = build_symbol_graph(root)
+    call_graph = build_call_graph(root)
+    config_runtime_graph = build_config_runtime_graph(root)
+    test_mapping = build_test_mapping(root)
     source_items = [
         EvidenceItem(
             path=str(item["path"]),
@@ -122,10 +127,18 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
         recommendations.append(f"Optimize skill synthesis around the dominant languages: {', '.join(dominant_languages)}.")
     if structural_items:
         recommendations.append("Use structural evidence such as functions, classes, divisions, and sections to refine skill boundaries.")
+    if symbol_graph:
+        recommendations.append("Use the symbol graph to align skill boundaries with real modules, classes, and callable surfaces.")
+    if test_mapping:
+        recommendations.append("Keep skill guidance grounded in both implementation evidence and the nearest mapped tests.")
     return EvidenceGraph(
         language_inventory=signals.language_inventory,
         dominant_languages=dominant_languages,
         import_graph=import_graph,
         items=items,
         recommendations=recommendations,
+        symbol_graph=symbol_graph,
+        call_graph=call_graph,
+        config_runtime_graph=config_runtime_graph,
+        test_mapping=test_mapping,
     )

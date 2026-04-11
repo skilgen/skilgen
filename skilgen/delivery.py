@@ -5,12 +5,14 @@ from pathlib import Path
 from typing import Callable
 
 from skilgen.agents import build_agent_decision, fingerprint_project
+from skilgen.core.analytics import log_skill_usage
 from skilgen.core.config import load_config
 from skilgen.core.context import build_codebase_context
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state, save_freshness_state, snapshot_freshness_state
 from skilgen.core.models import RunMemory
 from skilgen.core.repo_state import classify_repo_change, git_repo_state
 from skilgen.core.run_memory import append_run_event, create_run_memory, finalize_run_memory
+from skilgen.core.score import record_score_history
 from skilgen.deep_agents_core import current_runtime_mode
 from skilgen.enterprise_skills import ensure_enterprise_skills_for_project
 from skilgen.external_skills import ensure_external_skills_for_project
@@ -136,6 +138,7 @@ def run_delivery(
         f"Decision planner selected domains: {', '.join(decision.prioritized_domains) or 'none'}; "
         f"prioritized skills: {', '.join(decision.prioritized_skill_paths[:4]) or 'none'}."
     )
+    log_skill_usage(root, decision.prioritized_skill_paths, context="decision_planner")
     run_memory = append_run_event(root, run_memory, decision_message)
     _emit(progress_callback, decision_message)
     generated = []
@@ -174,6 +177,7 @@ def run_delivery(
         saved_context = load_project_context(root, Path(requirements_path).resolve() if requirements_path is not None else None)
         saved_codebase_context = build_codebase_context(root, saved_context)
         save_freshness_state(root, snapshot_freshness_state(root, saved_context, saved_codebase_context.domain_graph))
+        record_score_history(root, source="delivery")
     run_memory = finalize_run_memory(root, run_memory, generated, "completed")
     message = f"Finished delivery. Generated or refreshed {len(generated)} files."
     run_memory = append_run_event(root, run_memory, message)

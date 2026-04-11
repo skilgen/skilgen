@@ -22,6 +22,26 @@ RICH_DOCUMENT_EXTENSIONS = {".docx", ".pdf", ".pptx", ".html", ".htm", ".xlsx"}
 SUPPORTED_DOCUMENT_EXTENSIONS = PLAIN_TEXT_EXTENSIONS | STRUCTURED_TEXT_EXTENSIONS | RICH_DOCUMENT_EXTENSIONS
 
 
+def normalize_extracted_text(text: str) -> str:
+    text = text.replace("\x00", " ")
+    lines: list[str] = []
+    previous = ""
+    for raw in text.splitlines():
+        line = " ".join(raw.split()).strip()
+        if not line:
+            if previous:
+                lines.append("")
+            previous = ""
+            continue
+        if line == previous:
+            continue
+        lines.append(line)
+        previous = line
+    cleaned = "\n".join(lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 def detect_document_type(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in PLAIN_TEXT_EXTENSIONS:
@@ -168,27 +188,27 @@ def _extract_pptx(path: Path) -> str:
 def extract_document_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in PLAIN_TEXT_EXTENSIONS:
-        return path.read_text(encoding="utf-8", errors="ignore")
+        return normalize_extracted_text(path.read_text(encoding="utf-8", errors="ignore"))
     if suffix == ".docx":
-        return _extract_docx(path)
+        return normalize_extracted_text(_extract_docx(path))
     if suffix == ".pdf":
-        return _extract_pdf(path)
+        return normalize_extracted_text(_extract_pdf(path))
     if suffix in {".html", ".htm"}:
-        return _extract_html(path)
+        return normalize_extracted_text(_extract_html(path))
     if suffix == ".json":
-        return _extract_json(path)
+        return normalize_extracted_text(_extract_json(path))
     if suffix in {".yaml", ".yml"}:
-        return _extract_yaml(path)
+        return normalize_extracted_text(_extract_yaml(path))
     if suffix == ".xml":
-        return _extract_xml(path)
+        return normalize_extracted_text(_extract_xml(path))
     if suffix in {".csv", ".tsv"}:
-        return _extract_csv(path)
+        return normalize_extracted_text(_extract_csv(path))
     if suffix == ".toml":
-        return _extract_toml(path)
+        return normalize_extracted_text(_extract_toml(path))
     if suffix in {".ini", ".cfg"}:
-        return _extract_config(path)
+        return normalize_extracted_text(_extract_config(path))
     if suffix == ".xlsx":
-        return _extract_xlsx(path)
+        return normalize_extracted_text(_extract_xlsx(path))
     if suffix == ".pptx":
-        return _extract_pptx(path)
-    return path.read_text(encoding="utf-8", errors="ignore")
+        return normalize_extracted_text(_extract_pptx(path))
+    return normalize_extracted_text(path.read_text(encoding="utf-8", errors="ignore"))

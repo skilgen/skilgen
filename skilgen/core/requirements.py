@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import hashlib
 from pathlib import Path
 
@@ -138,7 +139,35 @@ def synthesize_requirements_context(project_root: Path) -> RequirementsContext:
     )
 
 
+def _remembered_requirements_path(project_root: Path) -> Path | None:
+    root = project_root.resolve()
+    run_memory_path = root / ".skilgen" / "memory" / "current_run.json"
+    if run_memory_path.exists():
+        try:
+            payload = json.loads(run_memory_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+        remembered = payload.get("requirements_path")
+        if isinstance(remembered, str) and remembered.strip():
+            candidate = Path(remembered).resolve()
+            if candidate.exists():
+                return candidate
+
+    autoupdate_path = root / ".skilgen" / "state" / "autoupdate-requirements.txt"
+    if autoupdate_path.exists():
+        remembered = autoupdate_path.read_text(encoding="utf-8").strip()
+        if remembered:
+            candidate = Path(remembered).resolve()
+            if candidate.exists():
+                return candidate
+
+    return None
+
+
 def load_project_context(project_root: Path, requirements_path: Path | None = None) -> RequirementsContext:
     if requirements_path is not None:
         return load_requirements(requirements_path.resolve())
+    remembered = _remembered_requirements_path(project_root)
+    if remembered is not None:
+        return load_requirements(remembered)
     return synthesize_requirements_context(project_root.resolve())

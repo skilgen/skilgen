@@ -84,6 +84,7 @@ class ApiSmokeTests(unittest.TestCase):
                 architecture = get_json(f"{base}/architecture?{urlencode({'project_root': str(root), 'requirements': str(requirements)})}")
                 self.assertIn("architecture", architecture)
                 self.assertIn("evidence_graph", architecture)
+                self.assertIn("graph_export", architecture)
                 self.assertTrue(architecture["architecture"]["domains"])
 
                 intent = post_json(f"{base}/intent", {"requirements": str(requirements)})
@@ -108,6 +109,11 @@ class ApiSmokeTests(unittest.TestCase):
                 score = get_json(f"{base}/score?{urlencode({'project_root': str(root)})}")
                 self.assertIn("score", score)
                 self.assertIn("subscores", score)
+                score_history = get_json(f"{base}/score?{urlencode({'project_root': str(root), 'history': '1'})}")
+                self.assertIn("history", score_history)
+
+                analytics = get_json(f"{base}/analytics?{urlencode({'project_root': str(root)})}")
+                self.assertIn("top_skills", analytics)
 
                 with urlopen(f"{base}/badge.svg?{urlencode({'project_root': str(root)})}") as response:  # noqa: S310
                     badge = response.read().decode("utf-8")
@@ -120,7 +126,8 @@ class ApiSmokeTests(unittest.TestCase):
 
                 job_id = deliver_job["job_id"]
                 polled: dict[str, object] = {}
-                for _ in range(200):
+                deadline = time.monotonic() + 180.0
+                while time.monotonic() < deadline:
                     polled = get_json(f"{base}/jobs/{job_id}?{urlencode({'project_root': str(root)})}")
                     if polled["status"] in {"completed", "failed"}:
                         break

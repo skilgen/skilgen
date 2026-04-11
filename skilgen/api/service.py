@@ -6,6 +6,8 @@ from typing import Callable
 from skilgen.api.jobs import get_job, job_payload, list_jobs, request_cancel, submit_job
 from skilgen.agents.decision_planner import build_agent_decision
 from skilgen.autoupdate import auto_update_status
+from skilgen.core.diff import compute_diff
+from skilgen.core.analytics import analytics_summary
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.deep_agents_runtime import (
     DeepAgentsRuntime,
@@ -35,7 +37,7 @@ from skilgen.enterprise_skills import (
 )
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state
 from skilgen.core.context import build_codebase_context
-from skilgen.core.score import compute_skillgen_score, render_score_badge_svg, write_score_badge
+from skilgen.core.score import compute_skillgen_score, record_score_history, render_score_badge_svg, score_history_payload, write_score_badge
 from skilgen.core.requirements import load_project_context
 from skilgen.core.run_memory import load_current_run_memory
 from skilgen.external_skills import (
@@ -312,14 +314,24 @@ def status_payload(project_root: str | Path) -> dict[str, object]:
             "recommended_mcp_connectors": recommend_mcp_connectors(root),
             "active_mcp_connectors": active_mcp_connectors(root),
             "auto_update": auto_update_status(root),
+            "analytics": analytics_summary(root),
             "skilgen_score": compute_skillgen_score(root),
         }
     )
 
 
-def score_payload(project_root: str | Path, badge_file: str | Path | None = None) -> dict[str, object]:
+def score_payload(
+    project_root: str | Path,
+    badge_file: str | Path | None = None,
+    *,
+    history: bool = False,
+    history_limit: int = 10,
+) -> dict[str, object]:
     root = Path(project_root).resolve()
-    payload = compute_skillgen_score(root)
+    payload = score_history_payload(root, limit=history_limit) if history else compute_skillgen_score(root)
+    snapshot = record_score_history(root, source="score")
+    if history:
+        payload["recorded_snapshot"] = snapshot
     if badge_file is not None:
         payload["badge_file"] = write_score_badge(root, badge_file)
     return _with_api_meta(payload)
@@ -431,6 +443,7 @@ def enterprise_ingest_payload(
     name: str,
     path: str | Path | None = None,
     git_url: str | None = None,
+    url: str | None = None,
     ref: str | None = None,
     activate: bool | None = None,
     kind: str = "enterprise",
@@ -442,6 +455,7 @@ def enterprise_ingest_payload(
                 name=name,
                 path=path,
                 git_url=git_url,
+                url=url,
                 ref=ref,
                 activate=activate,
                 kind=kind,
@@ -513,3 +527,11 @@ def validate_payload(project_root: str | Path) -> dict[str, object]:
         )
     payload["skilgen_score"] = compute_skillgen_score(root)
     return _with_api_meta(payload)
+
+
+def analytics_payload(project_root: str | Path, *, limit: int = 10) -> dict[str, object]:
+    return _with_api_meta(analytics_summary(Path(project_root).resolve(), limit=limit))
+
+
+def diff_payload(project_root: str | Path) -> dict[str, object]:
+    return _with_api_meta(compute_diff(Path(project_root).resolve()))

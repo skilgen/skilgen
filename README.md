@@ -50,6 +50,8 @@ Useful next commands:
 ```bash
 skilgen architecture --project-root . --requirements docs/product-requirements.docx
 skilgen score --project-root .
+skilgen diff --project-root .
+skilgen analytics --project-root .
 skilgen doctor --project-root .
 ```
 
@@ -65,6 +67,7 @@ Skilgen turns a codebase, a requirements document, or both into a living operati
 It does not just generate a few markdown files once. It continuously builds:
 - a repo-local agent contract in `AGENTS.md`
 - a navigable `skills/` tree with manifests, summaries, and graph structure
+- an evidence-backed `ARCHITECTURE.md` and exportable graph view
 - project reports and traceability docs
 - freshness, memory, and status state under `.skilgen/`
 - quality signals such as `Skilgen Score`
@@ -74,10 +77,14 @@ It does not just generate a few markdown files once. It continuously builds:
 
 When you run Skilgen in a repo, it can:
 - generate and refresh `AGENTS.md`, `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
+- generate and refresh `ARCHITECTURE.md`
 - generate and refresh a dynamic `skills/` tree with `MANIFEST.md` and `GRAPH.md`
 - analyze the repo and synthesize an evidence-backed architecture blueprint
 - detect changed code and refresh skills automatically
+- show stale skills and impacted domains with `skilgen diff`
 - score the quality of the skill tree with a verifiable `Skilgen Score`
+- track score history and regressions
+- log skill usage analytics
 - ingest enterprise-wide skill packs
 - install and rank external skill ecosystems
 - recommend and activate approved official MCP connectors
@@ -169,6 +176,14 @@ It combines:
 So the end result is not just “we understood the repo.”
 It is “we generated the operating context that agents should actually use.”
 
+## At A Glance
+
+Skilgen now ships with:
+- 50+ CLI commands and subcommands across generation, scoring, diffing, architecture, enterprise skills, and MCP workflows
+- 50+ SDK helpers for embedding the same flows into internal tooling and automation
+- API surfaces for analysis, architecture, diff, score, analytics, enterprise ingestion, and job orchestration
+- repo-local outputs agents can use immediately instead of reconstructing context every session
+
 ## Skilgen Score
 
 Skilgen Score is the quality bar for a skill tree.
@@ -186,6 +201,12 @@ Run it like this:
 
 ```bash
 skilgen score --project-root .
+```
+
+Track trend too:
+
+```bash
+skilgen score --project-root . --history
 ```
 
 Skilgen Score is intentionally opinionated:
@@ -214,6 +235,7 @@ skilgen architecture --project-root . --requirements docs/product-requirements.d
 The output includes:
 - `evidence_graph`
 - dominant languages
+- symbol, call, config/runtime, and test-mapping signals
 - architecture domains
 - responsibilities
 - evidence paths
@@ -225,6 +247,52 @@ This gives you a much stronger answer than “what files exist?”:
 - what domain boundaries matter
 - what should become first-class skills
 - what agents should understand before editing the codebase
+
+Export graph views:
+
+```bash
+skilgen architecture --project-root . --json
+skilgen architecture --project-root . --graph-format mermaid --graph-file architecture.mmd
+skilgen architecture --project-root . --graph-format json --graph-file architecture.json
+```
+
+## Diff And Freshness
+
+Skilgen can now show exactly what changed and why the skill tree is stale:
+
+```bash
+skilgen diff --project-root .
+skilgen diff --project-root . --json
+```
+
+The diff output includes:
+- changed files with `added`, `modified`, or `deleted`
+- impacted domains
+- stale skill paths
+- fresh domains that remain current
+- freshness reason and freshness score
+- git-aware event context
+
+## Analytics
+
+Skilgen can log what skills agents load and summarize recent usage:
+
+```bash
+skilgen analytics --project-root .
+```
+
+This makes it easier to see:
+- most-used skills
+- least-used skills
+- whether stale skills are actually important
+- which domains are hot in day-to-day agent usage
+
+## Enterprise Governance
+
+Skilgen can combine repo-native skills with enterprise controls:
+- private enterprise skill ingestion from local paths, Git sources, or URLs
+- MCP policy packs for allowlists, denylists, approval-required connectors, and skill-to-tool bindings
+- approved connector activation and traceability inside the repo-local operating context
 
 ## What Agents Get Immediately
 
@@ -338,10 +406,29 @@ Once initialized in a repo, Skilgen can automatically:
 
 - `AGENTS.md` for the top-level agent contract
 - `FEATURES.md` for product behavior
+- `ARCHITECTURE.md` for the evidence-backed architecture blueprint
 - `REPORT.md` for project-level understanding
 - `TRACEABILITY.md` for source-to-output reasoning
 - `skills/MANIFEST.md` and `skills/**/SKILL.md` for execution-ready guidance
 - `.skilgen/state/` and `.skilgen/memory/` for freshness and continuity
+
+## Docs And Examples
+
+Deeper guides:
+- [`docs/architecture-mode.md`](docs/architecture-mode.md)
+- [`docs/evidence-graph.md`](docs/evidence-graph.md)
+- [`docs/score.md`](docs/score.md)
+- [`docs/diff-and-autoupdate.md`](docs/diff-and-autoupdate.md)
+
+Examples:
+- [`examples/codebase-only/README.md`](examples/codebase-only/README.md)
+- [`examples/codebase-and-requirements/README.md`](examples/codebase-and-requirements/README.md)
+- [`examples/requirements-only/README.md`](examples/requirements-only/README.md)
+- [`examples/external-skills/README.md`](examples/external-skills/README.md)
+- [`examples/legacy-cobol/README.md`](examples/legacy-cobol/README.md)
+- [`examples/enterprise-repo/README.md`](examples/enterprise-repo/README.md)
+- [`examples/polyglot-repo/README.md`](examples/polyglot-repo/README.md)
+- [`examples/github-actions/README.md`](examples/github-actions/README.md)
 
 ## Quick Mental Model
 

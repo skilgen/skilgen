@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from skilgen.api.service import (
+    analytics_payload,
     analyze_payload,
     architecture_payload,
     cancel_job_payload,
@@ -10,6 +11,7 @@ from skilgen.api.service import (
     create_deliver_job,
     features_payload,
     fingerprint_payload,
+    diff_payload,
     intent_payload,
     job_status_payload,
     jobs_payload,
@@ -90,6 +92,10 @@ def decide_project(project_root: str | Path = ".", requirements: str | Path | No
     return decision_payload(Path(project_root).resolve(), resolved_requirements)
 
 
+def project_diff(project_root: str | Path = ".") -> dict[str, object]:
+    return diff_payload(Path(project_root).resolve())
+
+
 def parse_intent(requirements: str | Path) -> dict[str, object]:
     return intent_payload(Path(requirements).resolve())
 
@@ -159,8 +165,14 @@ def project_status(project_root: str | Path = ".") -> dict[str, object]:
     return status_payload(Path(project_root).resolve())
 
 
-def project_score(project_root: str | Path = ".", badge_file: str | Path | None = None) -> dict[str, object]:
-    return score_payload(Path(project_root).resolve(), badge_file)
+def project_score(
+    project_root: str | Path = ".",
+    badge_file: str | Path | None = None,
+    *,
+    history: bool = False,
+    history_limit: int = 10,
+) -> dict[str, object]:
+    return score_payload(Path(project_root).resolve(), badge_file, history=history, history_limit=history_limit)
 
 
 def start_auto_update(project_root: str | Path = ".", requirements: str | Path | None = None) -> dict[str, object]:
@@ -182,6 +194,10 @@ def project_report(project_root: str | Path = ".") -> dict[str, object]:
 
 def validate_project_outputs(project_root: str | Path = ".") -> dict[str, object]:
     return validate_payload(Path(project_root).resolve())
+
+
+def project_analytics(project_root: str | Path = ".", *, limit: int = 10) -> dict[str, object]:
+    return analytics_payload(Path(project_root).resolve(), limit=limit)
 
 
 def scaffold_eval(project_root: str | Path = ".", output_dir: str | Path | None = None) -> dict[str, object]:
@@ -274,6 +290,7 @@ def ingest_enterprise_skill_source(
     *,
     path: str | Path | None = None,
     git_url: str | None = None,
+    url: str | None = None,
     ref: str | None = None,
     activate: bool | None = None,
     kind: str = "enterprise",
@@ -284,6 +301,7 @@ def ingest_enterprise_skill_source(
             name=name,
             path=path,
             git_url=git_url,
+            url=url,
             ref=ref,
             activate=activate,
             kind=kind,

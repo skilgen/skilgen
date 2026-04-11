@@ -388,7 +388,7 @@ def _render_skill_native(spec: SkillSpec, source_hash: str) -> str:
     sections = [
         "---",
         f"name: {spec.name}",
-        "version: 0.5.0",
+        "version: 0.6.0",
         f"domain: {spec.domain}",
         f"sub_domain: {spec.sub_domain}",
         f"last_updated: {TODAY}",
@@ -454,7 +454,7 @@ def render_manifest(specs: list[SkillSpec], source_hash: str) -> str:
         "| --- | --- | --- | --- | --- | --- |",
     ]
     for spec in specs:
-        lines.append(f"| `{spec.path}` | `0.5.0` | `{spec.domain}` | `{TODAY}` | `requirements_pipeline` | `{source_hash}` |")
+        lines.append(f"| `{spec.path}` | `0.6.0` | `{spec.domain}` | `{TODAY}` | `requirements_pipeline` | `{source_hash}` |")
     lines.append("")
     return "\n".join(lines)
 

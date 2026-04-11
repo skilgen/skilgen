@@ -3,7 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from skilgen.core.repo_state import classify_repo_change
-from skilgen.core.score import compute_skillgen_score
+from skilgen.core.score import compute_skillgen_score, load_score_history, record_score_history, score_history_payload
 
 
 class ScoreTests(unittest.TestCase):
@@ -112,6 +112,30 @@ class ScoreTests(unittest.TestCase):
         }
         payload = classify_repo_change(previous, current)
         self.assertEqual(payload["event_type"], "merge_commit")
+
+    def test_score_history_tracks_trends(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "app.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+            record_score_history(root, source="delivery")
+            (root / "skills").mkdir()
+            (root / "skills" / "backend").mkdir()
+            (root / "skills" / "backend" / "SKILL.md").write_text("# Backend\n", encoding="utf-8")
+            (root / "skills" / "backend" / "SUMMARY.md").write_text("# Summary\n", encoding="utf-8")
+            (root / "skills" / "MANIFEST.md").write_text("# Manifest\n", encoding="utf-8")
+            (root / "skills" / "GRAPH.md").write_text("# Graph\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text("# Agents\n", encoding="utf-8")
+            (root / "FEATURES.md").write_text("# Features\n", encoding="utf-8")
+            (root / "TRACEABILITY.md").write_text("# Traceability\n", encoding="utf-8")
+            record_score_history(root, source="score")
+
+            history = load_score_history(root, limit=5)
+            payload = score_history_payload(root, limit=5)
+
+            self.assertEqual(len(history), 2)
+            self.assertIn("trend", payload)
+            self.assertIn("delta_from_previous", payload["trend"])
 
 
 if __name__ == "__main__":

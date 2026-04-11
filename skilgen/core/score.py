@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 from skilgen.core.context import build_codebase_context
@@ -18,6 +19,14 @@ GENERIC_MARKERS = (
     "generally",
     "typically",
 )
+
+
+def _score_history_path(project_root: Path) -> Path:
+    return project_root / ".skilgen" / "state" / "score-history.jsonl"
+
+
+def _timestamp() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def _iter_source_files(project_root: Path) -> list[Path]:
@@ -314,6 +323,10 @@ def _freshness_score(project_root: Path) -> tuple[float, dict[str, object]]:
         "changed_files": len(freshness.changed_files),
         "stale_skill_paths": len(freshness.stale_skill_paths),
     }
+
+
+def freshness_subscore(project_root: str | Path) -> tuple[float, dict[str, object]]:
+    return _freshness_score(Path(project_root).resolve())
 
 
 def _freshness_score_for_skill(
@@ -683,6 +696,63 @@ def compute_skillgen_score(project_root: str | Path) -> dict[str, object]:
         "markdown_example": "![Skilgen Score](https://skilgen.com/badge/your-repo)",
     }
     return scorecard
+
+
+def record_score_history(project_root: str | Path, *, source: str = "score") -> dict[str, object]:
+    root = Path(project_root).resolve()
+    payload = compute_skillgen_score(root)
+    history_path = _score_history_path(root)
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot = {
+        "timestamp": _timestamp(),
+        "source": source,
+        "score": payload["score"],
+        "raw_score": payload["raw_score"],
+        "rating": payload["rating"],
+        "domain_scores": {entry["domain"]: entry["score"] for entry in payload.get("domains", [])},
+    }
+    existing = history_path.read_text(encoding="utf-8").splitlines() if history_path.exists() else []
+    existing.append(json.dumps(snapshot))
+    history_path.write_text("\n".join(existing[-1000:]) + ("\n" if existing else ""), encoding="utf-8")
+    return snapshot
+
+
+def load_score_history(project_root: str | Path, *, limit: int = 10) -> list[dict[str, object]]:
+    path = _score_history_path(Path(project_root).resolve())
+    if not path.exists():
+        return []
+    history: list[dict[str, object]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            history.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return history[-limit:]
+
+
+def score_history_payload(project_root: str | Path, *, limit: int = 10) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    current = compute_skillgen_score(root)
+    history = load_score_history(root, limit=limit)
+    previous = history[-1] if history else None
+    delta = round(current["score"] - float(previous["score"]), 2) if previous is not None else 0.0
+    previous_domain_scores = previous.get("domain_scores", {}) if isinstance(previous, dict) else {}
+    current_domain_scores = {entry["domain"]: entry["score"] for entry in current.get("domains", [])}
+    regressions = []
+    for domain, score in current_domain_scores.items():
+        previous_score = float(previous_domain_scores.get(domain, score))
+        if score < previous_score:
+            regressions.append({"domain": domain, "delta": round(score - previous_score, 2), "score": score})
+    return {
+        "current": current,
+        "history": history,
+        "trend": {
+            "delta_from_previous": delta,
+            "regressions": sorted(regressions, key=lambda item: item["delta"]),
+        },
+    }
 
 
 def render_score_badge_svg(score_payload: dict[str, object]) -> str:

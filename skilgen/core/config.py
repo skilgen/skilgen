@@ -30,8 +30,10 @@ DEFAULT_CONFIG = SkilgenConfig(
     mcp_connectors_require_oauth=True,
     mcp_connector_allowlist=[],
     mcp_connector_denylist=[],
+    mcp_policy_pack_path=None,
     enterprise_skill_paths=[],
     enterprise_skill_git_urls=[],
+    enterprise_skill_urls=[],
 )
 
 
@@ -97,8 +99,10 @@ def load_config(project_root: Path) -> SkilgenConfig:
         "mcp_connectors_require_oauth": DEFAULT_CONFIG.mcp_connectors_require_oauth,
         "mcp_connector_allowlist": list(DEFAULT_CONFIG.mcp_connector_allowlist),
         "mcp_connector_denylist": list(DEFAULT_CONFIG.mcp_connector_denylist),
+        "mcp_policy_pack_path": DEFAULT_CONFIG.mcp_policy_pack_path,
         "enterprise_skill_paths": list(DEFAULT_CONFIG.enterprise_skill_paths),
         "enterprise_skill_git_urls": list(DEFAULT_CONFIG.enterprise_skill_git_urls),
+        "enterprise_skill_urls": list(DEFAULT_CONFIG.enterprise_skill_urls),
     }
     current_list: str | None = None
 
@@ -152,8 +156,10 @@ def load_config(project_root: Path) -> SkilgenConfig:
         mcp_connectors_require_oauth=bool(data.get("mcp_connectors_require_oauth", DEFAULT_CONFIG.mcp_connectors_require_oauth)),
         mcp_connector_allowlist=list(data.get("mcp_connector_allowlist", DEFAULT_CONFIG.mcp_connector_allowlist)),
         mcp_connector_denylist=list(data.get("mcp_connector_denylist", DEFAULT_CONFIG.mcp_connector_denylist)),
+        mcp_policy_pack_path=data.get("mcp_policy_pack_path") if isinstance(data.get("mcp_policy_pack_path"), str) or data.get("mcp_policy_pack_path") is None else None,
         enterprise_skill_paths=list(data.get("enterprise_skill_paths", DEFAULT_CONFIG.enterprise_skill_paths)),
         enterprise_skill_git_urls=list(data.get("enterprise_skill_git_urls", DEFAULT_CONFIG.enterprise_skill_git_urls)),
+        enterprise_skill_urls=list(data.get("enterprise_skill_urls", DEFAULT_CONFIG.enterprise_skill_urls)),
     )
 
 
@@ -207,6 +213,8 @@ mcp_connectors_require_official_source: true
 mcp_connectors_require_oauth: true
 mcp_connector_allowlist:
 mcp_connector_denylist:
+mcp_policy_pack_path:
 enterprise_skill_paths:
 enterprise_skill_git_urls:
+enterprise_skill_urls:
 """
