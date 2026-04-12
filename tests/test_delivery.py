@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from skilgen.core.models import ArchitectureBlueprint, ArchitectureDomain, SkillMaterializationPlan
 from skilgen.delivery import run_delivery
 
 
@@ -327,6 +328,94 @@ class DeliveryTests(unittest.TestCase):
             run_delivery(None, root)
 
             self.assertEqual((root / "skilgen.yml").read_text(encoding="utf-8"), config_text)
+
+    def test_architecture_split_materializes_dynamic_child_skills(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "users.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+
+            blueprint = ArchitectureBlueprint(
+                headline="Backend architecture",
+                system_summary="Split backend into focused child skills.",
+                domains=[
+                    ArchitectureDomain(
+                        name="backend",
+                        summary="Backend domain",
+                        confidence=0.92,
+                        responsibilities=["Serve backend requests"],
+                        evidence_paths=["api/routes/users.py"],
+                        related_domains=[],
+                        recommended_skill_path="skills/backend/SKILL.md",
+                    )
+                ],
+                hotspots=[],
+                recommendations=[],
+                materialization_plan=[
+                    SkillMaterializationPlan(
+                        domain="backend",
+                        parent_skill_path="skills/backend/SKILL.md",
+                        child_skill_paths=[
+                            "skills/backend/api/SKILL.md",
+                            "skills/backend/routes/SKILL.md",
+                        ],
+                        cross_links=[],
+                        decision="split",
+                        rationale="Backend has multiple concrete surfaces.",
+                    )
+                ],
+            )
+
+            with patch("skilgen.generators.skills.build_architecture_blueprint", return_value=blueprint):
+                run_delivery(None, root)
+
+            graph_text = (root / "skills" / "GRAPH.md").read_text(encoding="utf-8")
+            self.assertIn("Materialization Decisions", graph_text)
+            self.assertIn("`skills/backend/api/SKILL.md` (materialized)", graph_text)
+            self.assertTrue((root / "skills" / "backend" / "api" / "SKILL.md").exists())
+
+    def test_architecture_merge_skips_child_skill_materialization(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "src" / "components").mkdir(parents=True)
+            (root / "src" / "components" / "SkillCard.tsx").write_text("export function SkillCard() { return null; }\n", encoding="utf-8")
+            (root / "src" / "state").mkdir(parents=True)
+            (root / "src" / "state" / "store.ts").write_text("export const store = {};\n", encoding="utf-8")
+
+            blueprint = ArchitectureBlueprint(
+                headline="Frontend architecture",
+                system_summary="Merge weak frontend child surfaces into the parent skill.",
+                domains=[
+                    ArchitectureDomain(
+                        name="frontend",
+                        summary="Frontend domain",
+                        confidence=0.55,
+                        responsibilities=["Serve UI routes"],
+                        evidence_paths=["src/components/SkillCard.tsx"],
+                        related_domains=[],
+                        recommended_skill_path="skills/frontend/SKILL.md",
+                    )
+                ],
+                hotspots=[],
+                recommendations=[],
+                materialization_plan=[
+                    SkillMaterializationPlan(
+                        domain="frontend",
+                        parent_skill_path="skills/frontend/SKILL.md",
+                        child_skill_paths=["skills/frontend/state/SKILL.md"],
+                        cross_links=[],
+                        decision="merge",
+                        rationale="Weak child evidence should stay merged into the parent.",
+                    )
+                ],
+            )
+
+            with patch("skilgen.generators.skills.build_architecture_blueprint", return_value=blueprint):
+                run_delivery(None, root)
+
+            self.assertFalse((root / "skills" / "frontend" / "state" / "SKILL.md").exists())
+            graph_text = (root / "skills" / "GRAPH.md").read_text(encoding="utf-8")
+            self.assertIn("- decision: `merge`", graph_text)
 
 
 if __name__ == "__main__":

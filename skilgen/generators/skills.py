@@ -9,7 +9,7 @@ from skilgen.agents.codebase_signals import analyze_codebase
 from skilgen.agents.requirements_parser import parse_project_intent
 from skilgen.agents.roadmap_planner import build_roadmap_plan
 from skilgen.core.config import load_config
-from skilgen.core.models import ArchitectureBlueprint, ArchitectureDomain
+from skilgen.core.models import ArchitectureBlueprint, ArchitectureDomain, SkillMaterializationPlan
 from skilgen.core.context import build_codebase_context
 from skilgen.core.models import RequirementsContext, SkillSpec
 from skilgen.deep_agents_core import run_deep_text
@@ -55,15 +55,32 @@ def _architecture_domain_map(context: RequirementsContext, project_root: Path) -
     return domain_map
 
 
-def _dynamic_parent_specs(context: RequirementsContext, project_root: Path) -> list[SkillSpec]:
+def _materialization_plan_map(architecture: ArchitectureBlueprint) -> dict[str, SkillMaterializationPlan]:
+    return {item.domain: item for item in architecture.materialization_plan}
+
+
+def _dynamic_parent_specs(
+    context: RequirementsContext,
+    project_root: Path,
+    architecture: ArchitectureBlueprint,
+) -> list[SkillSpec]:
     codebase_context = build_codebase_context(project_root, context)
     architecture_domains = _architecture_domain_map(context, project_root)
+    plan_map = _materialization_plan_map(architecture)
     parent_nodes = [node for node in codebase_context.domain_graph.nodes if node.parent_domain is None and node.skill_path]
     specs: list[SkillSpec] = []
     for node in parent_nodes:
         architecture = architecture_domains.get(node.name)
+        plan = plan_map.get(node.name)
         references = []
-        for related in node.related_domains:
+        related_domains = list(node.related_domains)
+        if plan is not None and plan.cross_links:
+            related_domains.extend(
+                Path(link).parts[1] if len(Path(link).parts) > 1 else Path(link).stem
+                for link in plan.cross_links
+                if link.startswith("skills/")
+            )
+        for related in related_domains:
             related_node = next((item for item in codebase_context.domain_graph.nodes if item.name == related and item.skill_path), None)
             if related_node is not None and related_node.skill_path != node.skill_path:
                 references.append(_relative_skill_ref(node.skill_path, related_node.skill_path))
@@ -97,6 +114,8 @@ def _dynamic_parent_specs(context: RequirementsContext, project_root: Path) -> l
                 "Use the listed responsibilities to keep changes inside the right domain boundary.",
                 "Refresh this parent skill whenever the architecture blueprint or top evidence files change materially.",
             ]
+        if plan is not None:
+            how_to.append(f"Honor the current materialization decision for this domain: `{plan.decision}`.")
         specs.append(
             SkillSpec(
                 path=node.skill_path.removeprefix("skills/"),
@@ -108,6 +127,54 @@ def _dynamic_parent_specs(context: RequirementsContext, project_root: Path) -> l
                 patterns=patterns,
                 how_to=how_to,
                 references=references,
+            )
+        )
+    return specs
+
+
+def _dynamic_child_specs(
+    context: RequirementsContext,
+    project_root: Path,
+    architecture: ArchitectureBlueprint,
+) -> list[SkillSpec]:
+    codebase_context = build_codebase_context(project_root, context)
+    nodes_by_name = {node.name: node for node in codebase_context.domain_graph.nodes}
+    plan_map = _materialization_plan_map(architecture)
+    specs: list[SkillSpec] = []
+    for node in codebase_context.domain_graph.nodes:
+        if node.parent_domain is None or not node.skill_path:
+            continue
+        parent_plan = plan_map.get(node.parent_domain)
+        if parent_plan is not None and parent_plan.decision == "merge":
+            continue
+        parent_node = nodes_by_name.get(node.parent_domain)
+        references: list[str] = []
+        if parent_node is not None and parent_node.skill_path:
+            references.append(_relative_skill_ref(node.skill_path, parent_node.skill_path))
+        for related_name in node.related_domains:
+            related_node = nodes_by_name.get(related_name)
+            if related_node is not None and related_node.skill_path and related_node.skill_path != node.skill_path:
+                references.append(_relative_skill_ref(node.skill_path, related_node.skill_path))
+        checks = [f"{{{{project_root}}}}/{item}" for item in node.key_files[:4]] or ["{{project_root}}/"]
+        patterns = [
+            ("Inferred child domain patterns", node.key_patterns or ["Use the nearest existing implementation surface before creating a new sub-skill boundary."]),
+        ]
+        how_to = [
+            "Start from the nearest evidence file in this child domain.",
+            "Keep the change aligned with the parent domain contract before widening the boundary.",
+            "Prefer cross-linked sibling skills when the change spans multiple closely related surfaces.",
+        ]
+        specs.append(
+            SkillSpec(
+                path=node.skill_path.removeprefix("skills/"),
+                name=_slug_name(node.name),
+                domain=node.parent_domain or node.name,
+                sub_domain=node.name,
+                overview=node.summary,
+                checks=checks,
+                patterns=patterns,
+                how_to=how_to,
+                references=list(dict.fromkeys(references)),
             )
         )
     return specs
@@ -362,10 +429,22 @@ def _legacy_child_specs(context: RequirementsContext, project_root: Path) -> lis
     return specs
 
 
-def build_skill_specs(context: RequirementsContext, output_dir: Path) -> list[SkillSpec]:
+def build_skill_specs(
+    context: RequirementsContext,
+    output_dir: Path,
+    architecture: ArchitectureBlueprint | None = None,
+) -> list[SkillSpec]:
     project_root = output_dir.parent
-    specs = _dynamic_parent_specs(context, project_root)
-    specs.extend(_legacy_child_specs(context, project_root))
+    architecture = architecture or build_architecture_blueprint(project_root, context)
+    plan_map = _materialization_plan_map(architecture)
+    merged_domains = {domain for domain, plan in plan_map.items() if plan.decision == "merge"}
+    specs = _dynamic_parent_specs(context, project_root, architecture)
+    specs.extend(_dynamic_child_specs(context, project_root, architecture))
+    legacy_children = _legacy_child_specs(context, project_root)
+    for spec in legacy_children:
+        if spec.domain in merged_domains and spec.sub_domain != "platform":
+            continue
+        specs.append(spec)
     seen: set[str] = set()
     unique: list[SkillSpec] = []
     for spec in specs:
@@ -468,6 +547,7 @@ def render_graph(specs: list[SkillSpec], architecture: ArchitectureBlueprint | N
     ]
     if architecture is not None:
         skill_paths = {spec.path for spec in specs}
+        normalized_skill_paths = {f"skills/{spec.path}" for spec in specs}
         lines.extend(
             [
                 "## Architecture Blueprint",
@@ -487,7 +567,7 @@ def render_graph(specs: list[SkillSpec], architecture: ArchitectureBlueprint | N
                 if item.child_skill_paths:
                     lines.append("- child skills:")
                     for child in item.child_skill_paths[:8]:
-                        marker = "materialized" if child in skill_paths else "planned"
+                        marker = "materialized" if child in normalized_skill_paths or child.removeprefix("skills/") in skill_paths else "planned"
                         lines.append(f"  - `{child}` ({marker})")
                 if item.cross_links:
                     lines.append("- cross-links:")
@@ -551,7 +631,8 @@ def _dynamic_summary_paths(context: RequirementsContext, output_dir: Path, selec
 
 def planned_skill_paths(context: RequirementsContext, output_dir: Path, selected_domains: set[str] | None = None) -> list[Path]:
     selected = selected_domains or set()
-    specs = _select_specs(build_skill_specs(context, output_dir), selected)
+    architecture = build_architecture_blueprint(output_dir.parent, context)
+    specs = _select_specs(build_skill_specs(context, output_dir, architecture), selected)
     planned = [output_dir / spec.path for spec in specs]
     planned.append(output_dir / "MANIFEST.md")
     planned.append(output_dir / "GRAPH.md")
@@ -568,9 +649,9 @@ def planned_skill_paths(context: RequirementsContext, output_dir: Path, selected
 
 def write_skills(context: RequirementsContext, output_dir: Path, selected_domains: set[str] | None = None) -> list[Path]:
     selected = selected_domains or set()
-    specs = _select_specs(build_skill_specs(context, output_dir), selected)
     signals = analyze_codebase(output_dir.parent)
     architecture = build_architecture_blueprint(output_dir.parent, context)
+    specs = _select_specs(build_skill_specs(context, output_dir, architecture), selected)
     written: list[Path] = []
     for spec in specs:
         target = output_dir / spec.path
