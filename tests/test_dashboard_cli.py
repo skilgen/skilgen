@@ -63,6 +63,7 @@ class DashboardCliTests(unittest.TestCase):
             self.assertIn("skilgen-dashboard.html", html)
             self.assertIn("trend-ticks", html)
             self.assertIn("data-sankey='skills'", html)
+            self.assertIn("data-radial='analytics'", html)
             self.assertIn("ops-tab active", html)
             self.assertIn("surface-tab active", html)
             self.assertIn("graph-copy active", html)
@@ -79,6 +80,8 @@ class DashboardCliTests(unittest.TestCase):
             self.assertIn("Agent Intelligence Surface", html)
             self.assertEqual(html.count("aria-label='Skilgen logo'"), 1)
             self.assertIn("&copy; Skilgen", html)
+            self.assertIn("Skill Usage", html)
+            self.assertIn("usage + depth + content", html)
 
     def test_dashboard_command_json_payload_contains_html_and_graphs(self) -> None:
         with TemporaryDirectory() as tmp:

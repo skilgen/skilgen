@@ -500,39 +500,41 @@ def render_skill_sankey_data(context: RequirementsContext, project_root: Path, b
     return {"nodes": nodes, "links": links}
 
 
-def render_analytics_sankey_data(project_root: Path, analytics: dict[str, object]) -> dict[str, object]:
-    nodes: list[dict[str, object]] = [{"id": "loads", "name": "Skill Loads", "layer": 0}]
-    node_ids = {"loads"}
-    links: list[dict[str, object]] = []
-
-    def ensure_node(node_id: str, name: str, layer: int) -> None:
-        if node_id in node_ids:
-            return
-        node_ids.add(node_id)
-        nodes.append({"id": node_id, "name": name, "layer": layer})
-
-    top_skills = analytics.get("top_skills", [])
-    if not top_skills:
-        ensure_node("none", "No usage yet", 1)
-        links.append({"source": "loads", "target": "none", "value": 1})
-        return {"nodes": nodes, "links": links}
-
-    for item in top_skills[:10]:
-        skill = str(item.get("skill", "unknown"))
+def render_analytics_radial_data(project_root: Path, analytics: dict[str, object]) -> list[dict[str, object]]:
+    usage = analytics.get("skill_usage", [])
+    if not usage:
+        return []
+    max_load = max(int(item.get("loads", 0)) for item in usage) or 1
+    radial_rows: list[dict[str, object]] = []
+    for item in usage:
+        metrics = item.get("metrics", {}) if isinstance(item.get("metrics"), dict) else {}
         loads = int(item.get("loads", 0))
-        parts = Path(skill).parts
-        domain = parts[1] if len(parts) > 2 else "other"
-        domain_id = f"domain::{domain}"
-        skill_id = f"skill::{skill}"
-        bucket = "hot" if loads >= 5 else "active" if loads >= 2 else "low"
-        bucket_id = f"bucket::{bucket}"
-        ensure_node(domain_id, domain, 1)
-        ensure_node(skill_id, Path(skill).parent.name or skill, 2)
-        ensure_node(bucket_id, bucket.title(), 3)
-        links.append({"source": "loads", "target": domain_id, "value": max(1, loads)})
-        links.append({"source": domain_id, "target": skill_id, "value": max(1, loads)})
-        links.append({"source": skill_id, "target": bucket_id, "value": max(1, loads)})
-    return {"nodes": nodes, "links": links}
+        richness = int(item.get("richness", 0))
+        depth = int(item.get("depth", 1))
+        title = str(item.get("title", item.get("skill", "Unknown skill")))
+        summary = str(item.get("summary", ""))
+        family = str(item.get("family", "other"))
+        skill = str(item.get("skill", title))
+        radial_rows.append(
+            {
+                "skill": skill,
+                "title": title,
+                "family": family,
+                "kind": str(item.get("kind", "repo")),
+                "summary": summary,
+                "loads": loads,
+                "load_score": round((loads / max_load) * 100, 2) if max_load else 0.0,
+                "depth_score": min(100, depth * 22),
+                "richness_score": min(100, richness * 8),
+                "depth": depth,
+                "richness": richness,
+                "headings": int(metrics.get("headings", 0)),
+                "bullets": int(metrics.get("bullets", 0)),
+                "references": int(metrics.get("references", 0)),
+                "words": int(metrics.get("words", 0)),
+            }
+        )
+    return radial_rows
 
 
 def render_dashboard_html(
@@ -585,7 +587,7 @@ def render_dashboard_html(
     architecture_sunburst = render_architecture_sunburst_data(context, project_root, bundle)
     evidence_sankey = render_evidence_sankey_data(context, project_root, bundle)
     skill_sankey = render_skill_sankey_data(context, project_root, bundle)
-    analytics_sankey = render_analytics_sankey_data(project_root, analytics)
+    analytics_radial = render_analytics_radial_data(project_root, analytics)
     external_skill_labels = [item.get("slug", "unknown") for item in external_skills["installed"][:6]]
     brand_mark = _skilgen_logo_svg()
     trend_points = score_history[-8:]
@@ -682,9 +684,10 @@ def render_dashboard_html(
         for item in mcp_connectors["active"][:6]
     ) or "<li class='muted'>No MCP connectors active yet.</li>"
     analytics_markup = "\n".join(
-        f"<li><strong>{escape(item['skill'])}</strong><span>{int(item['loads'])} loads</span></li>"
-        for item in analytics["top_skills"][:6]
+        f"<li><div><strong>{escape(str(item['title']))}</strong><span>{escape(str(item['skill']))}</span></div><span>{int(item['loads'])} loads</span></li>"
+        for item in analytics.get("skill_usage", [])[:8]
     ) or "<li class='muted'>Usage analytics will populate as agents load skills.</li>"
+    hot_skill = analytics.get("skill_usage", [{}])[0] if analytics.get("skill_usage") else {}
     domain_cards_parts: list[str] = []
     for domain in architecture["domains"][:6]:
         confidence_label = f"{float(domain['confidence']):.2f}"
@@ -721,7 +724,8 @@ def render_dashboard_html(
     graph_payload_json = json.dumps({"architecture": architecture_mermaid})
     network_payload_json = json.dumps({"dependencies": dependency_network})
     sunburst_payload_json = json.dumps(architecture_sunburst)
-    sankey_payload_json = json.dumps({"evidence": evidence_sankey, "skills": skill_sankey, "analytics": analytics_sankey})
+    sankey_payload_json = json.dumps({"evidence": evidence_sankey, "skills": skill_sankey})
+    radial_payload_json = json.dumps({"analytics": analytics_radial})
     dashboard_styles = """
 :root{--bg:#050608;--bg-soft:#090b0f;--panel:#10141b;--panel-strong:#0d1117;--line:rgba(255,255,255,.08);--line-strong:rgba(239,211,122,.18);--text:#f6f7fb;--muted:#98a1b2;--gold:#efd37a;--gold-strong:#f8df8e;--white:#f3f4f8;--good:#8fd9a8;--warning:#ffb86b;--danger:#ff7a7a;--shadow:0 28px 90px rgba(0,0,0,.42);}
 *{box-sizing:border-box}html,body{min-height:100%}body{margin:0;font-family:'Sora','Inter',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:radial-gradient(circle at left top, rgba(239,211,122,.12), transparent 28%),radial-gradient(circle at right top, rgba(243,244,248,.07), transparent 22%),var(--bg);color:var(--text)}
@@ -741,7 +745,7 @@ a{color:inherit}.page{max-width:1500px;margin:0 auto;padding:24px 24px 64px}.her
 .dashboard-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}.list{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:10px}.list li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.list li div{display:grid;gap:4px}.list li span{color:var(--muted)}.change-type{text-transform:uppercase;font-size:.74rem;letter-spacing:.12em;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.08);color:var(--text)}.change-type.added{color:var(--good)}.change-type.modified{color:var(--warning)}.change-type.deleted{color:var(--danger)}.muted{color:var(--muted)!important}.section-stack{display:grid;gap:24px}
 .domain-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:18px}.domain-card{padding:20px;border-radius:22px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02))}.domain-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.domain-card h3{margin:0;font-size:1.02rem}.domain-card p{color:#d6dbe5}.micro-label{margin-top:14px;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}.domain-card ul{padding-left:18px;color:var(--muted)}table{width:100%;border-collapse:collapse;border-spacing:0;margin-top:18px}th,td{padding:14px 12px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;vertical-align:top}th{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.14em}
 .systems-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.mini-panel{padding:18px;border-radius:22px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03)}.mini-panel ul{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:10px}.mini-panel li{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.ops-board{display:grid;gap:18px;margin-top:18px}.ops-tabs,.surface-tabs{display:flex;flex-wrap:wrap;gap:10px}.ops-tab,.surface-tab{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600}.ops-tab.active,.surface-tab.active{background:rgba(239,211,122,.14);border-color:rgba(239,211,122,.35);color:var(--gold-strong)}.ops-copy,.surface-copy{display:none}.ops-copy.active,.surface-copy.active{display:block}.ops-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.ops-tile{padding:16px;border-radius:18px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03)}.ops-tile strong{display:block;font-size:1rem;margin-bottom:6px}
-.analytics-board{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:18px;align-items:stretch}.analytics-side{display:grid;gap:16px}.nuance-copy,.rationale-note{margin-top:8px;color:var(--muted);font-size:.92rem;line-height:1.5}.footer-note{margin-top:12px;color:var(--muted);font-size:.92rem}.tooltip{position:absolute;pointer-events:none;background:rgba(6,8,11,.98);border:1px solid rgba(239,211,122,.3);border-radius:14px;padding:12px 14px;color:#f6f7fb;font-size:.86rem;line-height:1.45;box-shadow:0 18px 40px rgba(0,0,0,.28);opacity:0;transform:translate(-50%,-100%);transition:opacity .16s ease;max-width:280px}.tooltip strong{display:block;color:var(--gold);margin-bottom:6px}.corner-badge{position:fixed;top:18px;right:22px;z-index:20;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(5,6,8,.76);backdrop-filter:blur(12px);color:var(--muted);font-size:.8rem;letter-spacing:.08em;text-transform:uppercase}
+.analytics-board{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:18px;align-items:stretch}.analytics-side{display:grid;gap:16px}.analytics-side .mini-panel li div{display:grid;gap:3px}.analytics-side .mini-panel li span{font-size:.82rem;color:var(--muted)}.radial-canvas{width:100%;height:100%;min-height:540px;border-radius:20px;position:relative;overflow:hidden;background:radial-gradient(circle at center, rgba(239,211,122,.08), transparent 42%), rgba(255,255,255,.02)}.radial-legend{display:grid;gap:10px}.legend-dot{display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:8px}.nuance-copy,.rationale-note{margin-top:8px;color:var(--muted);font-size:.92rem;line-height:1.5}.footer-note{margin-top:12px;color:var(--muted);font-size:.92rem}.tooltip{position:absolute;pointer-events:none;background:rgba(6,8,11,.98);border:1px solid rgba(239,211,122,.3);border-radius:14px;padding:12px 14px;color:#f6f7fb;font-size:.86rem;line-height:1.45;box-shadow:0 18px 40px rgba(0,0,0,.28);opacity:0;transform:translate(-50%,-100%);transition:opacity .16s ease;max-width:280px}.tooltip strong{display:block;color:var(--gold);margin-bottom:6px}.corner-badge{position:fixed;top:18px;right:22px;z-index:20;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(5,6,8,.76);backdrop-filter:blur(12px);color:var(--muted);font-size:.8rem;letter-spacing:.08em;text-transform:uppercase}
 @media (max-width:1180px){.hero-grid,.score-board,.dashboard-columns,.graph-frame,.analytics-board{grid-template-columns:1fr}.hero-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.systems-grid,.domain-grid,.ops-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:760px){.page{padding:18px}.hero-panel,.panel{padding:20px}.hero-metrics,.score-rail,.systems-grid,.domain-grid,.ops-grid{grid-template-columns:1fr}.hero-copy h1{font-size:clamp(2.1rem,14vw,3.4rem)}.skilgen-mark{width:240px}.graph-stage{height:420px}.sunburst-canvas,.sankey-canvas,.network-canvas{min-height:360px}.subscore-row{grid-template-columns:1fr}.subscore-value{text-align:left}.corner-badge{top:12px;right:12px;font-size:.72rem}}
 """.strip()
@@ -751,6 +755,7 @@ window.__SKILGEN_GRAPHS__ = {graph_payload_json};
 window.__SKILGEN_NETWORKS__ = {network_payload_json};
 window.__SKILGEN_SUNBURST__ = {sunburst_payload_json};
 window.__SKILGEN_SANKEY__ = {sankey_payload_json};
+window.__SKILGEN_RADIAL__ = {radial_payload_json};
 const tabs=[...document.querySelectorAll('.graph-tab')];
 const panels=[...document.querySelectorAll('.graph-stage .graph-panel')];
 const copies=[...document.querySelectorAll('.graph-aside .graph-copy')];
@@ -800,6 +805,15 @@ const detailDefaults={{
     meta:[
       'Click a skill node to inspect why that skill exists.',
       'External packs show which ecosystem skills are already active in the map.',
+    ],
+  }},
+  analytics:{{
+    title:'Skill usage intelligence',
+    body:'Skilgen shows every tracked skill as its own radial bar, layering real usage, structural depth, and content richness together so the most meaningful skills stand out immediately.',
+    meta:[
+      'Gold measures usage intensity.',
+      'Blue measures structural depth in the skill tree.',
+      'Green measures content richness inside the skill.',
     ],
   }},
 }};
@@ -983,6 +997,85 @@ const renderSankey=(target, container)=>{{
   renderedSankeys.set(target,true);
   if(detailDefaults[target]) setDetail(target, detailDefaults[target].title, detailDefaults[target].body, detailDefaults[target].meta);
 }};
+const renderAnalyticsRadial=(container)=>{{
+  if(!window.d3 || container.dataset.loaded==='1') return;
+  container.dataset.loaded='1';
+  const data=(window.__SKILGEN_RADIAL__ && window.__SKILGEN_RADIAL__.analytics) || [];
+  container.innerHTML='';
+  const width=container.clientWidth||860;
+  const height=container.clientHeight||560;
+  const innerRadius=88;
+  const outerRadius=Math.min(width,height)/2-30;
+  const svg=d3.select(container).append('svg').attr('viewBox',`${{-width/2}} ${{-height/2}} ${{width}} ${{height}}`);
+  if(!data.length){{
+    svg.append('text').attr('fill','#98A1B2').attr('text-anchor','middle').text('No skill usage recorded yet');
+    return;
+  }}
+  const keys=['load_score','depth_score','richness_score'];
+  const colors={{
+    load_score:'#EFD37A',
+    depth_score:'#67D5FF',
+    richness_score:'#8FD9A8',
+  }};
+  const x=d3.scaleBand().domain(data.map((d)=>d.title)).range([0,2*Math.PI]).align(0);
+  const maxValue=d3.max(data,(d)=>d.load_score+d.depth_score+d.richness_score)||100;
+  const y=d3.scaleLinear().domain([0,maxValue]).range([innerRadius,outerRadius]);
+  const stack=d3.stack().keys(keys);
+  const stacked=stack(data);
+  const arc=d3.arc()
+    .innerRadius((d)=>y(d[0]))
+    .outerRadius((d)=>y(d[1]))
+    .startAngle((d)=>x(d.data.title))
+    .endAngle((d)=>x(d.data.title)+x.bandwidth())
+    .padAngle(0.018)
+    .padRadius(innerRadius);
+  const layers=svg.append('g').selectAll('g').data(stacked).join('g').attr('fill',(d)=>colors[d.key]);
+  layers.selectAll('path').data((d)=>d.map((entry)=>Object.assign(entry,{{key:d.key}}))).join('path')
+    .attr('d',arc)
+    .attr('stroke','#050608')
+    .attr('stroke-width',1.2)
+    .style('cursor','pointer')
+    .on('mousemove',(event,d)=>showTooltip(event,d.data.title,`${{d.key.replace('_score','').replace('_',' ')}} · ${{Math.round(d.data[d.key])}}`))
+    .on('mouseleave',hideTooltip)
+    .on('click',(_,d)=>setDetail('analytics', d.data.title, d.data.summary, [
+      `Loads: ${{d.data.loads}}`,
+      `Depth score: ${{Math.round(d.data.depth_score)}}`,
+      `Richness score: ${{Math.round(d.data.richness_score)}}`,
+      `Headings: ${{d.data.headings}}, bullets: ${{d.data.bullets}}, references: ${{d.data.references}}`,
+    ]));
+  svg.append('g').selectAll('text').data(data).join('text')
+    .attr('text-anchor',(d)=>((x(d.title)+x.bandwidth()/2+Math.PI/2)%(2*Math.PI))<Math.PI?'start':'end')
+    .attr('transform',(d)=>{{
+      const angle=(x(d.title)+x.bandwidth()/2)-Math.PI/2;
+      const radius=outerRadius+10;
+      const rotation=angle*180/Math.PI;
+      const flip=rotation>90&&rotation<270?180:0;
+      return `rotate(${{rotation}}) translate(${{radius}},0) rotate(${{flip}})`;
+    }})
+    .attr('fill','#F6F7FB')
+    .style('font','10px Inter')
+    .text((d)=>d.title);
+  const legend=svg.append('g').attr('transform',`translate(${{-70}},${{-18}})`);
+  [
+    ['Usage','#EFD37A'],
+    ['Depth','#67D5FF'],
+    ['Content','#8FD9A8'],
+  ].forEach(([label,color],index)=>{{
+    const row=legend.append('g').attr('transform',`translate(0,${{index*18}})`);
+    row.append('circle').attr('r',5).attr('cx',0).attr('cy',0).attr('fill',color);
+    row.append('text').attr('x',12).attr('y',4).attr('fill','#98A1B2').style('font','11px Inter').text(label);
+  }});
+  svg.append('text').attr('text-anchor','middle').attr('fill','#F6F7FB').style('font','700 16px Inter').text('Skill Usage');
+  svg.append('text').attr('text-anchor','middle').attr('dy','1.6em').attr('fill','#98A1B2').style('font','11px Inter').text('usage + depth + content');
+  if(data[0]){{
+    setDetail('analytics', data[0].title, data[0].summary, [
+      `Loads: ${{data[0].loads}}`,
+      `Depth score: ${{Math.round(data[0].depth_score)}}`,
+      `Richness score: ${{Math.round(data[0].richness_score)}}`,
+      `Headings: ${{data[0].headings}}, bullets: ${{data[0].bullets}}, references: ${{data[0].references}}`,
+    ]);
+  }}
+}};
 const setPanel=(target)=>{{
   activateSet(tabs,panels,target,'target','panel');
   activateSet(tabs,copies,target,'target','copy');
@@ -999,8 +1092,8 @@ const setPanel=(target)=>{{
 tabs.forEach((tab)=>tab.addEventListener('click',()=>setPanel(tab.dataset.target)));
 opsTabs.forEach((tab)=>tab.addEventListener('click',()=>activateSet(opsTabs,opsCopies,tab.dataset.target,'target','copy')));
 surfaceTabs.forEach((tab)=>tab.addEventListener('click',()=>activateSet(surfaceTabs,surfaceCopies,tab.dataset.target,'target','copy')));
-const analyticsCanvas=document.querySelector('[data-sankey="analytics"]');
-if(analyticsCanvas) renderSankey('analytics', analyticsCanvas);
+const analyticsCanvas=document.querySelector('[data-radial="analytics"]');
+if(analyticsCanvas) renderAnalyticsRadial(analyticsCanvas);
 setPanel('architecture');
 if(opsTabs.length) activateSet(opsTabs,opsCopies,'worker','target','copy');
 if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target','copy');
@@ -1066,10 +1159,10 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
             "<section class='layout section-stack'>",
             "<section class='panel'>",
             "<h2>Usage Analytics</h2>",
-            "<div class='section-copy'>Skilgen tracks where agent attention actually lands. This surface shows load flow through the skill tree before you ever dive into the graph studio.</div>",
+            "<div class='section-copy'>Skilgen tracks usage at the skill level, then layers in tree depth and content richness so you can see which skills are truly carrying the repo.</div>",
             "<div class='analytics-board'>",
             "<div class='graph-stage'>",
-            "<div class='sankey-canvas' data-sankey='analytics'></div>",
+            "<div class='radial-canvas' data-radial='analytics'></div>",
             "</div>",
             "<div class='analytics-side'>",
             "<div class='legend'>"
@@ -1077,9 +1170,9 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
                 f"{int(analytics.get('event_count', 0))} recorded events",
                 "good" if int(analytics.get("event_count", 0)) else "default",
             )
-            + pill(f"{len(analytics.get('top_skills', []))} tracked skills")
+            + pill(f"{len(analytics.get('skill_usage', []))} mapped skills")
             + "</div>",
-            "<div class='mini-panel'><div class='micro-label'>Most Loaded Skills</div>"
+            "<div class='mini-panel'><div class='micro-label'>Most Active Skills</div>"
             + f"<ul>{analytics_markup}</ul></div>",
             "<div class='mini-panel'><div class='micro-label'>Least Used</div><ul>"
             + "\n".join(
@@ -1087,8 +1180,11 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
                 for item in analytics.get("least_used", [])[:6]
             )
             + ("</ul></div>" if analytics.get("least_used") else "<li class='muted'>No underused skills yet.</li></ul></div>"),
+            "<div class='mini-panel'><div class='micro-label'>Selected Skill</div>"
+            f"<p class='nuance-copy'><strong>{escape(str(hot_skill.get('title', 'No skill usage yet')))}</strong><br>{escape(str(hot_skill.get('summary', 'Skilgen will surface the currently hottest skill here as soon as load events exist.')))}</p>"
+            f"<p class='nuance-copy'>Usage: {int(hot_skill.get('loads', 0))} loads · Depth: {int(hot_skill.get('depth', 0))} · Richness: {int(hot_skill.get('richness', 0))}</p></div>",
             "<div class='mini-panel'><div class='micro-label'>Deep nuance</div>"
-            f"<p class='nuance-copy'>Skilgen is not just summarizing the repo. It is grounding load analytics against {total_symbol_files} parsed files, {dependency_edges} dependency edges, {call_edges} call edges, and {test_links} test mappings so agent attention can be interpreted in context.</p></div>",
+            f"<p class='nuance-copy'>Skilgen is not just summarizing the repo. It is grounding skill usage against {total_symbol_files} parsed files, {dependency_edges} dependency edges, {call_edges} call edges, {test_links} test mappings, and the content structure inside each SKILL.md file.</p></div>",
             "</div>",
             "</div>",
             "</section>",
