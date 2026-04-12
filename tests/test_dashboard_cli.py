@@ -73,9 +73,12 @@ class DashboardCliTests(unittest.TestCase):
             self.assertIn("data-detail='evidence'", html)
             self.assertIn("data-detail='dependencies'", html)
             self.assertIn("data-detail='skills'", html)
+            self.assertIn("data-copy-title='architecture'", html)
+            self.assertIn("data-copy-body='architecture'", html)
             self.assertIn("setDetail=(", html)
             self.assertIn("Agent Intelligence Surface", html)
             self.assertEqual(html.count("aria-label='Skilgen logo'"), 1)
+            self.assertIn("&copy; Skilgen", html)
 
     def test_dashboard_command_json_payload_contains_html_and_graphs(self) -> None:
         with TemporaryDirectory() as tmp:
