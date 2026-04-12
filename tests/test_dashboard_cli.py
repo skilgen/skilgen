@@ -68,6 +68,14 @@ class DashboardCliTests(unittest.TestCase):
             self.assertIn("graph-copy active", html)
             self.assertIn(".page{max-width:1500px", html)
             self.assertLess(html.index("Usage Analytics"), html.index("Graph Studio"))
+            self.assertEqual(html.count("data-copy='evidence'"), 1)
+            self.assertIn("data-detail='architecture'", html)
+            self.assertIn("data-detail='evidence'", html)
+            self.assertIn("data-detail='dependencies'", html)
+            self.assertIn("data-detail='skills'", html)
+            self.assertIn("setDetail=(", html)
+            self.assertIn("Agent Intelligence Surface", html)
+            self.assertEqual(html.count("aria-label='Skilgen logo'"), 1)
 
     def test_dashboard_command_json_payload_contains_html_and_graphs(self) -> None:
         with TemporaryDirectory() as tmp:
