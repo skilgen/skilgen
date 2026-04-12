@@ -128,6 +128,11 @@ def _compact_label(value: str, *, max_length: int = 28) -> str:
     return cleaned[: max_length - 1].rstrip() + "…"
 
 
+def _count_phrase(count: int, singular: str, plural: str | None = None) -> str:
+    plural_form = plural or f"{singular}s"
+    return f"{count} {singular if count == 1 else plural_form}"
+
+
 def _graph_skill_name(path_or_name: str) -> str:
     if "/SKILL.md" in path_or_name:
         parts = Path(path_or_name).parts
@@ -854,7 +859,7 @@ def render_dashboard_html(
             f"<td>{escape(item['parent_skill_path'] or '-')}</td>"
             f"<td>{escape(', '.join(item['child_skill_paths'][:4]) or '-')}</td>"
             f"<td>{escape(item['rationale'])}"
-            f"<div class='rationale-note'>Grounded in {len(item['child_skill_paths']) or 1} concrete skill surfaces, {len(item.get('cross_links', []))} cross-links, and the evidence attached to {escape(_display_domain_name(str(item['domain'])))} rather than a template split.</div></td>"
+            f"<div class='rationale-note'>Grounded in {_count_phrase(len(item['child_skill_paths']) or 1, 'concrete skill surface')}, {_count_phrase(len(item.get('cross_links', [])), 'cross-link')}, and the evidence attached to {escape(_display_domain_name(str(item['domain'])))} rather than a template split.</div></td>"
             "</tr>"
         )
         for item in architecture["materialization_plan"][:8]
@@ -905,8 +910,12 @@ tooltip.className='tooltip';
 document.body.appendChild(tooltip);
 const showTooltip=(event,title,body='')=>{{
   tooltip.innerHTML=`<strong>${{title}}</strong>${{body}}`;
-  tooltip.style.left=`${{event.pageX}}px`;
-  tooltip.style.top=`${{event.pageY-16}}px`;
+  const viewportWidth=window.innerWidth||document.documentElement.clientWidth||1280;
+  const viewportHeight=window.innerHeight||document.documentElement.clientHeight||720;
+  const clampedX=Math.min(Math.max(160,event.pageX),viewportWidth-160);
+  const clampedY=Math.min(Math.max(96,event.pageY-16),viewportHeight-24);
+  tooltip.style.left=`${{clampedX}}px`;
+  tooltip.style.top=`${{clampedY}}px`;
   tooltip.style.opacity='1';
 }};
 const hideTooltip=()=>{{ tooltip.style.opacity='0'; }};
@@ -1105,7 +1114,7 @@ const renderSankey=(target, container)=>{{
   const svg=d3.select(container).append('svg').attr('viewBox',`0 0 ${{width}} ${{height}}`);
   const sankey=d3.sankey().nodeId((d)=>d.id).nodeWidth(18).nodePadding(20).extent([[16,18],[width-16,height-18]]);
   const {{nodes,links}}=sankey(graph);
-  const linkColor = target==='analytics' ? 'rgba(143,217,168,0.44)' : target==='skills' ? 'rgba(103,213,255,0.34)' : 'rgba(239,211,122,0.42)';
+  const linkColor = target==='skills' ? 'rgba(103,213,255,0.34)' : 'rgba(239,211,122,0.42)';
   svg.append('g').selectAll('path').data(links).join('path')
     .attr('d',d3.sankeyLinkHorizontal())
     .attr('stroke',linkColor)
@@ -1121,7 +1130,7 @@ const renderSankey=(target, container)=>{{
     .attr('height',(d)=>Math.max(1,d.y1-d.y0))
     .attr('width',(d)=>d.x1-d.x0)
     .attr('rx',7)
-    .attr('fill',(d)=>d.layer===1 ? (target==='skills' ? '#67D5FF' : '#EFD37A') : d.layer===2 ? (target==='skills' ? '#8FD9A8' : '#B9C2D4') : d.layer===3 && target==='analytics' ? '#8FD9A8' : '#11161E')
+    .attr('fill',(d)=>d.layer===1 ? (target==='skills' ? '#67D5FF' : '#EFD37A') : d.layer===2 ? (target==='skills' ? '#8FD9A8' : '#B9C2D4') : '#11161E')
     .attr('stroke','#F6F7FB')
     .attr('stroke-opacity',0.32)
     .style('cursor','pointer')
@@ -1214,8 +1223,9 @@ const renderAnalyticsRadial=(container)=>{{
     row.append('text').attr('x',12).attr('y',4).attr('fill','#98A1B2').style('font','11px Inter').text(label);
   }});
   const usageMode = data[0] ? data[0].usage_label : 'Usage';
+  const hasLiveUsage = data.some((entry)=>Number(entry.recorded_loads || 0) > 0);
   svg.append('text').attr('text-anchor','middle').attr('fill','#F6F7FB').style('font','700 16px Inter').text(usageMode);
-  svg.append('text').attr('text-anchor','middle').attr('dy','1.6em').attr('fill','#98A1B2').style('font','11px Inter').text('depth + content + live signals');
+  svg.append('text').attr('text-anchor','middle').attr('dy','1.6em').attr('fill','#98A1B2').style('font','11px Inter').text(hasLiveUsage ? 'depth + content + live signals' : 'no live usage yet · content signal only');
   if(data[0]){{
     setDetail('analytics', `Usage · ${{data[0].title}}`, data[0].summary, [
       `${{data[0].usage_label}}: ${{data[0].loads}}`,
@@ -1323,7 +1333,7 @@ window.addEventListener('resize',()=>{{
             "<div class='analytics-side'>",
             "<div class='legend'>"
             + pill(
-                f"{int(analytics.get('live_event_count', 0))} live usage events",
+                _count_phrase(int(analytics.get("live_event_count", 0)), "live usage event"),
                 "good" if int(analytics.get("live_event_count", 0)) else "default",
             )
             + pill(f"{len(analytics.get('skill_usage', []))} mapped skills")
@@ -1340,9 +1350,9 @@ window.addEventListener('resize',()=>{{
             + ("</ul></div>" if analytics.get("least_used") else "<li class='muted'>No underused skills yet.</li></ul></div>"),
             "<div class='mini-panel'><div class='micro-label'>Selected Skill</div>"
             f"<p class='nuance-copy'><strong>{escape(str(hot_skill.get('title', 'No real skill usage yet')))}</strong><br>{escape(str(hot_skill.get('summary', 'Skilgen will surface the hottest genuinely-used skill here once agent usage events exist.')))}</p>"
-            f"<p class='nuance-copy'>{escape('Modeled attention' if usage_mode != 'live' else 'Live usage')}: {int(hot_skill.get('effective_loads', hot_skill.get('loads', 0)))} · Recorded loads: {int(hot_skill.get('loads', 0))} · Depth: {int(hot_skill.get('depth', 0))} · Richness: {int(hot_skill.get('richness', 0))}</p></div>",
+            f"<p class='nuance-copy'>{escape('Modeled attention' if usage_mode != 'live' else 'Live usage')}: {int(hot_skill.get('effective_loads', hot_skill.get('loads', 0)))} · Recorded loads: {int(hot_skill.get('loads', 0))} · Depth: {int(hot_skill.get('depth', 0))} · Richness: {int(hot_skill.get('richness', 0))}</p><div class='graph-detail' data-detail='analytics'><h4>Usage Analytics</h4><p>Skilgen surfaces the currently most meaningful skill here. Click a radial segment to inspect its summary, usage, and content shape.</p><ul class='graph-detail-meta'><li>Usage is live when real skill loads exist.</li><li>Otherwise Skilgen falls back to modeled attention so the surface still teaches something useful.</li></ul></div></div>",
             "<div class='mini-panel'><div class='micro-label'>Deep nuance</div>"
-            f"<p class='nuance-copy'>Skilgen is not just summarizing the repo. It is walking file by file across {total_symbol_files} parser-backed files, {dependency_edges} dependency edges, {call_edges} call edges, {test_links} test mappings, and the internal structure of every SKILL.md file. Planner warmup loads are excluded so this surface reflects real skill pressure instead of bootstrap noise.</p></div>",
+            f"<p class='nuance-copy'>Skilgen is not just summarizing the repo. It is walking file by file across {total_symbol_files} parser-backed files, {dependency_edges} dependency edges, {call_edges} call edges, {_count_phrase(test_links, 'test mapping')}, and the internal structure of every SKILL.md file. Planner warmup loads are excluded so this surface reflects real skill pressure instead of bootstrap noise.</p></div>",
             "</div>",
             "</div>",
             "</section>",

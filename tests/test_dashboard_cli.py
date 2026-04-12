@@ -68,6 +68,7 @@ class DashboardCliTests(unittest.TestCase):
                 self.assertIn("trend-ticks", html)
                 self.assertIn("data-sankey='skills'", html)
                 self.assertIn("data-radial='analytics'", html)
+                self.assertIn("data-detail='analytics'", html)
                 self.assertIn("ops-tab active", html)
                 self.assertIn("surface-tab active", html)
                 self.assertIn("graph-copy active", html)
@@ -85,7 +86,7 @@ class DashboardCliTests(unittest.TestCase):
                 self.assertEqual(html.count("aria-label='Skilgen logo'"), 1)
                 self.assertIn("&copy; Skilgen", html)
                 self.assertTrue(any(marker in html for marker in ("Modeled attention", "Live usage")))
-                self.assertIn("depth + content + live signals", html)
+                self.assertTrue(any(marker in html for marker in ("depth + content + live signals", "no live usage yet")))
                 self.assertNotIn(">---<", html)
                 self.assertTrue(
                     any(
@@ -104,6 +105,7 @@ class DashboardCliTests(unittest.TestCase):
                 self.assertIn("Usage ·", html)
                 self.assertIn("Recommended profiles", html)
                 self.assertIn("No git metadata; freshness is file-state based", html)
+                self.assertIn("viewportWidth", html)
                 self.assertNotIn(">No diff since baseline<", html)
             finally:
                 stop_auto_update_worker(root)
