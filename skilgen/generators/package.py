@@ -1269,7 +1269,7 @@ const renderAnalyticsRadial=(container)=>{{
     .attr('fill','#F6F7FB')
     .style('font','10px Inter')
     .text((d)=>d.title);
-  const legend=svg.append('g').attr('transform',`translate(${{-70}},${{-18}})`);
+  const legend=svg.append('g').attr('transform',`translate(${{-outerRadius + 28}},${{-outerRadius + 28}})`);
   [
     ['Usage','#EFD37A'],
     ['Depth','#67D5FF'],
@@ -1281,8 +1281,8 @@ const renderAnalyticsRadial=(container)=>{{
   }});
   const usageMode = data[0] ? data[0].usage_label : 'Usage';
   const hasLiveUsage = data.some((entry)=>Number(entry.recorded_loads || 0) > 0);
-  svg.append('text').attr('text-anchor','middle').attr('fill','#F6F7FB').style('font','700 16px Inter').text(usageMode);
-  svg.append('text').attr('text-anchor','middle').attr('dy','1.6em').attr('fill','#98A1B2').style('font','11px Inter').text(hasLiveUsage ? 'depth + content + live signals' : 'no live usage yet · content signal only');
+  svg.append('text').attr('text-anchor','middle').attr('fill','#F6F7FB').style('font','700 15px Inter').text(hasLiveUsage ? 'Live Usage' : 'Modeled Usage');
+  svg.append('text').attr('text-anchor','middle').attr('dy','1.6em').attr('fill','#98A1B2').style('font','11px Inter').text(hasLiveUsage ? 'depth + content' : 'content signal only');
   if(data[0]){{
     setDetail('analytics', `Usage · ${{data[0].title}}`, data[0].summary, [
       `${{data[0].usage_label}}: ${{data[0].loads}}`,
@@ -1431,7 +1431,7 @@ window.addEventListener('resize',()=>{{
             "<div class='graph-panel' data-panel='skills' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='skills'></div></div>",
             "</div>",
             "<aside class='graph-aside'>",
-            "<div class='graph-copy active' data-copy='architecture'><h3 data-copy-title='architecture'>Architecture Sunburst</h3><p data-copy-body='architecture'>Zoom through top-level domains, sub-skills, and evidence surfaces. Click deeper to focus a capability boundary and click the center to move back out.</p><ul><li>Outer rings represent planned or generated child skills.</li><li>Ring sizes scale with evidence and responsibilities.</li><li>Hover reveals domain summaries and skill context.</li></ul><div class='micro-label'>Visible Domain Legend</div><ul class='graph-legend'>"
+            f"<div class='graph-copy active' data-copy='architecture'><h3 data-copy-title='architecture'>Architecture Sunburst</h3><p data-copy-body='architecture'>{escape(architecture['system_summary'])}</p><ul><li>{escape(_count_phrase(len(architecture['domains']), 'top-level domain'))} are visible in the current architecture slice.</li><li>{escape(_count_phrase(len(architecture['materialization_plan']), 'materialization decision'))} shape how parent and child skills are split.</li><li>Click any arc to inspect the exact capability boundary, evidence count, and recommended skill path.</li></ul><div class='micro-label'>Visible Domain Legend</div><ul class='graph-legend'>"
             + architecture_legend
             + "</ul><div class='graph-detail' data-detail='architecture'><h4>Architecture Sunburst</h4><p>Skilgen starts from parser-backed evidence, then lets the architecture view reveal how responsibilities split across the repo. Click an arc to inspect that specific capability boundary.</p><ul class='graph-detail-meta'><li>Color separates architecture families so the high-level shape is easy to scan.</li><li>Clicking a domain replaces this summary with node-specific detail.</li></ul></div></div>",
             "<div class='graph-copy' data-copy='evidence'><h3 data-copy-title='evidence'>Evidence Flow</h3><p data-copy-body='evidence'>Follow how languages and evidence kinds feed concrete files. This is the visible proof behind the architecture Skilgen is synthesizing.</p><ul><li>Left: dominant languages or repo root.</li><li>Middle: evidence kinds.</li><li>Right: files or source artifacts.</li></ul><div class='graph-detail' data-detail='evidence'><h4>Evidence Flow</h4><p>Skilgen walks file by file and groups the repo into languages, evidence kinds, and concrete artifacts. Click any node to inspect the exact nuance that was extracted.</p><ul class='graph-detail-meta'><li>Evidence is grounded in real files, snippets, configs, docs, and tests.</li><li>This is the proof layer beneath every generated skill.</li></ul></div></div>",

@@ -88,7 +88,7 @@ class DashboardCliTests(unittest.TestCase):
                 self.assertEqual(html.count("aria-label='Skilgen logo'"), 1)
                 self.assertIn("&copy; Skilgen", html)
                 self.assertTrue(any(marker in html for marker in ("Modeled attention", "Live usage")))
-                self.assertTrue(any(marker in html for marker in ("depth + content + live signals", "no live usage yet")))
+                self.assertTrue(any(marker in html for marker in ("depth + content", "content signal only")))
                 self.assertNotIn(">---<", html)
                 self.assertTrue(
                     any(
@@ -110,6 +110,8 @@ class DashboardCliTests(unittest.TestCase):
                 self.assertIn("viewportWidth", html)
                 self.assertIn("integrity='sha384-", html)
                 self.assertIn("aria-label='Interactive dependency network showing repo-local import relationships.'", html)
+                self.assertNotIn("Outer rings represent planned or generated child skills.", html)
+                self.assertTrue(any(marker in html for marker in ("Live Usage", "Modeled Usage")))
                 self.assertNotIn(">No diff since baseline<", html)
             finally:
                 stop_auto_update_worker(root)
