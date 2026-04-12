@@ -18,6 +18,7 @@ class DeliveryTests(unittest.TestCase):
 
             self.assertTrue((root / "ANALYSIS.md").exists())
             self.assertTrue((root / "ARCHITECTURE.md").exists())
+            self.assertTrue((root / "skilgen-dashboard.html").exists())
             self.assertTrue((root / "FEATURES.md").exists())
             self.assertTrue((root / "skills" / "MANIFEST.md").exists())
             self.assertTrue((root / "skills" / "requirements" / "SKILL.md").exists())
@@ -49,6 +50,7 @@ class DeliveryTests(unittest.TestCase):
             self.assertTrue((root / "FEATURES.md").exists())
             self.assertTrue((root / "REPORT.md").exists())
             self.assertTrue((root / "TRACEABILITY.md").exists())
+            self.assertTrue((root / "skilgen-dashboard.html").exists())
             self.assertTrue((root / "skills" / "MANIFEST.md").exists())
             self.assertTrue((root / "skills" / "GRAPH.md").exists())
             self.assertTrue((root / "AGENTS.md").exists())
@@ -95,6 +97,7 @@ class DeliveryTests(unittest.TestCase):
 
             self.assertTrue((root / "ANALYSIS.md").exists())
             self.assertTrue((root / "ARCHITECTURE.md").exists())
+            self.assertTrue((root / "skilgen-dashboard.html").exists())
             self.assertTrue((root / "FEATURES.md").exists())
             self.assertTrue((root / "skills" / "MANIFEST.md").exists())
             self.assertTrue((root / "skills" / "backend" / "SKILL.md").exists())

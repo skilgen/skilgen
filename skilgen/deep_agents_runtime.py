@@ -429,6 +429,7 @@ def native_status_payload(project_root: str | Path) -> dict[str, Any]:
         "config_exists": (root / "skilgen.yml").exists(),
         "analysis_exists": (root / "ANALYSIS.md").exists(),
         "architecture_exists": (root / "ARCHITECTURE.md").exists(),
+        "dashboard_exists": (root / "skilgen-dashboard.html").exists(),
         "report_exists": (root / "REPORT.md").exists(),
         "traceability_exists": (root / "TRACEABILITY.md").exists(),
         "agents_exists": (root / "AGENTS.md").exists(),

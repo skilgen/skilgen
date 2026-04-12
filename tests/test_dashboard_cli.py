@@ -55,8 +55,11 @@ class DashboardCliTests(unittest.TestCase):
             self.assertEqual(payload["dashboard_file"], str(output_path))
             html = output_path.read_text(encoding="utf-8")
             self.assertIn("Skilgen Operating System", html)
-            self.assertIn("Architecture + Evidence Graphs", html)
-            self.assertIn("Capability Layer", html)
+            self.assertIn("Graph Studio", html)
+            self.assertIn("Architecture Sunburst", html)
+            self.assertIn("Evidence Flow", html)
+            self.assertIn("d3-sankey", html)
+            self.assertIn("skilgen-dashboard.html", html)
 
     def test_dashboard_command_json_payload_contains_html_and_graphs(self) -> None:
         with TemporaryDirectory() as tmp:
