@@ -346,7 +346,7 @@ def render_evidence_network_data(context: RequirementsContext, project_root: Pat
         nodes.append({"id": language_id, "label": language, "group": "language", "value": 20, "title": f"Dominant language: {language}"})
         edges.append({"from": "repo", "to": language_id})
     for item in evidence_graph.items[:18]:
-        item_id = f"item::{item.path}"
+        item_id = f"item::{path}"
         snippet = " ".join(item.snippet[:2]).strip() or "No snippet captured"
         title = f"{item.kind}: {item.path}\n{snippet}"
         nodes.append({"id": item_id, "label": item.path.split("/")[-1], "group": item.kind, "value": 14, "title": title})
@@ -445,7 +445,7 @@ def render_architecture_sunburst_data(context: RequirementsContext, project_root
         node = {
             "name": domain_label,
             "summary": domain_summary,
-            "value": max(1, len(evidence_paths) + len(responsibilities)),
+            "value": max(3, len(evidence_paths) + min(2, len(responsibilities))),
             "detail_meta": [
                 f"Evidence paths: {len(evidence_paths)}",
                 f"Responsibilities: {len(responsibilities)}",
@@ -458,7 +458,7 @@ def render_architecture_sunburst_data(context: RequirementsContext, project_root
                     {
                         "name": _graph_skill_name(child),
                         "summary": f"Generated skill path: {child}",
-                        "value": max(1, len(child)),
+                        "value": 1,
                         "detail_meta": [
                             f"Skill path: {child}",
                             f"Decision: {plan.decision if plan is not None else 'derived from evidence'}",
@@ -501,26 +501,49 @@ def render_evidence_sankey_data(context: RequirementsContext, project_root: Path
                 node["detail_meta"] = ["File-by-file evidence is grouped under language before deeper domain synthesis happens."]
         links.append({"source": "repo", "target": language_id, "value": 2})
 
+    grouped_items: dict[str, dict[str, object]] = {}
     for item in evidence_graph.items[:16]:
+        entry = grouped_items.setdefault(
+            item.path,
+            {
+                "path": item.path,
+                "language": item.language,
+                "snippet": list(item.snippet[:2]),
+                "kinds": [],
+            },
+        )
+        if item.kind not in entry["kinds"]:
+            entry["kinds"].append(item.kind)
+        if not entry["language"] and item.language:
+            entry["language"] = item.language
+        if not entry["snippet"] and item.snippet:
+            entry["snippet"] = list(item.snippet[:2])
+
+    for entry in list(grouped_items.values())[:16]:
+        path = str(entry["path"])
+        language = str(entry["language"] or "")
+        kinds = [str(kind) for kind in entry["kinds"]]
         item_id = f"item::{item.path}"
-        kind_id = f"kind::{item.kind}"
-        file_label = item.path.split("/")[-1]
-        ensure_node(kind_id, item.kind.replace("_", " "), 2)
+        file_label = path.split("/")[-1]
         ensure_node(item_id, file_label, 3)
         for node in nodes:
-            if node["id"] == kind_id:
-                node["detail"] = f"Evidence kind: {item.kind.replace('_', ' ')}. This bucket groups repo signals before Skilgen hands them to architecture synthesis."
-                node["detail_meta"] = [f"Bucket: {item.kind.replace('_', ' ')}", "Used to separate code, config, docs, tests, and runtime clues."]
             if node["id"] == item_id:
-                node["detail"] = f"{item.path} — {' '.join(item.snippet[:2]).strip() or 'No snippet captured.'}"
-                node["detail_meta"] = [f"Path: {item.path}", f"Language: {item.language or 'unknown'}", f"Kind: {item.kind}"]
-        if item.language:
-            language_id = f"lang::{item.language}"
-            ensure_node(language_id, item.language, 1)
-            links.append({"source": language_id, "target": kind_id, "value": 1})
+                node["detail"] = f"{path} — {' '.join(entry['snippet']).strip() or 'No snippet captured.'}"
+                node["detail_meta"] = [f"Path: {path}", f"Language: {language or 'unknown'}", f"Kinds: {', '.join(kinds) or 'unknown'}"]
+        if language:
+            language_id = f"lang::{language}"
+            ensure_node(language_id, language, 1)
         else:
-            links.append({"source": "repo", "target": kind_id, "value": 1})
-        links.append({"source": kind_id, "target": item_id, "value": 1})
+            language_id = "repo"
+        for kind in kinds:
+            kind_id = f"kind::{kind}"
+            ensure_node(kind_id, kind.replace("_", " "), 2)
+            for node in nodes:
+                if node["id"] == kind_id:
+                    node["detail"] = f"Evidence kind: {kind.replace('_', ' ')}. This bucket groups repo signals before Skilgen hands them to architecture synthesis."
+                    node["detail_meta"] = [f"Bucket: {kind.replace('_', ' ')}", "Used to separate code, config, docs, tests, and runtime clues."]
+            links.append({"source": language_id, "target": kind_id, "value": 1})
+            links.append({"source": kind_id, "target": item_id, "value": 1})
     return {"nodes": nodes, "links": links}
 
 
@@ -603,13 +626,22 @@ def render_analytics_radial_data(project_root: Path, analytics: dict[str, object
         return []
     max_load = max(int(item.get("effective_loads", item.get("loads", 0))) for item in usage) or 1
     max_richness = max(int(item.get("richness", 0)) for item in usage) or 1
+    title_counts: dict[str, int] = {}
+    for item in usage:
+        raw_title = str(item.get("title", item.get("skill", "Unknown skill")))
+        title_counts[raw_title] = title_counts.get(raw_title, 0) + 1
     radial_rows: list[dict[str, object]] = []
     for item in usage:
         metrics = item.get("metrics", {}) if isinstance(item.get("metrics"), dict) else {}
         loads = int(item.get("effective_loads", item.get("loads", 0)))
         richness = int(item.get("richness", 0))
         depth = int(item.get("depth", 1))
-        title = _compact_label(str(item.get("title", item.get("skill", "Unknown skill"))), max_length=22)
+        raw_title = str(item.get("title", item.get("skill", "Unknown skill")))
+        title = raw_title
+        if title_counts.get(raw_title, 0) > 1:
+            family = str(item.get("family", "other")).replace("-", " ").replace("_", " ").title()
+            title = f"{family} {raw_title}"
+        title = _compact_label(title, max_length=22)
         summary = str(item.get("summary", ""))
         family = str(item.get("family", "other"))
         skill = str(item.get("skill", title))
@@ -711,7 +743,7 @@ def render_dashboard_html(
     if len(trend_points) <= 1:
         trend_summary = "This is the current baseline. Trend history will become more useful after a few distinct runs."
     elif trend_is_flat:
-        trend_summary = "Stable across recent snapshots. Skilgen will surface a stronger trend once the score meaningfully changes."
+        trend_summary = f"Score has stayed at {int(round(score_value))} across the last {len(trend_points)} snapshots. Skilgen will surface a stronger trend once the score meaningfully changes."
     else:
         delta_from_previous = float(score_trend["delta_from_previous"])
         trend_summary = (
@@ -818,6 +850,12 @@ def render_dashboard_html(
         domain_label = _display_domain_name(str(domain["name"]))
         related_domains = ", ".join(_display_domain_name(str(item)) for item in domain["related_domains"][:3]) or "No related domains surfaced"
         plan = plan_by_domain.get(str(domain["name"]))
+        domain_responsibilities = [
+            item for item in domain["responsibilities"][:4]
+            if str(item).strip().lower() != str(domain["summary"]).strip().lower()
+        ]
+        if not domain_responsibilities:
+            domain_responsibilities = domain["responsibilities"][:4]
         nuance_bits = [
             (
                 "1 grounded evidence path backs this boundary."
@@ -840,7 +878,7 @@ def render_dashboard_html(
             "<article class='domain-card'>"
             f"<div class='domain-head'><h3>{escape(domain_label)}</h3>{pill(confidence_label, 'good')}</div>"
             f"<p>{escape(domain['summary'])}</p>"
-            f"<div class='micro-label'>Responsibilities</div><ul>{list_items(domain['responsibilities'][:4], empty='No responsibilities captured')}</ul>"
+            f"<div class='micro-label'>Responsibilities</div><ul>{list_items(domain_responsibilities, empty='No responsibilities captured')}</ul>"
             f"<div class='micro-label'>Evidence</div><ul>{list_items(domain['evidence_paths'][:3], empty='No evidence paths captured')}</ul>"
             f"<div class='micro-label'>Nuance</div><p class='nuance-copy'>{escape(' '.join(nuance_bits))}</p>"
             "</article>"
@@ -883,7 +921,7 @@ a{color:inherit}.page{max-width:1500px;margin:0 auto;padding:24px 24px 64px}.her
 .layout{display:grid;gap:24px;margin-top:24px}.panel{padding:24px}.panel h2{margin:0;font-size:1.1rem}.section-copy{margin:8px 0 0;color:var(--muted);line-height:1.5}.score-board{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:24px}.subscore-stack{display:grid;gap:12px;margin-top:20px}.subscore-row{display:grid;grid-template-columns:120px 1fr 70px;gap:12px;align-items:center}.subscore-label{font-size:.92rem;color:#e4e8ef}.subscore-bar{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}.subscore-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--gold),#fff3be)}.subscore-value{text-align:right;color:var(--muted);font-size:.86rem}
 .quality-gates{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:12px}.quality-gates li{padding:14px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.03)}.quality-gates li p{margin:8px 0 0;color:var(--muted)}.quality-gates li span{float:right;color:var(--gold)}.trend-shell{display:grid;gap:16px}.sparkline{display:flex;align-items:flex-end;gap:10px;height:152px;padding:18px;border-radius:22px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.spark-point{flex:1;border-radius:18px 18px 8px 8px;background:linear-gradient(180deg,var(--gold),rgba(239,211,122,.18));position:relative;min-height:18px}.spark-point span{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);font-size:.75rem;color:var(--muted)}.spark-empty{color:var(--muted)}.trend-ticks{display:flex;gap:10px;justify-content:space-between;color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.12em}
 .legend{display:flex;flex-wrap:wrap;gap:10px}.graph-shell{display:grid;gap:18px}.graph-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-end;flex-wrap:wrap}.graph-tabs{display:flex;gap:10px;flex-wrap:wrap}.graph-tab{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600}.graph-tab.active{background:rgba(239,211,122,.14);border-color:rgba(239,211,122,.35);color:var(--gold-strong)}.graph-frame{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(320px,.55fr);gap:18px;align-items:stretch}
-.graph-panel{display:none;height:100%}.graph-panel.active{display:block;height:100%}.graph-stage{height:600px;border-radius:26px;border:1px solid var(--line-strong);background:linear-gradient(180deg,#0a0d13,#06080d);padding:16px;overflow:hidden}.graph-stage .mermaid{height:100%;overflow:auto}.graph-aside{padding:20px;border-radius:26px;border:1px solid rgba(255,255,255,.07);background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.02));display:grid;align-content:start;gap:16px;min-width:0}.graph-copy{display:none;gap:16px;min-width:0}.graph-copy.active{display:grid}.graph-aside h3{margin:0;font-size:1rem}.graph-aside p{margin:0;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}.graph-aside ul{margin:0;padding-left:18px;color:#dce1ea}.graph-detail{padding:16px;border-radius:18px;border:1px solid rgba(239,211,122,.14);background:rgba(255,255,255,.03);display:grid;gap:10px;min-width:0}.graph-detail h4{margin:0;font-size:1rem;color:var(--text);overflow-wrap:anywhere}.graph-detail p{margin:0;color:var(--muted);overflow-wrap:anywhere}.graph-detail-meta{display:grid;gap:8px;list-style:none;padding:0;margin:0}.graph-detail-meta li{padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);list-style:none;color:#dce1ea;overflow-wrap:anywhere}
+.graph-panel{display:none;height:100%}.graph-panel.active{display:block;height:100%}.graph-stage{height:600px;border-radius:26px;border:1px solid var(--line-strong);background:linear-gradient(180deg,#0a0d13,#06080d);padding:16px;overflow:hidden}.graph-aside{padding:20px;border-radius:26px;border:1px solid rgba(255,255,255,.07);background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.02));display:grid;align-content:start;gap:16px;min-width:0}.graph-copy{display:none;gap:16px;min-width:0}.graph-copy.active{display:grid}.graph-aside h3{margin:0;font-size:1rem}.graph-aside p{margin:0;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}.graph-aside ul{margin:0;padding-left:18px;color:#dce1ea}.graph-detail{padding:16px;border-radius:18px;border:1px solid rgba(239,211,122,.14);background:rgba(255,255,255,.03);display:grid;gap:10px;min-width:0}.graph-detail h4{margin:0;font-size:1rem;color:var(--text);overflow-wrap:anywhere}.graph-detail p{margin:0;color:var(--muted);overflow-wrap:anywhere}.graph-detail-meta{display:grid;gap:8px;list-style:none;padding:0;margin:0}.graph-detail-meta li{padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);list-style:none;color:#dce1ea;overflow-wrap:anywhere}
 .sunburst-canvas,.sankey-canvas,.network-canvas{width:100%;height:100%;min-height:540px;border-radius:20px;position:relative;overflow:hidden;background:radial-gradient(circle at top, rgba(239,211,122,.08), transparent 38%), rgba(255,255,255,.02)}.network-canvas canvas{width:100%!important;height:100%!important;display:block}.graph-stage svg{width:100%;height:100%;display:block}.graph-legend{list-style:none;padding:0;margin:0;display:grid;gap:10px}.graph-legend li{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);min-width:0}.graph-legend li strong,.graph-legend li span{overflow-wrap:anywhere;word-break:break-word}.graph-legend li span{color:var(--muted);font-size:.88rem}
 .dashboard-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}.list{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:10px}.list li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.list li div{display:grid;gap:4px}.list li span{color:var(--muted)}.change-type{text-transform:uppercase;font-size:.74rem;letter-spacing:.12em;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.08);color:var(--text)}.change-type.added{color:var(--good)}.change-type.modified{color:var(--warning)}.change-type.deleted{color:var(--danger)}.muted{color:var(--muted)!important}.section-stack{display:grid;gap:24px}
 .domain-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:18px}.domain-card{padding:20px;border-radius:22px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02))}.domain-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.domain-card h3{margin:0;font-size:1.02rem}.domain-card p{color:#d6dbe5}.micro-label{margin-top:14px;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}.domain-card ul{padding-left:18px;color:var(--muted)}table{width:100%;border-collapse:collapse;border-spacing:0;margin-top:18px}th,td{padding:14px 12px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;vertical-align:top}th{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.14em}
@@ -909,19 +947,38 @@ const tooltip=document.createElement('div');
 tooltip.className='tooltip';
 document.body.appendChild(tooltip);
 const showTooltip=(event,title,body='')=>{{
-  tooltip.innerHTML=`<strong>${{title}}</strong>${{body}}`;
+  const escapeHtml=(value)=>String(value)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/\"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+  tooltip.innerHTML=`<strong>${{escapeHtml(title)}}</strong>${{escapeHtml(body).replace(/\\n/g,'<br>')}}`;
   const viewportWidth=window.innerWidth||document.documentElement.clientWidth||1280;
   const viewportHeight=window.innerHeight||document.documentElement.clientHeight||720;
-  const clampedX=Math.min(Math.max(160,event.pageX),viewportWidth-160);
-  const clampedY=Math.min(Math.max(96,event.pageY-16),viewportHeight-24);
+  const tooltipWidth=Math.max(220, tooltip.offsetWidth || 280);
+  const tooltipHeight=Math.max(64, tooltip.offsetHeight || 96);
+  const preferredTop=event.pageY-16;
+  const clampedX=Math.min(Math.max(tooltipWidth/2+8,event.pageX),viewportWidth-(tooltipWidth/2)-8);
+  const placeBelow=(preferredTop-tooltipHeight) < 8;
+  const clampedY=placeBelow ? Math.min(viewportHeight-tooltipHeight-8, event.pageY+18) : Math.min(Math.max(tooltipHeight+8, preferredTop),viewportHeight-8);
   tooltip.style.left=`${{clampedX}}px`;
   tooltip.style.top=`${{clampedY}}px`;
+  tooltip.style.transform=placeBelow ? 'translate(-50%, 0)' : 'translate(-50%, -100%)';
   tooltip.style.opacity='1';
 }};
-const hideTooltip=()=>{{ tooltip.style.opacity='0'; }};
+const hideTooltip=()=>{{ tooltip.style.opacity='0'; tooltip.style.transform='translate(-50%, -100%)'; }};
 const activateSet=(buttons,panels,target,buttonKey,panelKey)=>{{
-  buttons.forEach((button)=>button.classList.toggle('active',button.dataset[buttonKey]===target));
-  panels.forEach((panel)=>panel.classList.toggle('active',panel.dataset[panelKey]===target));
+  buttons.forEach((button)=>{{
+    const active=button.dataset[buttonKey]===target;
+    button.classList.toggle('active',active);
+    if(button.getAttribute('role')==='tab') button.setAttribute('aria-selected', active ? 'true' : 'false');
+  }});
+  panels.forEach((panel)=>{{
+    const active=panel.dataset[panelKey]===target;
+    panel.classList.toggle('active',active);
+    if(panel.getAttribute('role')==='tabpanel') panel.setAttribute('aria-hidden', active ? 'false' : 'true');
+  }});
 }};
 const detailDefaults={{
   architecture:{{
@@ -1029,7 +1086,7 @@ const renderSunburst=(container)=>{{
   const color=d3.scaleOrdinal()
     .domain(root.descendants().map((d)=>d.data.name))
     .range(['#F4D76A','#46C9FF','#7AF0AE','#FF8D5C','#C685FF','#FF5CA8','#3FE0C6','#6F8CFF']);
-  const svg=d3.select(container).append('svg').attr('viewBox',`${{-width/2}} ${{-height/2}} ${{width}} ${{height}}`).style('font','12px Inter');
+  const svg=d3.select(container).append('svg').attr('viewBox',`${{-width/2}} ${{-height/2}} ${{width}} ${{height}}`).attr('role','img').attr('aria-label','Architecture sunburst showing top-level domains, child skills, and evidence-backed capability boundaries.').style('font','12px Inter');
   const ringScale=radius/(root.height+1);
   const arc=d3.arc()
     .startAngle((d)=>d.x0)
@@ -1111,7 +1168,7 @@ const renderSankey=(target, container)=>{{
   const height=container.clientHeight||560;
   const raw=window.__SKILGEN_SANKEY__[target];
   const graph={{nodes:raw.nodes.map((d)=>({{...d}})),links:raw.links.map((d)=>({{...d}}))}};
-  const svg=d3.select(container).append('svg').attr('viewBox',`0 0 ${{width}} ${{height}}`);
+  const svg=d3.select(container).append('svg').attr('viewBox',`0 0 ${{width}} ${{height}}`).attr('role','img').attr('aria-label', target==='skills' ? 'Skill flow sankey showing domains, parent skills, child skills, and ecosystem packs.' : 'Evidence sankey showing languages, evidence kinds, and grounded repository artifacts.');
   const sankey=d3.sankey().nodeId((d)=>d.id).nodeWidth(18).nodePadding(20).extent([[16,18],[width-16,height-18]]);
   const {{nodes,links}}=sankey(graph);
   const linkColor = target==='skills' ? 'rgba(103,213,255,0.34)' : 'rgba(239,211,122,0.42)';
@@ -1162,7 +1219,7 @@ const renderAnalyticsRadial=(container)=>{{
   const height=container.clientHeight||560;
   const innerRadius=88;
   const outerRadius=Math.min(width,height)/2-30;
-  const svg=d3.select(container).append('svg').attr('viewBox',`${{-width/2}} ${{-height/2}} ${{width}} ${{height}}`);
+  const svg=d3.select(container).append('svg').attr('viewBox',`${{-width/2}} ${{-height/2}} ${{width}} ${{height}}`).attr('role','img').attr('aria-label','Radial analytics chart showing per-skill usage, depth, and content richness.');
   if(!data.length){{
     svg.append('text').attr('fill','#98A1B2').attr('text-anchor','middle').text('No skill usage recorded yet');
     return;
@@ -1275,9 +1332,9 @@ window.addEventListener('resize',()=>{{
             "<link rel='preconnect' href='https://fonts.googleapis.com'>",
             "<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>",
             "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap' rel='stylesheet'>",
-            "<script src='https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js'></script>",
-            "<script src='https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js'></script>",
-            "<script src='https://unpkg.com/vis-network/standalone/umd/vis-network.min.js'></script>",
+            "<script src='https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js' integrity='sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i' crossorigin='anonymous'></script>",
+            "<script src='https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js' integrity='sha384-SM54CE5h+qdDI046d2Y5ym7wq1kq4uxcQ1cqGq5/+5jrE5tPLeDJSq711Q8sIska' crossorigin='anonymous'></script>",
+            "<script src='https://unpkg.com/vis-network/standalone/umd/vis-network.min.js' integrity='sha384-m/pqkSdIs50f1nWlv062s9HmCAygFne+xY7uot2M8ZVijdcC+c/n97dFCfAZnKwO' crossorigin='anonymous'></script>",
             f"<style>{dashboard_styles}</style>",
             "</head>",
             "<body>",
@@ -1340,7 +1397,7 @@ window.addEventListener('resize',()=>{{
             + pill("Modeled attention" if usage_mode != "live" else "Live traces", "warning" if usage_mode != "live" else "good")
             + pill(f"{int(analytics.get('planner_event_count', 0))} planner warmups ignored")
             + "</div>",
-            "<div class='mini-panel'><div class='micro-label'>Most Active Skills</div>"
+            f"<div class='mini-panel'><div class='micro-label'>{'Skill Attention Ranking' if usage_mode != 'live' else 'Most Active Skills'}</div>"
             + f"<ul>{analytics_markup}</ul></div>",
             f"<div class='mini-panel'><div class='micro-label'>{'Lower Attention' if usage_mode != 'live' else 'Least Used'}</div><ul>"
             + "\n".join(
@@ -1360,18 +1417,18 @@ window.addEventListener('resize',()=>{{
             "<div class='graph-head'>",
             "<div><h2>Graph Studio</h2><div class='section-copy'>Skilgen walks the repository file by file, extracts symbols, calls, configs, tests, docs, and capability clues, then turns those nuances into a living operating map.</div></div>",
             "<div class='graph-tabs'>",
-            "<button class='graph-tab active' data-target='architecture'>Architecture</button>",
-            "<button class='graph-tab' data-target='evidence'>Evidence</button>",
-            "<button class='graph-tab' data-target='dependencies'>Dependencies</button>",
-            "<button class='graph-tab' data-target='skills'>Skills</button>",
+            "<button class='graph-tab active' data-target='architecture' role='tab' aria-selected='true'>Architecture</button>",
+            "<button class='graph-tab' data-target='evidence' role='tab' aria-selected='false'>Evidence</button>",
+            "<button class='graph-tab' data-target='dependencies' role='tab' aria-selected='false'>Dependencies</button>",
+            "<button class='graph-tab' data-target='skills' role='tab' aria-selected='false'>Skills</button>",
             "</div>",
             "</div>",
             "<div class='graph-frame'>",
             "<div class='graph-stage'>",
-            "<div class='graph-panel active' data-panel='architecture'><div class='sunburst-canvas' data-sunburst='architecture'></div></div>",
-            "<div class='graph-panel' data-panel='evidence'><div class='sankey-canvas' data-sankey='evidence'></div></div>",
-            "<div class='graph-panel' data-panel='dependencies'><div class='network-canvas' data-network='dependencies'></div></div>",
-            "<div class='graph-panel' data-panel='skills'><div class='sankey-canvas' data-sankey='skills'></div></div>",
+            "<div class='graph-panel active' data-panel='architecture' role='tabpanel' aria-hidden='false'><div class='sunburst-canvas' data-sunburst='architecture'></div></div>",
+            "<div class='graph-panel' data-panel='evidence' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='evidence'></div></div>",
+            "<div class='graph-panel' data-panel='dependencies' role='tabpanel' aria-hidden='true'><div class='network-canvas' data-network='dependencies' role='img' aria-label='Interactive dependency network showing repo-local import relationships.'></div></div>",
+            "<div class='graph-panel' data-panel='skills' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='skills'></div></div>",
             "</div>",
             "<aside class='graph-aside'>",
             "<div class='graph-copy active' data-copy='architecture'><h3 data-copy-title='architecture'>Architecture Sunburst</h3><p data-copy-body='architecture'>Zoom through top-level domains, sub-skills, and evidence surfaces. Click deeper to focus a capability boundary and click the center to move back out.</p><ul><li>Outer rings represent planned or generated child skills.</li><li>Ring sizes scale with evidence and responsibilities.</li><li>Hover reveals domain summaries and skill context.</li></ul><div class='micro-label'>Visible Domain Legend</div><ul class='graph-legend'>"
@@ -1452,21 +1509,21 @@ window.addEventListener('resize',()=>{{
             "<div class='section-copy'>A live operations board for the worker, the last repo event, the start order, and the repo-local outputs currently ready to load.</div>",
             "<div class='ops-board'>",
             "<div class='ops-tabs'>",
-            "<button class='ops-tab active' data-target='worker'>Worker</button>",
-            "<button class='ops-tab' data-target='event'>Last Event</button>",
-            "<button class='ops-tab' data-target='order'>Start Order</button>",
-            "<button class='ops-tab' data-target='outputs'>Outputs</button>",
+            "<button class='ops-tab active' data-target='worker' role='tab' aria-selected='true'>Worker</button>",
+            "<button class='ops-tab' data-target='event' role='tab' aria-selected='false'>Last Event</button>",
+            "<button class='ops-tab' data-target='order' role='tab' aria-selected='false'>Start Order</button>",
+            "<button class='ops-tab' data-target='outputs' role='tab' aria-selected='false'>Outputs</button>",
             "</div>",
-            "<div class='ops-copy active' data-copy='worker'>"
+            "<div class='ops-copy active' data-copy='worker' role='tabpanel' aria-hidden='false'>"
             f"<div class='ops-grid'><div class='ops-tile'><strong>Worker state</strong><span>{escape('Running in background' if auto_update.get('running') else 'Idle until the next change')}</span></div><div class='ops-tile'><strong>Refresh policy</strong><span>{escape(str(auto_update.get('enabled') and 'Automatic refresh is enabled' or 'Manual refresh only'))}</span></div><div class='ops-tile'><strong>Current freshness</strong><span>{int(round(float(diff['freshness_score'])))}/{int(diff['freshness_max'])}</span></div><div class='ops-tile'><strong>Readiness signal</strong><span>{escape('Agents can load the current repo-local outputs now')}</span></div></div>"
             "</div>",
-            "<div class='ops-copy' data-copy='event'>"
+            "<div class='ops-copy' data-copy='event' role='tabpanel' aria-hidden='true'>"
             f"<div class='ops-grid'><div class='ops-tile'><strong>Last git-aware event</strong><span>{escape(str(auto_update.get('last_event') or diff['git'].get('event_type') or 'none').replace('_', ' '))}</span></div><div class='ops-tile'><strong>Reason</strong><span>{escape(str(diff['reason']).replace('_', ' '))}</span></div><div class='ops-tile'><strong>Changed files</strong><span>{changed_count}</span></div><div class='ops-tile'><strong>Stale skills</strong><span>{stale_count}</span></div></div>"
             "</div>",
-            "<div class='ops-copy' data-copy='order'>"
+            "<div class='ops-copy' data-copy='order' role='tabpanel' aria-hidden='true'>"
             f"<div class='ops-grid'><div class='ops-tile'><strong>Decision focus</strong><span>{escape(', '.join(_display_domain_name(item) for item in decision.get('prioritized_domains', [])[:4]) or 'No prioritized domains yet')}</span></div><div class='ops-tile'><strong>Memory load</strong><span>{escape(', '.join(decision.get('memory_to_load', [])[:3]) or 'No memory recommended')}</span></div><div class='ops-tile'><strong>Prioritized skills</strong><span>{escape(', '.join(_display_skill_name(item) for item in decision.get('prioritized_skill_paths', [])[:3]) or 'No prioritized skills yet')}</span></div><div class='ops-tile'><strong>Nuance</strong><span>{escape('Skilgen is sequencing agent context from evidence, score, diff, architecture, and live repo state instead of a static startup order.')}</span></div></div>"
             "</div>",
-            "<div class='ops-copy' data-copy='outputs'>"
+            "<div class='ops-copy' data-copy='outputs' role='tabpanel' aria-hidden='true'>"
             f"<div class='micro-label'>Generated Outputs</div><ul class='list'>{outputs_markup}</ul><div class='micro-label'>Prioritized Skills</div><ul class='list'>{list_items(decision.get('prioritized_skill_paths', [])[:6], empty='No prioritized skills yet')}</ul>"
             "</div>",
             "</div>",
@@ -1475,17 +1532,17 @@ window.addEventListener('resize',()=>{{
             "<h2>Capability Layer</h2>",
             "<div class='section-copy'>External skills, enterprise packs, and MCP connectors share the same operating surface.</div>",
             "<div class='surface-tabs'>",
-            "<button class='surface-tab active' data-target='external'>External Skills</button>",
-            "<button class='surface-tab' data-target='enterprise'>Enterprise Skills</button>",
-            "<button class='surface-tab' data-target='connectors'>MCP Connectors</button>",
+            "<button class='surface-tab active' data-target='external' role='tab' aria-selected='true'>External Skills</button>",
+            "<button class='surface-tab' data-target='enterprise' role='tab' aria-selected='false'>Enterprise Skills</button>",
+            "<button class='surface-tab' data-target='connectors' role='tab' aria-selected='false'>MCP Connectors</button>",
             "</div>",
-            "<div class='surface-copy active' data-copy='external'><div class='mini-panel'><div class='micro-label'>External skills present</div><ul>"
+            "<div class='surface-copy active' data-copy='external' role='tabpanel' aria-hidden='false'><div class='mini-panel'><div class='micro-label'>External skills present</div><ul>"
             + external_markup
             + "</ul><p class='nuance-copy'>These packs were installed because the repository signaled they were relevant, so the skill system includes ecosystem knowledge as well as repo-native guidance.</p></div></div>",
-            "<div class='surface-copy' data-copy='enterprise'><div class='mini-panel'><div class='micro-label'>Enterprise skills present</div><ul>"
+            "<div class='surface-copy' data-copy='enterprise' role='tabpanel' aria-hidden='true'><div class='mini-panel'><div class='micro-label'>Enterprise skills present</div><ul>"
             + enterprise_markup
             + "</ul><p class='nuance-copy'>Enterprise packs let the repo-local skill map inherit organization-specific standards, playbooks, and internal conventions.</p></div></div>",
-            "<div class='surface-copy' data-copy='connectors'><div class='mini-panel'><div class='micro-label'>Connected profiles</div><ul>"
+            "<div class='surface-copy' data-copy='connectors' role='tabpanel' aria-hidden='true'><div class='mini-panel'><div class='micro-label'>Connected profiles</div><ul>"
             + connector_markup
             + "</ul><div class='micro-label'>Recommended profiles</div><ul>"
             + recommended_connector_markup

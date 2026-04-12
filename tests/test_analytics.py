@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from skilgen.core.analytics import analytics_summary, log_skill_usage
+from skilgen.generators.package import render_analytics_radial_data
 
 
 class AnalyticsTests(unittest.TestCase):
@@ -76,6 +77,20 @@ class AnalyticsTests(unittest.TestCase):
             summary = analytics_summary(root, limit=10)
 
             self.assertNotEqual(summary["skill_usage"][0]["summary"], "---")
+
+    def test_radial_titles_are_disambiguated_when_skill_names_collide(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "skills" / "backend" / "routes").mkdir(parents=True)
+            (root / "skills" / "frontend" / "routes").mkdir(parents=True)
+            (root / "skills" / "backend" / "routes" / "SKILL.md").write_text("# Routes\n\nBackend route guidance.\n", encoding="utf-8")
+            (root / "skills" / "frontend" / "routes" / "SKILL.md").write_text("# Routes\n\nFrontend route guidance.\n", encoding="utf-8")
+
+            summary = analytics_summary(root, limit=10)
+            radial = render_analytics_radial_data(root, summary)
+            titles = [entry["title"] for entry in radial]
+
+            self.assertEqual(len(titles), len(set(titles)))
 
 
 if __name__ == "__main__":

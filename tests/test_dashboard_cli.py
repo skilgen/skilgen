@@ -69,6 +69,8 @@ class DashboardCliTests(unittest.TestCase):
                 self.assertIn("data-sankey='skills'", html)
                 self.assertIn("data-radial='analytics'", html)
                 self.assertIn("data-detail='analytics'", html)
+                self.assertIn("role='tab'", html)
+                self.assertIn("role='tabpanel'", html)
                 self.assertIn("ops-tab active", html)
                 self.assertIn("surface-tab active", html)
                 self.assertIn("graph-copy active", html)
@@ -106,6 +108,8 @@ class DashboardCliTests(unittest.TestCase):
                 self.assertIn("Recommended profiles", html)
                 self.assertIn("No git metadata; freshness is file-state based", html)
                 self.assertIn("viewportWidth", html)
+                self.assertIn("integrity='sha384-", html)
+                self.assertIn("aria-label='Interactive dependency network showing repo-local import relationships.'", html)
                 self.assertNotIn(">No diff since baseline<", html)
             finally:
                 stop_auto_update_worker(root)
@@ -198,7 +202,7 @@ class DashboardCliTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             html = payload["html"]
             self.assertNotIn(">delivery<", html)
-            self.assertIn("Stable across recent snapshots.", html)
+            self.assertIn("Score has stayed at", html)
             self.assertLessEqual(html.count("<div class='spark-point'"), 2)
             self.assertIn(">Stable<", html)
 
