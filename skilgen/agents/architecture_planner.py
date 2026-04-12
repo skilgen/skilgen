@@ -23,12 +23,16 @@ def _native_architecture(project_root: Path, domain_graph: DomainGraph, evidence
     domains: list[ArchitectureDomain] = []
     for node in top_level:
         child_names = node.child_domains[:4]
+        child_nodes = [item for item in domain_graph.nodes if item.parent_domain == node.name]
         responsibilities = [node.summary]
         if child_names:
             responsibilities.append(f"Coordinates subdomains: {', '.join(child_names)}.")
         if node.key_patterns:
             responsibilities.extend(node.key_patterns[:2])
-        evidence_paths = list(dict.fromkeys(node.key_files[:5]))
+        evidence_pool = list(node.key_files)
+        for child in child_nodes:
+            evidence_pool.extend(child.key_files[:2])
+        evidence_paths = list(dict.fromkeys(path for path in evidence_pool if path))[:6]
         domains.append(
             ArchitectureDomain(
                 name=node.name,
@@ -57,25 +61,39 @@ def _native_architecture(project_root: Path, domain_graph: DomainGraph, evidence
     ]
     materialization_plan: list[SkillMaterializationPlan] = []
     for node in top_level:
+        child_nodes = [item for item in domain_graph.nodes if item.parent_domain == node.name]
         child_skill_paths = [
             child.skill_path
-            for child in domain_graph.nodes
-            if child.parent_domain == node.name and child.skill_path
+            for child in child_nodes
+            if child.skill_path
         ]
+        evidence_paths = list(dict.fromkeys(node.key_files + [path for child in child_nodes for path in child.key_files]))[:6]
         cross_links = [
             nodes_by_name[related].skill_path
             for related in node.related_domains
             if related in nodes_by_name and nodes_by_name[related].skill_path
         ]
+        child_labels = ", ".join(child.name for child in child_nodes[:3]) or "no child domains"
+        related_labels = ", ".join(node.related_domains[:3]) or "adjacent domains"
         if len(child_skill_paths) >= 2:
             decision = "split"
-            rationale = "Multiple concrete child domains exist, so a parent skill plus child skills will be easier for agents to navigate."
+            rationale = (
+                f"Split because {len(child_skill_paths)} concrete child skill surfaces emerged from {len(evidence_paths)} grounded evidence paths. "
+                f"The parent skill can hold shared context while child skills isolate the distinct capability seams around {child_labels}."
+            )
         elif node.confidence < 0.65 and len(node.key_files) <= 1:
             decision = "merge"
-            rationale = "The domain has weak evidence and low confidence, so it should likely merge into a related higher-confidence domain."
+            rationale = (
+                f"Merge because confidence is only {node.confidence:.2f} and the domain has just {len(evidence_paths)} strong evidence paths. "
+                f"The nuance is currently weaker than adjacent boundaries around {related_labels}."
+            )
         else:
             decision = "keep"
-            rationale = "The domain has enough direct evidence to remain a first-class skill boundary."
+            rationale = (
+                f"Keep as a first-class boundary because confidence is {node.confidence:.2f}, "
+                f"{len(evidence_paths)} evidence paths cluster around one coherent responsibility set, "
+                f"and the boundary is clearer as a single skill than as shallower splits."
+            )
         materialization_plan.append(
             SkillMaterializationPlan(
                 domain=node.name,

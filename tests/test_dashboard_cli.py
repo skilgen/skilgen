@@ -6,6 +6,8 @@ import subprocess
 import sys
 import unittest
 
+from skilgen.autoupdate import stop_auto_update_worker
+
 
 class DashboardCliTests(unittest.TestCase):
     def test_dashboard_command_writes_branded_html(self) -> None:
@@ -18,85 +20,91 @@ class DashboardCliTests(unittest.TestCase):
                 "export default function Dashboard() { return null; }\n",
                 encoding="utf-8",
             )
-            subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "skilgen.cli.main",
-                    "deliver",
-                    "--project-root",
-                    str(root),
-                    "--requirements",
-                    str(requirements),
-                ],
-                text=True,
-                capture_output=True,
-                check=True,
-            )
+            try:
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "skilgen.cli.main",
+                        "deliver",
+                        "--project-root",
+                        str(root),
+                        "--requirements",
+                        str(requirements),
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
 
-            output_path = (root / "dashboard.html").resolve()
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "skilgen.cli.main",
-                    "dashboard",
-                    "--project-root",
-                    str(root),
-                    "--requirements",
-                    str(requirements),
-                    "--output",
-                    str(output_path),
-                ],
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["dashboard_file"], str(output_path))
-            html = output_path.read_text(encoding="utf-8")
-            self.assertIn("Skilgen Operating System", html)
-            self.assertIn("All your skill intelligence", html)
-            self.assertIn("Graph Studio", html)
-            self.assertIn("Architecture Sunburst", html)
-            self.assertIn("Evidence Flow", html)
-            self.assertIn("d3-sankey", html)
-            self.assertIn("skilgen-dashboard.html", html)
-            self.assertIn("trend-ticks", html)
-            self.assertIn("data-sankey='skills'", html)
-            self.assertIn("data-radial='analytics'", html)
-            self.assertIn("ops-tab active", html)
-            self.assertIn("surface-tab active", html)
-            self.assertIn("graph-copy active", html)
-            self.assertIn(".page{max-width:1500px", html)
-            self.assertLess(html.index("Usage Analytics"), html.index("Graph Studio"))
-            self.assertEqual(html.count("data-copy='evidence'"), 1)
-            self.assertIn("data-detail='architecture'", html)
-            self.assertIn("data-detail='evidence'", html)
-            self.assertIn("data-detail='dependencies'", html)
-            self.assertIn("data-detail='skills'", html)
-            self.assertIn("data-copy-title='architecture'", html)
-            self.assertIn("data-copy-body='architecture'", html)
-            self.assertIn("setDetail=(", html)
-            self.assertIn("Agent Intelligence Surface", html)
-            self.assertEqual(html.count("aria-label='Skilgen logo'"), 1)
-            self.assertIn("&copy; Skilgen", html)
-            self.assertIn("Skill Usage", html)
-            self.assertIn("usage + depth + content", html)
-            self.assertTrue(
-                any(
-                    marker in html
-                    for marker in (
-                        "No meaningful trend yet",
-                        "Improving compared with the previous snapshot.",
-                        "Falling compared with the previous snapshot.",
-                        "This is the current baseline.",
+                output_path = (root / "dashboard.html").resolve()
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "skilgen.cli.main",
+                        "dashboard",
+                        "--project-root",
+                        str(root),
+                        "--requirements",
+                        str(requirements),
+                        "--output",
+                        str(output_path),
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                payload = json.loads(result.stdout)
+                self.assertEqual(payload["dashboard_file"], str(output_path))
+                html = output_path.read_text(encoding="utf-8")
+                self.assertIn("Skilgen Operating System", html)
+                self.assertIn("All your skill intelligence", html)
+                self.assertIn("Graph Studio", html)
+                self.assertIn("Architecture Sunburst", html)
+                self.assertIn("Evidence Flow", html)
+                self.assertIn("d3-sankey", html)
+                self.assertIn("skilgen-dashboard.html", html)
+                self.assertIn("trend-ticks", html)
+                self.assertIn("data-sankey='skills'", html)
+                self.assertIn("data-radial='analytics'", html)
+                self.assertIn("ops-tab active", html)
+                self.assertIn("surface-tab active", html)
+                self.assertIn("graph-copy active", html)
+                self.assertIn(".page{max-width:1500px", html)
+                self.assertLess(html.index("Usage Analytics"), html.index("Graph Studio"))
+                self.assertEqual(html.count("data-copy='evidence'"), 1)
+                self.assertIn("data-detail='architecture'", html)
+                self.assertIn("data-detail='evidence'", html)
+                self.assertIn("data-detail='dependencies'", html)
+                self.assertIn("data-detail='skills'", html)
+                self.assertIn("data-copy-title='architecture'", html)
+                self.assertIn("data-copy-body='architecture'", html)
+                self.assertIn("setDetail=(", html)
+                self.assertIn("Agent Intelligence Surface", html)
+                self.assertEqual(html.count("aria-label='Skilgen logo'"), 1)
+                self.assertIn("&copy; Skilgen", html)
+                self.assertTrue(any(marker in html for marker in ("Modeled attention", "Live usage")))
+                self.assertIn("depth + content + live signals", html)
+                self.assertTrue(
+                    any(
+                        marker in html
+                        for marker in (
+                            "No meaningful trend yet",
+                            "Improving compared with the previous snapshot.",
+                            "Falling compared with the previous snapshot.",
+                            "This is the current baseline.",
+                        )
                     )
                 )
-            )
-            self.assertIn("Architecture ·", html)
-            self.assertIn("Dependency Network", html)
-            self.assertIn("Usage ·", html)
+                self.assertIn("Architecture ·", html)
+                self.assertIn("Dependency Network", html)
+                self.assertIn("Usage ·", html)
+                self.assertIn("Recommended profiles", html)
+                self.assertIn("No git metadata; freshness is file-state based", html)
+                self.assertNotIn(">No diff since baseline<", html)
+            finally:
+                stop_auto_update_worker(root)
 
     def test_dashboard_command_json_payload_contains_html_and_graphs(self) -> None:
         with TemporaryDirectory() as tmp:

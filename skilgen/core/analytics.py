@@ -30,11 +30,20 @@ def _skill_title_and_summary(path: Path) -> tuple[str, str]:
     lines = [line.strip() for line in text.splitlines()]
     title = path.parent.name.replace("-", " ").replace("_", " ").title()
     summary = "No summary captured yet."
+    in_frontmatter = False
+    generic_titles = {"overview", "summary", "skill"}
     for line in lines:
-        if line.startswith("#"):
-            title = line.lstrip("#").strip() or title
+        if line == "---":
+            in_frontmatter = not in_frontmatter
             continue
-        if line:
+        if in_frontmatter:
+            continue
+        if line.startswith("#"):
+            candidate = line.lstrip("#").strip()
+            if candidate and candidate.lower() not in generic_titles:
+                title = candidate
+            continue
+        if line and line not in {"```", "~~~"} and not line.startswith(("references:", "inputs:", "outputs:")):
             summary = line
             break
     return title, summary
@@ -53,6 +62,22 @@ def _skill_content_metrics(path: Path) -> dict[str, int]:
         "references": references,
         "words": words,
     }
+
+
+def _modeled_attention_score(*, depth: int, richness: int, metrics: dict[str, int], kind: str) -> int:
+    base = 35 if kind == "repo" else 16
+    score = (
+        base
+        + depth * 18
+        + richness * 4
+        + int(metrics.get("headings", 0)) * 6
+        + int(metrics.get("bullets", 0)) * 2
+        + max(0, int(metrics.get("references", 0)) // 2)
+        + max(0, int(metrics.get("words", 0)) // 18)
+    )
+    if kind == "external":
+        score = max(12, score // 3)
+    return score
 
 
 def log_skill_usage(
@@ -98,11 +123,8 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
     live_events = [event for event in events if str(event.get("context", "")) != "decision_planner"]
     planner_events = [event for event in events if str(event.get("context", "")) == "decision_planner"]
     counts = Counter(str(event.get("skill", "")) for event in live_events if event.get("skill"))
-    top_skills = [{"skill": skill, "loads": count} for skill, count in counts.most_common(limit)]
-    least_used = [{"skill": skill, "loads": count} for skill, count in sorted(counts.items(), key=lambda item: (item[1], item[0]))[:limit]]
     skill_usage: list[dict[str, object]] = []
     repo_skill_files = _iter_repo_skill_files(project_root)
-    max_load = max(counts.values(), default=1)
     for skill_path in repo_skill_files:
         rel = skill_path.relative_to(Path(project_root).resolve()).as_posix()
         title, summary = _skill_title_and_summary(skill_path)
@@ -112,6 +134,7 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
         family = parts[1] if len(parts) > 2 else "other"
         depth = max(1, len(parts) - 2)
         richness = metrics["headings"] + metrics["bullets"] + max(1, metrics["references"] // 4)
+        modeled_loads = _modeled_attention_score(depth=depth, richness=richness, metrics=metrics, kind="repo")
         skill_usage.append(
             {
                 "skill": rel,
@@ -119,10 +142,10 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
                 "summary": summary,
                 "family": family,
                 "loads": loads,
-                "load_share": round(loads / max_load, 3) if max_load else 0.0,
                 "depth": depth,
                 "richness": richness,
                 "metrics": metrics,
+                "modeled_loads": modeled_loads,
                 "kind": "repo",
             }
         )
@@ -130,6 +153,7 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
         slug = str(external.get("slug", "external-skill"))
         key = f"external::{slug}"
         loads = counts.get(key, counts.get(slug, 0))
+        metrics = {"headings": 0, "bullets": 0, "references": 0, "words": 0}
         skill_usage.append(
             {
                 "skill": key,
@@ -137,14 +161,33 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
                 "summary": str(external.get("summary") or "Installed external skill pack available to the repo."),
                 "family": "external",
                 "loads": loads,
-                "load_share": round(loads / max_load, 3) if max_load else 0.0,
                 "depth": 1,
                 "richness": 2,
-                "metrics": {"headings": 0, "bullets": 0, "references": 0, "words": 0},
+                "metrics": metrics,
+                "modeled_loads": _modeled_attention_score(depth=1, richness=2, metrics=metrics, kind="external"),
                 "kind": "external",
             }
         )
-    skill_usage.sort(key=lambda item: (-int(item["loads"]), -int(item["richness"]), str(item["skill"])))
+    live_loads = [int(item["loads"]) for item in skill_usage]
+    non_zero_live = [value for value in live_loads if value > 0]
+    live_mode = bool(non_zero_live) and (max(non_zero_live) - min(non_zero_live) > 1 or len(set(non_zero_live)) > 1)
+    usage_mode = "live" if live_mode else "modeled"
+    for item in skill_usage:
+        effective_loads = int(item["loads"]) if usage_mode == "live" else int(item["modeled_loads"])
+        item["effective_loads"] = effective_loads
+    max_effective = max((int(item["effective_loads"]) for item in skill_usage), default=1)
+    for item in skill_usage:
+        item["load_share"] = round(int(item["effective_loads"]) / max_effective, 3) if max_effective else 0.0
+        item["usage_label"] = "Live usage" if usage_mode == "live" else "Modeled attention"
+    skill_usage.sort(key=lambda item: (-int(item["effective_loads"]), -int(item["richness"]), str(item["skill"])))
+    top_skills = [
+        {"skill": str(item["skill"]), "loads": int(item["effective_loads"]), "mode": usage_mode, "title": str(item["title"])}
+        for item in skill_usage[:limit]
+    ]
+    least_used = [
+        {"skill": str(item["skill"]), "loads": int(item["effective_loads"]), "mode": usage_mode, "title": str(item["title"])}
+        for item in sorted(skill_usage, key=lambda item: (int(item["effective_loads"]), int(item["richness"]), str(item["skill"])))[:limit]
+    ]
     return {
         "events": events[-limit:],
         "live_events": live_events[-limit:],
@@ -153,5 +196,6 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
         "event_count": len(events),
         "live_event_count": len(live_events),
         "planner_event_count": len(planner_events),
+        "usage_mode": usage_mode,
         "skill_usage": skill_usage,
     }

@@ -16,6 +16,8 @@ _GO_IMPORT_BLOCK_RE = re.compile(r'import\s*\((.*?)\)', re.DOTALL)
 _GO_IMPORT_LINE_RE = re.compile(r'"([^"]+)"')
 _RUST_USE_RE = re.compile(r"""^\s*(?:use|mod)\s+([a-zA-Z0-9_:]+)""", re.MULTILINE)
 _COBOL_COPY_RE = re.compile(r"""^\s*COPY\s+([A-Z0-9_-]+)""", re.MULTILINE)
+_RESOLUTION_EXTENSIONS = ("", ".ts", ".tsx", ".js", ".jsx", ".py", ".java", ".go", ".rs", ".cbl", ".cob", ".cpy")
+_RESOLUTION_INDEXES = ("index.ts", "index.tsx", "index.js", "index.jsx", "page.tsx", "page.jsx", "page.ts", "page.js")
 
 
 def _relative_text_imports(path: Path) -> list[str]:
@@ -41,6 +43,22 @@ def _relative_text_imports(path: Path) -> list[str]:
     return sorted({entry.strip() for entry in imports if entry.strip()})
 
 
+def _resolve_repo_local_import(project_root: Path, source_path: Path, raw_import: str) -> str:
+    if raw_import.startswith(("./", "../")):
+        base = (source_path.parent / raw_import).resolve()
+        candidates = [base]
+        candidates.extend(base.with_suffix(ext) for ext in _RESOLUTION_EXTENSIONS[1:] if not base.suffix)
+        if base.is_dir():
+            candidates.extend(base / name for name in _RESOLUTION_INDEXES)
+        for candidate in candidates:
+            try:
+                if candidate.exists() and candidate.is_file():
+                    return candidate.relative_to(project_root).as_posix()
+            except ValueError:
+                continue
+    return raw_import
+
+
 def build_import_graph(project_root: Path) -> dict[str, list[str]]:
     root = project_root.resolve()
     graph: dict[str, list[str]] = {}
@@ -62,5 +80,6 @@ def build_import_graph(project_root: Path) -> dict[str, list[str]]:
                     imports.append(node.module)
         else:
             imports.extend(_relative_text_imports(path))
-        graph[rel] = sorted(set(imports))
+        normalized_imports = [_resolve_repo_local_import(root, path, entry) for entry in imports]
+        graph[rel] = sorted(set(normalized_imports))
     return graph

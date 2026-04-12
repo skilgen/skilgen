@@ -42,6 +42,29 @@ class AnalyticsTests(unittest.TestCase):
             self.assertEqual(summary["live_event_count"], 1)
             self.assertEqual(summary["skill_usage"][0]["loads"], 1)
 
+    def test_analytics_summary_models_attention_when_no_live_usage_exists(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "skills" / "backend").mkdir(parents=True)
+            (root / "skills" / "frontend" / "components").mkdir(parents=True)
+            (root / "skills" / "backend" / "SKILL.md").write_text(
+                "---\nkind: repo\n---\n# Backend\n\nCoordinates routes, services, persistence, and tests.\n\n## References\n- `src/api/routes.py`\n- `src/services/users.py`\n",
+                encoding="utf-8",
+            )
+            (root / "skills" / "frontend" / "components" / "SKILL.md").write_text(
+                "# Components\n\nReusable UI building blocks.\n\n- buttons\n- cards\n",
+                encoding="utf-8",
+            )
+
+            summary = analytics_summary(root, limit=10)
+
+            self.assertEqual(summary["usage_mode"], "modeled")
+            self.assertGreater(summary["skill_usage"][0]["effective_loads"], summary["skill_usage"][-1]["effective_loads"])
+            self.assertNotEqual(summary["top_skills"][0]["skill"], summary["least_used"][0]["skill"])
+            self.assertEqual(summary["skill_usage"][0]["usage_label"], "Modeled attention")
+            self.assertNotEqual(summary["skill_usage"][0]["summary"], "---")
+            self.assertNotEqual(summary["skill_usage"][0]["title"], "Overview")
+
 
 if __name__ == "__main__":
     unittest.main()

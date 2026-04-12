@@ -273,6 +273,7 @@ def _coverage_score(project_root: Path) -> tuple[float, dict[str, object]]:
             "source_file_count": 0,
             "mapped_file_count": 0,
             "coverage_ratio": 1.0,
+            "unmapped_files": [],
         }
 
     context = load_project_context(project_root, None)
@@ -284,6 +285,7 @@ def _coverage_score(project_root: Path) -> tuple[float, dict[str, object]]:
         for key_file in node.key_files
         if key_file in source_paths
     }
+    unmapped_files = sorted(source_paths - mapped_files)
     ratio = len(mapped_files) / max(1, len(source_paths))
     score = round(25 * ratio, 2)
     return score, {
@@ -292,6 +294,7 @@ def _coverage_score(project_root: Path) -> tuple[float, dict[str, object]]:
         "source_file_count": len(source_paths),
         "mapped_file_count": len(mapped_files),
         "coverage_ratio": round(ratio, 4),
+        "unmapped_files": unmapped_files[:12],
     }
 
 
