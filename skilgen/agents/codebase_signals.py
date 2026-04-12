@@ -42,6 +42,8 @@ LANGUAGE_BY_EXTENSION = {
 }
 IGNORED_PARTS = {
     ".git",
+    ".skilgen",
+    "external-skills",
     ".venv",
     "venv",
     "node_modules",

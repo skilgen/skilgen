@@ -118,6 +118,21 @@ class CodebaseSignalsTests(unittest.TestCase):
             self.assertIn("program BILLING", evidence_by_path["cobol/billing.cbl"]["snippet"])
             self.assertIn("copy CUSTOMER-REC", evidence_by_path["cobol/billing.cbl"]["snippet"])
 
+    def test_collect_code_evidence_ignores_external_skill_sources(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "app.py").write_text("def run():\n    return True\n", encoding="utf-8")
+            external = root / ".skilgen" / "external-skills" / "sources" / "anthropic-skills" / "skills" / "docx" / "scripts"
+            external.mkdir(parents=True)
+            (external / "pack.py").write_text("def pack():\n    return True\n", encoding="utf-8")
+
+            evidence = collect_code_evidence(root, limit=10)
+            paths = {item["path"] for item in evidence}
+
+            self.assertIn("src/app.py", paths)
+            self.assertNotIn(".skilgen/external-skills/sources/anthropic-skills/skills/docx/scripts/pack.py", paths)
+
 
 if __name__ == "__main__":
     unittest.main()

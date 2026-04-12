@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from datetime import UTC, datetime, timedelta
 import json
 import subprocess
 import sys
@@ -82,7 +83,20 @@ class DashboardCliTests(unittest.TestCase):
             self.assertIn("&copy; Skilgen", html)
             self.assertIn("Skill Usage", html)
             self.assertIn("usage + depth + content", html)
-            self.assertIn("Stable across the last", html)
+            self.assertTrue(
+                any(
+                    marker in html
+                    for marker in (
+                        "No meaningful trend yet",
+                        "Improving compared with the previous snapshot.",
+                        "Falling compared with the previous snapshot.",
+                        "This is the current baseline.",
+                    )
+                )
+            )
+            self.assertIn("Architecture ·", html)
+            self.assertIn("Dependency Network", html)
+            self.assertIn("Usage ·", html)
 
     def test_dashboard_command_json_payload_contains_html_and_graphs(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -111,6 +125,69 @@ class DashboardCliTests(unittest.TestCase):
             self.assertIn("html", payload)
             self.assertIn("graph_export", payload)
             self.assertIn("dependencies", payload["graph_export"])
+
+    def test_dashboard_trend_collapses_repeated_delivery_snapshots(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requirements = root / "requirements.md"
+            requirements.write_text("Track architecture, evidence, and analytics.\n", encoding="utf-8")
+            (root / "api").mkdir()
+            (root / "api" / "service.py").write_text("def handler():\n    return True\n", encoding="utf-8")
+            score_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "score",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            current_score = json.loads(score_result.stdout)
+            history_dir = root / ".skilgen" / "state"
+            history_dir.mkdir(parents=True, exist_ok=True)
+            base = datetime(2026, 4, 12, 15, 53, 0, tzinfo=UTC)
+            snapshots = []
+            for index in range(8):
+                snapshots.append(
+                    json.dumps(
+                        {
+                            "timestamp": (base + timedelta(seconds=index)).isoformat(),
+                            "source": "delivery",
+                            "score": current_score["score"],
+                            "raw_score": current_score["raw_score"],
+                            "rating": current_score["rating"],
+                            "domain_scores": {entry["domain"]: entry["score"] for entry in current_score.get("domains", [])},
+                        }
+                    )
+                )
+            (history_dir / "score-history.jsonl").write_text("\n".join(snapshots) + "\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "dashboard",
+                    "--project-root",
+                    str(root),
+                    "--requirements",
+                    str(requirements),
+                    "--json",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            payload = json.loads(result.stdout)
+            html = payload["html"]
+            self.assertNotIn(">delivery<", html)
+            self.assertIn("No meaningful trend yet", html)
+            self.assertLessEqual(html.count("<div class='spark-point'"), 2)
 
 
 if __name__ == "__main__":

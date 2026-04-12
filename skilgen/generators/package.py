@@ -34,12 +34,61 @@ def _trend_label(entry: dict[str, object], index: int, total: int) -> str:
         try:
             normalized = timestamp.replace("Z", "+00:00")
             moment = datetime.fromisoformat(normalized)
-            return moment.strftime("%b %d %H:%M")
+            return moment.strftime("%b %d %H:%M:%S")
         except ValueError:
             pass
     if index == total - 1:
         return "Current"
     return f"Run {index + 1}"
+
+
+def _trend_signature(entry: dict[str, object]) -> tuple[float, float, str, tuple[tuple[str, float], ...]]:
+    raw_domain_scores = entry.get("domain_scores", {})
+    if not isinstance(raw_domain_scores, dict):
+        raw_domain_scores = {}
+    domain_scores = tuple(
+        sorted((str(key), round(float(value), 2)) for key, value in raw_domain_scores.items())
+    )
+    return (
+        round(float(entry.get("score", 0.0)), 2),
+        round(float(entry.get("raw_score", entry.get("score", 0.0))), 2),
+        str(entry.get("rating", "")),
+        domain_scores,
+    )
+
+
+def _meaningful_trend_points(
+    score_history: list[dict[str, object]],
+    current_score: dict[str, object],
+    *,
+    limit: int = 8,
+) -> list[dict[str, object]]:
+    snapshots = [dict(item) for item in score_history]
+    current_snapshot = {
+        "timestamp": "",
+        "source": "current",
+        "score": current_score.get("score", 0.0),
+        "raw_score": current_score.get("raw_score", current_score.get("score", 0.0)),
+        "rating": current_score.get("rating", ""),
+        "domain_scores": {
+            str(item.get("domain", "")): float(item.get("score", 0.0))
+            for item in current_score.get("domains", [])
+        },
+    }
+    if not snapshots or _trend_signature(snapshots[-1]) != _trend_signature(current_snapshot):
+        snapshots.append(current_snapshot)
+
+    if not snapshots:
+        return [current_snapshot]
+
+    compressed: list[dict[str, object]] = []
+    for snapshot in snapshots:
+        if not compressed or _trend_signature(compressed[-1]) != _trend_signature(snapshot):
+            compressed.append(snapshot)
+
+    if len(compressed) == 1 and len(snapshots) > 1:
+        return [snapshots[0], snapshots[-1]][-limit:]
+    return compressed[-limit:]
 
 
 def _node_id(value: str) -> str:
@@ -596,8 +645,6 @@ def render_dashboard_html(
     config_edges = sum(len(targets) for targets in bundle.evidence_graph.config_runtime_graph.values())
     test_links = sum(len(targets) for targets in bundle.evidence_graph.test_mapping.values())
     total_symbol_files = len(bundle.evidence_graph.symbol_graph)
-    architecture_mermaid = render_architecture_graph_mermaid(context, project_root, bundle)
-    skill_mermaid = render_skill_graph_mermaid(context, project_root, bundle)
     dependency_network = render_dependency_network_data(context, project_root, bundle)
     architecture_sunburst = render_architecture_sunburst_data(context, project_root, bundle)
     evidence_sankey = render_evidence_sankey_data(context, project_root, bundle)
@@ -605,29 +652,30 @@ def render_dashboard_html(
     analytics_radial = render_analytics_radial_data(project_root, analytics)
     external_skill_labels = [item.get("slug", "unknown") for item in external_skills["installed"][:6]]
     brand_mark = _skilgen_logo_svg()
-    trend_points = score_history[-8:]
-    if not trend_points:
-        trend_points = [
-            {"score": score_value, "source": "baseline", "timestamp": ""},
-            {"score": score_value, "source": "current", "timestamp": ""},
-        ]
-    elif len(trend_points) == 1:
-        trend_points = [trend_points[0], {"score": score_value, "source": "current", "timestamp": ""}]
+    trend_points = _meaningful_trend_points(score_history, score, limit=8)
     trend_scores = [float(item.get("score", score_value)) for item in trend_points]
     trend_is_flat = len({round(item, 2) for item in trend_scores}) <= 1
+    trend_labels: list[str] = []
+    seen_trend_labels: dict[str, int] = {}
+    for index, item in enumerate(trend_points):
+        base_label = _trend_label(item, index, len(trend_points))
+        duplicate_count = seen_trend_labels.get(base_label, 0)
+        seen_trend_labels[base_label] = duplicate_count + 1
+        trend_labels.append(base_label if duplicate_count == 0 else f"{base_label} · {duplicate_count + 1}")
     trend_markup = "\n".join(
         f"<div class='spark-point' style='height:{max(18, min(100, float(item.get('score', 0))))}%'><span>{int(round(float(item.get('score', 0))))}</span></div>"
         for item in trend_points
     ) or "<div class='spark-empty'>Score history will appear after a few runs.</div>"
     trend_ticks_markup = "\n".join(
-        f"<span>{escape(_trend_label(item, index, len(trend_points)))}</span>"
-        for index, item in enumerate(trend_points)
+        f"<span>{escape(label)}</span>"
+        for label in trend_labels
     )
-    trend_summary = (
-        f"Stable across the last {len(trend_points)} runs."
-        if trend_is_flat
-        else f"{'Improving' if float(score_trend['delta_from_previous']) >= 0 else 'Falling'} compared with the previous snapshot."
-    )
+    if len(trend_points) <= 1:
+        trend_summary = "This is the current baseline. Trend history will become more useful after a few distinct runs."
+    elif trend_is_flat:
+        trend_summary = "No meaningful trend yet — the recorded score is still effectively flat across recent runs."
+    else:
+        trend_summary = f"{'Improving' if float(score_trend['delta_from_previous']) >= 0 else 'Falling'} compared with the previous snapshot."
 
     def pill(label: str, tone: str = "default") -> str:
         return f"<span class='pill {tone}'>{escape(label)}</span>"
@@ -715,13 +763,19 @@ def render_dashboard_html(
         confidence_label = f"{float(domain['confidence']):.2f}"
         domain_label = _display_domain_name(str(domain["name"]))
         related_domains = ", ".join(_display_domain_name(str(item)) for item in domain["related_domains"][:3]) or "No related domains surfaced"
+        nuance_bits = [
+            f"{len(domain['responsibilities'])} responsibilities were strong enough to hold this boundary together.",
+            f"{len(domain['evidence_paths'])} grounded evidence paths support it.",
+        ]
+        if domain["related_domains"]:
+            nuance_bits.append(f"Cross-domain pressure is strongest with {related_domains}.")
         domain_cards_parts.append(
             "<article class='domain-card'>"
             f"<div class='domain-head'><h3>{escape(domain_label)}</h3>{pill(confidence_label, 'good')}</div>"
             f"<p>{escape(domain['summary'])}</p>"
             f"<div class='micro-label'>Responsibilities</div><ul>{list_items(domain['responsibilities'][:4], empty='No responsibilities captured')}</ul>"
             f"<div class='micro-label'>Evidence</div><ul>{list_items(domain['evidence_paths'][:3], empty='No evidence paths captured')}</ul>"
-            f"<div class='micro-label'>Nuance</div><p class='nuance-copy'>{escape(related_domains)}</p>"
+            f"<div class='micro-label'>Nuance</div><p class='nuance-copy'>{escape(' '.join(nuance_bits))}</p>"
             "</article>"
         )
     domain_cards = "\n".join(domain_cards_parts)
@@ -738,13 +792,12 @@ def render_dashboard_html(
             f"<td>{escape(item['parent_skill_path'] or '-')}</td>"
             f"<td>{escape(', '.join(item['child_skill_paths'][:4]) or '-')}</td>"
             f"<td>{escape(item['rationale'])}"
-            f"<div class='rationale-note'>Grounded in parser evidence, symbol surfaces, import relationships, and cross-domain context for {escape(_display_domain_name(str(item['domain'])))}.</div></td>"
+            f"<div class='rationale-note'>Grounded in {len(item['child_skill_paths']) or 1} concrete skill surfaces, parent path {escape(item['parent_skill_path'] or '-')}, and domain evidence for {escape(_display_domain_name(str(item['domain'])))} rather than a template split.</div></td>"
             "</tr>"
         )
         for item in architecture["materialization_plan"][:8]
     ) or "<tr><td colspan='5' class='muted'>No materialization plan entries yet.</td></tr>"
 
-    graph_payload_json = json.dumps({"architecture": architecture_mermaid})
     network_payload_json = json.dumps({"dependencies": dependency_network})
     sunburst_payload_json = json.dumps(architecture_sunburst)
     sankey_payload_json = json.dumps({"evidence": evidence_sankey, "skills": skill_sankey})
@@ -774,7 +827,6 @@ a{color:inherit}.page{max-width:1500px;margin:0 auto;padding:24px 24px 64px}.her
 """.strip()
 
     dashboard_script = f"""
-window.__SKILGEN_GRAPHS__ = {graph_payload_json};
 window.__SKILGEN_NETWORKS__ = {network_payload_json};
 window.__SKILGEN_SUNBURST__ = {sunburst_payload_json};
 window.__SKILGEN_SANKEY__ = {sankey_payload_json};
@@ -802,7 +854,7 @@ const activateSet=(buttons,panels,target,buttonKey,panelKey)=>{{
 }};
 const detailDefaults={{
   architecture:{{
-    title:'Architecture summary',
+    title:'Architecture Sunburst',
     body:'Skilgen starts from parser-backed evidence, then lets the architecture view reveal how responsibilities split across the repo. Click an arc to inspect that specific capability boundary.',
     meta:[
       'Color separates architecture families so the high-level shape is easy to scan.',
@@ -810,7 +862,7 @@ const detailDefaults={{
     ],
   }},
   evidence:{{
-    title:'Evidence summary',
+    title:'Evidence Flow',
     body:'Skilgen walks file by file and groups the repo into languages, evidence kinds, and concrete artifacts. Click any node to inspect the exact nuance that was extracted.',
     meta:[
       'Evidence is grounded in real files, snippets, configs, docs, and tests.',
@@ -818,12 +870,12 @@ const detailDefaults={{
     ],
   }},
   dependencies:{{
-    title:'Dependency summary',
+    title:'Dependency Network',
     body:'Skilgen turns import relationships into a navigable map so you can see what will feel expensive, central, or risky before an agent starts editing.',
     meta:['Click a node to inspect its exact file path and dependency role.'],
   }},
   skills:{{
-    title:'Skill summary',
+    title:'Skill Flow',
     body:'Skilgen does not stop at high-level domains. It goes file by file, then decides where nuance deserves its own child skill, where it should stay merged, and where external packs strengthen the repo-native tree.',
     meta:[
       'Click a skill node to inspect why that skill exists.',
@@ -831,7 +883,7 @@ const detailDefaults={{
     ],
   }},
   analytics:{{
-    title:'Skill usage intelligence',
+    title:'Usage Analytics',
     body:'Skilgen shows every tracked skill as its own radial bar, layering real usage, structural depth, and content richness together so the most meaningful skills stand out immediately.',
     meta:[
       'Gold measures usage intensity.',
@@ -883,9 +935,10 @@ const renderNetwork=(target, canvas)=>{{
     if(!params.nodes.length) return;
     const node=graph.nodes.find((entry)=>entry.id===params.nodes[0]);
     if(!node) return;
+    const prefix = target === 'dependencies' ? 'Dependency' : target === 'evidence' ? 'Evidence' : target === 'skills' ? 'Skill' : 'Graph';
     setDetail(
       target,
-      node.detail_title || node.label,
+      `${{prefix}} · ${{node.detail_title || node.label}}`,
       node.detail_body || node.title || node.label,
       node.detail_meta || []
     );
@@ -903,7 +956,7 @@ const renderSunburst=(container)=>{{
   root.each((d)=>d.current=d);
   const color=d3.scaleOrdinal()
     .domain(root.descendants().map((d)=>d.data.name))
-    .range(['#EFD37A','#67D5FF','#8FD9A8','#FF8F70','#C99BFF','#FF6B9A','#6EE7D2','#7C8EFF']);
+    .range(['#F4D76A','#46C9FF','#7AF0AE','#FF8D5C','#C685FF','#FF5CA8','#3FE0C6','#6F8CFF']);
   const svg=d3.select(container).append('svg').attr('viewBox',`${{-width/2}} ${{-height/2}} ${{width}} ${{height}}`).style('font','12px Inter');
   const ringScale=radius/(root.height+1);
   const arc=d3.arc()
@@ -923,12 +976,17 @@ const renderSunburst=(container)=>{{
   const center=svg.append('g').attr('pointer-events','none');
   const label=center.append('text').attr('text-anchor','middle').attr('fill','#F6F7FB').style('font-size','18px').style('font-weight','700').text(root.data.name);
   center.append('text').attr('text-anchor','middle').attr('fill','#98A1B2').attr('dy','1.8em').text('click to zoom');
-  const applyDetail=(node)=>setDetail('architecture', node.data.name, node.data.summary || node.data.name, node.data.detail_meta || []);
+  const applyDetail=(node)=>{{
+    const title=node.depth ? `Architecture · ${{node.data.name}}` : 'Architecture Sunburst';
+    setDetail('architecture', title, node.data.summary || node.data.name, node.data.detail_meta || []);
+  }};
   const path=svg.append('g').selectAll('path')
     .data(root.descendants().slice(1))
     .join('path')
     .attr('fill',(d)=>{{ let current=d; while(current.depth>1) current=current.parent; return color(current.data.name); }})
-    .attr('fill-opacity',(d)=>d.children?0.96:0.86)
+    .attr('fill-opacity',(d)=>d.children?1:0.92)
+    .attr('stroke','#050608')
+    .attr('stroke-width',1.5)
     .attr('d',(d)=>arc(d.current))
     .style('cursor','pointer')
     .on('click',(_,p)=>clicked(p))
@@ -1007,7 +1065,10 @@ const renderSankey=(target, container)=>{{
     .on('mousemove',(event,d)=>showTooltip(event,d.name,`Layer ${{d.layer}}`))
     .on('mouseleave',hideTooltip)
     .on('click',(_,d)=>{{
-      if(detailDefaults[target]) setDetail(target, d.name, d.detail || d.name, d.detail_meta || []);
+      if(detailDefaults[target]) {{
+        const prefix = target === 'skills' ? 'Skill' : 'Evidence';
+        setDetail(target, `${{prefix}} · ${{d.name}}`, d.detail || d.name, d.detail_meta || []);
+      }}
     }});
   node.append('text')
     .attr('x',(d)=>d.x0<width/2?d.x1+8:d.x0-8)
@@ -1060,7 +1121,7 @@ const renderAnalyticsRadial=(container)=>{{
     .style('cursor','pointer')
     .on('mousemove',(event,d)=>showTooltip(event,d.data.title,`${{d.key.replace('_score','').replace('_',' ')}} · ${{Math.round(d.data[d.key])}}`))
     .on('mouseleave',hideTooltip)
-    .on('click',(_,d)=>setDetail('analytics', d.data.title, d.data.summary, [
+    .on('click',(_,d)=>setDetail('analytics', `Usage · ${{d.data.title}}`, d.data.summary, [
       `Loads: ${{d.data.loads}}`,
       `Depth score: ${{Math.round(d.data.depth_score)}}`,
       `Richness score: ${{Math.round(d.data.richness_score)}}`,
@@ -1091,7 +1152,7 @@ const renderAnalyticsRadial=(container)=>{{
   svg.append('text').attr('text-anchor','middle').attr('fill','#F6F7FB').style('font','700 16px Inter').text('Skill Usage');
   svg.append('text').attr('text-anchor','middle').attr('dy','1.6em').attr('fill','#98A1B2').style('font','11px Inter').text('usage + depth + content');
   if(data[0]){{
-    setDetail('analytics', data[0].title, data[0].summary, [
+    setDetail('analytics', `Usage · ${{data[0].title}}`, data[0].summary, [
       `Loads: ${{data[0].loads}}`,
       `Depth score: ${{Math.round(data[0].depth_score)}}`,
       `Richness score: ${{Math.round(data[0].richness_score)}}`,
@@ -1130,7 +1191,9 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
             "<meta charset='utf-8'>",
             "<meta name='viewport' content='width=device-width, initial-scale=1'>",
             f"<title>Skilgen Dashboard · {escape(repo_name)}</title>",
-            "<script type='module'>import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; window.__mermaid = mermaid; mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });</script>",
+            "<link rel='preconnect' href='https://fonts.googleapis.com'>",
+            "<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>",
+            "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap' rel='stylesheet'>",
             "<script src='https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js'></script>",
             "<script src='https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js'></script>",
             "<script src='https://unpkg.com/vis-network/standalone/umd/vis-network.min.js'></script>",
@@ -1154,7 +1217,6 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
             f"<p class='hero-context'><strong>{escape(repo_name)}</strong> is translated into one operating surface for coding agents: architecture, evidence, dependencies, skill flows, score, freshness, analytics, auto-update, and capability context together.</p>",
             "</div>",
             "<div class='hero-actions'>",
-            pill(f"Skilgen Score {int(round(score_value))}/100", "good" if score_value >= 75 else "warning"),
             pill(f"{stale_count} stale skills" if stale_count else "All skills current", "warning" if stale_count else "good"),
             pill(f"{changed_count} changed files" if changed_count else "No diff since baseline"),
             pill(f"Auto-update {'on' if auto_update.get('enabled') else 'off'}", "good" if auto_update.get("enabled") else "warning"),
@@ -1190,10 +1252,11 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
             "<div class='analytics-side'>",
             "<div class='legend'>"
             + pill(
-                f"{int(analytics.get('event_count', 0))} recorded events",
-                "good" if int(analytics.get("event_count", 0)) else "default",
+                f"{int(analytics.get('live_event_count', 0))} live usage events",
+                "good" if int(analytics.get("live_event_count", 0)) else "default",
             )
             + pill(f"{len(analytics.get('skill_usage', []))} mapped skills")
+            + pill(f"{int(analytics.get('planner_event_count', 0))} planner warmups ignored")
             + "</div>",
             "<div class='mini-panel'><div class='micro-label'>Most Active Skills</div>"
             + f"<ul>{analytics_markup}</ul></div>",
@@ -1204,10 +1267,10 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
             )
             + ("</ul></div>" if analytics.get("least_used") else "<li class='muted'>No underused skills yet.</li></ul></div>"),
             "<div class='mini-panel'><div class='micro-label'>Selected Skill</div>"
-            f"<p class='nuance-copy'><strong>{escape(str(hot_skill.get('title', 'No skill usage yet')))}</strong><br>{escape(str(hot_skill.get('summary', 'Skilgen will surface the currently hottest skill here as soon as load events exist.')))}</p>"
+            f"<p class='nuance-copy'><strong>{escape(str(hot_skill.get('title', 'No real skill usage yet')))}</strong><br>{escape(str(hot_skill.get('summary', 'Skilgen will surface the hottest genuinely-used skill here once agent usage events exist.')))}</p>"
             f"<p class='nuance-copy'>Usage: {int(hot_skill.get('loads', 0))} loads · Depth: {int(hot_skill.get('depth', 0))} · Richness: {int(hot_skill.get('richness', 0))}</p></div>",
             "<div class='mini-panel'><div class='micro-label'>Deep nuance</div>"
-            f"<p class='nuance-copy'>Skilgen is not just summarizing the repo. It is grounding skill usage against {total_symbol_files} parsed files, {dependency_edges} dependency edges, {call_edges} call edges, {test_links} test mappings, and the content structure inside each SKILL.md file.</p></div>",
+            f"<p class='nuance-copy'>Skilgen is not just summarizing the repo. It is grounding skill usage against {total_symbol_files} parsed files, {dependency_edges} dependency edges, {call_edges} call edges, {test_links} test mappings, and the content structure inside each SKILL.md file. Planner warmup loads are excluded here so the analytics surface reflects real agent behavior rather than delivery-time bootstrap noise.</p></div>",
             "</div>",
             "</div>",
             "</section>",
@@ -1231,15 +1294,15 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
             "<aside class='graph-aside'>",
             "<div class='graph-copy active' data-copy='architecture'><h3 data-copy-title='architecture'>Architecture Sunburst</h3><p data-copy-body='architecture'>Zoom through top-level domains, sub-skills, and evidence surfaces. Click deeper to focus a capability boundary and click the center to move back out.</p><ul><li>Outer rings represent planned or generated child skills.</li><li>Ring sizes scale with evidence and responsibilities.</li><li>Hover reveals domain summaries and skill context.</li></ul><div class='micro-label'>Visible Domain Legend</div><ul class='graph-legend'>"
             + architecture_legend
-            + "</ul><div class='graph-detail' data-detail='architecture'><h4>Architecture summary</h4><p>Skilgen starts from parser-backed evidence, then lets the architecture view reveal how responsibilities split across the repo. Click an arc to inspect that specific capability boundary.</p><ul class='graph-detail-meta'><li>Color separates architecture families so the high-level shape is easy to scan.</li><li>Clicking a domain replaces this summary with node-specific detail.</li></ul></div></div>",
-            "<div class='graph-copy' data-copy='evidence'><h3 data-copy-title='evidence'>Evidence Flow</h3><p data-copy-body='evidence'>Follow how languages and evidence kinds feed concrete files. This is the visible proof behind the architecture Skilgen is synthesizing.</p><ul><li>Left: dominant languages or repo root.</li><li>Middle: evidence kinds.</li><li>Right: files or source artifacts.</li></ul><div class='graph-detail' data-detail='evidence'><h4>Evidence summary</h4><p>Skilgen walks file by file and groups the repo into languages, evidence kinds, and concrete artifacts. Click any node to inspect the exact nuance that was extracted.</p><ul class='graph-detail-meta'><li>Evidence is grounded in real files, snippets, configs, docs, and tests.</li><li>This is the proof layer beneath every generated skill.</li></ul></div></div>",
-            "<div class='graph-copy' data-copy='dependencies'><h3 data-copy-title='dependencies'>Dependency Network</h3><p data-copy-body='dependencies'>Pan, zoom, and inspect the live import network. This makes coupling and high-fanout modules obvious before the agent ever starts coding.</p><ul><li>Use the built-in controls to zoom around.</li><li>Hover nodes to inspect exact paths.</li><li>Dense clusters often signal hot spots.</li></ul><div class='graph-detail' data-detail='dependencies'><h4>Dependency summary</h4><p>Skilgen turns import relationships into a navigable map so you can see what will feel expensive, central, or risky before an agent starts editing.</p><ul class='graph-detail-meta'><li>Click a node to inspect its exact file path and dependency role.</li></ul></div></div>",
+            + "</ul><div class='graph-detail' data-detail='architecture'><h4>Architecture Sunburst</h4><p>Skilgen starts from parser-backed evidence, then lets the architecture view reveal how responsibilities split across the repo. Click an arc to inspect that specific capability boundary.</p><ul class='graph-detail-meta'><li>Color separates architecture families so the high-level shape is easy to scan.</li><li>Clicking a domain replaces this summary with node-specific detail.</li></ul></div></div>",
+            "<div class='graph-copy' data-copy='evidence'><h3 data-copy-title='evidence'>Evidence Flow</h3><p data-copy-body='evidence'>Follow how languages and evidence kinds feed concrete files. This is the visible proof behind the architecture Skilgen is synthesizing.</p><ul><li>Left: dominant languages or repo root.</li><li>Middle: evidence kinds.</li><li>Right: files or source artifacts.</li></ul><div class='graph-detail' data-detail='evidence'><h4>Evidence Flow</h4><p>Skilgen walks file by file and groups the repo into languages, evidence kinds, and concrete artifacts. Click any node to inspect the exact nuance that was extracted.</p><ul class='graph-detail-meta'><li>Evidence is grounded in real files, snippets, configs, docs, and tests.</li><li>This is the proof layer beneath every generated skill.</li></ul></div></div>",
+            "<div class='graph-copy' data-copy='dependencies'><h3 data-copy-title='dependencies'>Dependency Network</h3><p data-copy-body='dependencies'>Pan, zoom, and inspect the live import network. This makes coupling and high-fanout modules obvious before the agent ever starts coding.</p><ul><li>Use the built-in controls to zoom around.</li><li>Hover nodes to inspect exact paths.</li><li>Dense clusters often signal hot spots.</li></ul><div class='graph-detail' data-detail='dependencies'><h4>Dependency Network</h4><p>Skilgen turns import relationships into a navigable map so you can see what will feel expensive, central, or risky before an agent starts editing.</p><ul class='graph-detail-meta'><li>Click a node to inspect its exact file path and dependency role.</li></ul></div></div>",
             "<div class='graph-copy' data-copy='skills'><h3 data-copy-title='skills'>Skill Flow</h3><p data-copy-body='skills'>See how domains become parent skills, generated child skills, and external packs that Skilgen has already pulled in because the repo signaled they matter.</p><ul><li>Left: domain families.</li><li>Middle: parent skills.</li><li>Right: generated child skills and external skill packs.</li></ul><div class='micro-label'>External skills in play</div><ul class='graph-legend'>"
             + (
                 "".join(f"<li><strong>{escape(item)}</strong><span>installed from repo signals</span></li>" for item in external_skill_labels)
                 or "<li class='muted'>No external skills installed yet.</li>"
             )
-            + "</ul><p class='nuance-copy'>Skilgen folds external skill packs into the same surface so agents can see generated skill boundaries and imported ecosystem capability together.</p><div class='graph-detail' data-detail='skills'><h4>Skill summary</h4><p>Skilgen does not stop at high-level domains. It goes file by file, then decides where nuance deserves its own child skill, where it should stay merged, and where external packs strengthen the repo-native tree.</p><ul class='graph-detail-meta'><li>Click a skill node to inspect why that skill exists.</li><li>External packs show which ecosystem skills are already active in the map.</li></ul></div></div>",
+            + "</ul><p class='nuance-copy'>Skilgen folds external skill packs into the same surface so agents can see generated skill boundaries and imported ecosystem capability together.</p><div class='graph-detail' data-detail='skills'><h4>Skill Flow</h4><p>Skilgen does not stop at high-level domains. It goes file by file, then decides where nuance deserves its own child skill, where it should stay merged, and where external packs strengthen the repo-native tree.</p><ul class='graph-detail-meta'><li>Click a skill node to inspect why that skill exists.</li><li>External packs show which ecosystem skills are already active in the map.</li></ul></div></div>",
             "<div class='legend'>",
             pill(f"{len(architecture['domains'])} active domains", "good"),
             pill(f"{evidence_count} evidence items"),
@@ -1252,7 +1315,13 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
             "<h2>Skilgen Score</h2>",
             "<div class='section-copy'>Groundedness, coverage, freshness, and structure are grouped here as one quality bar instead of separate floating metrics.</div>",
             "<div class='score-board'>",
-            f"<div><div class='subscore-stack'>{subscores_markup}</div><ul class='quality-gates'>{quality_gates_markup}</ul></div>",
+            f"<div><div class='subscore-stack'>{subscores_markup}</div><ul class='quality-gates'>{quality_gates_markup}</ul>"
+            + (
+                "<p class='nuance-copy'><strong>Coverage action:</strong> No mapped tests were found yet, so coverage is being dragged down. Add test files or map existing tests into the repo surface, then rerun `skilgen deliver` to raise grounded coverage.</p>"
+                if test_links == 0
+                else ""
+            )
+            + "</div>",
             "<div class='trend-shell'>",
             "<div class='micro-label'>Score Trend</div>",
             f"<div class='sparkline'>{trend_markup}</div>",
@@ -1275,7 +1344,11 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
             "</div>",
             "<div class='legend'>",
             pill(f"Current domains: {', '.join(diff['current_domains'][:4]) or 'none'}"),
-            pill(f"Git event {str(diff['git']['event_type']).replace('_', ' ')}"),
+            pill(
+                "No git metadata; freshness is file-state based"
+                if str(diff['git']['event_type']) == 'not_git_repo'
+                else f"Git event {str(diff['git']['event_type']).replace('_', ' ')}"
+            ),
             pill(f"Freshness {int(round(float(diff['freshness_score'])))} / {int(diff['freshness_max'])}", "good" if float(diff["freshness_score"]) >= 20 else "warning"),
             "</div>",
             "</section>",
@@ -1325,9 +1398,9 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
             "<div class='surface-copy' data-copy='enterprise'><div class='mini-panel'><div class='micro-label'>Enterprise skills present</div><ul>"
             + enterprise_markup
             + "</ul><p class='nuance-copy'>Enterprise packs let the repo-local skill map inherit organization-specific standards, playbooks, and internal conventions.</p></div></div>",
-            "<div class='surface-copy' data-copy='connectors'><div class='mini-panel'><div class='micro-label'>Capability connectors</div><ul>"
+            "<div class='surface-copy' data-copy='connectors'><div class='mini-panel'><div class='micro-label'>Capability connector profiles</div><ul>"
             + connector_markup
-            + "</ul><p class='nuance-copy'>Connectors make the skill map operational by binding domains to approved enterprise capabilities instead of leaving them as static prose.</p></div></div>",
+            + "</ul><p class='nuance-copy'>These are approved connector profiles available to bind into an agent runtime. They are not presented as live authenticated sessions unless the runtime has actually connected them.</p></div></div>",
             "</section>",
             "<p class='footer-note'>Generated by Skilgen from live repository evidence, architecture synthesis, score history, diff state, analytics, and enterprise capability context.</p>",
             "</section>",

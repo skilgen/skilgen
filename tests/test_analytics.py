@@ -26,6 +26,22 @@ class AnalyticsTests(unittest.TestCase):
             self.assertGreater(summary["skill_usage"][0]["richness"], 0)
             self.assertIn("summary", summary["skill_usage"][0])
 
+    def test_analytics_summary_excludes_decision_planner_from_live_usage(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "skills" / "backend"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("# Backend\n\nCore backend skill.\n", encoding="utf-8")
+
+            log_skill_usage(root, ["skills/backend/SKILL.md"], context="decision_planner")
+            log_skill_usage(root, ["skills/backend/SKILL.md"], context="claude_code")
+
+            summary = analytics_summary(root, limit=10)
+
+            self.assertEqual(summary["planner_event_count"], 1)
+            self.assertEqual(summary["live_event_count"], 1)
+            self.assertEqual(summary["skill_usage"][0]["loads"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -95,7 +95,9 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
                 events.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
-    counts = Counter(str(event.get("skill", "")) for event in events if event.get("skill"))
+    live_events = [event for event in events if str(event.get("context", "")) != "decision_planner"]
+    planner_events = [event for event in events if str(event.get("context", "")) == "decision_planner"]
+    counts = Counter(str(event.get("skill", "")) for event in live_events if event.get("skill"))
     top_skills = [{"skill": skill, "loads": count} for skill, count in counts.most_common(limit)]
     least_used = [{"skill": skill, "loads": count} for skill, count in sorted(counts.items(), key=lambda item: (item[1], item[0]))[:limit]]
     skill_usage: list[dict[str, object]] = []
@@ -145,8 +147,11 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
     skill_usage.sort(key=lambda item: (-int(item["loads"]), -int(item["richness"]), str(item["skill"])))
     return {
         "events": events[-limit:],
+        "live_events": live_events[-limit:],
         "top_skills": top_skills,
         "least_used": least_used,
         "event_count": len(events),
+        "live_event_count": len(live_events),
+        "planner_event_count": len(planner_events),
         "skill_usage": skill_usage,
     }
