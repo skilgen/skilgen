@@ -16,6 +16,7 @@ from skilgen.sdk import (
     activate_skill_source,
     analyze_project,
     architecture_project,
+    project_dashboard,
     cancel_job,
     deactivate_project_mcp_connector,
     deactivate_skill_source,
@@ -86,6 +87,11 @@ class SdkTests(unittest.TestCase):
             self.assertIn("evidence_graph", architecture)
             self.assertIn("graph_export", architecture)
             self.assertTrue(architecture["architecture"]["domains"])
+
+            dashboard = project_dashboard(root, requirements)
+            self.assertIn("html", dashboard)
+            self.assertIn("graph_export", dashboard)
+            self.assertIn("score", dashboard)
 
             decision = decide_project(root, requirements)
             self.assertIn("should_refresh", decision)

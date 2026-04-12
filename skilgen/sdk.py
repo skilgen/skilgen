@@ -6,6 +6,7 @@ from skilgen.api.service import (
     analytics_payload,
     analyze_payload,
     architecture_payload,
+    dashboard_payload,
     cancel_job_payload,
     decision_payload,
     create_deliver_job,
@@ -85,6 +86,11 @@ def analyze_project(project_root: str | Path = ".", requirements: str | Path | N
 def architecture_project(project_root: str | Path = ".", requirements: str | Path | None = None) -> dict[str, object]:
     resolved_requirements = Path(requirements).resolve() if requirements is not None else None
     return architecture_payload(Path(project_root).resolve(), resolved_requirements)
+
+
+def project_dashboard(project_root: str | Path = ".", requirements: str | Path | None = None) -> dict[str, object]:
+    resolved_requirements = Path(requirements).resolve() if requirements is not None else None
+    return dashboard_payload(Path(project_root).resolve(), resolved_requirements)
 
 
 def decide_project(project_root: str | Path = ".", requirements: str | Path | None = None) -> dict[str, object]:

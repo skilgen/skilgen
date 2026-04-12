@@ -7,7 +7,7 @@ from pathlib import Path
 
 from skilgen.api.server import run_server
 from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
-from skilgen.api.service import analytics_payload, analyze_payload, architecture_payload, decision_payload, diff_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
+from skilgen.api.service import analytics_payload, analyze_payload, architecture_payload, dashboard_payload, decision_payload, diff_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
@@ -136,6 +136,12 @@ def build_parser() -> argparse.ArgumentParser:
     architecture.add_argument("--json", action="store_true", help="Emit the raw architecture payload as JSON.")
     architecture.add_argument("--graph-file", help="Write the architecture graph export to a file.")
     architecture.add_argument("--graph-format", choices=["mermaid", "json", "html"], default="mermaid")
+
+    dashboard = subparsers.add_parser("dashboard", help="Generate a branded HTML dashboard for the current Skilgen project state.")
+    dashboard.add_argument("--project-root", default=".")
+    dashboard.add_argument("--requirements")
+    dashboard.add_argument("--output", help="Write the dashboard HTML to a file. Defaults to <project-root>/skilgen-dashboard.html.")
+    dashboard.add_argument("--json", action="store_true", help="Emit the raw dashboard payload as JSON instead of writing HTML.")
 
     decide = subparsers.add_parser("decide", help="Recommend whether to refresh skills, which skills to prioritize, and which run memory to load.")
     decide.add_argument("--project-root", default=".")
@@ -412,6 +418,31 @@ def main() -> None:
             print(json.dumps(payload, indent=2))
         else:
             print(payload["report_markdown"])
+        return
+    if args.command == "dashboard":
+        root = Path(args.project_root).resolve()
+        emit_progress(
+            f"Building the branded Skilgen dashboard with the {current_runtime_mode(root)} runtime so you can inspect score, freshness, graphs, and agent readiness in one place."
+        )
+        payload = dashboard_payload(root, Path(args.requirements).resolve() if args.requirements else None)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+            return
+        output_path = Path(args.output).resolve() if args.output else (root / "skilgen-dashboard.html")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(str(payload["html"]), encoding="utf-8")
+        print(
+            json.dumps(
+                {
+                    "dashboard_file": str(output_path),
+                    "headline": payload["architecture"]["headline"],
+                    "score": payload["score"]["score"],
+                    "stale_skill_count": len(payload["diff"]["stale_skill_paths"]),
+                    "graph_panels": sorted(payload["graph_export"].keys()),
+                },
+                indent=2,
+            )
+        )
         return
     if args.command == "decide":
         root = Path(args.project_root).resolve()

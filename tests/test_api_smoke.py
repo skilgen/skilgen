@@ -87,6 +87,11 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertIn("graph_export", architecture)
                 self.assertTrue(architecture["architecture"]["domains"])
 
+                dashboard = get_json(f"{base}/dashboard?{urlencode({'project_root': str(root), 'requirements': str(requirements)})}")
+                self.assertIn("html", dashboard)
+                self.assertIn("score", dashboard)
+                self.assertIn("graph_export", dashboard)
+
                 intent = post_json(f"{base}/intent", {"requirements": str(requirements)})
                 self.assertTrue(intent["features"])
 

@@ -13,6 +13,7 @@ from skilgen.deep_agents_runtime import (
     DeepAgentsRuntime,
     native_analyze_payload,
     native_architecture_payload,
+    native_dashboard_payload,
     native_features_payload,
     native_fingerprint_payload,
     native_intent_payload,
@@ -154,6 +155,19 @@ def architecture_payload(project_root: str | Path, requirements: str | Path | No
             "architecture",
             f"Synthesize an evidence-backed architecture blueprint for project_root={root} requirements={req}. Return JSON with requirements_context, evidence_graph, and architecture.",
             lambda: native_architecture_payload(root, req),
+        )
+    )
+
+
+def dashboard_payload(project_root: str | Path, requirements: str | Path | None = None) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    req = Path(requirements).resolve() if requirements is not None else None
+    runtime = DeepAgentsRuntime(root)
+    return _with_api_meta(
+        runtime.run(
+            "dashboard",
+            f"Build the Skilgen dashboard payload for project_root={root} requirements={req}. Return JSON with html, score, diff, analytics, graphs, and architecture.",
+            lambda: native_dashboard_payload(root, req),
         )
     )
 

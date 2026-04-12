@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import escape
 import json
 import re
 from pathlib import Path
@@ -140,6 +141,388 @@ def render_architecture_graph_html(context: RequirementsContext, project_root: P
             *plan_rows,
             "</tbody></table>",
             "</body></html>",
+        ]
+    )
+
+
+def render_evidence_graph_mermaid(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> str:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    evidence_graph = bundle.evidence_graph
+    lines = ["graph LR", '  repo["Repository Evidence"]']
+    for language in evidence_graph.dominant_languages[:5]:
+        language_id = _node_id(f"language_{language}")
+        lines.append(f'  repo --> {language_id}["{language}"]')
+    for item in evidence_graph.items[:10]:
+        item_id = _node_id(f"evidence_{item.path}")
+        kind_id = _node_id(f"kind_{item.kind}")
+        lines.append(f'  repo --> {item_id}["{item.path}"]')
+        lines.append(f'  {item_id} --> {kind_id}["{item.kind}"]')
+        for tag in item.tags[:3]:
+            tag_id = _node_id(f"{item.path}_{tag}")
+            lines.append(f'  {item_id} -.-> {tag_id}["{tag}"]')
+    return "\n".join(lines)
+
+
+def render_dependency_graph_mermaid(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> str:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    import_graph = bundle.import_graph
+    lines = ["graph LR"]
+    edge_count = 0
+    for source, targets in import_graph.items():
+        source_id = _node_id(source)
+        lines.append(f'  {source_id}["{source}"]')
+        for target in targets[:4]:
+            target_id = _node_id(target)
+            lines.append(f'  {source_id} --> {target_id}["{target}"]')
+            edge_count += 1
+            if edge_count >= 24:
+                return "\n".join(lines)
+    if edge_count == 0:
+        lines.append('  idle["No import dependencies detected yet"]')
+    return "\n".join(lines)
+
+
+def render_skill_graph_mermaid(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> str:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    architecture = bundle.architecture
+    lines = ["graph TD", '  root["Skilgen Skill System"]']
+    for plan in architecture.materialization_plan[:12]:
+        parent = plan.parent_skill_path or plan.domain
+        parent_id = _node_id(parent)
+        lines.append(f'  root --> {parent_id}["{parent}"]')
+        for child in plan.child_skill_paths[:5]:
+            child_id = _node_id(child)
+            lines.append(f'  {parent_id} --> {child_id}["{child}"]')
+        for link in plan.cross_links[:3]:
+            link_id = _node_id(link)
+            lines.append(f'  {parent_id} -.-> {link_id}["{link}"]')
+    return "\n".join(lines)
+
+
+def render_dashboard_html(
+    context: RequirementsContext,
+    project_root: Path,
+    dashboard_payload: dict[str, object],
+    bundle: ProjectAnalysisBundle | None = None,
+) -> str:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    score = dashboard_payload["score"]
+    diff = dashboard_payload["diff"]
+    auto_update = dashboard_payload["auto_update"]
+    analytics = dashboard_payload["analytics"]
+    status = dashboard_payload["status"]
+    decision = dashboard_payload["agent_decision"]
+    score_history = dashboard_payload["score_history"]
+    score_trend = dashboard_payload["score_trend"]
+    external_skills = dashboard_payload["external_skills"]
+    enterprise_skills = dashboard_payload["enterprise_skills"]
+    mcp_connectors = dashboard_payload["mcp_connectors"]
+    architecture = dashboard_payload["architecture"]
+    evidence_graph = dashboard_payload["evidence_graph"]
+    repo_name = project_root.name
+    score_value = float(score["score"])
+    score_percent = max(0.0, min(100.0, score_value))
+    score_label = escape(str(score["rating"]).replace("-", " ").title())
+    stale_count = len(diff["stale_skill_paths"])
+    changed_count = int(diff["changed_file_count"])
+    parser_backends = sorted({str(payload.get("backend", "unknown")) for payload in evidence_graph["parser_summary"].values()})
+    generated_outputs = [
+        ("AGENTS.md", status["agents_exists"]),
+        ("ANALYSIS.md", status["analysis_exists"]),
+        ("ARCHITECTURE.md", status["architecture_exists"]),
+        ("FEATURES.md", status["features_exists"]),
+        ("REPORT.md", status["report_exists"]),
+        ("TRACEABILITY.md", status["traceability_exists"]),
+        ("skills/MANIFEST.md", status["manifest_exists"]),
+        ("skills/GRAPH.md", status["graph_exists"]),
+    ]
+    evidence_count = len(evidence_graph["items"])
+    dependency_edges = sum(len(targets) for targets in bundle.import_graph.values())
+    call_edges = sum(len(targets) for targets in bundle.evidence_graph.call_graph.values())
+    config_edges = sum(len(targets) for targets in bundle.evidence_graph.config_runtime_graph.values())
+    test_links = sum(len(targets) for targets in bundle.evidence_graph.test_mapping.values())
+    architecture_mermaid = render_architecture_graph_mermaid(context, project_root, bundle)
+    evidence_mermaid = render_evidence_graph_mermaid(context, project_root, bundle)
+    dependency_mermaid = render_dependency_graph_mermaid(context, project_root, bundle)
+    skill_mermaid = render_skill_graph_mermaid(context, project_root, bundle)
+    trend_points = score_history[-8:]
+    trend_markup_parts: list[str] = []
+    for item in trend_points:
+        point_score = float(item.get("score", 0))
+        point_height = max(18, min(100, point_score))
+        trend_markup_parts.append(
+            f"<div class='spark-point' style='height:{point_height}%'><span>{int(round(point_score))}</span></div>"
+        )
+    trend_markup = "\n".join(trend_markup_parts) or "<div class='spark-empty'>Score history will appear after a few runs.</div>"
+
+    def metric(title: str, value: str, subtitle: str, accent: str = "gold") -> str:
+        return (
+            "<article class='metric-card'>"
+            f"<div class='metric-eyebrow {accent}'>{escape(title)}</div>"
+            f"<div class='metric-value'>{escape(value)}</div>"
+            f"<div class='metric-subtitle'>{escape(subtitle)}</div>"
+            "</article>"
+        )
+
+    def pill(label: str, tone: str = "default") -> str:
+        return f"<span class='pill {tone}'>{escape(label)}</span>"
+
+    def list_items(items: list[str], *, empty: str = "None yet") -> str:
+        if not items:
+            return f"<li class='muted'>{escape(empty)}</li>"
+        return "\n".join(f"<li>{escape(item)}</li>" for item in items)
+
+    subscores_markup = "\n".join(
+        (
+            "<div class='subscore-row'>"
+            f"<div class='subscore-label'>{escape(name.title())}</div>"
+            f"<div class='subscore-bar'><span style='width:{max(4.0, min(100.0, (float(payload['score']) / float(payload['max_score'])) * 100))}%'></span></div>"
+            f"<div class='subscore-value'>{int(round(float(payload['score'])))} / {int(payload['max_score'])}</div>"
+            "</div>"
+        )
+        for name, payload in score["subscores"].items()
+    )
+
+    quality_gates_markup = "\n".join(
+        "<li><strong>{name}</strong> caps the score at {cap}. {reason}</li>".format(
+            name=escape(str(gate["name"]).replace("_", " ").title()),
+            cap=escape(str(gate["cap"])),
+            reason=escape(str(gate["reason"])),
+        )
+        for gate in score.get("quality_gates", [])
+    ) or "<li class='muted'>No active quality gates are lowering the score right now.</li>"
+
+    changed_files_markup = "\n".join(
+        f"<li><span class='change-type {escape(item['change_type'])}'>{escape(item['change_type'])}</span><span>{escape(item['path'])}</span></li>"
+        for item in diff["changed_files"][:8]
+    ) or "<li class='muted'>No source changes detected since the last generation baseline.</li>"
+
+    impacted_markup = "\n".join(
+        (
+            "<li>"
+            f"<strong>{escape(item['domain'])}</strong>"
+            f"<span>{escape(item['skill_path'] or '-')}</span>"
+            f"{pill('STALE' if item['stale'] else 'CURRENT', 'warning' if item['stale'] else 'good')}"
+            "</li>"
+        )
+        for item in diff["impacted_domain_details"][:8]
+        if item["domain"] in diff["impacted_domains"]
+    ) or "<li class='muted'>All materialized domains are current.</li>"
+
+    domain_cards_parts: list[str] = []
+    for domain in architecture["domains"][:6]:
+        confidence = f"{float(domain['confidence']):.2f}"
+        domain_cards_parts.append(
+            "<article class='domain-card'>"
+            f"<div class='domain-head'><h3>{escape(domain['name'])}</h3>{pill(confidence, 'good')}</div>"
+            f"<p>{escape(domain['summary'])}</p>"
+            f"<div class='micro-label'>Responsibilities</div>"
+            f"<ul>{list_items(domain['responsibilities'][:4], empty='No responsibilities captured')}</ul>"
+            f"<div class='micro-label'>Evidence</div>"
+            f"<ul>{list_items(domain['evidence_paths'][:3], empty='No evidence paths captured')}</ul>"
+            "</article>"
+        )
+    domain_cards = "\n".join(domain_cards_parts)
+
+    plan_rows = "\n".join(
+        (
+            "<tr>"
+            f"<td>{escape(item['domain'])}</td>"
+            f"<td>{pill(str(item['decision']).upper(), 'warning' if item['decision'] == 'split' else 'default')}</td>"
+            f"<td>{escape(item['parent_skill_path'] or '-')}</td>"
+            f"<td>{escape(', '.join(item['child_skill_paths'][:4]) or '-')}</td>"
+            f"<td>{escape(item['rationale'])}</td>"
+            "</tr>"
+        )
+        for item in architecture["materialization_plan"][:8]
+    ) or "<tr><td colspan='5' class='muted'>No materialization plan entries yet.</td></tr>"
+
+    external_markup = "\n".join(
+        f"<li>{escape(item.get('slug', 'unknown'))} {pill('active' if item.get('active') else 'installed', 'good' if item.get('active') else 'default')}</li>"
+        for item in external_skills["installed"][:6]
+    ) or "<li class='muted'>No external skills installed yet.</li>"
+    enterprise_markup = "\n".join(
+        f"<li>{escape(item.get('slug', 'unknown'))} {pill(str(item.get('kind', 'enterprise')), 'default')}</li>"
+        for item in enterprise_skills["active"][:6]
+    ) or "<li class='muted'>No enterprise skills active yet.</li>"
+    connector_markup = "\n".join(
+        (
+            "<li>"
+            f"{escape(item.get('slug', 'unknown'))} "
+            f"{pill('official' if item.get('official_source_verified') else 'community', 'good' if item.get('official_source_verified') else 'warning')} "
+            f"{pill('oauth' if item.get('oauth_ready') else 'custom auth', 'default')}"
+            "</li>"
+        )
+        for item in mcp_connectors["active"][:6]
+    ) or "<li class='muted'>No MCP connectors active yet.</li>"
+
+    analytics_markup = "\n".join(
+        f"<li>{escape(item['skill'])}<span>{int(item['loads'])} loads</span></li>"
+        for item in analytics["top_skills"][:6]
+    ) or "<li class='muted'>Usage analytics will populate as agents load skills.</li>"
+
+    outputs_markup = "\n".join(
+        (
+            "<li>"
+            f"<span>{escape(name)}</span>"
+            f"{pill('ready' if exists else 'missing', 'good' if exists else 'warning')}"
+            "</li>"
+        )
+        for name, exists in generated_outputs
+    )
+
+    graph_payload = {
+        "architecture": architecture_mermaid,
+        "evidence": evidence_mermaid,
+        "dependencies": dependency_mermaid,
+        "skills": skill_mermaid,
+    }
+    graph_payload_json = json.dumps(graph_payload)
+
+    return "\n".join(
+        [
+            "<!doctype html>",
+            "<html lang='en'>",
+            "<head>",
+            "<meta charset='utf-8'>",
+            "<meta name='viewport' content='width=device-width, initial-scale=1'>",
+            f"<title>Skilgen Dashboard · {escape(repo_name)}</title>",
+            "<script type='module'>import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; window.__mermaid = mermaid; mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });</script>",
+            "<style>",
+            ":root{--bg:#050608;--bg-soft:#0b0d11;--panel:#10141b;--panel-alt:#141922;--line:rgba(255,255,255,.08);--text:#f6f7fb;--muted:#9da5b4;--gold:#efd37a;--gold-strong:#f8df8e;--good:#8fd9a8;--warning:#ffb86b;--danger:#ff7a7a;--shadow:0 24px 80px rgba(0,0,0,.38);}*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:radial-gradient(circle at top left, rgba(239,211,122,.14), transparent 32%), radial-gradient(circle at 85% 12%, rgba(255,255,255,.08), transparent 26%), var(--bg);color:var(--text)}body::before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.22;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='156' viewBox='0 0 180 156'%3E%3Cg fill='none' stroke='%23efd37a' stroke-opacity='.16' stroke-width='3'%3E%3Cpath d='M45 3l39 19.5v39L45 81 6 61.5v-39z'/%3E%3Cpath d='M135 3l39 19.5v39L135 81 96 61.5v-39z'/%3E%3Cpath d='M90 75l39 19.5v39L90 153 51 133.5v-39z'/%3E%3C/g%3E%3C/svg%3E\");background-size:240px 208px;background-position:center top}a{color:inherit}.page{max-width:1440px;margin:0 auto;padding:32px 24px 56px}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:24px;align-items:stretch}.hero-card,.panel{background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));border:1px solid var(--line);border-radius:28px;box-shadow:var(--shadow);backdrop-filter:blur(10px)}.hero-card{padding:32px;position:relative;overflow:hidden}.hero-card::after{content:'';position:absolute;inset:auto -60px -60px auto;width:220px;height:220px;background:radial-gradient(circle, rgba(239,211,122,.18), transparent 68%)}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;font-weight:700}.hero h1{margin:14px 0 12px;font-size:clamp(2.4rem,4vw,4.3rem);line-height:.94;max-width:11ch}.hero p{max-width:62ch;color:#d7dbe5;font-size:1.02rem}.hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}.pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);font-size:.86rem}.pill.good{border-color:rgba(143,217,168,.28);color:var(--good)}.pill.warning{border-color:rgba(255,184,107,.32);color:var(--warning)}.hero-score{padding:28px;display:grid;grid-template-rows:auto 1fr;gap:22px}.honeycomb{display:grid;grid-template-columns:repeat(4,76px);grid-auto-rows:66px;justify-content:end;gap:0}.hex{width:72px;height:62px;clip-path:polygon(25% 6%,75% 6%,100% 50%,75% 94%,25% 94%,0 50%);border:3px solid rgba(255,255,255,.95);background:rgba(255,255,255,.02)}.hex.gold{border-color:var(--gold)}.hex.offset{transform:translateX(38px)}.score-ring{width:196px;height:196px;border-radius:50%;background:conic-gradient(var(--gold) 0% calc(var(--score) * 1%), rgba(255,255,255,.08) 0% 100%);display:grid;place-items:center;margin:auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}.score-ring::before{content:'';width:148px;height:148px;border-radius:50%;background:var(--bg-soft);border:1px solid rgba(255,255,255,.08)}.score-ring-content{position:absolute;text-align:center}.score-ring-content strong{display:block;font-size:3.1rem;line-height:1}.score-ring-content span{color:var(--muted);text-transform:uppercase;letter-spacing:.16em;font-size:.75rem}.hero-score-grid,.metrics-grid,.insights-grid,.systems-grid,.domain-grid{display:grid;gap:16px}.hero-score-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metrics-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:24px}.metric-card{padding:18px 18px 20px;border-radius:20px;border:1px solid var(--line);background:rgba(255,255,255,.03)}.metric-eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.14em;color:var(--muted)}.metric-eyebrow.gold{color:var(--gold)}.metric-value{font-size:1.9rem;font-weight:700;margin-top:8px}.metric-subtitle{margin-top:6px;color:var(--muted);font-size:.92rem}.layout{display:grid;grid-template-columns:1.08fr .92fr;gap:24px;margin-top:24px}.panel{padding:24px}.panel h2{margin:0 0 16px;font-size:1.1rem}.section-copy{color:var(--muted);margin:-6px 0 18px}.subscore-row{display:grid;grid-template-columns:110px 1fr 64px;align-items:center;gap:12px;margin-bottom:12px}.subscore-label{font-size:.94rem;color:#dfe3eb}.subscore-bar{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}.subscore-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--gold),#fff3be)}.subscore-value{font-size:.88rem;color:var(--muted);text-align:right}.graph-shell{padding:26px}.graph-tabs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}.graph-tab{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600}.graph-tab.active{background:rgba(239,211,122,.14);border-color:rgba(239,211,122,.35);color:var(--gold-strong)}.graph-panel{display:none}.graph-panel.active{display:block}.graph-stage{border-radius:24px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,#0b0f15,#07090d);padding:16px;min-height:380px}.graph-stage .mermaid{overflow:auto}.list{list-style:none;padding:0;margin:0;display:grid;gap:10px}.list li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.list li span{color:var(--muted)}.change-type{text-transform:uppercase;font-size:.74rem;letter-spacing:.12em;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.08);color:var(--text)}.change-type.added{color:var(--good)}.change-type.modified{color:var(--warning)}.change-type.deleted{color:var(--danger)}.muted{color:var(--muted)!important}.sparkline{display:flex;align-items:flex-end;gap:10px;height:132px;padding:18px;border-radius:20px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.spark-point{flex:1;border-radius:18px 18px 6px 6px;background:linear-gradient(180deg,var(--gold),rgba(239,211,122,.18));position:relative;min-height:18px}.spark-point span{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);font-size:.76rem;color:var(--muted)}.spark-empty{color:var(--muted)}.domain-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:18px}.domain-card{padding:20px;border-radius:22px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02))}.domain-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.domain-card h3{margin:0;font-size:1.02rem}.domain-card p{color:#d6dbe5}.micro-label{margin-top:14px;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}.domain-card ul{padding-left:18px;color:var(--muted)}table{width:100%;border-collapse:collapse;border-spacing:0}th,td{padding:14px 12px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;vertical-align:top}th{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.14em}.systems-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.footer-note{margin-top:24px;color:var(--muted);font-size:.92rem}.stack{display:grid;gap:24px}.compact{padding:20px}.label-pair{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:.9rem}.stat-large{font-size:2rem;font-weight:700}.legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}@media (max-width:1100px){.hero,.layout{grid-template-columns:1fr}.metrics-grid,.systems-grid,.domain-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.honeycomb{justify-content:start}}@media (max-width:720px){.page{padding:18px}.hero-card,.panel{padding:20px}.metrics-grid,.systems-grid,.domain-grid{grid-template-columns:1fr}.hero-score-grid{grid-template-columns:1fr 1fr}.score-ring{width:160px;height:160px}.score-ring::before{width:120px;height:120px}.score-ring-content strong{font-size:2.4rem}}",
+            "</style>",
+            "</head>",
+            "<body>",
+            "<div class='page'>",
+            "<section class='hero'>",
+            "<div class='hero-card'>",
+            "<div class='eyebrow'>Skilgen Operating System</div>",
+            f"<h1>{escape(repo_name)} is now a living skill system.</h1>",
+            f"<p>Evidence graph, architecture synthesis, quality scoring, freshness tracking, auto-update, dependency intelligence, and enterprise capability context are all visible in one branded control surface.</p>",
+            "<div class='hero-actions'>",
+            pill(f"Skilgen Score {int(round(score_value))}/100", "good" if score_value >= 75 else "warning"),
+            pill(f"{stale_count} stale skills" if stale_count else "All skills current", "warning" if stale_count else "good"),
+            pill(f"{changed_count} changed files" if changed_count else "No diff since baseline", "default"),
+            pill(f"Auto-update {'on' if auto_update.get('enabled') else 'off'}", "good" if auto_update.get("enabled") else "warning"),
+            pill(f"{config_edges} config/runtime edges", "default"),
+            "</div>",
+            "<div class='metrics-grid'>",
+            metric("Evidence Graph", str(evidence_count), "Evidence items grounded in code, config, docs, and tests."),
+            metric("Dependency Graph", str(dependency_edges), "Import edges across the repository."),
+            metric("Call Graph", str(call_edges), "Observed call relationships from parsed source."),
+            metric("Test Mapping", str(test_links), "Tests mapped back to implementation files."),
+            "</div>",
+            "</div>",
+            "<aside class='hero-card hero-score'>",
+            "<div class='honeycomb'><div class='hex gold'></div><div class='hex'></div><div class='hex'></div><div class='hex gold'></div><div class='hex offset'></div><div class='hex offset'></div><div class='hex offset'></div></div>",
+            f"<div class='score-ring' style='--score:{score_percent};'><div class='score-ring-content'><strong>{int(round(score_value))}</strong><span>{score_label}</span></div></div>",
+            "<div class='hero-score-grid'>",
+            metric("Freshness", f"{int(round(float(score['subscores']['freshness']['score'])))} / 25", str(diff['reason']).replace('_', ' '), "gold"),
+            metric("Active Domains", str(len(architecture["domains"])), "Materialized architecture domains in play.", "gold"),
+            metric("Parsers", str(len(parser_backends) or 1), "Language backends contributing evidence.", "gold"),
+            metric("Outputs", str(sum(1 for _, exists in generated_outputs if exists)), "Generated repo-local artifacts ready for agents.", "gold"),
+            "</div>",
+            "</aside>",
+            "</section>",
+            "<section class='layout'>",
+            "<div class='stack'>",
+            "<section class='panel'>",
+            "<h2>Skilgen Score</h2>",
+            "<div class='section-copy'>A quality gate for the entire skill system with groundedness, coverage, freshness, and structure all visible at once.</div>",
+            subscores_markup,
+            "<div class='micro-label'>Quality Gates</div>",
+            f"<ul>{quality_gates_markup}</ul>",
+            "</section>",
+            "<section class='panel graph-shell'>",
+            "<h2>Architecture + Evidence Graphs</h2>",
+            "<div class='section-copy'>Switch between the architecture map, evidence graph, dependency graph, and the skill tree Skilgen plans to materialize.</div>",
+            "<div class='graph-tabs'>",
+            "<button class='graph-tab active' data-target='architecture'>Architecture</button>",
+            "<button class='graph-tab' data-target='evidence'>Evidence</button>",
+            "<button class='graph-tab' data-target='dependencies'>Dependencies</button>",
+            "<button class='graph-tab' data-target='skills'>Skills</button>",
+            "</div>",
+            "<div class='graph-stage'>",
+            "<div class='graph-panel active' data-panel='architecture'><pre class='mermaid'></pre></div>",
+            "<div class='graph-panel' data-panel='evidence'><pre class='mermaid'></pre></div>",
+            "<div class='graph-panel' data-panel='dependencies'><pre class='mermaid'></pre></div>",
+            "<div class='graph-panel' data-panel='skills'><pre class='mermaid'></pre></div>",
+            "</div>",
+            "</section>",
+            "<section class='panel'>",
+            "<h2>Architecture Materialization</h2>",
+            "<div class='section-copy'>Skilgen uses the architecture plan to decide where skills should split, merge, or stay consolidated.</div>",
+            "<table><thead><tr><th>Domain</th><th>Decision</th><th>Parent Skill</th><th>Child Skills</th><th>Rationale</th></tr></thead><tbody>",
+            plan_rows,
+            "</tbody></table>",
+            "<div class='domain-grid'>",
+            domain_cards,
+            "</div>",
+            "</section>",
+            "</div>",
+            "<div class='stack'>",
+            "<section class='panel compact'>",
+            "<h2>Diff + Freshness</h2>",
+            "<div class='section-copy'>What changed since the last generation baseline, what is stale now, and what remains current.</div>",
+            "<div class='insights-grid'>",
+            "<div>",
+            "<div class='micro-label'>Changed Files</div>",
+            f"<ul class='list'>{changed_files_markup}</ul>",
+            "</div>",
+            "<div>",
+            "<div class='micro-label'>Impacted Domains</div>",
+            f"<ul class='list'>{impacted_markup}</ul>",
+            "</div>",
+            "</div>",
+            "<div class='legend'>",
+            pill(f"Current domains: {', '.join(diff['current_domains'][:4]) or 'none'}"),
+            pill(f"Freshness {int(round(float(diff['freshness_score'])))} / {int(diff['freshness_max'])}", "good" if float(diff["freshness_score"]) >= 20 else "warning"),
+            pill(f"Git event {str(diff['git']['event_type']).replace('_', ' ')}"),
+            "</div>",
+            "</section>",
+            "<section class='panel compact'>",
+            "<h2>Score Trend</h2>",
+            "<div class='section-copy'>Repo-level score movement and domain regressions over recent runs.</div>",
+            f"<div class='sparkline'>{trend_markup}</div>",
+            "<div class='legend'>",
+            pill(f"Delta {score_trend['delta_from_previous']:+.2f}", "good" if float(score_trend["delta_from_previous"]) >= 0 else "warning"),
+            pill(f"Regressions {len(score_trend['regressions'])}", "warning" if score_trend["regressions"] else "good"),
+            "</div>",
+            "</section>",
+            "<section class='panel compact'>",
+            "<h2>Auto-Update + Agent Readiness</h2>",
+            "<div class='section-copy'>The repo-local worker state, agent loading order, and the outputs currently ready to be consumed.</div>",
+            "<div class='label-pair'><span>Worker status</span><strong>{}</strong></div>".format("running" if auto_update.get("running") else "idle"),
+            "<div class='label-pair'><span>Last event</span><strong>{}</strong></div>".format(escape(str(auto_update.get("last_event") or "none"))),
+            "<div class='label-pair'><span>Recommended start order</span><strong>{}</strong></div>".format(escape(", ".join(decision.get("prioritized_domains", [])[:4]) or "none")),
+            "<div class='micro-label'>Prioritized Skills</div>",
+            f"<ul>{list_items(decision.get('prioritized_skill_paths', [])[:6], empty='No prioritized skills yet')}</ul>",
+            "<div class='micro-label'>Generated Outputs</div>",
+            f"<ul class='list'>{outputs_markup}</ul>",
+            "</section>",
+            "<section class='panel compact'>",
+            "<h2>Capability Layer</h2>",
+            "<div class='section-copy'>External skills, enterprise skills, and MCP connectors brought into the same operating surface.</div>",
+            "<div class='systems-grid'>",
+            "<div><div class='micro-label'>External Skills</div><ul>{}</ul></div>".format(external_markup),
+            "<div><div class='micro-label'>Enterprise Skills</div><ul>{}</ul></div>".format(enterprise_markup),
+            "<div><div class='micro-label'>MCP Connectors</div><ul>{}</ul></div>".format(connector_markup),
+            "</div>",
+            "</section>",
+            "<section class='panel compact'>",
+            "<h2>Usage Analytics</h2>",
+            "<div class='section-copy'>Which generated skills agents are leaning on most, and where the skill tree may be underused.</div>",
+            "<div class='stat-large'>{}</div>".format(int(analytics.get("event_count", 0))),
+            "<div class='section-copy'>Recorded skill load events.</div>",
+            f"<ul class='list'>{analytics_markup}</ul>",
+            "</section>",
+            "</div>",
+            "</section>",
+            "<p class='footer-note'>Generated by Skilgen from live repository evidence, architecture synthesis, score history, diff state, analytics, and enterprise capability context.</p>",
+            "</div>",
+            f"<script>window.__SKILGEN_GRAPHS__ = {graph_payload_json}; const tabs = [...document.querySelectorAll('.graph-tab')]; const panels = [...document.querySelectorAll('.graph-panel')]; const setPanel = async (target) => {{ tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.target === target)); panels.forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === target)); const panel = document.querySelector(`.graph-panel[data-panel=\"${{target}}\"] .mermaid`); if (!panel.dataset.loaded) {{ panel.textContent = window.__SKILGEN_GRAPHS__[target]; panel.dataset.loaded = '1'; await window.__mermaid.run({{ nodes: [panel] }}); }} }}; tabs.forEach((tab) => tab.addEventListener('click', () => setPanel(tab.dataset.target))); setPanel('architecture');</script>",
+            "</body>",
+            "</html>",
         ]
     )
 

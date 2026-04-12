@@ -49,6 +49,7 @@ Useful next commands:
 
 ```bash
 skilgen architecture --project-root . --requirements docs/product-requirements.docx
+skilgen dashboard --project-root . --requirements docs/product-requirements.docx
 skilgen score --project-root .
 skilgen diff --project-root .
 skilgen analytics --project-root .
@@ -80,6 +81,7 @@ When you run Skilgen in a repo, it can:
 - generate and refresh `ARCHITECTURE.md`
 - generate and refresh a dynamic `skills/` tree with `MANIFEST.md` and `GRAPH.md`
 - analyze the repo and synthesize an evidence-backed architecture blueprint
+- generate a branded HTML dashboard that brings score, diff, architecture, evidence, analytics, and dependency views together
 - detect changed code and refresh skills automatically
 - show stale skills and impacted domains with `skilgen diff`
 - score the quality of the skill tree with a verifiable `Skilgen Score`
