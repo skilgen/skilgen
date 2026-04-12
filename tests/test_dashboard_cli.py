@@ -82,6 +82,7 @@ class DashboardCliTests(unittest.TestCase):
             self.assertIn("&copy; Skilgen", html)
             self.assertIn("Skill Usage", html)
             self.assertIn("usage + depth + content", html)
+            self.assertIn("Stable across the last", html)
 
     def test_dashboard_command_json_payload_contains_html_and_graphs(self) -> None:
         with TemporaryDirectory() as tmp:

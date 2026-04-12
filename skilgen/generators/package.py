@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from html import escape
 import json
 import re
@@ -25,6 +26,20 @@ class ProjectAnalysisBundle:
     codebase_context: object
     evidence_graph: object
     architecture: object
+
+
+def _trend_label(entry: dict[str, object], index: int, total: int) -> str:
+    timestamp = str(entry.get("timestamp", "")).strip()
+    if timestamp:
+        try:
+            normalized = timestamp.replace("Z", "+00:00")
+            moment = datetime.fromisoformat(normalized)
+            return moment.strftime("%b %d %H:%M")
+        except ValueError:
+            pass
+    if index == total - 1:
+        return "Current"
+    return f"Run {index + 1}"
 
 
 def _node_id(value: str) -> str:
@@ -593,18 +608,25 @@ def render_dashboard_html(
     trend_points = score_history[-8:]
     if not trend_points:
         trend_points = [
-            {"score": score_value, "source": "baseline"},
-            {"score": score_value, "source": "current"},
+            {"score": score_value, "source": "baseline", "timestamp": ""},
+            {"score": score_value, "source": "current", "timestamp": ""},
         ]
     elif len(trend_points) == 1:
-        trend_points = [trend_points[0], {"score": score_value, "source": "current"}]
+        trend_points = [trend_points[0], {"score": score_value, "source": "current", "timestamp": ""}]
+    trend_scores = [float(item.get("score", score_value)) for item in trend_points]
+    trend_is_flat = len({round(item, 2) for item in trend_scores}) <= 1
     trend_markup = "\n".join(
         f"<div class='spark-point' style='height:{max(18, min(100, float(item.get('score', 0))))}%'><span>{int(round(float(item.get('score', 0))))}</span></div>"
         for item in trend_points
     ) or "<div class='spark-empty'>Score history will appear after a few runs.</div>"
     trend_ticks_markup = "\n".join(
-        f"<span>{escape(str(item.get('source', 'current')).replace('_', ' '))}</span>"
-        for item in trend_points
+        f"<span>{escape(_trend_label(item, index, len(trend_points)))}</span>"
+        for index, item in enumerate(trend_points)
+    )
+    trend_summary = (
+        f"Stable across the last {len(trend_points)} runs."
+        if trend_is_flat
+        else f"{'Improving' if float(score_trend['delta_from_previous']) >= 0 else 'Falling'} compared with the previous snapshot."
     )
 
     def pill(label: str, tone: str = "default") -> str:
@@ -703,9 +725,10 @@ def render_dashboard_html(
             "</article>"
         )
     domain_cards = "\n".join(domain_cards_parts)
+    architecture_palette = ["#EFD37A", "#67D5FF", "#8FD9A8", "#FF8F70", "#C99BFF", "#FF6B9A", "#6EE7D2", "#7C8EFF"]
     architecture_legend = "\n".join(
-        f"<li><strong>{escape(_display_domain_name(str(domain['name'])))}</strong><span>{escape(domain['recommended_skill_path'] or 'domain')}</span></li>"
-        for domain in architecture["domains"][:8]
+        f"<li><strong><span class='legend-dot' style='background:{architecture_palette[index % len(architecture_palette)]}'></span>{escape(_display_domain_name(str(domain['name'])))}</strong><span>{escape(domain['recommended_skill_path'] or 'domain')}</span></li>"
+        for index, domain in enumerate(architecture["domains"][:8])
     ) or "<li class='muted'>No architecture domains yet.</li>"
     plan_rows = "\n".join(
         (
@@ -880,7 +903,7 @@ const renderSunburst=(container)=>{{
   root.each((d)=>d.current=d);
   const color=d3.scaleOrdinal()
     .domain(root.descendants().map((d)=>d.data.name))
-    .range(['#EFD37A','#67D5FF','#8FD9A8','#FF8F70','#C99BFF','#F6F7FB','#FFB86B','#7C8EFF']);
+    .range(['#EFD37A','#67D5FF','#8FD9A8','#FF8F70','#C99BFF','#FF6B9A','#6EE7D2','#7C8EFF']);
   const svg=d3.select(container).append('svg').attr('viewBox',`${{-width/2}} ${{-height/2}} ${{width}} ${{height}}`).style('font','12px Inter');
   const ringScale=radius/(root.height+1);
   const arc=d3.arc()
@@ -905,7 +928,7 @@ const renderSunburst=(container)=>{{
     .data(root.descendants().slice(1))
     .join('path')
     .attr('fill',(d)=>{{ let current=d; while(current.depth>1) current=current.parent; return color(current.data.name); }})
-    .attr('fill-opacity',(d)=>d.children?0.92:0.74)
+    .attr('fill-opacity',(d)=>d.children?0.96:0.86)
     .attr('d',(d)=>arc(d.current))
     .style('cursor','pointer')
     .on('click',(_,p)=>clicked(p))
@@ -938,7 +961,7 @@ const renderSunburst=(container)=>{{
     path.transition(t)
       .tween('data',(d)=>{{ const i=d3.interpolate(d.current,d.target); return (tick)=>d.current=i(tick); }})
       .filter(function(d){{ return +this.getAttribute('fill-opacity')||arcVisible(d.target); }})
-      .attr('fill-opacity',(d)=>arcVisible(d.target)?(d.children?0.92:0.74):0)
+      .attr('fill-opacity',(d)=>arcVisible(d.target)?(d.children?0.96:0.86):0)
       .attrTween('d',(d)=>()=>arc(d.current));
     text.filter(function(d){{ return +this.getAttribute('fill-opacity')||labelVisible(d.target); }})
       .transition(t)
@@ -1234,6 +1257,7 @@ if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target'
             "<div class='micro-label'>Score Trend</div>",
             f"<div class='sparkline'>{trend_markup}</div>",
             f"<div class='trend-ticks'>{trend_ticks_markup}</div>",
+            f"<div class='section-copy'>{escape(trend_summary)}</div>",
             "<div class='legend'>",
             pill(f"Delta {score_trend['delta_from_previous']:+.2f}", "good" if float(score_trend["delta_from_previous"]) >= 0 else "warning"),
             pill(f"Regressions {len(score_trend['regressions'])}", "warning" if score_trend["regressions"] else "good"),
