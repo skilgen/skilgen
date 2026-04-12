@@ -199,6 +199,77 @@ def render_skill_graph_mermaid(context: RequirementsContext, project_root: Path,
     return "\n".join(lines)
 
 
+def _skilgen_logo_svg() -> str:
+    return (
+        "<svg class='skilgen-mark' viewBox='0 0 448 220' fill='none' xmlns='http://www.w3.org/2000/svg' aria-label='Skilgen logo'>"
+        "<g stroke-linejoin='round' stroke-linecap='round' stroke-width='12'>"
+        "<path d='M69 22 118 46.5v49L69 120 20 95.5v-49L69 22Z' stroke='#EFD37A'/>"
+        "<path d='M204 22 253 46.5v49L204 120 155 95.5v-49L204 22Z' stroke='#F3F4F8'/>"
+        "<path d='M339 22 388 46.5v49L339 120 290 95.5v-49L339 22Z' stroke='#F3F4F8'/>"
+        "<path d='M158 102 207 126.5v49L158 200 109 175.5v-49L158 102Z' stroke='#F3F4F8'/>"
+        "<path d='M249 102 298 126.5v49L249 200 200 175.5v-49L249 102Z' stroke='#F3F4F8'/>"
+        "<path d='M340 102 389 126.5v49L340 200 291 175.5v-49L340 102Z' stroke='#EFD37A'/>"
+        "</g>"
+        "</svg>"
+    )
+
+
+def render_evidence_network_data(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> dict[str, object]:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    evidence_graph = bundle.evidence_graph
+    nodes: list[dict[str, object]] = [
+        {"id": "repo", "label": project_root.name, "group": "repo", "value": 38, "title": "Repository root"},
+    ]
+    edges: list[dict[str, object]] = []
+    for language in evidence_graph.dominant_languages[:6]:
+        language_id = f"lang::{language}"
+        nodes.append({"id": language_id, "label": language, "group": "language", "value": 20, "title": f"Dominant language: {language}"})
+        edges.append({"from": "repo", "to": language_id})
+    for item in evidence_graph.items[:18]:
+        item_id = f"item::{item.path}"
+        snippet = " ".join(item.snippet[:2]).strip() or "No snippet captured"
+        title = f"{item.kind}: {item.path}\n{snippet}"
+        nodes.append({"id": item_id, "label": item.path.split("/")[-1], "group": item.kind, "value": 14, "title": title})
+        edges.append({"from": "repo", "to": item_id})
+        if item.language:
+            language_id = f"lang::{item.language}"
+            if not any(node["id"] == language_id for node in nodes):
+                nodes.append({"id": language_id, "label": item.language, "group": "language", "value": 18, "title": f"Language: {item.language}"})
+            edges.append({"from": language_id, "to": item_id})
+        for related in item.related_imports[:2]:
+            related_id = f"ref::{related}"
+            if not any(node["id"] == related_id for node in nodes):
+                nodes.append({"id": related_id, "label": related.split("/")[-1], "group": "reference", "value": 10, "title": related})
+            edges.append({"from": item_id, "to": related_id})
+    return {"nodes": nodes, "edges": edges}
+
+
+def render_dependency_network_data(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> dict[str, object]:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    nodes: dict[str, dict[str, object]] = {}
+    edges: list[dict[str, object]] = []
+    edge_count = 0
+    for source, targets in bundle.import_graph.items():
+        if edge_count >= 48:
+            break
+        nodes.setdefault(
+            source,
+            {"id": source, "label": source.split("/")[-1], "group": "source", "value": 14, "title": source},
+        )
+        for target in targets[:5]:
+            nodes.setdefault(
+                target,
+                {"id": target, "label": target.split("/")[-1], "group": "target", "value": 12, "title": target},
+            )
+            edges.append({"from": source, "to": target})
+            edge_count += 1
+            if edge_count >= 48:
+                break
+    if not nodes:
+        nodes["empty"] = {"id": "empty", "label": "No dependencies", "group": "repo", "value": 18, "title": "No import dependencies detected yet"}
+    return {"nodes": list(nodes.values()), "edges": edges}
+
+
 def render_dashboard_html(
     context: RequirementsContext,
     project_root: Path,
@@ -245,6 +316,9 @@ def render_dashboard_html(
     evidence_mermaid = render_evidence_graph_mermaid(context, project_root, bundle)
     dependency_mermaid = render_dependency_graph_mermaid(context, project_root, bundle)
     skill_mermaid = render_skill_graph_mermaid(context, project_root, bundle)
+    evidence_network = render_evidence_network_data(context, project_root, bundle)
+    dependency_network = render_dependency_network_data(context, project_root, bundle)
+    brand_mark = _skilgen_logo_svg()
     trend_points = score_history[-8:]
     trend_markup_parts: list[str] = []
     for item in trend_points:
@@ -378,6 +452,12 @@ def render_dashboard_html(
         "skills": skill_mermaid,
     }
     graph_payload_json = json.dumps(graph_payload)
+    network_payload_json = json.dumps(
+        {
+            "evidence": evidence_network,
+            "dependencies": dependency_network,
+        }
+    )
 
     return "\n".join(
         [
@@ -388,15 +468,23 @@ def render_dashboard_html(
             "<meta name='viewport' content='width=device-width, initial-scale=1'>",
             f"<title>Skilgen Dashboard · {escape(repo_name)}</title>",
             "<script type='module'>import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; window.__mermaid = mermaid; mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });</script>",
+            "<script src='https://unpkg.com/vis-network/standalone/umd/vis-network.min.js'></script>",
             "<style>",
-            ":root{--bg:#050608;--bg-soft:#0b0d11;--panel:#10141b;--panel-alt:#141922;--line:rgba(255,255,255,.08);--text:#f6f7fb;--muted:#9da5b4;--gold:#efd37a;--gold-strong:#f8df8e;--good:#8fd9a8;--warning:#ffb86b;--danger:#ff7a7a;--shadow:0 24px 80px rgba(0,0,0,.38);}*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:radial-gradient(circle at top left, rgba(239,211,122,.14), transparent 32%), radial-gradient(circle at 85% 12%, rgba(255,255,255,.08), transparent 26%), var(--bg);color:var(--text)}body::before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.22;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='156' viewBox='0 0 180 156'%3E%3Cg fill='none' stroke='%23efd37a' stroke-opacity='.16' stroke-width='3'%3E%3Cpath d='M45 3l39 19.5v39L45 81 6 61.5v-39z'/%3E%3Cpath d='M135 3l39 19.5v39L135 81 96 61.5v-39z'/%3E%3Cpath d='M90 75l39 19.5v39L90 153 51 133.5v-39z'/%3E%3C/g%3E%3C/svg%3E\");background-size:240px 208px;background-position:center top}a{color:inherit}.page{max-width:1440px;margin:0 auto;padding:32px 24px 56px}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:24px;align-items:stretch}.hero-card,.panel{background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));border:1px solid var(--line);border-radius:28px;box-shadow:var(--shadow);backdrop-filter:blur(10px)}.hero-card{padding:32px;position:relative;overflow:hidden}.hero-card::after{content:'';position:absolute;inset:auto -60px -60px auto;width:220px;height:220px;background:radial-gradient(circle, rgba(239,211,122,.18), transparent 68%)}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;font-weight:700}.hero h1{margin:14px 0 12px;font-size:clamp(2.4rem,4vw,4.3rem);line-height:.94;max-width:11ch}.hero p{max-width:62ch;color:#d7dbe5;font-size:1.02rem}.hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}.pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);font-size:.86rem}.pill.good{border-color:rgba(143,217,168,.28);color:var(--good)}.pill.warning{border-color:rgba(255,184,107,.32);color:var(--warning)}.hero-score{padding:28px;display:grid;grid-template-rows:auto 1fr;gap:22px}.honeycomb{display:grid;grid-template-columns:repeat(4,76px);grid-auto-rows:66px;justify-content:end;gap:0}.hex{width:72px;height:62px;clip-path:polygon(25% 6%,75% 6%,100% 50%,75% 94%,25% 94%,0 50%);border:3px solid rgba(255,255,255,.95);background:rgba(255,255,255,.02)}.hex.gold{border-color:var(--gold)}.hex.offset{transform:translateX(38px)}.score-ring{width:196px;height:196px;border-radius:50%;background:conic-gradient(var(--gold) 0% calc(var(--score) * 1%), rgba(255,255,255,.08) 0% 100%);display:grid;place-items:center;margin:auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}.score-ring::before{content:'';width:148px;height:148px;border-radius:50%;background:var(--bg-soft);border:1px solid rgba(255,255,255,.08)}.score-ring-content{position:absolute;text-align:center}.score-ring-content strong{display:block;font-size:3.1rem;line-height:1}.score-ring-content span{color:var(--muted);text-transform:uppercase;letter-spacing:.16em;font-size:.75rem}.hero-score-grid,.metrics-grid,.insights-grid,.systems-grid,.domain-grid{display:grid;gap:16px}.hero-score-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metrics-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:24px}.metric-card{padding:18px 18px 20px;border-radius:20px;border:1px solid var(--line);background:rgba(255,255,255,.03)}.metric-eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.14em;color:var(--muted)}.metric-eyebrow.gold{color:var(--gold)}.metric-value{font-size:1.9rem;font-weight:700;margin-top:8px}.metric-subtitle{margin-top:6px;color:var(--muted);font-size:.92rem}.layout{display:grid;grid-template-columns:1.08fr .92fr;gap:24px;margin-top:24px}.panel{padding:24px}.panel h2{margin:0 0 16px;font-size:1.1rem}.section-copy{color:var(--muted);margin:-6px 0 18px}.subscore-row{display:grid;grid-template-columns:110px 1fr 64px;align-items:center;gap:12px;margin-bottom:12px}.subscore-label{font-size:.94rem;color:#dfe3eb}.subscore-bar{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}.subscore-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--gold),#fff3be)}.subscore-value{font-size:.88rem;color:var(--muted);text-align:right}.graph-shell{padding:26px}.graph-tabs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}.graph-tab{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600}.graph-tab.active{background:rgba(239,211,122,.14);border-color:rgba(239,211,122,.35);color:var(--gold-strong)}.graph-panel{display:none}.graph-panel.active{display:block}.graph-stage{border-radius:24px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,#0b0f15,#07090d);padding:16px;min-height:380px}.graph-stage .mermaid{overflow:auto}.list{list-style:none;padding:0;margin:0;display:grid;gap:10px}.list li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.list li span{color:var(--muted)}.change-type{text-transform:uppercase;font-size:.74rem;letter-spacing:.12em;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.08);color:var(--text)}.change-type.added{color:var(--good)}.change-type.modified{color:var(--warning)}.change-type.deleted{color:var(--danger)}.muted{color:var(--muted)!important}.sparkline{display:flex;align-items:flex-end;gap:10px;height:132px;padding:18px;border-radius:20px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.spark-point{flex:1;border-radius:18px 18px 6px 6px;background:linear-gradient(180deg,var(--gold),rgba(239,211,122,.18));position:relative;min-height:18px}.spark-point span{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);font-size:.76rem;color:var(--muted)}.spark-empty{color:var(--muted)}.domain-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:18px}.domain-card{padding:20px;border-radius:22px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02))}.domain-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.domain-card h3{margin:0;font-size:1.02rem}.domain-card p{color:#d6dbe5}.micro-label{margin-top:14px;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}.domain-card ul{padding-left:18px;color:var(--muted)}table{width:100%;border-collapse:collapse;border-spacing:0}th,td{padding:14px 12px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;vertical-align:top}th{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.14em}.systems-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.footer-note{margin-top:24px;color:var(--muted);font-size:.92rem}.stack{display:grid;gap:24px}.compact{padding:20px}.label-pair{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:.9rem}.stat-large{font-size:2rem;font-weight:700}.legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}@media (max-width:1100px){.hero,.layout{grid-template-columns:1fr}.metrics-grid,.systems-grid,.domain-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.honeycomb{justify-content:start}}@media (max-width:720px){.page{padding:18px}.hero-card,.panel{padding:20px}.metrics-grid,.systems-grid,.domain-grid{grid-template-columns:1fr}.hero-score-grid{grid-template-columns:1fr 1fr}.score-ring{width:160px;height:160px}.score-ring::before{width:120px;height:120px}.score-ring-content strong{font-size:2.4rem}}",
+            ":root{--bg:#050608;--bg-soft:#0b0d11;--panel:#10141b;--panel-alt:#141922;--line:rgba(255,255,255,.08);--text:#f6f7fb;--muted:#9da5b4;--gold:#efd37a;--gold-strong:#f8df8e;--good:#8fd9a8;--warning:#ffb86b;--danger:#ff7a7a;--shadow:0 24px 80px rgba(0,0,0,.38);}*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:radial-gradient(circle at top left, rgba(239,211,122,.14), transparent 32%), radial-gradient(circle at 85% 12%, rgba(255,255,255,.08), transparent 26%), var(--bg);color:var(--text)}body::before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.22;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='156' viewBox='0 0 180 156'%3E%3Cg fill='none' stroke='%23efd37a' stroke-opacity='.16' stroke-width='3'%3E%3Cpath d='M45 3l39 19.5v39L45 81 6 61.5v-39z'/%3E%3Cpath d='M135 3l39 19.5v39L135 81 96 61.5v-39z'/%3E%3Cpath d='M90 75l39 19.5v39L90 153 51 133.5v-39z'/%3E%3C/g%3E%3C/svg%3E\");background-size:240px 208px;background-position:center top}a{color:inherit}.page{max-width:1440px;margin:0 auto;padding:32px 24px 56px}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:24px;align-items:stretch}.hero-card,.panel{background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));border:1px solid var(--line);border-radius:28px;box-shadow:var(--shadow);backdrop-filter:blur(10px)}.hero-card{padding:32px;position:relative;overflow:hidden}.hero-card::after{content:'';position:absolute;inset:auto -60px -60px auto;width:220px;height:220px;background:radial-gradient(circle, rgba(239,211,122,.18), transparent 68%)}.brand-header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:18px}.brand-cluster{display:grid;gap:12px}.brand-row{display:flex;align-items:center;gap:16px}.skilgen-mark{width:176px;max-width:100%;height:auto;display:block;filter:drop-shadow(0 12px 28px rgba(0,0,0,.32))}.skilgen-mark.compact{width:220px;margin-left:auto;opacity:.98}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;font-weight:700}.hero h1{margin:14px 0 12px;font-size:clamp(2.4rem,4vw,4.3rem);line-height:.94;max-width:11ch}.hero p{max-width:62ch;color:#d7dbe5;font-size:1.02rem}.hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}.pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);font-size:.86rem}.pill.good{border-color:rgba(143,217,168,.28);color:var(--good)}.pill.warning{border-color:rgba(255,184,107,.32);color:var(--warning)}.hero-score{padding:28px;display:grid;grid-template-rows:auto 1fr;gap:22px}.score-ring-wrap{display:grid;gap:18px;justify-items:center}.score-ring{width:196px;height:196px;border-radius:50%;background:conic-gradient(var(--gold) 0% calc(var(--score) * 1%), rgba(255,255,255,.08) 0% 100%);display:grid;place-items:center;margin:auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}.score-ring::before{content:'';width:148px;height:148px;border-radius:50%;background:var(--bg-soft);border:1px solid rgba(255,255,255,.08)}.score-ring-content{position:absolute;text-align:center}.score-ring-content strong{display:block;font-size:3.1rem;line-height:1}.score-ring-content span{color:var(--muted);text-transform:uppercase;letter-spacing:.16em;font-size:.75rem}.hero-score-grid,.metrics-grid,.insights-grid,.systems-grid,.domain-grid{display:grid;gap:16px}.hero-score-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metrics-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:24px}.metric-card{padding:18px 18px 20px;border-radius:20px;border:1px solid var(--line);background:rgba(255,255,255,.03)}.metric-eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.14em;color:var(--muted)}.metric-eyebrow.gold{color:var(--gold)}.metric-value{font-size:1.9rem;font-weight:700;margin-top:8px}.metric-subtitle{margin-top:6px;color:var(--muted);font-size:.92rem}.layout{display:grid;grid-template-columns:1.08fr .92fr;gap:24px;margin-top:24px}.panel{padding:24px}.panel h2{margin:0 0 16px;font-size:1.1rem}.section-copy{color:var(--muted);margin:-6px 0 18px}.subscore-row{display:grid;grid-template-columns:110px 1fr 64px;align-items:center;gap:12px;margin-bottom:12px}.subscore-label{font-size:.94rem;color:#dfe3eb}.subscore-bar{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}.subscore-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--gold),#fff3be)}.subscore-value{font-size:.88rem;color:var(--muted);text-align:right}.graph-shell{padding:26px}.graph-tabs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}.graph-tab{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600}.graph-tab.active{background:rgba(239,211,122,.14);border-color:rgba(239,211,122,.35);color:var(--gold-strong)}.graph-panel{display:none}.graph-panel.active{display:block}.graph-stage{border-radius:24px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,#0b0f15,#07090d);padding:16px;min-height:380px}.graph-stage .mermaid{overflow:auto}.network-canvas{width:100%;height:380px;border-radius:20px;background:radial-gradient(circle at top, rgba(239,211,122,.08), transparent 38%), rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06)}.network-note{margin-top:12px;color:var(--muted);font-size:.9rem}.list{list-style:none;padding:0;margin:0;display:grid;gap:10px}.list li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.list li span{color:var(--muted)}.change-type{text-transform:uppercase;font-size:.74rem;letter-spacing:.12em;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.08);color:var(--text)}.change-type.added{color:var(--good)}.change-type.modified{color:var(--warning)}.change-type.deleted{color:var(--danger)}.muted{color:var(--muted)!important}.sparkline{display:flex;align-items:flex-end;gap:10px;height:132px;padding:18px;border-radius:20px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.spark-point{flex:1;border-radius:18px 18px 6px 6px;background:linear-gradient(180deg,var(--gold),rgba(239,211,122,.18));position:relative;min-height:18px}.spark-point span{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);font-size:.76rem;color:var(--muted)}.spark-empty{color:var(--muted)}.domain-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:18px}.domain-card{padding:20px;border-radius:22px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02))}.domain-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.domain-card h3{margin:0;font-size:1.02rem}.domain-card p{color:#d6dbe5}.micro-label{margin-top:14px;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}.domain-card ul{padding-left:18px;color:var(--muted)}table{width:100%;border-collapse:collapse;border-spacing:0}th,td{padding:14px 12px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;vertical-align:top}th{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.14em}.systems-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.footer-note{margin-top:24px;color:var(--muted);font-size:.92rem}.stack{display:grid;gap:24px}.compact{padding:20px}.label-pair{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:.9rem}.stat-large{font-size:2rem;font-weight:700}.legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}@media (max-width:1100px){.hero,.layout{grid-template-columns:1fr}.metrics-grid,.systems-grid,.domain-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.brand-header{align-items:flex-start;flex-direction:column}.skilgen-mark.compact{margin-left:0;width:180px}}@media (max-width:720px){.page{padding:18px}.hero-card,.panel{padding:20px}.metrics-grid,.systems-grid,.domain-grid{grid-template-columns:1fr}.hero-score-grid{grid-template-columns:1fr 1fr}.score-ring{width:160px;height:160px}.score-ring::before{width:120px;height:120px}.score-ring-content strong{font-size:2.4rem}.brand-row{flex-direction:column;align-items:flex-start}.skilgen-mark{width:150px}}",
             "</style>",
             "</head>",
             "<body>",
             "<div class='page'>",
             "<section class='hero'>",
             "<div class='hero-card'>",
+            "<div class='brand-header'>",
+            "<div class='brand-cluster'>",
+            "<div class='brand-row'>",
+            brand_mark,
             "<div class='eyebrow'>Skilgen Operating System</div>",
+            "</div>",
+            "</div>",
+            "</div>",
             f"<h1>{escape(repo_name)} is now a living skill system.</h1>",
             f"<p>Evidence graph, architecture synthesis, quality scoring, freshness tracking, auto-update, dependency intelligence, and enterprise capability context are all visible in one branded control surface.</p>",
             "<div class='hero-actions'>",
@@ -414,8 +502,10 @@ def render_dashboard_html(
             "</div>",
             "</div>",
             "<aside class='hero-card hero-score'>",
-            "<div class='honeycomb'><div class='hex gold'></div><div class='hex'></div><div class='hex'></div><div class='hex gold'></div><div class='hex offset'></div><div class='hex offset'></div><div class='hex offset'></div></div>",
+            "<div class='score-ring-wrap'>",
+            brand_mark.replace("class='skilgen-mark'", "class='skilgen-mark compact'"),
             f"<div class='score-ring' style='--score:{score_percent};'><div class='score-ring-content'><strong>{int(round(score_value))}</strong><span>{score_label}</span></div></div>",
+            "</div>",
             "<div class='hero-score-grid'>",
             metric("Freshness", f"{int(round(float(score['subscores']['freshness']['score'])))} / 25", str(diff['reason']).replace('_', ' '), "gold"),
             metric("Active Domains", str(len(architecture["domains"])), "Materialized architecture domains in play.", "gold"),
@@ -438,14 +528,14 @@ def render_dashboard_html(
             "<div class='section-copy'>Switch between the architecture map, evidence graph, dependency graph, and the skill tree Skilgen plans to materialize.</div>",
             "<div class='graph-tabs'>",
             "<button class='graph-tab active' data-target='architecture'>Architecture</button>",
-            "<button class='graph-tab' data-target='evidence'>Evidence</button>",
-            "<button class='graph-tab' data-target='dependencies'>Dependencies</button>",
+            "<button class='graph-tab' data-target='evidence'>Evidence Network</button>",
+            "<button class='graph-tab' data-target='dependencies'>Dependency Network</button>",
             "<button class='graph-tab' data-target='skills'>Skills</button>",
             "</div>",
             "<div class='graph-stage'>",
             "<div class='graph-panel active' data-panel='architecture'><pre class='mermaid'></pre></div>",
-            "<div class='graph-panel' data-panel='evidence'><pre class='mermaid'></pre></div>",
-            "<div class='graph-panel' data-panel='dependencies'><pre class='mermaid'></pre></div>",
+            "<div class='graph-panel' data-panel='evidence'><div class='network-canvas' data-network='evidence'></div><p class='network-note'>Interactive evidence network connecting the repo root to languages, evidence files, and referenced assets.</p></div>",
+            "<div class='graph-panel' data-panel='dependencies'><div class='network-canvas' data-network='dependencies'></div><p class='network-note'>Interactive dependency graph showing import relationships across the current codebase.</p></div>",
             "<div class='graph-panel' data-panel='skills'><pre class='mermaid'></pre></div>",
             "</div>",
             "</section>",
@@ -520,7 +610,7 @@ def render_dashboard_html(
             "</section>",
             "<p class='footer-note'>Generated by Skilgen from live repository evidence, architecture synthesis, score history, diff state, analytics, and enterprise capability context.</p>",
             "</div>",
-            f"<script>window.__SKILGEN_GRAPHS__ = {graph_payload_json}; const tabs = [...document.querySelectorAll('.graph-tab')]; const panels = [...document.querySelectorAll('.graph-panel')]; const setPanel = async (target) => {{ tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.target === target)); panels.forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === target)); const panel = document.querySelector(`.graph-panel[data-panel=\"${{target}}\"] .mermaid`); if (!panel.dataset.loaded) {{ panel.textContent = window.__SKILGEN_GRAPHS__[target]; panel.dataset.loaded = '1'; await window.__mermaid.run({{ nodes: [panel] }}); }} }}; tabs.forEach((tab) => tab.addEventListener('click', () => setPanel(tab.dataset.target))); setPanel('architecture');</script>",
+            f"<script>window.__SKILGEN_GRAPHS__ = {graph_payload_json}; window.__SKILGEN_NETWORKS__ = {network_payload_json}; const tabs = [...document.querySelectorAll('.graph-tab')]; const panels = [...document.querySelectorAll('.graph-panel')]; const networkOptions = {{autoResize:true, physics:{{stabilization:true, barnesHut:{{gravitationalConstant:-3200, centralGravity:0.18, springLength:128, springConstant:0.03}}}}, interaction:{{hover:true,navigationButtons:true,keyboard:true}}, nodes:{{shape:'dot', borderWidth:2, font:{{color:'#F6F7FB', face:'Inter'}}, color:{{border:'#EFD37A', background:'#11161E', highlight:{{border:'#F8DF8E', background:'#1B2430'}}}}}}, edges:{{color:{{color:'rgba(255,255,255,0.26)', highlight:'#EFD37A'}}, smooth:true, width:1.2}}, groups:{{repo:{{size:38,color:{{border:'#F8DF8E',background:'#1B1A12'}}}},language:{{size:26,color:{{border:'#F8DF8E',background:'#201B0F'}}}},source:{{size:16,color:{{border:'#F6F7FB',background:'#171A21'}}}},target:{{size:13,color:{{border:'#B7C0D0',background:'#11161E'}}}},reference:{{size:12,color:{{border:'#8FD9A8',background:'#102017'}}}},route:{{size:16}},service:{{size:16}},test:{{size:16}},config:{{size:16}},document:{{size:16}},code:{{size:15}}}}}}; const renderedNetworks = new Map(); const setPanel = async (target) => {{ tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.target === target)); panels.forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === target)); const panel = document.querySelector(`.graph-panel[data-panel=\"${{target}}\"]`); const mermaidNode = panel?.querySelector('.mermaid'); if (mermaidNode) {{ if (!mermaidNode.dataset.loaded) {{ mermaidNode.textContent = window.__SKILGEN_GRAPHS__[target]; mermaidNode.dataset.loaded = '1'; await window.__mermaid.run({{ nodes: [mermaidNode] }}); }} return; }} const canvas = panel?.querySelector('.network-canvas'); if (!canvas || renderedNetworks.has(target) || !window.vis) return; const graph = window.__SKILGEN_NETWORKS__[target]; const data = {{ nodes: new vis.DataSet(graph.nodes), edges: new vis.DataSet(graph.edges) }}; const network = new vis.Network(canvas, data, networkOptions); renderedNetworks.set(target, network); }}; tabs.forEach((tab) => tab.addEventListener('click', () => setPanel(tab.dataset.target))); setPanel('architecture');</script>",
             "</body>",
             "</html>",
         ]
