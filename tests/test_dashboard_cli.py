@@ -86,11 +86,13 @@ class DashboardCliTests(unittest.TestCase):
                 self.assertIn("&copy; Skilgen", html)
                 self.assertTrue(any(marker in html for marker in ("Modeled attention", "Live usage")))
                 self.assertIn("depth + content + live signals", html)
+                self.assertNotIn(">---<", html)
                 self.assertTrue(
                     any(
                         marker in html
                         for marker in (
                             "No meaningful trend yet",
+                            "Stable across recent snapshots.",
                             "Improving compared with the previous snapshot.",
                             "Falling compared with the previous snapshot.",
                             "This is the current baseline.",
@@ -194,8 +196,9 @@ class DashboardCliTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             html = payload["html"]
             self.assertNotIn(">delivery<", html)
-            self.assertIn("No meaningful trend yet", html)
+            self.assertIn("Stable across recent snapshots.", html)
             self.assertLessEqual(html.count("<div class='spark-point'"), 2)
+            self.assertIn(">Stable<", html)
 
 
 if __name__ == "__main__":

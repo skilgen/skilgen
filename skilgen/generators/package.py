@@ -597,6 +597,7 @@ def render_analytics_radial_data(project_root: Path, analytics: dict[str, object
     if not usage:
         return []
     max_load = max(int(item.get("effective_loads", item.get("loads", 0))) for item in usage) or 1
+    max_richness = max(int(item.get("richness", 0)) for item in usage) or 1
     radial_rows: list[dict[str, object]] = []
     for item in usage:
         metrics = item.get("metrics", {}) if isinstance(item.get("metrics"), dict) else {}
@@ -619,7 +620,7 @@ def render_analytics_radial_data(project_root: Path, analytics: dict[str, object
                 "usage_label": str(item.get("usage_label", "Usage")),
                 "load_score": round((loads / max_load) * 100, 2) if max_load else 0.0,
                 "depth_score": min(100, depth * 22),
-                "richness_score": min(100, richness * 8),
+                "richness_score": round((richness / max_richness) * 100, 2) if max_richness else 0.0,
                 "depth": depth,
                 "richness": richness,
                 "headings": int(metrics.get("headings", 0)),
@@ -700,14 +701,19 @@ def render_dashboard_html(
     ) or "<div class='spark-empty'>Score history will appear after a few runs.</div>"
     trend_ticks_markup = "\n".join(
         f"<span>{escape(label)}</span>"
-        for label in (trend_labels[:1] if trend_is_flat and len(trend_labels) > 1 else trend_labels)
+        for label in (["Stable"] if trend_is_flat and len(trend_labels) > 1 else trend_labels)
     )
     if len(trend_points) <= 1:
         trend_summary = "This is the current baseline. Trend history will become more useful after a few distinct runs."
     elif trend_is_flat:
-        trend_summary = "No meaningful trend yet — the recorded score is still effectively flat across recent runs."
+        trend_summary = "Stable across recent snapshots. Skilgen will surface a stronger trend once the score meaningfully changes."
     else:
-        trend_summary = f"{'Improving' if float(score_trend['delta_from_previous']) >= 0 else 'Falling'} compared with the previous snapshot."
+        delta_from_previous = float(score_trend["delta_from_previous"])
+        trend_summary = (
+            "Improving compared with the previous snapshot."
+            if delta_from_previous > 0
+            else "Falling compared with the previous snapshot."
+        )
 
     def pill(label: str, tone: str = "default") -> str:
         return f"<span class='pill {tone}'>{escape(label)}</span>"
@@ -808,8 +814,16 @@ def render_dashboard_html(
         related_domains = ", ".join(_display_domain_name(str(item)) for item in domain["related_domains"][:3]) or "No related domains surfaced"
         plan = plan_by_domain.get(str(domain["name"]))
         nuance_bits = [
-            f"{len(domain['evidence_paths'])} grounded evidence paths back this boundary.",
-            f"{len(domain['responsibilities'])} responsibilities stayed coherent enough to keep this capability readable for an agent.",
+            (
+                "1 grounded evidence path backs this boundary."
+                if len(domain["evidence_paths"]) == 1
+                else f"{len(domain['evidence_paths'])} grounded evidence paths back this boundary."
+            ),
+            (
+                "1 responsibility stayed coherent enough to keep this capability readable for an agent."
+                if len(domain["responsibilities"]) == 1
+                else f"{len(domain['responsibilities'])} responsibilities stayed coherent enough to keep this capability readable for an agent."
+            ),
         ]
         if plan is not None:
             nuance_bits.append(str(plan["rationale"]))

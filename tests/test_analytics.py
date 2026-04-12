@@ -65,6 +65,18 @@ class AnalyticsTests(unittest.TestCase):
             self.assertNotEqual(summary["skill_usage"][0]["summary"], "---")
             self.assertNotEqual(summary["skill_usage"][0]["title"], "Overview")
 
+    def test_skill_title_and_summary_falls_back_when_summary_is_placeholder(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "skills" / "backend"
+            skill_dir.mkdir(parents=True)
+            skill_file = skill_dir / "SKILL.md"
+            skill_file.write_text("---\nname: backend\n---\n# Backend Skill\n\n---\n", encoding="utf-8")
+
+            summary = analytics_summary(root, limit=10)
+
+            self.assertNotEqual(summary["skill_usage"][0]["summary"], "---")
+
 
 if __name__ == "__main__":
     unittest.main()

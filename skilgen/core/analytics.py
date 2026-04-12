@@ -46,6 +46,8 @@ def _skill_title_and_summary(path: Path) -> tuple[str, str]:
         if line and line not in {"```", "~~~"} and not line.startswith(("references:", "inputs:", "outputs:")):
             summary = line
             break
+    if not summary.strip() or summary.strip() == "---":
+        summary = f"{title} guidance grounded in repo evidence and reusable implementation nuance."
     return title, summary
 
 
