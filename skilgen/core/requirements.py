@@ -104,7 +104,7 @@ def synthesize_requirements_context(project_root: Path) -> RequirementsContext:
         if path.is_file()
         and ".git/" not in path.as_posix()
         and not path.relative_to(root).as_posix().startswith(("skills/", ".skilgen/"))
-        and path.name not in {"AGENTS.md", "ANALYSIS.md", "FEATURES.md", "REPORT.md", "TRACEABILITY.md"}
+        and path.name not in {"AGENTS.md", "ANALYSIS.md", "ARCHITECTURE.md", "FEATURES.md", "REPORT.md", "TRACEABILITY.md"}
     )
     backend_detected = any(
         marker in path.lower()

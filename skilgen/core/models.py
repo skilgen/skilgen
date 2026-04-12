@@ -202,6 +202,7 @@ class EvidenceGraph:
     import_graph: dict[str, list[str]]
     items: list[EvidenceItem]
     recommendations: list[str]
+    parser_summary: dict[str, dict[str, object]] = field(default_factory=dict)
     symbol_graph: dict[str, list[str]] = field(default_factory=dict)
     call_graph: dict[str, list[str]] = field(default_factory=dict)
     config_runtime_graph: dict[str, list[str]] = field(default_factory=dict)
@@ -220,12 +221,23 @@ class ArchitectureDomain:
 
 
 @dataclass(frozen=True)
+class SkillMaterializationPlan:
+    domain: str
+    parent_skill_path: str | None
+    child_skill_paths: list[str]
+    cross_links: list[str]
+    decision: str
+    rationale: str
+
+
+@dataclass(frozen=True)
 class ArchitectureBlueprint:
     headline: str
     system_summary: str
     domains: list[ArchitectureDomain]
     hotspots: list[str]
     recommendations: list[str]
+    materialization_plan: list[SkillMaterializationPlan] = field(default_factory=list)
 
 
 @dataclass

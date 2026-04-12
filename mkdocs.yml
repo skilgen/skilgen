@@ -1,0 +1,12 @@
+site_name: Skilgen
+site_description: Living repo-local skill system for coding agents
+repo_url: https://github.com/skilgen/skilgen
+theme:
+  name: material
+nav:
+  - Home: index.md
+  - Architecture Mode: architecture-mode.md
+  - Evidence Graph: evidence-graph.md
+  - Skilgen Score: score.md
+  - Diff And Auto-Refresh: diff-and-autoupdate.md
+  - Enterprise Governance: enterprise-governance.md

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import re
 from pathlib import Path
@@ -15,14 +16,36 @@ from skilgen.external_skills import active_external_skills, detect_external_skil
 from skilgen.core.models import RequirementsContext
 
 
+@dataclass(frozen=True)
+class ProjectAnalysisBundle:
+    fingerprint: object
+    signals: object
+    import_graph: dict[str, list[str]]
+    codebase_context: object
+    evidence_graph: object
+    architecture: object
+
+
 def _node_id(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_")
     return cleaned.lower() or "node"
 
 
-def render_architecture_graph_mermaid(context: RequirementsContext, project_root: Path) -> str:
-    evidence_graph = build_evidence_graph(project_root, context)
-    architecture = build_architecture_blueprint(project_root, context)
+def _analysis_bundle(context: RequirementsContext, project_root: Path) -> ProjectAnalysisBundle:
+    return ProjectAnalysisBundle(
+        fingerprint=fingerprint_project(project_root),
+        signals=analyze_codebase(project_root),
+        import_graph=build_import_graph(project_root),
+        codebase_context=build_codebase_context(project_root, context),
+        evidence_graph=build_evidence_graph(project_root, context),
+        architecture=build_architecture_blueprint(project_root, context),
+    )
+
+
+def render_architecture_graph_mermaid(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> str:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    evidence_graph = bundle.evidence_graph
+    architecture = bundle.architecture
     lines = ["graph TD"]
     for domain in architecture.domains:
         domain_id = _node_id(domain.name)
@@ -33,6 +56,16 @@ def render_architecture_graph_mermaid(context: RequirementsContext, project_root
         for evidence_path in domain.evidence_paths[:3]:
             evidence_id = _node_id(f"{domain.name}_{evidence_path}")
             lines.append(f'  {domain_id} -. evidence .-> {evidence_id}["{evidence_path}"]')
+    for plan in architecture.materialization_plan[:10]:
+        domain_id = _node_id(plan.domain)
+        parent_id = _node_id(plan.parent_skill_path)
+        lines.append(f'  {domain_id} --> {parent_id}["{plan.parent_skill_path}"]')
+        for child in plan.child_skill_paths[:5]:
+            child_id = _node_id(child)
+            lines.append(f'  {parent_id} --> {child_id}["{child}"]')
+        for link in plan.cross_links[:4]:
+            link_id = _node_id(link)
+            lines.append(f'  {parent_id} -. cross-link .-> {link_id}["{link}"]')
     for path, symbols in list(evidence_graph.symbol_graph.items())[:6]:
         file_id = _node_id(path)
         lines.append(f'  {file_id}["{path}"]')
@@ -42,16 +75,73 @@ def render_architecture_graph_mermaid(context: RequirementsContext, project_root
     return "\n".join(lines)
 
 
-def render_architecture_graph_json(context: RequirementsContext, project_root: Path) -> dict[str, object]:
-    evidence_graph = build_evidence_graph(project_root, context)
-    architecture = build_architecture_blueprint(project_root, context)
+def render_architecture_graph_json(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> dict[str, object]:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    evidence_graph = bundle.evidence_graph
+    architecture = bundle.architecture
     return {
+        "headline": architecture.headline,
+        "system_summary": architecture.system_summary,
         "domains": [domain.__dict__ for domain in architecture.domains],
+        "materialization_plan": [item.__dict__ for item in architecture.materialization_plan],
+        "parser_summary": evidence_graph.parser_summary,
         "symbol_graph": evidence_graph.symbol_graph,
         "call_graph": evidence_graph.call_graph,
         "config_runtime_graph": evidence_graph.config_runtime_graph,
         "test_mapping": evidence_graph.test_mapping,
     }
+
+
+def render_architecture_graph_html(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> str:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    mermaid = render_architecture_graph_mermaid(context, project_root, bundle)
+    architecture = bundle.architecture
+    parser_backends = sorted({str(payload.get("backend", "unknown")) for payload in bundle.evidence_graph.parser_summary.values()})
+    cards = []
+    for domain in architecture.domains[:8]:
+        cards.append(
+            "\n".join(
+                [
+                    '<div class="domain-card">',
+                    f"<h3>{domain.name}</h3>",
+                    f"<p>{domain.summary}</p>",
+                    f"<p><strong>Confidence:</strong> {domain.confidence:.2f}</p>",
+                    "</div>",
+                ]
+            )
+        )
+    plan_rows = []
+    for item in architecture.materialization_plan[:10]:
+        plan_rows.append(
+            "<tr>"
+            f"<td>{item.domain}</td>"
+            f"<td>{item.decision}</td>"
+            f"<td>{item.parent_skill_path}</td>"
+            f"<td>{', '.join(item.child_skill_paths[:4]) or '-'}</td>"
+            "</tr>"
+        )
+    return "\n".join(
+        [
+            "<!doctype html>",
+            "<html><head><meta charset='utf-8'><title>Skilgen Architecture Graph</title>",
+            "<script type='module'>import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script>",
+            "<style>body{font-family:ui-sans-serif,system-ui,sans-serif;margin:2rem;line-height:1.5;color:#1f2937;} .domain-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin:1.5rem 0;} .domain-card{border:1px solid #d1d5db;border-radius:12px;padding:1rem;background:#f9fafb;} .mermaid{margin:2rem 0;} .pill{display:inline-block;border-radius:999px;padding:0.2rem 0.6rem;background:#e5eefc;margin-right:0.5rem;margin-bottom:0.5rem;} table{border-collapse:collapse;width:100%;margin-top:1.5rem;} th,td{border:1px solid #d1d5db;padding:0.75rem;text-align:left;vertical-align:top;} th{background:#f3f4f6;}</style>",
+            "</head><body>",
+            f"<h1>{architecture.headline}</h1>",
+            f"<p>{architecture.system_summary}</p>",
+            "<h2>Parser Backends</h2>",
+            *(f"<span class='pill'>{backend}</span>" for backend in parser_backends),
+            "<div class='domain-grid'>",
+            *cards,
+            "</div>",
+            f"<pre class='mermaid'>{mermaid}</pre>",
+            "<h2>Skill Materialization Plan</h2>",
+            "<table><thead><tr><th>Domain</th><th>Decision</th><th>Parent Skill</th><th>Child Skills</th></tr></thead><tbody>",
+            *plan_rows,
+            "</tbody></table>",
+            "</body></html>",
+        ]
+    )
 
 
 def ensure_file(path: Path, content: str) -> Path:
@@ -111,13 +201,18 @@ def render_feature_inventory(context: RequirementsContext) -> str:
     )
 
 
-def render_analysis_report(context: RequirementsContext, project_root: Path) -> str:
-    fingerprint = fingerprint_project(project_root)
-    signals = analyze_codebase(project_root)
-    import_graph = build_import_graph(project_root)
-    codebase_context = build_codebase_context(project_root, context)
-    evidence_graph = build_evidence_graph(project_root, context)
-    architecture = build_architecture_blueprint(project_root, context)
+def render_analysis_report(
+    context: RequirementsContext,
+    project_root: Path,
+    bundle: ProjectAnalysisBundle | None = None,
+) -> str:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    fingerprint = bundle.fingerprint
+    signals = bundle.signals
+    import_graph = bundle.import_graph
+    codebase_context = bundle.codebase_context
+    evidence_graph = bundle.evidence_graph
+    architecture = bundle.architecture
     payload = {
         "framework_fingerprint": {
             "frontend": fingerprint.frontend.__dict__ if fingerprint.frontend else None,
@@ -134,14 +229,23 @@ def render_analysis_report(context: RequirementsContext, project_root: Path) -> 
         "skill_tree": [node.__dict__ for node in codebase_context.skill_tree],
         "import_graph": import_graph,
         "evidence_graph": evidence_graph.__dict__ | {"items": [item.__dict__ for item in evidence_graph.items]},
-        "architecture": architecture.__dict__ | {"domains": [domain.__dict__ for domain in architecture.domains]},
+        "architecture": architecture.__dict__
+        | {
+            "domains": [domain.__dict__ for domain in architecture.domains],
+            "materialization_plan": [item.__dict__ for item in architecture.materialization_plan],
+        },
     }
     return "\n".join(["# Analysis", "", "```json", json.dumps(payload, indent=2), "```", ""])
 
 
-def render_architecture_report(context: RequirementsContext, project_root: Path) -> str:
-    evidence_graph = build_evidence_graph(project_root, context)
-    architecture = build_architecture_blueprint(project_root, context)
+def render_architecture_report(
+    context: RequirementsContext,
+    project_root: Path,
+    bundle: ProjectAnalysisBundle | None = None,
+) -> str:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    evidence_graph = bundle.evidence_graph
+    architecture = bundle.architecture
     dominant_languages = [f"- `{language}`" for language in evidence_graph.dominant_languages] or ["- none"]
     source_summary = [
         f"- Symbol graph files: `{len(evidence_graph.symbol_graph)}`",
@@ -149,6 +253,11 @@ def render_architecture_report(context: RequirementsContext, project_root: Path)
         f"- Config/runtime files: `{len(evidence_graph.config_runtime_graph)}`",
         f"- Tests mapped to code: `{len(evidence_graph.test_mapping)}`",
     ]
+    backend_counts: dict[str, int] = {}
+    for payload in evidence_graph.parser_summary.values():
+        backend = str(payload.get("backend", "unknown"))
+        backend_counts[backend] = backend_counts.get(backend, 0) + 1
+    parser_lines = [f"- `{backend}`: `{count}` files" for backend, count in sorted(backend_counts.items())] or ["- none"]
     lines = [
         "# Architecture",
         "",
@@ -158,7 +267,7 @@ def render_architecture_report(context: RequirementsContext, project_root: Path)
         "",
         "## Visual Overview",
         "```mermaid",
-        render_architecture_graph_mermaid(context, project_root),
+        render_architecture_graph_mermaid(context, project_root, bundle),
         "```",
         "",
         "## Dominant Languages",
@@ -166,6 +275,9 @@ def render_architecture_report(context: RequirementsContext, project_root: Path)
         "",
         "## Source Comprehension",
         *source_summary,
+        "",
+        "## Parser Backends",
+        *parser_lines,
         "",
         "### Example Symbol Surfaces",
     ]
@@ -199,6 +311,26 @@ def render_architecture_report(context: RequirementsContext, project_root: Path)
     lines.extend(
         [
             "",
+            "## Skill Materialization Plan",
+        ]
+    )
+    if architecture.materialization_plan:
+        for item in architecture.materialization_plan[:10]:
+            lines.append(f"### {item.domain}")
+            lines.append(f"- Decision: `{item.decision}`")
+            lines.append(f"- Parent skill: `{item.parent_skill_path}`")
+            if item.child_skill_paths:
+                lines.append("- Child skills:")
+                lines.extend(f"  - `{path}`" for path in item.child_skill_paths[:8])
+            if item.cross_links:
+                lines.append("- Cross-links:")
+                lines.extend(f"  - `{path}`" for path in item.cross_links[:8])
+            lines.append(f"- Rationale: {item.rationale}")
+            lines.append("")
+    else:
+        lines.extend(["- No materialization plan was inferred.", ""])
+    lines.extend(
+        [
             "## Architecture Domains",
         ]
     )
@@ -228,12 +360,17 @@ def render_architecture_report(context: RequirementsContext, project_root: Path)
     return "\n".join(lines)
 
 
-def _render_traceability_report_native(context: RequirementsContext, project_root: Path) -> str:
+def _render_traceability_report_native(
+    context: RequirementsContext,
+    project_root: Path,
+    bundle: ProjectAnalysisBundle | None = None,
+) -> str:
     requirements_path = context.requirements_path if context.requirements_path.exists() else None
     intent = parse_project_intent(project_root, requirements_path)
-    signals = analyze_codebase(project_root)
-    codebase_context = build_codebase_context(project_root, context)
-    architecture = build_architecture_blueprint(project_root, context)
+    bundle = bundle or _analysis_bundle(context, project_root)
+    signals = bundle.signals
+    codebase_context = bundle.codebase_context
+    architecture = bundle.architecture
     installed_skill_packs = installed_external_skills(project_root)
     ranked_skill_packs = ranked_external_skills(project_root).get("skills", [])
     enterprise_skill_packs = active_enterprise_skills(project_root)
@@ -388,11 +525,16 @@ def _render_traceability_report_native(context: RequirementsContext, project_roo
     return "\n".join(lines)
 
 
-def render_traceability_report(context: RequirementsContext, project_root: Path) -> str:
+def render_traceability_report(
+    context: RequirementsContext,
+    project_root: Path,
+    bundle: ProjectAnalysisBundle | None = None,
+) -> str:
     requirements_path = context.requirements_path if context.requirements_path.exists() else None
     intent = parse_project_intent(project_root, requirements_path)
-    signals = analyze_codebase(project_root)
-    codebase_context = build_codebase_context(project_root, context)
+    bundle = bundle or _analysis_bundle(context, project_root)
+    signals = bundle.signals
+    codebase_context = bundle.codebase_context
     return run_deep_text(
         "traceability explanation",
         (
@@ -404,17 +546,22 @@ def render_traceability_report(context: RequirementsContext, project_root: Path)
             f"Signals JSON:\n{json.dumps(signals.__dict__, indent=2)}\n\n"
             f"Detected domains JSON:\n{json.dumps([record.__dict__ for record in codebase_context.detected_domains], indent=2)}\n"
         ),
-        lambda: _render_traceability_report_native(context, project_root),
+        lambda: _render_traceability_report_native(context, project_root, bundle),
         project_root=project_root,
     )
 
 
-def _render_project_report_native(context: RequirementsContext, project_root: Path) -> str:
-    signals = analyze_codebase(project_root)
+def _render_project_report_native(
+    context: RequirementsContext,
+    project_root: Path,
+    bundle: ProjectAnalysisBundle | None = None,
+) -> str:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    signals = bundle.signals
     requirements_path = context.requirements_path if context.requirements_path.exists() else None
     features = extract_features(requirements_path, project_root)
-    codebase_context = build_codebase_context(project_root, context)
-    architecture = build_architecture_blueprint(project_root, context)
+    codebase_context = bundle.codebase_context
+    architecture = bundle.architecture
     ranked_skill_packs = ranked_external_skills(project_root).get("skills", [])
     domain_names = ", ".join(record.name for record in codebase_context.detected_domains)
     lines = [
@@ -511,11 +658,16 @@ def _render_project_report_native(context: RequirementsContext, project_root: Pa
     return "\n".join(lines)
 
 
-def render_project_report(context: RequirementsContext, project_root: Path) -> str:
-    signals = analyze_codebase(project_root)
+def render_project_report(
+    context: RequirementsContext,
+    project_root: Path,
+    bundle: ProjectAnalysisBundle | None = None,
+) -> str:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    signals = bundle.signals
     requirements_path = context.requirements_path if context.requirements_path.exists() else None
     features = extract_features(requirements_path, project_root)
-    codebase_context = build_codebase_context(project_root, context)
+    codebase_context = bundle.codebase_context
     return run_deep_text(
         "project report synthesis",
         (
@@ -524,7 +676,7 @@ def render_project_report(context: RequirementsContext, project_root: Path) -> s
             f"Features count: {len(features)}\n"
             f"Detected domains JSON:\n{json.dumps([record.__dict__ for record in codebase_context.detected_domains], indent=2)}"
         ),
-        lambda: _render_project_report_native(context, project_root),
+        lambda: _render_project_report_native(context, project_root, bundle),
         project_root=project_root,
     )
 
@@ -980,12 +1132,13 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
 
 def write_project_docs(context: RequirementsContext, project_root: Path) -> list[Path]:
     written = []
+    bundle = _analysis_bundle(context, project_root)
     agents = render_agents_contract(context, project_root)
-    analysis = render_analysis_report(context, project_root)
-    architecture = render_architecture_report(context, project_root)
+    analysis = render_analysis_report(context, project_root, bundle)
+    architecture = render_architecture_report(context, project_root, bundle)
     features = render_feature_inventory(context)
-    report = render_project_report(context, project_root)
-    traceability = render_traceability_report(context, project_root)
+    report = render_project_report(context, project_root, bundle)
+    traceability = render_traceability_report(context, project_root, bundle)
     written.append(ensure_file(project_root / "AGENTS.md", agents))
     written.append(ensure_file(project_root / "ANALYSIS.md", analysis))
     written.append(ensure_file(project_root / "ARCHITECTURE.md", architecture))

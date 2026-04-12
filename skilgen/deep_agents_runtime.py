@@ -6,7 +6,6 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from skilgen.agents.architecture_planner import build_architecture_blueprint
 from skilgen.agents.codebase_signals import analyze_codebase
 from skilgen.agents.evidence_graph import build_evidence_graph
 from skilgen.agents.feature_extractor import extract_features, extract_features_native
@@ -21,7 +20,9 @@ from skilgen.core.requirements import load_project_context, load_requirements
 from skilgen.core.validation import validate_project
 from skilgen.core.score import compute_skillgen_score
 from skilgen.generators.package import (
+    _analysis_bundle,
     project_doc_paths,
+    render_architecture_graph_html,
     render_architecture_graph_json,
     render_architecture_graph_mermaid,
     render_architecture_report,
@@ -293,15 +294,17 @@ def native_analyze_payload(project_root: str | Path, requirements: str | Path | 
 def native_architecture_payload(project_root: str | Path, requirements: str | Path | None = None) -> dict[str, Any]:
     root = Path(project_root).resolve()
     context = load_project_context(root, Path(requirements).resolve() if requirements is not None else None)
+    bundle = _analysis_bundle(context, root)
     return {
         "requirements_context": _serialize(context),
-        "evidence_graph": _serialize(build_evidence_graph(root, context)),
-        "architecture": _serialize(build_architecture_blueprint(root, context)),
+        "evidence_graph": _serialize(bundle.evidence_graph),
+        "architecture": _serialize(bundle.architecture),
         "graph_export": {
-            "mermaid": render_architecture_graph_mermaid(context, root),
-            "json": render_architecture_graph_json(context, root),
+            "mermaid": render_architecture_graph_mermaid(context, root, bundle),
+            "json": render_architecture_graph_json(context, root, bundle),
+            "html": render_architecture_graph_html(context, root, bundle),
         },
-        "report_markdown": render_architecture_report(context, root),
+        "report_markdown": render_architecture_report(context, root, bundle),
     }
 
 

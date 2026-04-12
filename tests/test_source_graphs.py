@@ -5,6 +5,7 @@ import unittest
 from skilgen.agents.source_graphs import (
     build_call_graph,
     build_config_runtime_graph,
+    build_parser_summary,
     build_symbol_graph,
     build_test_mapping,
 )
@@ -33,12 +34,16 @@ class SourceGraphTests(unittest.TestCase):
             calls = build_call_graph(root)
             runtime = build_config_runtime_graph(root)
             mapping = build_test_mapping(root)
+            parser_summary = build_parser_summary(root)
 
             self.assertIn("src/billing_service.py", symbols)
             self.assertIn("class BillingService", symbols["src/billing_service.py"])
             self.assertIn("function run_sync", symbols["src/billing_service.py"])
             self.assertIn("src/billing_service.py", calls)
             self.assertIn("notify_slack", calls["src/billing_service.py"])
+            self.assertIn("src/billing_service.py", parser_summary)
+            self.assertEqual(parser_summary["src/billing_service.py"]["language"], "python")
+            self.assertIn(parser_summary["src/billing_service.py"]["backend"], {"python-ast", "tree-sitter", "regex"})
             self.assertIn("pyproject.toml", runtime)
             self.assertIn("env:OPENAI_API_KEY", runtime["pyproject.toml"])
             self.assertIn("runtime:postgres", runtime["pyproject.toml"])

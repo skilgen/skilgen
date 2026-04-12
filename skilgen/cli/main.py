@@ -135,7 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     architecture.add_argument("--requirements")
     architecture.add_argument("--json", action="store_true", help="Emit the raw architecture payload as JSON.")
     architecture.add_argument("--graph-file", help="Write the architecture graph export to a file.")
-    architecture.add_argument("--graph-format", choices=["mermaid", "json"], default="mermaid")
+    architecture.add_argument("--graph-format", choices=["mermaid", "json", "html"], default="mermaid")
 
     decide = subparsers.add_parser("decide", help="Recommend whether to refresh skills, which skills to prioritize, and which run memory to load.")
     decide.add_argument("--project-root", default=".")

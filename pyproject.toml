@@ -34,10 +34,12 @@ dependencies = [
   "pypdf>=6.0.0",
   "python-pptx>=1.0.0",
   "PyYAML>=6.0.0",
+  "tree-sitter-language-pack>=0.10.0",
 ]
 
 [project.optional-dependencies]
 dev = ["build>=1.2", "twine>=5.1"]
+docs = ["mkdocs>=1.6", "mkdocs-material>=9.6"]
 
 [project.scripts]
 skilgen = "skilgen.cli.main:console_main"

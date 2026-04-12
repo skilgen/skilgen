@@ -175,8 +175,7 @@ def run_delivery(
             generated.extend(write_skills(context, root / "skills", selected_domains))
     if not dry_run:
         saved_context = load_project_context(root, Path(requirements_path).resolve() if requirements_path is not None else None)
-        saved_codebase_context = build_codebase_context(root, saved_context)
-        save_freshness_state(root, snapshot_freshness_state(root, saved_context, saved_codebase_context.domain_graph))
+        save_freshness_state(root, snapshot_freshness_state(root, saved_context, codebase_context.domain_graph))
         record_score_history(root, source="delivery")
     run_memory = finalize_run_memory(root, run_memory, generated, "completed")
     message = f"Finished delivery. Generated or refreshed {len(generated)} files."

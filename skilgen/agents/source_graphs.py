@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import ast
-import json
 import re
 from pathlib import Path
 
 from skilgen.agents.codebase_signals import _iter_code_files, _is_test, _language_for_path, _language_structure
+from skilgen.agents.language_parsers import parse_language_evidence
 
 
 CONFIG_RUNTIME_NAMES = {
@@ -87,10 +87,15 @@ def build_symbol_graph(project_root: Path) -> dict[str, list[str]]:
     root = project_root.resolve()
     graph: dict[str, list[str]] = {}
     for path in _iter_code_files(root):
+        parsed = parse_language_evidence(path)
         text = _safe_text(path)
-        if not text:
-            continue
-        symbols = _language_structure(path, text)
+        native_symbols = _language_structure(path, text)
+        if parsed.backend == "python-ast" and native_symbols:
+            symbols = native_symbols
+        elif parsed.symbols and native_symbols:
+            symbols = list(dict.fromkeys([*native_symbols, *parsed.symbols]))
+        else:
+            symbols = parsed.symbols or native_symbols
         if symbols:
             graph[path.relative_to(root).as_posix()] = symbols[:20]
     return graph
@@ -103,13 +108,32 @@ def build_call_graph(project_root: Path) -> dict[str, list[str]]:
         text = _safe_text(path)
         if not text:
             continue
-        if path.suffix.lower() == ".py":
+        parsed = parse_language_evidence(path)
+        if parsed.calls:
+            calls = parsed.calls
+        elif path.suffix.lower() == ".py":
             calls = _python_call_names(path)
         else:
             calls = _regex_call_names(text)
         if calls:
             graph[path.relative_to(root).as_posix()] = calls[:24]
     return graph
+
+
+def build_parser_summary(project_root: Path) -> dict[str, dict[str, object]]:
+    root = project_root.resolve()
+    summary: dict[str, dict[str, object]] = {}
+    for path in _iter_code_files(root):
+        relative = path.relative_to(root).as_posix()
+        parsed = parse_language_evidence(path)
+        summary[relative] = {
+            "language": parsed.language,
+            "backend": parsed.backend,
+            "symbol_count": len(parsed.symbols),
+            "call_count": len(parsed.calls),
+            "import_count": len(parsed.imports),
+        }
+    return summary
 
 
 def build_config_runtime_graph(project_root: Path) -> dict[str, list[str]]:
@@ -181,11 +205,13 @@ def summarize_source_graphs(project_root: Path) -> dict[str, object]:
     call_graph = build_call_graph(root)
     config_runtime_graph = build_config_runtime_graph(root)
     test_mapping = build_test_mapping(root)
+    parser_summary = build_parser_summary(root)
     return {
         "symbol_graph": symbol_graph,
         "call_graph": call_graph,
         "config_runtime_graph": config_runtime_graph,
         "test_mapping": test_mapping,
+        "parser_summary": parser_summary,
         "symbol_file_count": len(symbol_graph),
         "call_file_count": len(call_graph),
         "config_file_count": len(config_runtime_graph),

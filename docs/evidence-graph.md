@@ -10,6 +10,7 @@ Skilgen’s evidence graph is the bridge between deterministic extraction and De
 - call graph
 - config/runtime graph
 - test mapping
+- parser backend summary
 - requirements evidence
 - representative code evidence
 
@@ -26,3 +27,5 @@ skilgen architecture --project-root . --json
 ```
 
 and is also embedded into the native analysis payload for downstream tooling.
+
+The architecture payload also includes Mermaid, JSON, and HTML graph exports so teams can turn the same evidence into dashboards or visual architecture reviews.

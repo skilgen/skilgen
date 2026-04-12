@@ -467,6 +467,7 @@ def render_graph(specs: list[SkillSpec], architecture: ArchitectureBlueprint | N
         "",
     ]
     if architecture is not None:
+        skill_paths = {spec.path for spec in specs}
         lines.extend(
             [
                 "## Architecture Blueprint",
@@ -477,6 +478,22 @@ def render_graph(specs: list[SkillSpec], architecture: ArchitectureBlueprint | N
         if architecture.hotspots:
             lines.append("- Hotspots:")
             lines.extend(f"  - {item}" for item in architecture.hotspots[:5])
+        if architecture.materialization_plan:
+            lines.extend(["", "## Materialization Decisions"])
+            for item in architecture.materialization_plan:
+                lines.append(f"### {item.domain}")
+                lines.append(f"- decision: `{item.decision}`")
+                lines.append(f"- parent: `{item.parent_skill_path}`")
+                if item.child_skill_paths:
+                    lines.append("- child skills:")
+                    for child in item.child_skill_paths[:8]:
+                        marker = "materialized" if child in skill_paths else "planned"
+                        lines.append(f"  - `{child}` ({marker})")
+                if item.cross_links:
+                    lines.append("- cross-links:")
+                    for link in item.cross_links[:8]:
+                        lines.append(f"  - `{link}`")
+                lines.append(f"- rationale: {item.rationale}")
         lines.append("")
     for spec in specs:
         lines.append(f"## {spec.path}")

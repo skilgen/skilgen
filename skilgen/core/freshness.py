@@ -20,6 +20,7 @@ IGNORED_PARTS = {
 IGNORED_FILES = {
     "AGENTS.md",
     "ANALYSIS.md",
+    "ARCHITECTURE.md",
     "FEATURES.md",
     "REPORT.md",
     "TRACEABILITY.md",

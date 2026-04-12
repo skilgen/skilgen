@@ -254,6 +254,7 @@ Export graph views:
 skilgen architecture --project-root . --json
 skilgen architecture --project-root . --graph-format mermaid --graph-file architecture.mmd
 skilgen architecture --project-root . --graph-format json --graph-file architecture.json
+skilgen architecture --project-root . --graph-format html --graph-file architecture.html
 ```
 
 ## Diff And Freshness
@@ -419,6 +420,8 @@ Deeper guides:
 - [`docs/evidence-graph.md`](docs/evidence-graph.md)
 - [`docs/score.md`](docs/score.md)
 - [`docs/diff-and-autoupdate.md`](docs/diff-and-autoupdate.md)
+- [`docs/enterprise-governance.md`](docs/enterprise-governance.md)
+- [`RELEASE_NOTES_v0.6.0.md`](RELEASE_NOTES_v0.6.0.md)
 
 Examples:
 - [`examples/codebase-only/README.md`](examples/codebase-only/README.md)

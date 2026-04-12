@@ -4,7 +4,7 @@ from pathlib import Path
 
 from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence
 from skilgen.agents.relationship_mapper import build_import_graph
-from skilgen.agents.source_graphs import build_call_graph, build_config_runtime_graph, build_symbol_graph, build_test_mapping
+from skilgen.agents.source_graphs import build_call_graph, build_config_runtime_graph, build_parser_summary, build_symbol_graph, build_test_mapping
 from skilgen.core.models import EvidenceGraph, EvidenceItem, RequirementsContext
 
 
@@ -84,6 +84,7 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
     call_graph = build_call_graph(root)
     config_runtime_graph = build_config_runtime_graph(root)
     test_mapping = build_test_mapping(root)
+    parser_summary = build_parser_summary(root)
     source_items = [
         EvidenceItem(
             path=str(item["path"]),
@@ -129,6 +130,9 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
         recommendations.append("Use structural evidence such as functions, classes, divisions, and sections to refine skill boundaries.")
     if symbol_graph:
         recommendations.append("Use the symbol graph to align skill boundaries with real modules, classes, and callable surfaces.")
+    parser_backends = sorted({str(payload.get("backend", "unknown")) for payload in parser_summary.values()})
+    if parser_backends:
+        recommendations.append(f"Parser backends in use: {', '.join(parser_backends)}.")
     if test_mapping:
         recommendations.append("Keep skill guidance grounded in both implementation evidence and the nearest mapped tests.")
     return EvidenceGraph(
@@ -137,6 +141,7 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
         import_graph=import_graph,
         items=items,
         recommendations=recommendations,
+        parser_summary=parser_summary,
         symbol_graph=symbol_graph,
         call_graph=call_graph,
         config_runtime_graph=config_runtime_graph,
