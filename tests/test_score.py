@@ -137,6 +137,42 @@ class ScoreTests(unittest.TestCase):
             self.assertIn("trend", payload)
             self.assertIn("delta_from_previous", payload["trend"])
 
+    def test_coverage_ignores_non_code_repo_files(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "scan.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            (root / "README.md").write_text("# Project\n", encoding="utf-8")
+            (root / "docs").mkdir()
+            (root / "docs" / "notes.md").write_text("notes\n", encoding="utf-8")
+            (root / ".github").mkdir()
+            (root / ".github" / "workflow.yml").write_text("name: CI\n", encoding="utf-8")
+            (root / "skills" / "backend").mkdir(parents=True)
+            (root / "skills" / "backend" / "SKILL.md").write_text(
+                "\n".join(
+                    [
+                        "# Backend",
+                        "references:",
+                        "- ../MANIFEST.md",
+                        "## Check These Paths First",
+                        "- {{project_root}}/api/routes/scan.py",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "skills" / "backend" / "SUMMARY.md").write_text("Backend summary\n", encoding="utf-8")
+            (root / "skills" / "MANIFEST.md").write_text("# Manifest\n", encoding="utf-8")
+            (root / "skills" / "GRAPH.md").write_text("# Graph\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text("# Agents\n", encoding="utf-8")
+            (root / "FEATURES.md").write_text("# Features\n", encoding="utf-8")
+            (root / "TRACEABILITY.md").write_text("# Traceability\n", encoding="utf-8")
+
+            payload = compute_skillgen_score(root)
+
+            self.assertEqual(payload["subscores"]["coverage"]["source_file_count"], 1)
+            self.assertEqual(payload["subscores"]["coverage"]["mapped_file_count"], 1)
+            self.assertEqual(payload["subscores"]["coverage"]["coverage_ratio"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

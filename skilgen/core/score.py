@@ -5,6 +5,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
+from skilgen.agents.codebase_signals import CODE_EXTENSIONS, IGNORED_PARTS
 from skilgen.core.context import build_codebase_context
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state
 from skilgen.core.requirements import load_project_context
@@ -30,16 +31,15 @@ def _timestamp() -> str:
 
 
 def _iter_source_files(project_root: Path) -> list[Path]:
-    ignored_roots = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build", ".skilgen", "skills"}
-    ignored_files = {"AGENTS.md", "ANALYSIS.md", "FEATURES.md", "REPORT.md", "TRACEABILITY.md"}
+    ignored_roots = set(IGNORED_PARTS) | {"skills"}
     files: list[Path] = []
     for path in project_root.rglob("*"):
         if not path.is_file():
             continue
+        if path.suffix.lower() not in CODE_EXTENSIONS:
+            continue
         relative = path.relative_to(project_root)
         if set(relative.parts) & ignored_roots:
-            continue
-        if path.name in ignored_files:
             continue
         files.append(path)
     return sorted(files)

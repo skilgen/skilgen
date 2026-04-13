@@ -105,6 +105,7 @@ jobs:
           delta = round(float(score["score"]) - float(base_score["score"]), 2)
           direction = "↑" if delta > 0 else ("↓" if delta < 0 else "→")
           stale_count = len(diff.get("stale_skill_paths", []))
+          quality_gates = score.get("quality_gates", [])
           lines = [
               f"## Skilgen Score: {int(round(score['score']))}/100 ({direction}{abs(delta)})",
               "",
@@ -116,6 +117,10 @@ jobs:
           ]
           if stale_count:
               lines.extend(["", "Skilgen refreshed the stale skills for this PR before computing the final score."])
+          if quality_gates:
+              lines.extend(["", "### Active quality gates"])
+              for gate in quality_gates:
+                  lines.append(f"- `{gate['name']}`: {gate['reason']}")
           if score.get("trend", {}).get("regressions"):
               lines.extend(["", "### Domain regressions"])
               for item in score["trend"]["regressions"][:5]:
