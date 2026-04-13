@@ -152,7 +152,7 @@ def run_delivery(
             message = "Generating project docs so coding agents have clear context, traceability, and operating guidance."
             run_memory = append_run_event(root, run_memory, message)
             _emit(progress_callback, message)
-            generated.extend(write_project_docs(context, root))
+            generated.extend(write_project_docs(context, root, progress_callback=progress_callback))
     if "skills" in targets:
         if not explicit_domains and not decision.should_refresh:
             message = "Decision planner recommends reusing the current skills. Skipping skill regeneration for this run."
@@ -172,7 +172,7 @@ def run_delivery(
             message = "Materializing backend, frontend, requirements, and roadmap skills for coding agents."
             run_memory = append_run_event(root, run_memory, message)
             _emit(progress_callback, message)
-            generated.extend(write_skills(context, root / "skills", selected_domains))
+            generated.extend(write_skills(context, root / "skills", selected_domains, progress_callback=progress_callback))
     if not dry_run:
         saved_context = load_project_context(root, Path(requirements_path).resolve() if requirements_path is not None else None)
         save_freshness_state(root, snapshot_freshness_state(root, saved_context, codebase_context.domain_graph))

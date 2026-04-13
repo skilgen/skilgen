@@ -318,9 +318,22 @@ def native_architecture_payload(project_root: str | Path, requirements: str | Pa
 
 
 def native_dashboard_payload(project_root: str | Path, requirements: str | Path | None = None) -> dict[str, Any]:
+    return native_dashboard_payload_with_progress(project_root, requirements)
+
+
+def native_dashboard_payload_with_progress(
+    project_root: str | Path,
+    requirements: str | Path | None = None,
+    *,
+    progress_callback: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     root = Path(project_root).resolve()
     context = load_project_context(root, Path(requirements).resolve() if requirements is not None else None)
+    if progress_callback is not None:
+        progress_callback("Refreshing dashboard architecture and evidence graphs from the latest project snapshot.")
     bundle = _analysis_bundle(context, root)
+    if progress_callback is not None:
+        progress_callback("Computing dashboard score history, diff state, analytics, and agent readiness.")
     score_bundle = score_history_payload(root, limit=12)
     decision = build_agent_decision(root, context, bundle.codebase_context.domain_graph, bundle.codebase_context.skill_tree)
     payload: dict[str, Any] = {
@@ -357,6 +370,8 @@ def native_dashboard_payload(project_root: str | Path, requirements: str | Path 
             "json": render_architecture_graph_json(context, root, bundle),
         },
     }
+    if progress_callback is not None:
+        progress_callback("Rendering the final dashboard HTML surface with graphs, score, freshness, and capability context.")
     payload["html"] = render_dashboard_html(context, root, payload, bundle)
     return payload
 

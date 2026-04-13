@@ -6,6 +6,7 @@ from html import escape
 import json
 import re
 from pathlib import Path
+from typing import Callable
 
 from skilgen.agents import analyze_codebase, build_agent_decision, build_architecture_blueprint, build_evidence_graph, build_import_graph, fingerprint_project
 from skilgen.agents.feature_extractor import extract_features
@@ -26,6 +27,14 @@ class ProjectAnalysisBundle:
     codebase_context: object
     evidence_graph: object
     architecture: object
+
+
+ProgressCallback = Callable[[str], None]
+
+
+def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> None:
+    if progress_callback is not None:
+        progress_callback(message)
 
 
 def _trend_label(entry: dict[str, object], index: int, total: int) -> str:
@@ -2545,18 +2554,38 @@ def render_agents_contract(context: RequirementsContext, project_root: Path) -> 
     )
 
 
-def write_project_docs(context: RequirementsContext, project_root: Path) -> list[Path]:
+def write_project_docs(
+    context: RequirementsContext,
+    project_root: Path,
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> list[Path]:
     written = []
+    _emit_progress(progress_callback, "Assembling the evidence bundle that powers AGENTS.md, reports, and the dashboard.")
     bundle = _analysis_bundle(context, project_root)
+    _emit_progress(progress_callback, "Rendering AGENTS.md with repo contract, startup guidance, and operating rules.")
     agents = render_agents_contract(context, project_root)
+    _emit_progress(progress_callback, "Rendering ANALYSIS.md with the raw framework, evidence, and graph payloads.")
     analysis = render_analysis_report(context, project_root, bundle)
+    _emit_progress(progress_callback, "Rendering ARCHITECTURE.md with domain boundaries, parser signals, and materialization decisions.")
     architecture = render_architecture_report(context, project_root, bundle)
+    _emit_progress(progress_callback, "Rendering FEATURES.md so agents can see the current feature inventory.")
     features = render_feature_inventory(context)
+    _emit_progress(progress_callback, "Rendering REPORT.md with human-readable summary, hotspots, and starting points.")
     report = render_project_report(context, project_root, bundle)
+    _emit_progress(progress_callback, "Rendering TRACEABILITY.md so every generated artifact has evidence behind it.")
     traceability = render_traceability_report(context, project_root, bundle)
-    from skilgen.deep_agents_runtime import native_dashboard_payload
+    from skilgen.deep_agents_runtime import native_dashboard_payload_with_progress
 
-    dashboard_html = str(native_dashboard_payload(project_root, context.requirements_path if context.requirements_path.exists() else None)["html"])
+    _emit_progress(progress_callback, "Building skilgen-dashboard.html with score, architecture, evidence, dependency, and analytics views.")
+    dashboard_html = str(
+        native_dashboard_payload_with_progress(
+            project_root,
+            context.requirements_path if context.requirements_path.exists() else None,
+            progress_callback=progress_callback,
+        )["html"]
+    )
+    _emit_progress(progress_callback, "Writing AGENTS.md, ANALYSIS.md, ARCHITECTURE.md, FEATURES.md, REPORT.md, TRACEABILITY.md, and skilgen-dashboard.html to disk.")
     written.append(ensure_file(project_root / "AGENTS.md", agents))
     written.append(ensure_file(project_root / "ANALYSIS.md", analysis))
     written.append(ensure_file(project_root / "ARCHITECTURE.md", architecture))

@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+import threading
+import time
 
 from skilgen.api.server import run_server
 from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
@@ -47,6 +50,103 @@ from skilgen.external_skills import (
 
 def emit_progress(message: str) -> None:
     print(f"[skilgen] {message}", file=sys.stderr)
+
+
+@dataclass(frozen=True)
+class ProgressMilestone:
+    prefix: str
+    percent: int
+
+
+class CliProgressReporter:
+    _brand = "⬡⬢⬡"
+    _bar_width = 24
+    _frames = ("◜", "◠", "◝", "◞", "◡", "◟")
+    _milestones = (
+        ProgressMilestone("Starting delivery", 3),
+        ProgressMilestone("Model-backed runtime is not ready", 6),
+        ProgressMilestone("Reading your", 10),
+        ProgressMilestone("Scanning the repository", 18),
+        ProgressMilestone("Installed matching external skill packs", 24),
+        ProgressMilestone("Using already-installed external skill packs", 24),
+        ProgressMilestone("Ingested configured enterprise skill packs", 26),
+        ProgressMilestone("Using configured enterprise skill packs", 26),
+        ProgressMilestone("Activated recommended MCP connectors", 30),
+        ProgressMilestone("Building project context", 42),
+        ProgressMilestone("Inspecting the codebase", 54),
+        ProgressMilestone("Detected changes in", 64),
+        ProgressMilestone("No source changes were detected", 64),
+        ProgressMilestone("Decision planner selected domains", 72),
+        ProgressMilestone("Previewing the generated project docs", 78),
+        ProgressMilestone("Generating project docs", 78),
+        ProgressMilestone("Previewing the skill tree", 88),
+        ProgressMilestone("Materializing backend, frontend, requirements, and roadmap skills", 88),
+        ProgressMilestone("Decision planner recommends reusing", 88),
+        ProgressMilestone("Decision planner did not identify any concrete domains", 88),
+        ProgressMilestone("Finished delivery", 100),
+    )
+
+    def __init__(self) -> None:
+        self._last_percent = 0
+        self._current_message = ""
+        self._start_time = time.monotonic()
+        self._frame_index = 0
+        self._is_tty = sys.stderr.isatty()
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._spinner_thread: threading.Thread | None = None
+        if self._is_tty:
+            self._spinner_thread = threading.Thread(target=self._spin, name="skilgen-progress", daemon=True)
+            self._spinner_thread.start()
+
+    def emit(self, message: str) -> None:
+        with self._lock:
+            percent = self._infer_percent(message)
+            self._last_percent = max(self._last_percent, percent)
+            self._current_message = message
+            self._frame_index = (self._frame_index + 1) % len(self._frames)
+            line = self._render_line(self._last_percent, message, done=percent >= 100)
+        if self._is_tty:
+            print(f"\r{line}", file=sys.stderr, end="", flush=True)
+            if self._last_percent >= 100:
+                print(file=sys.stderr, flush=True)
+        else:
+            print(line, file=sys.stderr)
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._spinner_thread is not None:
+            self._spinner_thread.join(timeout=0.5)
+        if self._is_tty and self._current_message and self._last_percent < 100:
+            with self._lock:
+                print(f"\r{self._render_line(self._last_percent, self._current_message, done=True)}", file=sys.stderr)
+
+    def _infer_percent(self, message: str) -> int:
+        for milestone in self._milestones:
+            if message.startswith(milestone.prefix):
+                return milestone.percent
+        # Keep moving forward a bit for any uncatalogued progress messages.
+        return min(98, self._last_percent + 4)
+
+    def _elapsed(self) -> str:
+        elapsed = int(time.monotonic() - self._start_time)
+        minutes, seconds = divmod(elapsed, 60)
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def _render_line(self, percent: int, message: str, *, done: bool = False) -> str:
+        filled = round((percent / 100) * self._bar_width)
+        bar = "█" * filled + "░" * max(0, self._bar_width - filled)
+        frame = "●" if done else self._frames[self._frame_index]
+        return f"[skilgen {self._brand} {frame} {self._elapsed()}] {percent:>3}% |{bar}| {message}"
+
+    def _spin(self) -> None:
+        while not self._stop_event.wait(0.12):
+            with self._lock:
+                if not self._current_message:
+                    continue
+                self._frame_index = (self._frame_index + 1) % len(self._frames)
+                line = self._render_line(self._last_percent, self._current_message)
+            print(f"\r{line}", file=sys.stderr, end="", flush=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -698,38 +798,46 @@ def main() -> None:
 
     if args.command == "watch":
         root = Path(args.project_root).resolve()
+        watch_progress = CliProgressReporter()
         emit_progress(
             f"Starting watch mode with the {current_runtime_mode(root)} runtime. Skilgen will explain each refresh as changes are detected."
         )
-        runs = watch_delivery(
-            Path(args.requirements).resolve() if args.requirements else None,
-            root,
-            targets=targets,
-            domains=domains,
-            interval_seconds=args.interval,
-            cycles=args.cycles,
-            once=args.once,
-            progress_callback=emit_progress,
-        )
+        try:
+            runs = watch_delivery(
+                Path(args.requirements).resolve() if args.requirements else None,
+                root,
+                targets=targets,
+                domains=domains,
+                interval_seconds=args.interval,
+                cycles=args.cycles,
+                once=args.once,
+                progress_callback=watch_progress.emit,
+            )
+        finally:
+            watch_progress.stop()
         print(json.dumps({"runtime": current_runtime_mode(root), "runs": [[str(path) for path in generated] for generated in runs]}, indent=2))
         return
 
     root = Path(args.project_root).resolve()
     ensure_auto_update_worker(root, requirements_path=Path(args.requirements).resolve() if args.requirements else None)
     diagnostics = runtime_diagnostics(root)
-    emit_progress(
-        f"Starting delivery with the {current_runtime_mode(root)} runtime. This may take a bit while Skilgen builds project context and generates the final skill tree."
-    )
-    if diagnostics["runtime"] != "model_backed":
-        emit_progress(f"Model-backed runtime is not ready: {diagnostics['reason']}")
-    generated = run_delivery(
-        Path(args.requirements).resolve() if args.requirements else None,
-        root,
-        targets=targets,
-        domains=domains,
-        dry_run=args.dry_run,
-        progress_callback=emit_progress,
-    )
+    progress = CliProgressReporter()
+    try:
+        progress.emit(
+            f"Starting delivery with the {current_runtime_mode(root)} runtime. This may take a bit while Skilgen builds project context and generates the final skill tree."
+        )
+        if diagnostics["runtime"] != "model_backed":
+            progress.emit(f"Model-backed runtime is not ready: {diagnostics['reason']}")
+        generated = run_delivery(
+            Path(args.requirements).resolve() if args.requirements else None,
+            root,
+            targets=targets,
+            domains=domains,
+            dry_run=args.dry_run,
+            progress_callback=progress.emit,
+        )
+    finally:
+        progress.stop()
     print(
         json.dumps(
             {

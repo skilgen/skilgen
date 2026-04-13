@@ -276,6 +276,32 @@ class CliTests(unittest.TestCase):
             self.assertTrue(payload["generated_files"])
             self.assertTrue((root / "FEATURES.md").exists())
 
+    def test_deliver_emits_branded_progress_with_percentages(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "scan.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "deliver",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("[skilgen ⬡⬢⬡ ", result.stderr)
+            self.assertIn("00:", result.stderr)
+            self.assertIn("% |", result.stderr)
+            self.assertIn("Starting delivery", result.stderr)
+            self.assertIn("Building project context", result.stderr)
+            self.assertIn("Rendering AGENTS.md", result.stderr)
+            self.assertIn("Rendering the final dashboard HTML surface", result.stderr)
+
     def test_deliver_works_with_requirements_only(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

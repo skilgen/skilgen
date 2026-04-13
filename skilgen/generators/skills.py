@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from datetime import date
 from pathlib import Path
+from typing import Callable
 
 from skilgen.agents.architecture_planner import build_architecture_blueprint
 from skilgen.agents.codebase_signals import analyze_codebase
@@ -16,6 +17,12 @@ from skilgen.deep_agents_core import run_deep_text
 
 
 TODAY = date.today().isoformat()
+ProgressCallback = Callable[[str], None]
+
+
+def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> None:
+    if progress_callback is not None:
+        progress_callback(message)
 
 
 def _signal_bullets(items: list[str], fallback: str, limit: int = 5) -> list[str]:
@@ -647,18 +654,27 @@ def planned_skill_paths(context: RequirementsContext, output_dir: Path, selected
     return unique_paths
 
 
-def write_skills(context: RequirementsContext, output_dir: Path, selected_domains: set[str] | None = None) -> list[Path]:
+def write_skills(
+    context: RequirementsContext,
+    output_dir: Path,
+    selected_domains: set[str] | None = None,
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> list[Path]:
     selected = selected_domains or set()
+    _emit_progress(progress_callback, "Preparing the skill architecture so parent and child skill boundaries stay grounded in repo evidence.")
     signals = analyze_codebase(output_dir.parent)
     architecture = build_architecture_blueprint(output_dir.parent, context)
     specs = _select_specs(build_skill_specs(context, output_dir, architecture), selected)
     written: list[Path] = []
+    _emit_progress(progress_callback, f"Writing {len(specs)} skill files into the repo-local skill tree.")
     for spec in specs:
         target = output_dir / spec.path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(render_skill(spec, context.source_hash, output_dir.parent), encoding="utf-8")
         written.append(target)
 
+    _emit_progress(progress_callback, "Writing skills/MANIFEST.md and skills/GRAPH.md so agents can traverse the generated skill tree.")
     manifest = output_dir / "MANIFEST.md"
     manifest.write_text(render_manifest(specs, context.source_hash), encoding="utf-8")
     written.append(manifest)
@@ -679,6 +695,7 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
     }
     codebase_context = build_codebase_context(output_dir.parent, context)
     architecture_domains = {domain.name: domain for domain in architecture.domains}
+    _emit_progress(progress_callback, "Writing top-level domain summaries so each skill family explains its evidence and responsibilities.")
     for node in codebase_context.domain_graph.nodes:
         if node.parent_domain is not None or not node.skill_path:
             continue
@@ -703,6 +720,7 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
     if "frontend" in {node.name for node in codebase_context.domain_graph.nodes if node.parent_domain is None} and (
         not selected or "frontend" in selected
     ):
+        _emit_progress(progress_callback, "Writing frontend component summaries for reusable interface patterns.")
         component_summary = output_dir / "frontend" / "components" / "SUMMARY.md"
         component_summary.parent.mkdir(parents=True, exist_ok=True)
         component_summary.write_text(
@@ -714,6 +732,7 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
     if "backend" in {node.name for node in codebase_context.domain_graph.nodes if node.parent_domain is None} and signals.services and (
         not selected or "backend" in selected
     ):
+        _emit_progress(progress_callback, "Writing backend service summaries for deeper operational and implementation guidance.")
         service_summary = output_dir / "backend" / "services" / "SUMMARY.md"
         service_summary.parent.mkdir(parents=True, exist_ok=True)
         service_summary.write_text(
