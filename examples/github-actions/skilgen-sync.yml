@@ -75,4 +75,63 @@ jobs:
             skilgen init --project-root .
           fi
           skilgen diff --project-root . --json > /tmp/skilgen-diff.json
+          skilgen deliver --project-root .
           skilgen score --project-root . > /tmp/skilgen-score.json
+      - name: Post PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const diff = JSON.parse(fs.readFileSync("/tmp/skilgen-diff.json", "utf8"));
+            const score = JSON.parse(fs.readFileSync("/tmp/skilgen-score.json", "utf8"));
+            const staleCount = Array.isArray(diff.stale_skill_paths) ? diff.stale_skill_paths.length : 0;
+            const impacted = Array.isArray(diff.impacted_domains) ? diff.impacted_domains.slice(0, 6).join(", ") : "";
+            const gates = Array.isArray(score.quality_gates) ? score.quality_gates : [];
+            const gateLines = gates.length
+              ? gates.map((gate) => `- ${gate.name}: ${gate.reason}`).join("\n")
+              : "- none";
+            const body = [
+              "## Skilgen PR Check",
+              "",
+              `**Skilgen Score:** ${Number(score.score).toFixed(2)}/100`,
+              "",
+              `- Groundedness: ${Number(score.subscores.groundedness.score).toFixed(2)}/25`,
+              `- Coverage: ${Number(score.subscores.coverage.score).toFixed(2)}/25`,
+              `- Freshness: ${Number(score.subscores.freshness.score).toFixed(2)}/25`,
+              `- Structure: ${Number(score.subscores.structure.score).toFixed(2)}/25`,
+              `- Stale skills before refresh: ${staleCount}`,
+              `- Impacted domains before refresh: ${impacted || "none"}`,
+              "",
+              "**Quality gates**",
+              gateLines,
+              "",
+              staleCount > 0
+                ? "Skilgen refreshed stale skills for this PR before computing the final score."
+                : "No stale skills were detected before refresh.",
+            ].join("\n");
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+      - name: Enforce score threshold
+        env:
+          SKILGEN_SCORE_THRESHOLD: ${{ env.SKILGEN_SCORE_THRESHOLD }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          score_path = Path("/tmp/skilgen-score.json")
+          payload = json.loads(score_path.read_text(encoding="utf-8"))
+          score = float(payload["score"])
+          threshold = float(os.environ["SKILGEN_SCORE_THRESHOLD"])
+          if score < threshold:
+              print(f"Skilgen Score {score:.2f} is below the required threshold {threshold:.1f}.")
+              sys.exit(1)
+          print(f"Skilgen Score {score:.2f} meets the required threshold {threshold:.1f}.")
+          PY
