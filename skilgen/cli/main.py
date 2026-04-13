@@ -228,6 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     diff = subparsers.add_parser("diff", help="Show what changed since the last generation and which skills are stale.")
     diff.add_argument("--project-root", default=".")
+    diff.add_argument("--requirements")
     diff.add_argument("--json", action="store_true")
 
     architecture = subparsers.add_parser("architecture", help="Synthesize an evidence-backed architecture blueprint for the project.")
@@ -457,7 +458,7 @@ def main() -> None:
         print(json.dumps(analyze_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None), indent=2))
         return
     if args.command == "diff":
-        payload = diff_payload(Path(args.project_root).resolve())
+        payload = diff_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None)
         if args.json:
             print(json.dumps(payload, indent=2))
         elif payload["reason"] == "no_source_changes":

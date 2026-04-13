@@ -98,8 +98,9 @@ def decide_project(project_root: str | Path = ".", requirements: str | Path | No
     return decision_payload(Path(project_root).resolve(), resolved_requirements)
 
 
-def project_diff(project_root: str | Path = ".") -> dict[str, object]:
-    return diff_payload(Path(project_root).resolve())
+def project_diff(project_root: str | Path = ".", requirements: str | Path | None = None) -> dict[str, object]:
+    resolved_requirements = Path(requirements).resolve() if requirements is not None else None
+    return diff_payload(Path(project_root).resolve(), resolved_requirements)
 
 
 def parse_intent(requirements: str | Path) -> dict[str, object]:

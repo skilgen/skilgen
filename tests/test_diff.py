@@ -99,6 +99,33 @@ class DiffTests(unittest.TestCase):
             self.assertIn("reason", payload)
             self.assertIn("freshness_score", payload)
 
+    def test_diff_cli_accepts_requirements_argument(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requirements = root / "README.md"
+            requirements.write_text("# Repo\nbackend api\nfrontend route\n", encoding="utf-8")
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "users.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "diff",
+                    "--project-root",
+                    str(root),
+                    "--requirements",
+                    str(requirements),
+                    "--json",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertIn("reason", payload)
+            self.assertIn("git", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

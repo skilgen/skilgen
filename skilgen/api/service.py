@@ -547,5 +547,6 @@ def analytics_payload(project_root: str | Path, *, limit: int = 10) -> dict[str,
     return _with_api_meta(analytics_summary(Path(project_root).resolve(), limit=limit))
 
 
-def diff_payload(project_root: str | Path) -> dict[str, object]:
-    return _with_api_meta(compute_diff(Path(project_root).resolve()))
+def diff_payload(project_root: str | Path, requirements: str | Path | None = None) -> dict[str, object]:
+    resolved_requirements = Path(requirements).resolve() if requirements is not None else None
+    return _with_api_meta(compute_diff(Path(project_root).resolve(), resolved_requirements))

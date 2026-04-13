@@ -40,9 +40,10 @@ def _classify_changed_files(previous_hashes: dict[str, str], current_hashes: dic
     return changed
 
 
-def compute_diff(project_root: str | Path) -> dict[str, object]:
+def compute_diff(project_root: str | Path, requirements: str | Path | None = None) -> dict[str, object]:
     root = Path(project_root).resolve()
-    context = load_project_context(root, None)
+    resolved_requirements = Path(requirements).resolve() if requirements is not None else None
+    context = load_project_context(root, resolved_requirements)
     codebase_context = build_codebase_context(root, context)
     previous_state = load_freshness_state(root)
     current_state = snapshot_freshness_state(root, context, codebase_context.domain_graph)
