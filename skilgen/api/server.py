@@ -113,7 +113,14 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                 _json_response(self, 200, doctor_payload(query.get("project_root", ["."])[0]))
                 return
             if parsed.path == "/diff":
-                _json_response(self, 200, diff_payload(query.get("project_root", ["."])[0]))
+                _json_response(
+                    self,
+                    200,
+                    diff_payload(
+                        query.get("project_root", ["."])[0],
+                        query.get("requirements", [None])[0],
+                    ),
+                )
                 return
             if parsed.path == "/skills":
                 _json_response(

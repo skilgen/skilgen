@@ -56,6 +56,10 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertIn("retry_attempts", doctor)
                 self.assertIn("retry_base_delay_seconds", doctor)
 
+                diff = get_json(f"{base}/diff?{urlencode({'project_root': str(root), 'requirements': str(requirements)})}")
+                self.assertIn("reason", diff)
+                self.assertIn("git", diff)
+
                 skills_list = get_json(f"{base}/skills?{urlencode({'project_root': str(root), 'search': 'langsmith'})}")
                 self.assertTrue(skills_list["skills"])
 

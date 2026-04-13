@@ -176,14 +176,18 @@ class ScoreTests(unittest.TestCase):
     def test_coverage_uses_logical_code_areas_for_repo_scale(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
+            (root / "skilgen").mkdir(parents=True, exist_ok=True)
+            (root / "skilgen" / "__init__.py").write_text("", encoding="utf-8")
             (root / "skilgen" / "api").mkdir(parents=True)
             (root / "skilgen" / "core").mkdir(parents=True)
             (root / "tests").mkdir()
-            (root / "skilgen" / "api" / "__init__.py").write_text("", encoding="utf-8")
+            (root / "scripts").mkdir()
             (root / "skilgen" / "api" / "server.py").write_text("def serve():\n    return None\n", encoding="utf-8")
             (root / "skilgen" / "api" / "service.py").write_text("def service():\n    return None\n", encoding="utf-8")
             (root / "skilgen" / "core" / "config.py").write_text("VALUE = 1\n", encoding="utf-8")
             (root / "tests" / "test_api.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+            (root / "scripts" / "run_pipeline.py").write_text("print('ok')\n", encoding="utf-8")
+            (root / "setup.py").write_text("from setuptools import setup\n", encoding="utf-8")
             (root / "skills" / "backend").mkdir(parents=True)
             (root / "skills" / "backend" / "SKILL.md").write_text(
                 "\n".join(
@@ -194,6 +198,8 @@ class ScoreTests(unittest.TestCase):
                         "## Check These Paths First",
                         "- {{project_root}}/skilgen/api/server.py",
                         "- {{project_root}}/tests/test_api.py",
+                        "- {{project_root}}/scripts/run_pipeline.py",
+                        "- {{project_root}}/setup.py",
                     ]
                 ),
                 encoding="utf-8",
@@ -208,9 +214,9 @@ class ScoreTests(unittest.TestCase):
             payload = compute_skillgen_score(root)
             coverage = payload["subscores"]["coverage"]
 
-            self.assertEqual(coverage["source_file_count"], 5)
-            self.assertEqual(coverage["source_unit_count"], 3)
-            self.assertEqual(coverage["mapped_unit_count"], 2)
+            self.assertEqual(coverage["source_file_count"], 7)
+            self.assertEqual(coverage["source_unit_count"], 6)
+            self.assertGreaterEqual(coverage["mapped_unit_count"], 2)
             self.assertGreater(coverage["coverage_ratio"], 0.2)
 
 

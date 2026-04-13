@@ -39,6 +39,29 @@ def _top_file(paths: list[str], fallback: list[str], limit: int = 4) -> list[str
     return fallback
 
 
+def _python_package_root(project_root: Path) -> Path | None:
+    candidates = [
+        path
+        for path in sorted(project_root.iterdir())
+        if path.is_dir()
+        and (path / "__init__.py").exists()
+        and path.name not in {"tests", "docs", "scripts", "skills"}
+    ]
+    return candidates[0] if candidates else None
+
+
+def _relative_py_files(project_root: Path, directory: Path, *, top_level_only: bool = False, limit: int = 6) -> list[str]:
+    if not directory.exists():
+        return []
+    pattern = "*.py" if top_level_only else "**/*.py"
+    files = [
+        path.relative_to(project_root).as_posix()
+        for path in sorted(directory.glob(pattern))
+        if path.is_file()
+    ]
+    return files[:limit]
+
+
 def _confidence_value(raw: object) -> float:
     if isinstance(raw, (int, float)):
         return float(raw)
@@ -65,6 +88,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
     signals = analyze_codebase(root)
     requirements_path = requirements.requirements_path if requirements.requirements_path.exists() else None
     intent = parse_project_intent_native(root, requirements_path)
+    package_root = _python_package_root(root)
 
     backend_children = ["backend-api", "backend-testing"]
     if signals.backend_routes:
@@ -157,6 +181,111 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
                 skill_path="skills/frontend/SKILL.md",
             )
         )
+
+    platform_areas: list[tuple[str, str, list[str], list[str], str]] = []
+    if package_root is not None:
+        runtime_files = _relative_py_files(root, package_root, top_level_only=True)
+        agents_files = _relative_py_files(root, package_root / "agents")
+        cli_files = _relative_py_files(root, package_root / "cli")
+        core_files = _relative_py_files(root, package_root / "core")
+        generator_files = _relative_py_files(root, package_root / "generators")
+        script_files = _relative_py_files(root, root / "scripts")
+        if runtime_files:
+            if (root / "setup.py").exists():
+                runtime_files = [*runtime_files[:5], "setup.py"]
+            platform_areas.append(
+                (
+                    "platform-runtime",
+                    "Runtime orchestration guidance for package-level entrypoints, delivery orchestration, and repo-wide integration surfaces.",
+                    runtime_files,
+                    ["runtime orchestration", "repo-wide coordination", "package entrypoints"],
+                    "skills/platform/runtime/SKILL.md",
+                )
+            )
+        if agents_files:
+            platform_areas.append(
+                (
+                    "platform-agents",
+                    "Planner and inference guidance for domain graphing, architecture synthesis, and decision intelligence.",
+                    agents_files,
+                    ["domain inference", "architecture synthesis", "agent planning logic"],
+                    "skills/platform/agents/SKILL.md",
+                )
+            )
+        if cli_files:
+            platform_areas.append(
+                (
+                    "platform-cli",
+                    "Operator-facing CLI guidance for command surfaces, progress reporting, and repo-local execution flows.",
+                    cli_files,
+                    ["command surfaces", "operator UX", "progress orchestration"],
+                    "skills/platform/cli/SKILL.md",
+                )
+            )
+        if core_files:
+            platform_areas.append(
+                (
+                    "platform-core",
+                    "Shared core guidance for scoring, freshness, diffing, context loading, and validation primitives.",
+                    core_files,
+                    ["shared models", "freshness and scoring", "validation primitives"],
+                    "skills/platform/core/SKILL.md",
+                )
+            )
+        if generator_files:
+            platform_areas.append(
+                (
+                    "platform-generators",
+                    "Artifact materialization guidance for docs, skills, dashboards, and output rendering flows.",
+                    generator_files,
+                    ["artifact rendering", "materialization flow", "repo-local outputs"],
+                    "skills/platform/generators/SKILL.md",
+                )
+            )
+        if script_files:
+            platform_areas.append(
+                (
+                    "platform-scripts",
+                    "Maintenance automation guidance for release helpers and repo scripts that support the generation pipeline.",
+                    script_files,
+                    ["maintenance automation", "release helpers", "pipeline scripts"],
+                    "skills/platform/scripts/SKILL.md",
+                )
+            )
+
+    if len(platform_areas) >= 2:
+        platform_children = [name for name, *_ in platform_areas]
+        platform_key_files: list[str] = []
+        for _, _, files, _, _ in platform_areas:
+            platform_key_files.extend(files[:2])
+        platform_parent_files = list(dict.fromkeys(platform_key_files))[:8]
+        if not platform_parent_files:
+            platform_parent_files = [f"{package_root.name}/"] if package_root is not None else ["scripts/"]
+        nodes.append(
+            _node(
+                "platform",
+                summary="Tooling and runtime domain covering Skilgen's internal engine, CLI, planners, generators, and maintenance scripts.",
+                confidence=0.9,
+                key_files=platform_parent_files,
+                key_patterns=["tooling platform", "generation engine", "repo-local operating surface"],
+                child_domains=platform_children,
+                related_domains=["requirements", "backend", "roadmap", "frontend"],
+                skill_path="skills/platform/SKILL.md",
+            )
+        )
+        for name, summary, key_files, key_patterns, skill_path in platform_areas:
+            nodes.append(
+                _node(
+                    name,
+                    summary=summary,
+                    confidence=0.84,
+                    key_files=key_files,
+                    key_patterns=key_patterns,
+                    parent_domain="platform",
+                    related_domains=["requirements", "roadmap", "backend"],
+                    skill_path=skill_path,
+                )
+            )
 
     nodes.append(
         _node(

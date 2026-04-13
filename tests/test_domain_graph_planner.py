@@ -8,6 +8,36 @@ from skilgen.core.requirements import load_requirements
 
 
 class DomainGraphPlannerTests(unittest.TestCase):
+    def test_build_domain_graph_infers_platform_domains_for_tool_repo_shapes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requirements = root / "README.md"
+            requirements.write_text("Skilgen style tooling repo with backend api and planning.\n", encoding="utf-8")
+            (root / "skilgen").mkdir()
+            (root / "skilgen" / "__init__.py").write_text("", encoding="utf-8")
+            (root / "skilgen" / "sdk.py").write_text("VALUE = 1\n", encoding="utf-8")
+            for area, file_name in [
+                ("agents", "planner.py"),
+                ("core", "score.py"),
+                ("cli", "main.py"),
+                ("generators", "skills.py"),
+            ]:
+                directory = root / "skilgen" / area
+                directory.mkdir(parents=True)
+                (directory / file_name).write_text("def run():\n    return None\n", encoding="utf-8")
+            (root / "scripts").mkdir()
+            (root / "scripts" / "run_requirements_pipeline.py").write_text("print('ok')\n", encoding="utf-8")
+
+            graph = build_domain_graph(root, load_requirements(requirements))
+
+            graph_names = {node.name for node in graph.nodes}
+            self.assertIn("platform", graph_names)
+            self.assertIn("platform-agents", graph_names)
+            self.assertIn("platform-core", graph_names)
+            self.assertIn("platform-cli", graph_names)
+            self.assertIn("platform-generators", graph_names)
+            self.assertIn("platform-scripts", graph_names)
+
     def test_build_domain_graph_passes_code_evidence_to_llm_prompt(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

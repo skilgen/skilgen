@@ -41,6 +41,7 @@ from skilgen.sdk import (
     rank_skill_sources,
     recommend_project_mcp_connectors,
     project_analytics,
+    project_diff,
     project_report,
     project_score,
     project_status,
@@ -96,6 +97,10 @@ class SdkTests(unittest.TestCase):
             decision = decide_project(root, requirements)
             self.assertIn("should_refresh", decision)
             self.assertTrue(decision["prioritized_skill_paths"])
+
+            diff = project_diff(root, requirements)
+            self.assertIn("reason", diff)
+            self.assertIn("git", diff)
 
             preview = preview_project(requirements, root, targets=("docs",))
             self.assertTrue(preview["planned_files"])
