@@ -7,6 +7,8 @@ Copy [`skilgen-sync.yml`](skilgen-sync.yml) into `.github/workflows/` in your ow
 - post a PR comment with freshness and score context
 - fail the PR if the score drops below your threshold
 
+The example template installs the published `skilgen` package with `python -m pip install skilgen`, which is the right behavior for downstream repositories using Skilgen in CI.
+
 ## Secrets
 
 Add one of these as a repository secret if you want the model-backed runtime in CI:

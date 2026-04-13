@@ -71,16 +71,26 @@ jobs:
             python -m skilgen.cli.main init --project-root .
           fi
       - name: Compute diff and score for the PR branch
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HUGGINGFACEHUB_API_TOKEN: ${{ secrets.HUGGINGFACEHUB_API_TOKEN }}
         run: |
           python -m skilgen.cli.main diff --project-root . --json > /tmp/skilgen-diff.json
+          python -m skilgen.cli.main deliver --project-root .
           python -m skilgen.cli.main score --project-root . > /tmp/skilgen-score.json
       - name: Compute score for the base branch
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HUGGINGFACEHUB_API_TOKEN: ${{ secrets.HUGGINGFACEHUB_API_TOKEN }}
         run: |
           git fetch origin "${{ github.base_ref }}"
           git worktree add "$RUNNER_TEMP/skilgen-base" "origin/${{ github.base_ref }}"
           if [ ! -f "$RUNNER_TEMP/skilgen-base/skilgen.yml" ]; then
             python -m skilgen.cli.main init --project-root "$RUNNER_TEMP/skilgen-base"
           fi
+          python -m skilgen.cli.main deliver --project-root "$RUNNER_TEMP/skilgen-base"
           python -m skilgen.cli.main score --project-root "$RUNNER_TEMP/skilgen-base" > /tmp/skilgen-base-score.json
       - name: Build PR comment
         run: |
@@ -102,10 +112,10 @@ jobs:
               f"- Coverage: {score['subscores']['coverage']['score']}/25",
               f"- Freshness: {score['subscores']['freshness']['score']}/25",
               f"- Structure: {score['subscores']['structure']['score']}/25",
-              f"- Stale skills from this PR: {stale_count}",
+              f"- Stale skills before refresh: {stale_count}",
           ]
           if stale_count:
-              lines.extend(["", "Run `skilgen deliver` to refresh stale skills before merging."])
+              lines.extend(["", "Skilgen refreshed the stale skills for this PR before computing the final score."])
           if score.get("trend", {}).get("regressions"):
               lines.extend(["", "### Domain regressions"])
               for item in score["trend"]["regressions"][:5]:
