@@ -173,6 +173,46 @@ class ScoreTests(unittest.TestCase):
             self.assertEqual(payload["subscores"]["coverage"]["mapped_file_count"], 1)
             self.assertEqual(payload["subscores"]["coverage"]["coverage_ratio"], 1.0)
 
+    def test_coverage_uses_logical_code_areas_for_repo_scale(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "skilgen" / "api").mkdir(parents=True)
+            (root / "skilgen" / "core").mkdir(parents=True)
+            (root / "tests").mkdir()
+            (root / "skilgen" / "api" / "__init__.py").write_text("", encoding="utf-8")
+            (root / "skilgen" / "api" / "server.py").write_text("def serve():\n    return None\n", encoding="utf-8")
+            (root / "skilgen" / "api" / "service.py").write_text("def service():\n    return None\n", encoding="utf-8")
+            (root / "skilgen" / "core" / "config.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (root / "tests" / "test_api.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+            (root / "skills" / "backend").mkdir(parents=True)
+            (root / "skills" / "backend" / "SKILL.md").write_text(
+                "\n".join(
+                    [
+                        "# Backend",
+                        "references:",
+                        "- ../MANIFEST.md",
+                        "## Check These Paths First",
+                        "- {{project_root}}/skilgen/api/server.py",
+                        "- {{project_root}}/tests/test_api.py",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "skills" / "backend" / "SUMMARY.md").write_text("Backend summary\n", encoding="utf-8")
+            (root / "skills" / "MANIFEST.md").write_text("# Manifest\n", encoding="utf-8")
+            (root / "skills" / "GRAPH.md").write_text("# Graph\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text("# Agents\n", encoding="utf-8")
+            (root / "FEATURES.md").write_text("# Features\n", encoding="utf-8")
+            (root / "TRACEABILITY.md").write_text("# Traceability\n", encoding="utf-8")
+
+            payload = compute_skillgen_score(root)
+            coverage = payload["subscores"]["coverage"]
+
+            self.assertEqual(coverage["source_file_count"], 5)
+            self.assertEqual(coverage["source_unit_count"], 3)
+            self.assertEqual(coverage["mapped_unit_count"], 2)
+            self.assertGreater(coverage["coverage_ratio"], 0.2)
+
 
 if __name__ == "__main__":
     unittest.main()

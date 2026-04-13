@@ -32,3 +32,5 @@ That means:
 - the PR comment still tells you what was stale before refresh
 - the enforced threshold is evaluated against the refreshed skill tree
 - the score gate does not fail just because the repo had not been regenerated yet
+
+If your repo has a planning document such as `docs/Skilgen_PRD_v2.docx`, `requirements.md`, or `README.md`, the template will automatically pass it as `--requirements` during `diff` and `deliver` so the score reflects the full planning + code context instead of codebase-only mode.

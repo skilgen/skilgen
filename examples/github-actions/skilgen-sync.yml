@@ -10,6 +10,7 @@ on:
 
 env:
   SKILGEN_SCORE_THRESHOLD: "60"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   sync:
@@ -18,8 +19,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install Skilgen
@@ -35,7 +36,15 @@ jobs:
           if [ ! -f skilgen.yml ]; then
             skilgen init --project-root .
           fi
-          skilgen deliver --project-root .
+          if [ -f docs/Skilgen_PRD_v2.docx ]; then
+            skilgen deliver --project-root . --requirements docs/Skilgen_PRD_v2.docx
+          elif [ -f requirements.md ]; then
+            skilgen deliver --project-root . --requirements requirements.md
+          elif [ -f README.md ]; then
+            skilgen deliver --project-root . --requirements README.md
+          else
+            skilgen deliver --project-root .
+          fi
       - name: Commit refreshed outputs
         run: |
           if git diff --quiet -- AGENTS.md ANALYSIS.md ARCHITECTURE.md FEATURES.md REPORT.md TRACEABILITY.md skills; then
@@ -55,10 +64,10 @@ jobs:
       pull-requests: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install Skilgen
@@ -74,11 +83,22 @@ jobs:
           if [ ! -f skilgen.yml ]; then
             skilgen init --project-root .
           fi
-          skilgen diff --project-root . --json > /tmp/skilgen-diff.json
-          skilgen deliver --project-root .
+          if [ -f docs/Skilgen_PRD_v2.docx ]; then
+            skilgen diff --project-root . --requirements docs/Skilgen_PRD_v2.docx --json > /tmp/skilgen-diff.json
+            skilgen deliver --project-root . --requirements docs/Skilgen_PRD_v2.docx
+          elif [ -f requirements.md ]; then
+            skilgen diff --project-root . --requirements requirements.md --json > /tmp/skilgen-diff.json
+            skilgen deliver --project-root . --requirements requirements.md
+          elif [ -f README.md ]; then
+            skilgen diff --project-root . --requirements README.md --json > /tmp/skilgen-diff.json
+            skilgen deliver --project-root . --requirements README.md
+          else
+            skilgen diff --project-root . --json > /tmp/skilgen-diff.json
+            skilgen deliver --project-root .
+          fi
           skilgen score --project-root . > /tmp/skilgen-score.json
       - name: Post PR comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require("fs");

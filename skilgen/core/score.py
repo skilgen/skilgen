@@ -45,6 +45,19 @@ def _iter_source_files(project_root: Path) -> list[Path]:
     return sorted(files)
 
 
+def _coverage_unit(relative_path: str) -> str:
+    parts = Path(relative_path).parts
+    if not parts:
+        return relative_path
+    if len(parts) == 1:
+        return parts[0]
+    if parts[0] == "skilgen":
+        return parts[0] if len(parts) == 2 else "/".join(parts[:2])
+    if parts[0] in {"tests", "test"}:
+        return parts[0]
+    return "/".join(parts[:2])
+
+
 def _skill_files(project_root: Path) -> list[Path]:
     skills_root = project_root / "skills"
     if not skills_root.exists():
@@ -272,8 +285,11 @@ def _coverage_score(project_root: Path) -> tuple[float, dict[str, object]]:
             "max_score": 25,
             "source_file_count": 0,
             "mapped_file_count": 0,
+            "source_unit_count": 0,
+            "mapped_unit_count": 0,
             "coverage_ratio": 1.0,
             "unmapped_files": [],
+            "unmapped_units": [],
         }
 
     context = load_project_context(project_root, None)
@@ -286,15 +302,21 @@ def _coverage_score(project_root: Path) -> tuple[float, dict[str, object]]:
         if key_file in source_paths
     }
     unmapped_files = sorted(source_paths - mapped_files)
-    ratio = len(mapped_files) / max(1, len(source_paths))
+    source_units = {_coverage_unit(path) for path in source_paths}
+    mapped_units = {_coverage_unit(path) for path in mapped_files}
+    unmapped_units = sorted(source_units - mapped_units)
+    ratio = len(mapped_units) / max(1, len(source_units))
     score = round(25 * ratio, 2)
     return score, {
         "score": score,
         "max_score": 25,
         "source_file_count": len(source_paths),
         "mapped_file_count": len(mapped_files),
+        "source_unit_count": len(source_units),
+        "mapped_unit_count": len(mapped_units),
         "coverage_ratio": round(ratio, 4),
         "unmapped_files": unmapped_files[:12],
+        "unmapped_units": unmapped_units[:12],
     }
 
 
