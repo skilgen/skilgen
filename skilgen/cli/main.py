@@ -573,14 +573,32 @@ def main() -> None:
         output_path = Path(args.output).resolve() if args.output else (root / "skilgen-dashboard.html")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(str(payload["html"]), encoding="utf-8")
+        architecture = payload.get("architecture")
+        headline = f"Dashboard for {root.name}"
+        if isinstance(architecture, dict):
+            headline = str(architecture.get("headline") or headline)
+        score_info = payload.get("score")
+        score_value = 0
+        if isinstance(score_info, dict):
+            score_value = score_info.get("score", 0)
+        elif isinstance(score_info, (int, float)):
+            score_value = score_info
+        diff_payload = payload.get("diff")
+        stale_skill_count = 0
+        if isinstance(diff_payload, dict):
+            stale_skill_count = len(diff_payload.get("stale_skill_paths", []))
+        graph_payload = payload.get("graph_export")
+        if not isinstance(graph_payload, dict):
+            graph_payload = payload.get("graphs")
+        graph_panels = sorted(graph_payload.keys()) if isinstance(graph_payload, dict) else []
         print(
             json.dumps(
                 {
                     "dashboard_file": str(output_path),
-                    "headline": payload["architecture"]["headline"],
-                    "score": payload["score"]["score"],
-                    "stale_skill_count": len(payload["diff"]["stale_skill_paths"]),
-                    "graph_panels": sorted(payload["graph_export"].keys()),
+                    "headline": headline,
+                    "score": score_value,
+                    "stale_skill_count": stale_skill_count,
+                    "graph_panels": graph_panels,
                 },
                 indent=2,
             )

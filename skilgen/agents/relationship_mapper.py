@@ -69,8 +69,8 @@ def build_import_graph(project_root: Path) -> dict[str, list[str]]:
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", SyntaxWarning)
-                    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            except SyntaxError:
+                    tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
+            except (SyntaxError, OSError, UnicodeDecodeError):
                 graph[rel] = imports
                 continue
             for node in ast.walk(tree):

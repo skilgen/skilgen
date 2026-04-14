@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Skilgen Dashboard · claude-agent-sdk-python</title>
+<link rel='preconnect' href='https://fonts.googleapis.com'>
+<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>
+<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap' rel='stylesheet'>
+<script src='https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js' integrity='sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i' crossorigin='anonymous'></script>
+<script src='https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js' integrity='sha384-SM54CE5h+qdDI046d2Y5ym7wq1kq4uxcQ1cqGq5/+5jrE5tPLeDJSq711Q8sIska' crossorigin='anonymous'></script>
+<script src='https://unpkg.com/vis-network/standalone/umd/vis-network.min.js' integrity='sha384-m/pqkSdIs50f1nWlv062s9HmCAygFne+xY7uot2M8ZVijdcC+c/n97dFCfAZnKwO' crossorigin='anonymous'></script>
+<style>:root{--bg:#050608;--bg-soft:#090b0f;--panel:#10141b;--panel-strong:#0d1117;--line:rgba(255,255,255,.08);--line-strong:rgba(239,211,122,.18);--text:#f6f7fb;--muted:#98a1b2;--gold:#efd37a;--gold-strong:#f8df8e;--white:#f3f4f8;--good:#8fd9a8;--warning:#ffb86b;--danger:#ff7a7a;--shadow:0 28px 90px rgba(0,0,0,.42);}
+*{box-sizing:border-box}html,body{min-height:100%}body{margin:0;font-family:'Sora','Inter',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:radial-gradient(circle at left top, rgba(239,211,122,.12), transparent 28%),radial-gradient(circle at right top, rgba(243,244,248,.07), transparent 22%),var(--bg);color:var(--text)}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.18;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='156' viewBox='0 0 180 156'%3E%3Cg fill='none' stroke='%23efd37a' stroke-opacity='.17' stroke-width='2.6'%3E%3Cpath d='M45 3l39 19.5v39L45 81 6 61.5v-39z'/%3E%3Cpath d='M135 3l39 19.5v39L135 81 96 61.5v-39z'/%3E%3Cpath d='M90 75l39 19.5v39L90 153 51 133.5v-39z'/%3E%3C/g%3E%3C/svg%3E");background-size:250px 216px;background-position:center top}
+a{color:inherit}.page{max-width:1500px;margin:0 auto;padding:24px 24px 64px}.hero-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(360px,.85fr);gap:24px;align-items:stretch}.panel,.hero-panel{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid var(--line);border-radius:30px;box-shadow:var(--shadow);backdrop-filter:blur(14px)}
+.hero-panel{padding:30px;position:relative;overflow:hidden}.hero-panel::after{content:'';position:absolute;right:-80px;bottom:-80px;width:260px;height:260px;background:radial-gradient(circle, rgba(239,211,122,.16), transparent 68%)}.hero-left{display:grid;gap:22px}.brand-wrap{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap}.brand-lockup{display:grid;gap:10px;min-width:0}
+.skilgen-mark{width:320px;max-width:100%;height:auto;display:block;filter:drop-shadow(0 20px 46px rgba(0,0,0,.42))}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.18em;font-size:.72rem;font-weight:700}.repo-chip{display:inline-flex;align-items:center;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);color:var(--muted);font-size:.88rem;max-width:min(100%,340px);overflow-wrap:anywhere;word-break:break-word;flex:0 1 340px}
+.hero-copy h1{margin:0;font-size:clamp(2.2rem,4vw,4.2rem);line-height:.94;max-width:12ch}.hero-note{margin:14px 0 0;max-width:54ch;color:#d8dde7;font-size:1.02rem;line-height:1.55;font-style:italic}.hero-context{margin:12px 0 0;max-width:64ch;color:var(--muted);font-size:1rem;line-height:1.55;overflow-wrap:anywhere}.hero-context strong{overflow-wrap:anywhere}.hero-actions{display:flex;gap:10px;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);font-size:.84rem}.pill.good{border-color:rgba(143,217,168,.3);color:var(--good)}.pill.warning{border-color:rgba(255,184,107,.32);color:var(--warning)}.hero-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.metric-card{padding:18px;border-radius:22px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.02))}
+.metric-eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.16em;color:var(--gold)}.metric-value{font-size:2rem;font-weight:700;margin-top:10px}.metric-subtitle{margin-top:8px;color:var(--muted);font-size:.92rem;line-height:1.4}.hero-right{display:grid;gap:18px}.score-top{display:grid;gap:18px;justify-items:center}.score-ring{width:220px;height:220px;border-radius:50%;background:conic-gradient(var(--gold) 0% calc(var(--score) * 1%), rgba(255,255,255,.08) 0% 100%);display:grid;place-items:center;position:relative}
+.score-ring::before{content:'';width:164px;height:164px;border-radius:50%;background:var(--bg-soft);border:1px solid rgba(255,255,255,.08)}.score-ring-content{position:absolute;text-align:center}.score-ring-content strong{display:block;font-size:3.2rem;line-height:1}.score-ring-content span{display:block;color:var(--muted);text-transform:uppercase;letter-spacing:.18em;font-size:.76rem;margin-top:8px}.score-rail{display:grid;grid-template-columns:1fr 1fr;gap:14px}.stat-card{padding:16px 18px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.03)}.stat-label{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}.stat-value{font-size:1.8rem;font-weight:700;margin-top:10px}.stat-note{margin-top:6px;color:var(--muted);font-size:.9rem;line-height:1.35}
+.layout{display:grid;gap:24px;margin-top:24px}.panel{padding:24px}.panel h2{margin:0;font-size:1.1rem}.section-copy{margin:8px 0 0;color:var(--muted);line-height:1.5}.score-board{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:24px}.subscore-stack{display:grid;gap:12px;margin-top:20px}.subscore-row{display:grid;grid-template-columns:120px 1fr 70px;gap:12px;align-items:center}.subscore-label{font-size:.92rem;color:#e4e8ef}.subscore-bar{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}.subscore-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--gold),#fff3be)}.subscore-value{text-align:right;color:var(--muted);font-size:.86rem}
+.quality-gates{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:12px}.quality-gates li{padding:14px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.03)}.quality-gates li p{margin:8px 0 0;color:var(--muted)}.quality-gates li span{float:right;color:var(--gold)}.trend-shell{display:grid;gap:16px}.sparkline{display:flex;align-items:flex-end;gap:10px;height:152px;padding:18px;border-radius:22px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.spark-point{flex:1;border-radius:18px 18px 8px 8px;background:linear-gradient(180deg,var(--gold),rgba(239,211,122,.18));position:relative;min-height:18px}.spark-point span{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);font-size:.75rem;color:var(--muted)}.spark-empty{color:var(--muted)}.trend-ticks{display:flex;gap:10px;justify-content:space-between;color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.12em}
+.legend{display:flex;flex-wrap:wrap;gap:10px}.graph-shell{display:grid;gap:18px}.graph-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-end;flex-wrap:wrap}.graph-tabs{display:flex;gap:10px;flex-wrap:wrap}.graph-tab{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600}.graph-tab.active{background:rgba(239,211,122,.14);border-color:rgba(239,211,122,.35);color:var(--gold-strong)}.graph-frame{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(320px,.55fr);gap:18px;align-items:stretch}
+.graph-panel{display:none;height:100%}.graph-panel.active{display:block;height:100%}.graph-stage{height:600px;border-radius:26px;border:1px solid var(--line-strong);background:linear-gradient(180deg,#0a0d13,#06080d);padding:16px;overflow:hidden}.graph-aside{padding:20px;border-radius:26px;border:1px solid rgba(255,255,255,.07);background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.02));display:grid;align-content:start;gap:16px;min-width:0}.graph-copy{display:none;gap:16px;min-width:0}.graph-copy.active{display:grid}.graph-aside h3{margin:0;font-size:1rem}.graph-aside p{margin:0;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}.graph-aside ul{margin:0;padding-left:18px;color:#dce1ea}.graph-detail{padding:16px;border-radius:18px;border:1px solid rgba(239,211,122,.14);background:rgba(255,255,255,.03);display:grid;gap:10px;min-width:0}.graph-detail h4{margin:0;font-size:1rem;color:var(--text);overflow-wrap:anywhere}.graph-detail p{margin:0;color:var(--muted);overflow-wrap:anywhere}.graph-detail-meta{display:grid;gap:8px;list-style:none;padding:0;margin:0}.graph-detail-meta li{padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);list-style:none;color:#dce1ea;overflow-wrap:anywhere}
+.sunburst-canvas,.sankey-canvas,.network-canvas{width:100%;height:100%;min-height:540px;border-radius:20px;position:relative;overflow:hidden;background:radial-gradient(circle at top, rgba(239,211,122,.08), transparent 38%), rgba(255,255,255,.02)}.network-canvas canvas{width:100%!important;height:100%!important;display:block}.graph-stage svg{width:100%;height:100%;display:block}.graph-legend{list-style:none;padding:0;margin:0;display:grid;gap:10px}.graph-legend li{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);min-width:0}.graph-legend li strong,.graph-legend li span{overflow-wrap:anywhere;word-break:break-word}.graph-legend li span{color:var(--muted);font-size:.88rem}
+.dashboard-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}.list{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:10px}.list li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.list li div{display:grid;gap:4px}.list li span{color:var(--muted)}.change-type{text-transform:uppercase;font-size:.74rem;letter-spacing:.12em;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.08);color:var(--text)}.change-type.added{color:var(--good)}.change-type.modified{color:var(--warning)}.change-type.deleted{color:var(--danger)}.muted{color:var(--muted)!important}.section-stack{display:grid;gap:24px}
+.domain-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:18px}.domain-card{padding:20px;border-radius:22px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02))}.domain-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.domain-card h3{margin:0;font-size:1.02rem}.domain-card p{color:#d6dbe5}.micro-label{margin-top:14px;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}.domain-card ul{padding-left:18px;color:var(--muted)}table{width:100%;border-collapse:collapse;border-spacing:0;margin-top:18px}th,td{padding:14px 12px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;vertical-align:top}th{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.14em}
+.systems-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.mini-panel{padding:18px;border-radius:22px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03)}.mini-panel ul{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:10px}.mini-panel li{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.mini-panel li span{overflow-wrap:anywhere;word-break:break-word}.ops-board{display:grid;gap:18px;margin-top:18px}.ops-tabs,.surface-tabs{display:flex;flex-wrap:wrap;gap:10px}.ops-tab,.surface-tab{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600}.ops-tab.active,.surface-tab.active{background:rgba(239,211,122,.14);border-color:rgba(239,211,122,.35);color:var(--gold-strong)}.ops-copy,.surface-copy{display:none}.ops-copy.active,.surface-copy.active{display:block}.ops-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.ops-tile{padding:16px;border-radius:18px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03)}.ops-tile strong{display:block;font-size:1rem;margin-bottom:6px}
+.analytics-board{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:18px;align-items:stretch}.analytics-side{display:grid;gap:16px}.analytics-side .mini-panel li div{display:grid;gap:3px}.analytics-side .mini-panel li span{font-size:.82rem;color:var(--muted)}.radial-canvas{width:100%;height:100%;min-height:540px;border-radius:20px;position:relative;overflow:hidden;background:radial-gradient(circle at center, rgba(239,211,122,.08), transparent 42%), rgba(255,255,255,.02)}.radial-legend{display:grid;gap:10px}.legend-dot{display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:8px}.nuance-copy,.rationale-note{margin-top:8px;color:var(--muted);font-size:.92rem;line-height:1.5}.footer-note{margin-top:12px;color:var(--muted);font-size:.92rem}.tooltip{position:absolute;pointer-events:none;background:rgba(6,8,11,.98);border:1px solid rgba(239,211,122,.3);border-radius:14px;padding:12px 14px;color:#f6f7fb;font-size:.86rem;line-height:1.45;box-shadow:0 18px 40px rgba(0,0,0,.28);opacity:0;transform:translate(-50%,-100%);transition:opacity .16s ease;max-width:280px}.tooltip strong{display:block;color:var(--gold);margin-bottom:6px}.corner-badge{position:fixed;top:18px;right:22px;z-index:20;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(5,6,8,.76);backdrop-filter:blur(12px);color:var(--muted);font-size:.8rem;letter-spacing:.08em;text-transform:uppercase}
+@media (max-width:1180px){.hero-grid,.score-board,.dashboard-columns,.graph-frame,.analytics-board{grid-template-columns:1fr}.hero-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.systems-grid,.domain-grid,.ops-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:760px){.page{padding:18px}.hero-panel,.panel{padding:20px}.hero-metrics,.score-rail,.systems-grid,.domain-grid,.ops-grid{grid-template-columns:1fr}.hero-copy h1{font-size:clamp(2.1rem,14vw,3.4rem)}.skilgen-mark{width:240px}.graph-stage{height:420px}.sunburst-canvas,.sankey-canvas,.network-canvas{min-height:360px}.subscore-row{grid-template-columns:1fr}.subscore-value{text-align:left}.corner-badge{top:12px;right:12px;font-size:.72rem}}</style>
+</head>
+<body>
+<div class='corner-badge'>&copy; Skilgen</div>
+<div class='page'>
+<section class='hero-grid'>
+<section class='hero-panel hero-left'>
+<div class='brand-wrap'>
+<div class='brand-lockup'>
+<div class='eyebrow'>Agent Intelligence Surface</div>
+<svg class='skilgen-mark' viewBox='0 0 1200 640' fill='none' xmlns='http://www.w3.org/2000/svg' aria-label='Skilgen logo'><defs><filter id='skilgenGlow' x='-15%' y='-15%' width='130%' height='130%'><feDropShadow dx='0' dy='12' stdDeviation='10' flood-color='rgba(0,0,0,0.42)'/></filter></defs><g stroke-linejoin='round' stroke-linecap='round' stroke-width='16' filter='url(#skilgenGlow)'><path d='M260 122 350 170v98l-90 48-90-48v-98l90-48Z' stroke='#F2D679'/><path d='M510 122 600 170v98l-90 48-90-48v-98l90-48Z' stroke='#F3F4F8'/><path d='M760 122 850 170v98l-90 48-90-48v-98l90-48Z' stroke='#F3F4F8'/><path d='M1010 122 1100 170v98l-90 48-90-48v-98l90-48Z' stroke='#F2D679'/><path d='M385 332 475 380v98l-90 48-90-48v-98l90-48Z' stroke='#F3F4F8'/><path d='M635 332 725 380v98l-90 48-90-48v-98l90-48Z' stroke='#F3F4F8'/><path d='M885 332 975 380v98l-90 48-90-48v-98l90-48Z' stroke='#F3F4F8'/></g></svg>
+</div>
+<div class='repo-chip' title='claude-agent-sdk-python'>Repository · claude-agent-sdk-python</div>
+</div>
+<div class='hero-copy'>
+<h1>Skilgen Operating System</h1>
+<p class='hero-note'><em>All your skill intelligence — alive, connected, and visible on a single surface. Not a dashboard. A living map.</em></p>
+<p class='hero-context'><strong>claude-agent-sdk-python</strong> is translated into one operating surface for coding agents: architecture, evidence, dependencies, skill flows, score, freshness, analytics, auto-update, and capability context together.</p>
+</div>
+<div class='hero-actions'>
+<span class='pill warning'>12 stale skills</span>
+<span class='pill good'>Auto-update on</span>
+<span class='pill default'>Git-aware new untracked files</span>
+</div>
+<div class='hero-metrics'>
+<article class='metric-card'><div class='metric-eyebrow'>Evidence</div><div class='metric-value'>32</div><div class='metric-subtitle'>Files, snippets, config, docs, and tests feeding the graph.</div></article>
+<article class='metric-card'><div class='metric-eyebrow'>Dependencies</div><div class='metric-value'>327</div><div class='metric-subtitle'>Import edges across the active repository graph.</div></article>
+<article class='metric-card'><div class='metric-eyebrow'>Calls</div><div class='metric-value'>855</div><div class='metric-subtitle'>Observed call relationships from parsed source evidence.</div></article>
+<article class='metric-card'><div class='metric-eyebrow'>Tests</div><div class='metric-value'>30</div><div class='metric-subtitle'>Tests mapped back to implementation files.</div></article>
+</div>
+</section>
+<aside class='hero-panel hero-right'>
+<div class='score-top'>
+<div class='eyebrow'>Quality + freshness in one surface</div>
+<div class='score-ring' style='--score:8.45;'><div class='score-ring-content'><strong>8</strong><span>Needs Work</span></div></div>
+</div>
+<div class='score-rail'>
+<article class='stat-card'><div class='stat-label'>Freshness</div><div class='stat-value'>5/25</div><div class='stat-note'>missing freshness state</div></article>
+<article class='stat-card'><div class='stat-label'>Domains</div><div class='stat-value'>4</div><div class='stat-note'>Materialized architecture domains in play.</div></article>
+<article class='stat-card'><div class='stat-label'>Parsers</div><div class='stat-value'>2</div><div class='stat-note'>python-ast, regex</div></article>
+<article class='stat-card'><div class='stat-label'>Outputs</div><div class='stat-value'>0</div><div class='stat-note'>Repo-local artifacts ready for agents.</div></article>
+</div>
+</aside>
+</section>
+<section class='layout section-stack'>
+<section class='panel'>
+<h2>Usage Analytics</h2>
+<div class='section-copy'>Skilgen tracks every skill separately, then layers in tree depth, content richness, and live runtime traces so you can see where agent attention actually lands.</div>
+<div class='analytics-board'>
+<div class='graph-stage'>
+<div class='radial-canvas' data-radial='analytics'></div>
+</div>
+<div class='analytics-side'>
+<div class='legend'><span class='pill default'>0 live usage events</span><span class='pill default'>1 mapped skills</span><span class='pill warning'>Modeled attention</span><span class='pill default'>0 planner warmups ignored</span></div>
+<div class='mini-panel'><div class='micro-label'>Skill Attention Ranking</div><ul><li><div><strong>anthropic-skills</strong><span>external::anthropic-skills</span></div><span>14 attention</span></li></ul></div>
+<div class='mini-panel'><div class='micro-label'>Lower Attention</div><ul><li><div><strong>anthropic-skills</strong><span>external::anthropic-skills</span></div><span>14 attention</span></li></ul></div>
+<div class='mini-panel'><div class='micro-label'>Selected Skill</div><p class='nuance-copy'><strong>anthropic-skills</strong><br>Installed external skill pack available to the repo.</p><p class='nuance-copy'>Modeled attention: 14 · Recorded loads: 0 · Depth: 1 · Richness: 2</p><div class='graph-detail' data-detail='analytics'><h4>Usage Analytics</h4><p>Skilgen surfaces the currently most meaningful skill here. Click a radial segment to inspect its summary, usage, and content shape.</p><ul class='graph-detail-meta'><li>Usage is live when real skill loads exist.</li><li>Otherwise Skilgen falls back to modeled attention so the surface still teaches something useful.</li></ul></div></div>
+<div class='mini-panel'><div class='micro-label'>Deep nuance</div><p class='nuance-copy'>Skilgen is not just summarizing the repo. It is walking file by file across 60 parser-backed files, 327 dependency edges, 855 call edges, 30 test mappings, and the internal structure of every SKILL.md file. Planner warmup loads are excluded so this surface reflects real skill pressure instead of bootstrap noise.</p></div>
+</div>
+</div>
+</section>
+<section class='panel graph-shell'>
+<div class='graph-head'>
+<div><h2>Graph Studio</h2><div class='section-copy'>Skilgen walks the repository file by file, extracts symbols, calls, configs, tests, docs, and capability clues, then turns those nuances into a living operating map.</div></div>
+<div class='graph-tabs'>
+<button class='graph-tab active' data-target='architecture' role='tab' aria-selected='true'>Architecture</button>
+<button class='graph-tab' data-target='evidence' role='tab' aria-selected='false'>Evidence</button>
+<button class='graph-tab' data-target='dependencies' role='tab' aria-selected='false'>Dependencies</button>
+<button class='graph-tab' data-target='skills' role='tab' aria-selected='false'>Skills</button>
+</div>
+</div>
+<div class='graph-frame'>
+<div class='graph-stage'>
+<div class='graph-panel active' data-panel='architecture' role='tabpanel' aria-hidden='false'><div class='sunburst-canvas' data-sunburst='architecture'></div></div>
+<div class='graph-panel' data-panel='evidence' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='evidence'></div></div>
+<div class='graph-panel' data-panel='dependencies' role='tabpanel' aria-hidden='true'><div class='network-canvas' data-network='dependencies' role='img' aria-label='Interactive dependency network showing repo-local import relationships.'></div></div>
+<div class='graph-panel' data-panel='skills' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='skills'></div></div>
+</div>
+<aside class='graph-aside'>
+<div class='graph-copy active' data-copy='architecture'><h3 data-copy-title='architecture'>Architecture Sunburst</h3><p data-copy-body='architecture'>Skilgen identified 4 top-level architecture domains from 32 evidence items and 12 domain graph nodes. Parser backends in use: python-ast, regex. Source comprehension currently tracks 60 symbol-bearing files, 60 call-bearing files, and 15 mapped tests.</p><ul><li>4 top-level domains are visible in the current architecture slice.</li><li>4 materialization decisions shape how parent and child skills are split.</li><li>Click any arc to inspect the exact capability boundary, evidence count, and recommended skill path.</li></ul><div class='micro-label'>Visible Domain Legend</div><ul class='graph-legend'><li><strong><span class='legend-dot' style='background:#EFD37A'></span>Service Architecture</strong><span>skills/backend/SKILL.md</span></li>
+<li><strong><span class='legend-dot' style='background:#67D5FF'></span>Experience System</strong><span>skills/frontend/SKILL.md</span></li>
+<li><strong><span class='legend-dot' style='background:#8FD9A8'></span>Delivery Phases</strong><span>skills/roadmap/SKILL.md</span></li>
+<li><strong><span class='legend-dot' style='background:#FF8F70'></span>Security</strong><span>skills/security/SKILL.md</span></li></ul><div class='graph-detail' data-detail='architecture'><h4>Architecture Sunburst</h4><p>Skilgen starts from parser-backed evidence, then lets the architecture view reveal how responsibilities split across the repo. Click an arc to inspect that specific capability boundary.</p><ul class='graph-detail-meta'><li>Color separates architecture families so the high-level shape is easy to scan.</li><li>Clicking a domain replaces this summary with node-specific detail.</li></ul></div></div>
+<div class='graph-copy' data-copy='evidence'><h3 data-copy-title='evidence'>Evidence Flow</h3><p data-copy-body='evidence'>Follow how languages and evidence kinds feed concrete files. This is the visible proof behind the architecture Skilgen is synthesizing.</p><ul><li>Left: dominant languages or repo root.</li><li>Middle: evidence kinds.</li><li>Right: files or source artifacts.</li></ul><div class='graph-detail' data-detail='evidence'><h4>Evidence Flow</h4><p>Skilgen walks file by file and groups the repo into languages, evidence kinds, and concrete artifacts. Click any node to inspect the exact nuance that was extracted.</p><ul class='graph-detail-meta'><li>Evidence is grounded in real files, snippets, configs, docs, and tests.</li><li>This is the proof layer beneath every generated skill.</li></ul></div></div>
+<div class='graph-copy' data-copy='dependencies'><h3 data-copy-title='dependencies'>Dependency Network</h3><p data-copy-body='dependencies'>Pan, zoom, and inspect the live import network. This makes coupling and high-fanout modules obvious before the agent ever starts coding.</p><ul><li>Use the built-in controls to zoom around.</li><li>Hover nodes to inspect exact paths.</li><li>Dense clusters often signal hot spots.</li></ul><div class='graph-detail' data-detail='dependencies'><h4>Dependency Network</h4><p>Skilgen turns import relationships into a navigable map so you can see what will feel expensive, central, or risky before an agent starts editing.</p><ul class='graph-detail-meta'><li>Click a node to inspect its exact file path and dependency role.</li></ul></div></div>
+<div class='graph-copy' data-copy='skills'><h3 data-copy-title='skills'>Skill Flow</h3><p data-copy-body='skills'>See how domains become parent skills, generated child skills, and external packs that Skilgen has already pulled in because the repo signaled they matter.</p><ul><li>Left: domain families.</li><li>Middle: parent skills.</li><li>Right: generated child skills and external skill packs.</li></ul><div class='micro-label'>External skills in play</div><ul class='graph-legend'><li><strong>anthropic-skills</strong><span>installed from repo signals</span></li></ul><p class='nuance-copy'>Skilgen folds external skill packs into the same surface so agents can see generated skill boundaries and imported ecosystem capability together.</p><div class='graph-detail' data-detail='skills'><h4>Skill Flow</h4><p>Skilgen does not stop at high-level domains. It goes file by file, then decides where nuance deserves its own child skill, where it should stay merged, and where external packs strengthen the repo-native tree.</p><ul class='graph-detail-meta'><li>Click a skill node to inspect why that skill exists.</li><li>External packs show which ecosystem skills are already active in the map.</li></ul></div></div>
+<div class='legend'>
+<span class='pill good'>4 active domains</span>
+<span class='pill default'>32 evidence items</span>
+<span class='pill default'>327 dependency edges</span>
+</div>
+</aside>
+</div>
+</section>
+<section class='panel'>
+<h2>Skilgen Score</h2>
+<div class='section-copy'>Groundedness, coverage, freshness, and structure are grouped here as one quality bar instead of separate floating metrics.</div>
+<div class='score-board'>
+<div><div class='subscore-stack'><div class='subscore-row'><div class='subscore-label'>Groundedness</div><div class='subscore-bar'><span style='width:4.0%'></span></div><div class='subscore-value'>0 / 25</div></div>
+<div class='subscore-row'><div class='subscore-label'>Coverage</div><div class='subscore-bar'><span style='width:13.8%'></span></div><div class='subscore-value'>3 / 25</div></div>
+<div class='subscore-row'><div class='subscore-label'>Freshness</div><div class='subscore-bar'><span style='width:20.0%'></span></div><div class='subscore-value'>5 / 25</div></div>
+<div class='subscore-row'><div class='subscore-label'>Structure</div><div class='subscore-bar'><span style='width:4.0%'></span></div><div class='subscore-value'>0 / 25</div></div></div><ul class='quality-gates'><li><strong>Groundedness Gate</strong><span>cap 59.0</span><p>Skill guidance is not grounded enough in real files, real check paths, or inferred domain evidence.</p></li>
+<li><strong>Coverage Gate</strong><span>cap 59.0</span><p>Too little of the codebase is mapped into inferred skill domains.</p></li>
+<li><strong>Freshness State Gate</strong><span>cap 74.0</span><p>Freshness state is missing, so Skilgen cannot verify whether the skills are current.</p></li>
+<li><strong>Structure Gate</strong><span>cap 69.0</span><p>Core skill-system artifacts are missing, so the tree is not structurally complete.</p></li></ul><p class='nuance-copy'><strong>Unmapped files:</strong> e2e-tests/conftest.py, e2e-tests/test_agents_and_settings.py, e2e-tests/test_dynamic_control.py, e2e-tests/test_hook_events.py, e2e-tests/test_hooks.py</p></div>
+<div class='trend-shell'>
+<div class='micro-label'>Score Trend</div>
+<div class='sparkline'><div class='spark-point' style='height:18%'><span>8</span></div></div>
+<div class='trend-ticks'><span>Current</span></div>
+<div class='section-copy'>This is the current baseline. Trend history will become more useful after a few distinct runs.</div>
+<div class='legend'>
+<span class='pill good'>Delta +0.00</span>
+<span class='pill good'>Regressions 0</span>
+<span class='pill default'>71 config/runtime edges</span>
+</div>
+</div>
+</div>
+</section>
+<section class='panel'>
+<h2>Diff + Freshness</h2>
+<div class='section-copy'>See exactly what changed, which domains are stale, and what remains safe to reuse.</div>
+<div class='dashboard-columns'>
+<div><div class='micro-label'>Changed Files</div><ul class='list'><li class='muted'>No source changes detected since the last generation baseline.</li></ul></div>
+<div><div class='micro-label'>Impacted Domains</div><ul class='list'><li><div><strong>backend</strong><span>skills/backend/SKILL.md</span></div><span class='pill warning'>STALE</span></li>
+<li><div><strong>frontend</strong><span>skills/frontend/SKILL.md</span></div><span class='pill warning'>STALE</span></li>
+<li><div><strong>roadmap</strong><span>skills/roadmap/SKILL.md</span></div><span class='pill warning'>STALE</span></li>
+<li><div><strong>security</strong><span>skills/security/SKILL.md</span></div><span class='pill warning'>STALE</span></li></ul></div>
+</div>
+<div class='legend'>
+<span class='pill default'>Current domains: none</span>
+<span class='pill default'>Git event new untracked files</span>
+<span class='pill warning'>Freshness 5 / 25</span>
+</div>
+</section>
+<section class='panel'>
+<h2>Architecture Materialization</h2>
+<div class='section-copy'>Skilgen uses the architecture plan to decide where skills should split, merge, or stay consolidated.</div>
+<table><thead><tr><th>Domain</th><th>Decision</th><th>Parent Skill</th><th>Child Skills</th><th>Rationale</th></tr></thead><tbody>
+<tr><td>Service Architecture</td><td><span class='pill warning'>SPLIT</span></td><td>skills/backend/SKILL.md</td><td>skills/backend/api/SKILL.md, skills/backend/testing/SKILL.md, skills/backend/auth/SKILL.md</td><td>Split because 3 concrete child skill surfaces emerged from 6 grounded evidence paths. The parent skill can hold shared context while child skills isolate the distinct capability seams around backend-api, backend-testing, backend-auth.<div class='rationale-note'>Grounded in 3 concrete skill surfaces, 2 cross-links, and the evidence attached to Service Architecture rather than a template split.</div></td></tr>
+<tr><td>Experience System</td><td><span class='pill default'>KEEP</span></td><td>skills/frontend/SKILL.md</td><td>skills/frontend/components/SKILL.md</td><td>Keep as a first-class boundary because confidence is 0.88, 3 evidence paths cluster around one coherent responsibility set, and the boundary is clearer as a single skill than as shallower splits.<div class='rationale-note'>Grounded in 1 concrete skill surface, 2 cross-links, and the evidence attached to Experience System rather than a template split.</div></td></tr>
+<tr><td>Delivery Phases</td><td><span class='pill warning'>SPLIT</span></td><td>skills/roadmap/SKILL.md</td><td>skills/roadmap/phase-0/SKILL.md, skills/roadmap/phase-1/SKILL.md, skills/roadmap/phase-2/SKILL.md, skills/roadmap/phase-3/SKILL.md</td><td>Split because 4 concrete child skill surfaces emerged from 2 grounded evidence paths. The parent skill can hold shared context while child skills isolate the distinct capability seams around roadmap-phase-0, roadmap-phase-1, roadmap-phase-2.<div class='rationale-note'>Grounded in 4 concrete skill surfaces, 2 cross-links, and the evidence attached to Delivery Phases rather than a template split.</div></td></tr>
+<tr><td>Security</td><td><span class='pill default'>KEEP</span></td><td>skills/security/SKILL.md</td><td>-</td><td>Keep as a first-class boundary because confidence is 0.83, 4 evidence paths cluster around one coherent responsibility set, and the boundary is clearer as a single skill than as shallower splits.<div class='rationale-note'>Grounded in 1 concrete skill surface, 1 cross-link, and the evidence attached to Security rather than a template split.</div></td></tr>
+</tbody></table>
+<div class='domain-grid'><article class='domain-card'><div class='domain-head'><h3>Service Architecture</h3><span class='pill good'>0.88</span></div><p>Server-side delivery domain covering route handlers, services, persistence, and verification of backend changes.</p><div class='micro-label'>Responsibilities</div><ul><li>Coordinates subdomains: backend-api, backend-testing, backend-auth.</li>
+<li>endpoint quality gate</li>
+<li>service boundaries</li></ul><div class='micro-label'>Evidence</div><ul><li>e2e-tests/test_tool_permissions.py</li>
+<li>examples/tool_permission_callback.py</li>
+<li>src/claude_agent_sdk/_internal/session_mutations.py</li></ul><div class='micro-label'>Nuance</div><p class='nuance-copy'>6 grounded evidence paths back this boundary. 4 responsibilities stayed coherent enough to keep this capability readable for an agent. Split because 3 concrete child skill surfaces emerged from 6 grounded evidence paths. The parent skill can hold shared context while child skills isolate the distinct capability seams around backend-api, backend-testing, backend-auth. Cross-domain pressure is strongest with Delivery Phases, Experience System.</p></article>
+<article class='domain-card'><div class='domain-head'><h3>Experience System</h3><span class='pill good'>0.88</span></div><p>User-facing delivery domain covering route composition, reusable UI, state, and design-system concerns.</p><div class='micro-label'>Responsibilities</div><ul><li>Coordinates subdomains: frontend-components.</li>
+<li>route-driven UI structure</li>
+<li>shared components</li></ul><div class='micro-label'>Evidence</div><ul><li>src/</li>
+<li>app/</li>
+<li>src/components/</li></ul><div class='micro-label'>Nuance</div><p class='nuance-copy'>3 grounded evidence paths back this boundary. 4 responsibilities stayed coherent enough to keep this capability readable for an agent. Keep as a first-class boundary because confidence is 0.88, 3 evidence paths cluster around one coherent responsibility set, and the boundary is clearer as a single skill than as shallower splits. Cross-domain pressure is strongest with Delivery Phases, Service Architecture.</p></article>
+<article class='domain-card'><div class='domain-head'><h3>Delivery Phases</h3><span class='pill good'>0.84</span></div><p>Delivery sequencing domain that keeps phases, next steps, and implementation order explicit for agents.</p><div class='micro-label'>Responsibilities</div><ul><li>Coordinates subdomains: roadmap-phase-0, roadmap-phase-1, roadmap-phase-2, roadmap-phase-3.</li>
+<li>phase-based delivery</li>
+<li>sequenced implementation planning</li></ul><div class='micro-label'>Evidence</div><ul><li>skills/roadmap/SKILL.md</li>
+<li>REPORT.md</li></ul><div class='micro-label'>Nuance</div><p class='nuance-copy'>2 grounded evidence paths back this boundary. 4 responsibilities stayed coherent enough to keep this capability readable for an agent. Split because 4 concrete child skill surfaces emerged from 2 grounded evidence paths. The parent skill can hold shared context while child skills isolate the distinct capability seams around roadmap-phase-0, roadmap-phase-1, roadmap-phase-2. Cross-domain pressure is strongest with Service Architecture, Experience System.</p></article>
+<article class='domain-card'><div class='domain-head'><h3>Security</h3><span class='pill good'>0.83</span></div><p>Standalone security domain inferred from authentication, authorization, or session management files.</p><div class='micro-label'>Responsibilities</div><ul><li>authentication</li>
+<li>authorization</li></ul><div class='micro-label'>Evidence</div><ul><li>e2e-tests/test_tool_permissions.py</li>
+<li>examples/tool_permission_callback.py</li>
+<li>src/claude_agent_sdk/_internal/session_mutations.py</li></ul><div class='micro-label'>Nuance</div><p class='nuance-copy'>4 grounded evidence paths back this boundary. 3 responsibilities stayed coherent enough to keep this capability readable for an agent. Keep as a first-class boundary because confidence is 0.83, 4 evidence paths cluster around one coherent responsibility set, and the boundary is clearer as a single skill than as shallower splits. Cross-domain pressure is strongest with Delivery Phases.</p></article></div>
+</section>
+<section class='panel'>
+<h2>Auto-Update + Agent Readiness</h2>
+<div class='section-copy'>A live operations board for the worker, the last repo event, the start order, and the repo-local outputs currently ready to load.</div>
+<div class='ops-board'>
+<div class='ops-tabs'>
+<button class='ops-tab active' data-target='worker' role='tab' aria-selected='true'>Worker</button>
+<button class='ops-tab' data-target='event' role='tab' aria-selected='false'>Last Event</button>
+<button class='ops-tab' data-target='order' role='tab' aria-selected='false'>Start Order</button>
+<button class='ops-tab' data-target='outputs' role='tab' aria-selected='false'>Outputs</button>
+</div>
+<div class='ops-copy active' data-copy='worker' role='tabpanel' aria-hidden='false'><div class='ops-grid'><div class='ops-tile'><strong>Worker state</strong><span>Idle until the next change</span></div><div class='ops-tile'><strong>Refresh policy</strong><span>Automatic refresh is enabled</span></div><div class='ops-tile'><strong>Current freshness</strong><span>5/25</span></div><div class='ops-tile'><strong>Readiness signal</strong><span>Agents can load the current repo-local outputs now</span></div></div></div>
+<div class='ops-copy' data-copy='event' role='tabpanel' aria-hidden='true'><div class='ops-grid'><div class='ops-tile'><strong>Last git-aware event</strong><span>new untracked files</span></div><div class='ops-tile'><strong>Reason</strong><span>missing freshness state</span></div><div class='ops-tile'><strong>Changed files</strong><span>0</span></div><div class='ops-tile'><strong>Stale skills</strong><span>12</span></div></div></div>
+<div class='ops-copy' data-copy='order' role='tabpanel' aria-hidden='true'><div class='ops-grid'><div class='ops-tile'><strong>Decision focus</strong><span>Service Architecture, Experience System, Delivery Phases, Security</span></div><div class='ops-tile'><strong>Memory load</strong><span>.skilgen/memory/current_run.json, .skilgen/state/freshness.json, .skilgen/external-skills/lock.json</span></div><div class='ops-tile'><strong>Prioritized skills</strong><span>Service Architecture, Experience System, Delivery Phases</span></div><div class='ops-tile'><strong>Nuance</strong><span>Skilgen is sequencing agent context from evidence, score, diff, architecture, and live repo state instead of a static startup order.</span></div></div></div>
+<div class='ops-copy' data-copy='outputs' role='tabpanel' aria-hidden='true'><div class='micro-label'>Generated Outputs</div><ul class='list'><li><span>AGENTS.md</span><span class='pill warning'>missing</span></li>
+<li><span>ANALYSIS.md</span><span class='pill warning'>missing</span></li>
+<li><span>ARCHITECTURE.md</span><span class='pill warning'>missing</span></li>
+<li><span>FEATURES.md</span><span class='pill warning'>missing</span></li>
+<li><span>REPORT.md</span><span class='pill warning'>missing</span></li>
+<li><span>TRACEABILITY.md</span><span class='pill warning'>missing</span></li>
+<li><span>skills/MANIFEST.md</span><span class='pill warning'>missing</span></li>
+<li><span>skills/GRAPH.md</span><span class='pill warning'>missing</span></li>
+<li><span>skilgen-dashboard.html</span><span class='pill warning'>missing</span></li></ul><div class='micro-label'>Prioritized Skills</div><ul class='list'><li>skills/backend/SKILL.md</li>
+<li>skills/frontend/SKILL.md</li>
+<li>skills/roadmap/SKILL.md</li>
+<li>skills/security/SKILL.md</li>
+<li>.skilgen/external-skills/normalized/anthropic-skills/SUMMARY.md</li></ul></div>
+</div>
+</section>
+<section class='panel'>
+<h2>Capability Layer</h2>
+<div class='section-copy'>External skills, enterprise packs, and MCP connectors share the same operating surface.</div>
+<div class='surface-tabs'>
+<button class='surface-tab active' data-target='external' role='tab' aria-selected='true'>External Skills</button>
+<button class='surface-tab' data-target='enterprise' role='tab' aria-selected='false'>Enterprise Skills</button>
+<button class='surface-tab' data-target='connectors' role='tab' aria-selected='false'>MCP Connectors</button>
+</div>
+<div class='surface-copy active' data-copy='external' role='tabpanel' aria-hidden='false'><div class='mini-panel'><div class='micro-label'>External skills present</div><ul><li>anthropic-skills<span class='pill good'>active</span></li></ul><p class='nuance-copy'>These packs were installed because the repository signaled they were relevant, so the skill system includes ecosystem knowledge as well as repo-native guidance.</p></div></div>
+<div class='surface-copy' data-copy='enterprise' role='tabpanel' aria-hidden='true'><div class='mini-panel'><div class='micro-label'>Enterprise skills present</div><ul><li class='muted'>No enterprise skills active yet.</li></ul><p class='nuance-copy'>Enterprise packs let the repo-local skill map inherit organization-specific standards, playbooks, and internal conventions.</p></div></div>
+<div class='surface-copy' data-copy='connectors' role='tabpanel' aria-hidden='true'><div class='mini-panel'><div class='micro-label'>Connected profiles</div><ul><li class='muted'>No MCP connectors active yet.</li></ul><div class='micro-label'>Recommended profiles</div><ul><li>slack<span class='pill good'>recommended</span><span class='pill good'>official</span></li>
+<li>github-enterprise<span class='pill good'>recommended</span><span class='pill good'>official</span></li></ul><p class='nuance-copy'>These are capability profiles available to bind into an agent runtime. Recommended profiles are not shown as live authenticated sessions unless the runtime has actually connected them.</p></div></div>
+</section>
+<p class='footer-note'>Generated by Skilgen from live repository evidence, architecture synthesis, score history, diff state, analytics, and enterprise capability context.</p>
+</section>
+</div>
+<script>window.__SKILGEN_NETWORKS__ = {"dependencies": {"nodes": [{"id": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py", "label": "subprocess_cli.py", "group": "source", "value": 14, "title": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py", "detail_title": "subprocess_cli.py", "detail_body": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py is a connected source node in the dependency graph. Skilgen uses these relationships to reason about coupling, fan-out, and likely blast radius.", "detail_meta": ["Dependency role: source", "Path: src/claude_agent_sdk/_internal/transport/subprocess_cli.py"]}, {"id": "_errors", "label": "_errors", "group": "target", "value": 12, "title": "_errors", "detail_title": "_errors", "detail_body": "_errors is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: _errors"]}, {"id": "_version", "label": "_version", "group": "target", "value": 12, "title": "_version", "detail_title": "_version", "detail_body": "_version is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: _version"]}, {"id": "anyio", "label": "anyio", "group": "target", "value": 12, "title": "anyio", "detail_title": "anyio", "detail_body": "anyio is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: anyio"]}, {"id": "anyio.abc", "label": "anyio.abc", "group": "target", "value": 12, "title": "anyio.abc", "detail_title": "anyio.abc", "detail_body": "anyio.abc is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: anyio.abc"]}, {"id": "anyio.streams.text", "label": "anyio.streams.text", "group": "target", "value": 12, "title": "anyio.streams.text", "detail_title": "anyio.streams.text", "detail_body": "anyio.streams.text is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: anyio.streams.text"]}, {"id": "src/claude_agent_sdk/__init__.py", "label": "__init__.py", "group": "source", "value": 14, "title": "src/claude_agent_sdk/__init__.py", "detail_title": "__init__.py", "detail_body": "src/claude_agent_sdk/__init__.py is a connected source node in the dependency graph. Skilgen uses these relationships to reason about coupling, fan-out, and likely blast radius.", "detail_meta": ["Dependency role: source", "Path: src/claude_agent_sdk/__init__.py"]}, {"id": "_internal.session_mutations", "label": "_internal.session_mutations", "group": "target", "value": 12, "title": "_internal.session_mutations", "detail_title": "_internal.session_mutations", "detail_body": "_internal.session_mutations is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: _internal.session_mutations"]}, {"id": "_internal.sessions", "label": "_internal.sessions", "group": "target", "value": 12, "title": "_internal.sessions", "detail_title": "_internal.sessions", "detail_body": "_internal.sessions is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: _internal.sessions"]}, {"id": "_internal.transport", "label": "_internal.transport", "group": "target", "value": 12, "title": "_internal.transport", "detail_title": "_internal.transport", "detail_body": "_internal.transport is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: _internal.transport"]}, {"id": "tests/test_transport.py", "label": "test_transport.py", "group": "source", "value": 14, "title": "tests/test_transport.py", "detail_title": "test_transport.py", "detail_body": "tests/test_transport.py is a connected source node in the dependency graph. Skilgen uses these relationships to reason about coupling, fan-out, and likely blast radius.", "detail_meta": ["Dependency role: source", "Path: tests/test_transport.py"]}, {"id": "claude_agent_sdk", "label": "claude_agent_sdk", "group": "target", "value": 12, "title": "claude_agent_sdk", "detail_title": "claude_agent_sdk", "detail_body": "claude_agent_sdk is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: claude_agent_sdk"]}, {"id": "claude_agent_sdk._errors", "label": "claude_agent_sdk._errors", "group": "target", "value": 12, "title": "claude_agent_sdk._errors", "detail_title": "claude_agent_sdk._errors", "detail_body": "claude_agent_sdk._errors is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: claude_agent_sdk._errors"]}, {"id": "claude_agent_sdk._internal.transport.subprocess_cli", "label": "claude_agent_sdk._internal.transport.subprocess_cli", "group": "target", "value": 12, "title": "claude_agent_sdk._internal.transport.subprocess_cli", "detail_title": "claude_agent_sdk._internal.transport.subprocess_cli", "detail_body": "claude_agent_sdk._internal.transport.subprocess_cli is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: claude_agent_sdk._internal.transport.subprocess_cli"]}, {"id": "src/claude_agent_sdk/_internal/query.py", "label": "query.py", "group": "source", "value": 14, "title": "src/claude_agent_sdk/_internal/query.py", "detail_title": "query.py", "detail_body": "src/claude_agent_sdk/_internal/query.py is a connected source node in the dependency graph. Skilgen uses these relationships to reason about coupling, fan-out, and likely blast radius.", "detail_meta": ["Dependency role: source", "Path: src/claude_agent_sdk/_internal/query.py"]}, {"id": "asyncio", "label": "asyncio", "group": "target", "value": 12, "title": "asyncio", "detail_title": "asyncio", "detail_body": "asyncio is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: asyncio"]}, {"id": "collections.abc", "label": "collections.abc", "group": "target", "value": 12, "title": "collections.abc", "detail_title": "collections.abc", "detail_body": "collections.abc is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: collections.abc"]}, {"id": "contextlib", "label": "contextlib", "group": "target", "value": 12, "title": "contextlib", "detail_title": "contextlib", "detail_body": "contextlib is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: contextlib"]}, {"id": "json", "label": "json", "group": "target", "value": 12, "title": "json", "detail_title": "json", "detail_body": "json is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: json"]}, {"id": "src/claude_agent_sdk/_internal/session_mutations.py", "label": "session_mutations.py", "group": "source", "value": 14, "title": "src/claude_agent_sdk/_internal/session_mutations.py", "detail_title": "session_mutations.py", "detail_body": "src/claude_agent_sdk/_internal/session_mutations.py is a connected source node in the dependency graph. Skilgen uses these relationships to reason about coupling, fan-out, and likely blast radius.", "detail_meta": ["Dependency role: source", "Path: src/claude_agent_sdk/_internal/session_mutations.py"]}, {"id": "__future__", "label": "__future__", "group": "target", "value": 12, "title": "__future__", "detail_title": "__future__", "detail_body": "__future__ is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: __future__"]}, {"id": "dataclasses", "label": "dataclasses", "group": "target", "value": 12, "title": "dataclasses", "detail_title": "dataclasses", "detail_body": "dataclasses is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: dataclasses"]}, {"id": "datetime", "label": "datetime", "group": "target", "value": 12, "title": "datetime", "detail_title": "datetime", "detail_body": "datetime is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: datetime"]}, {"id": "errno", "label": "errno", "group": "target", "value": 12, "title": "errno", "detail_title": "errno", "detail_body": "errno is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: errno"]}, {"id": "src/claude_agent_sdk/_internal/sessions.py", "label": "sessions.py", "group": "source", "value": 14, "title": "src/claude_agent_sdk/_internal/sessions.py", "detail_title": "sessions.py", "detail_body": "src/claude_agent_sdk/_internal/sessions.py is a connected source node in the dependency graph. Skilgen uses these relationships to reason about coupling, fan-out, and likely blast radius.", "detail_meta": ["Dependency role: source", "Path: src/claude_agent_sdk/_internal/sessions.py"]}, {"id": "os", "label": "os", "group": "target", "value": 12, "title": "os", "detail_title": "os", "detail_body": "os is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: os"]}, {"id": "pathlib", "label": "pathlib", "group": "target", "value": 12, "title": "pathlib", "detail_title": "pathlib", "detail_body": "pathlib is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: pathlib"]}, {"id": "src/claude_agent_sdk/_internal/client.py", "label": "client.py", "group": "source", "value": 14, "title": "src/claude_agent_sdk/_internal/client.py", "detail_title": "client.py", "detail_body": "src/claude_agent_sdk/_internal/client.py is a connected source node in the dependency graph. Skilgen uses these relationships to reason about coupling, fan-out, and likely blast radius.", "detail_meta": ["Dependency role: source", "Path: src/claude_agent_sdk/_internal/client.py"]}, {"id": "message_parser", "label": "message_parser", "group": "target", "value": 12, "title": "message_parser", "detail_title": "message_parser", "detail_body": "message_parser is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: message_parser"]}, {"id": "src/claude_agent_sdk/client.py", "label": "client.py", "group": "source", "value": 14, "title": "src/claude_agent_sdk/client.py", "detail_title": "client.py", "detail_body": "src/claude_agent_sdk/client.py is a connected source node in the dependency graph. Skilgen uses these relationships to reason about coupling, fan-out, and likely blast radius.", "detail_meta": ["Dependency role: source", "Path: src/claude_agent_sdk/client.py"]}, {"id": "_internal.message_parser", "label": "_internal.message_parser", "group": "target", "value": 12, "title": "_internal.message_parser", "detail_title": "_internal.message_parser", "detail_body": "_internal.message_parser is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: _internal.message_parser"]}, {"id": "_internal.query", "label": "_internal.query", "group": "target", "value": 12, "title": "_internal.query", "detail_title": "_internal.query", "detail_body": "_internal.query is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: _internal.query"]}, {"id": "_internal.transport.subprocess_cli", "label": "_internal.transport.subprocess_cli", "group": "target", "value": 12, "title": "_internal.transport.subprocess_cli", "detail_title": "_internal.transport.subprocess_cli", "detail_body": "_internal.transport.subprocess_cli is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: _internal.transport.subprocess_cli"]}, {"id": "tests/test_sdk_mcp_integration.py", "label": "test_sdk_mcp_integration.py", "group": "source", "value": 14, "title": "tests/test_sdk_mcp_integration.py", "detail_title": "test_sdk_mcp_integration.py", "detail_body": "tests/test_sdk_mcp_integration.py is a connected source node in the dependency graph. Skilgen uses these relationships to reason about coupling, fan-out, and likely blast radius.", "detail_meta": ["Dependency role: source", "Path: tests/test_sdk_mcp_integration.py"]}, {"id": "base64", "label": "base64", "group": "target", "value": 12, "title": "base64", "detail_title": "base64", "detail_body": "base64 is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: base64"]}, {"id": "claude_agent_sdk._internal.query", "label": "claude_agent_sdk._internal.query", "group": "target", "value": 12, "title": "claude_agent_sdk._internal.query", "detail_title": "claude_agent_sdk._internal.query", "detail_body": "claude_agent_sdk._internal.query is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: claude_agent_sdk._internal.query"]}, {"id": "logging", "label": "logging", "group": "target", "value": 12, "title": "logging", "detail_title": "logging", "detail_body": "logging is pulled into the live dependency map because it is imported or referenced by other implementation files.", "detail_meta": ["Dependency role: target", "Path: logging"]}, {"id": "tests/test_streaming_client.py", "label": "test_streaming_client.py", "group": "source", "value": 14, "title": "tests/test_streaming_client.py", "detail_title": "test_streaming_client.py", "detail_body": "tests/test_streaming_client.py is a connected source node in the dependency graph. Skilgen uses these relationships to reason about coupling, fan-out, and likely blast radius.", "detail_meta": ["Dependency role: source", "Path: tests/test_streaming_client.py"]}], "edges": [{"from": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py", "to": "_errors"}, {"from": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py", "to": "_version"}, {"from": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py", "to": "anyio"}, {"from": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py", "to": "anyio.abc"}, {"from": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py", "to": "anyio.streams.text"}, {"from": "src/claude_agent_sdk/__init__.py", "to": "_errors"}, {"from": "src/claude_agent_sdk/__init__.py", "to": "_internal.session_mutations"}, {"from": "src/claude_agent_sdk/__init__.py", "to": "_internal.sessions"}, {"from": "src/claude_agent_sdk/__init__.py", "to": "_internal.transport"}, {"from": "src/claude_agent_sdk/__init__.py", "to": "_version"}, {"from": "tests/test_transport.py", "to": "anyio"}, {"from": "tests/test_transport.py", "to": "anyio.streams.text"}, {"from": "tests/test_transport.py", "to": "claude_agent_sdk"}, {"from": "tests/test_transport.py", "to": "claude_agent_sdk._errors"}, {"from": "tests/test_transport.py", "to": "claude_agent_sdk._internal.transport.subprocess_cli"}, {"from": "src/claude_agent_sdk/_internal/query.py", "to": "anyio"}, {"from": "src/claude_agent_sdk/_internal/query.py", "to": "asyncio"}, {"from": "src/claude_agent_sdk/_internal/query.py", "to": "collections.abc"}, {"from": "src/claude_agent_sdk/_internal/query.py", "to": "contextlib"}, {"from": "src/claude_agent_sdk/_internal/query.py", "to": "json"}, {"from": "src/claude_agent_sdk/_internal/session_mutations.py", "to": "__future__"}, {"from": "src/claude_agent_sdk/_internal/session_mutations.py", "to": "dataclasses"}, {"from": "src/claude_agent_sdk/_internal/session_mutations.py", "to": "datetime"}, {"from": "src/claude_agent_sdk/_internal/session_mutations.py", "to": "errno"}, {"from": "src/claude_agent_sdk/_internal/session_mutations.py", "to": "json"}, {"from": "src/claude_agent_sdk/_internal/sessions.py", "to": "__future__"}, {"from": "src/claude_agent_sdk/_internal/sessions.py", "to": "datetime"}, {"from": "src/claude_agent_sdk/_internal/sessions.py", "to": "json"}, {"from": "src/claude_agent_sdk/_internal/sessions.py", "to": "os"}, {"from": "src/claude_agent_sdk/_internal/sessions.py", "to": "pathlib"}, {"from": "src/claude_agent_sdk/_internal/client.py", "to": "collections.abc"}, {"from": "src/claude_agent_sdk/_internal/client.py", "to": "dataclasses"}, {"from": "src/claude_agent_sdk/_internal/client.py", "to": "json"}, {"from": "src/claude_agent_sdk/_internal/client.py", "to": "message_parser"}, {"from": "src/claude_agent_sdk/_internal/client.py", "to": "os"}, {"from": "src/claude_agent_sdk/client.py", "to": "_errors"}, {"from": "src/claude_agent_sdk/client.py", "to": "_internal.message_parser"}, {"from": "src/claude_agent_sdk/client.py", "to": "_internal.query"}, {"from": "src/claude_agent_sdk/client.py", "to": "_internal.transport.subprocess_cli"}, {"from": "src/claude_agent_sdk/client.py", "to": "collections.abc"}, {"from": "tests/test_sdk_mcp_integration.py", "to": "anyio"}, {"from": "tests/test_sdk_mcp_integration.py", "to": "base64"}, {"from": "tests/test_sdk_mcp_integration.py", "to": "claude_agent_sdk"}, {"from": "tests/test_sdk_mcp_integration.py", "to": "claude_agent_sdk._internal.query"}, {"from": "tests/test_sdk_mcp_integration.py", "to": "logging"}, {"from": "tests/test_streaming_client.py", "to": "anyio"}, {"from": "tests/test_streaming_client.py", "to": "asyncio"}, {"from": "tests/test_streaming_client.py", "to": "claude_agent_sdk"}]}};
+window.__SKILGEN_SUNBURST__ = {"name": "Architecture", "summary": "Skilgen architecture view built from file-level evidence, parser output, and materialization planning.", "detail_meta": ["Rooted in parser-backed evidence, symbols, tests, docs, and config/runtime signals.", "Click a domain to inspect why Skilgen separated that capability boundary."], "children": [{"name": "Services", "summary": "Server-side delivery domain covering route handlers, services, persistence, and verification of backend changes.", "value": 8, "detail_meta": ["Evidence paths: 6", "Responsibilities: 4", "Recommended skill path: skills/backend/SKILL.md"], "children": [{"name": "Api", "summary": "Generated skill path: skills/backend/api/SKILL.md", "value": 1, "detail_meta": ["Skill path: skills/backend/api/SKILL.md", "Decision: split"]}, {"name": "Testing", "summary": "Generated skill path: skills/backend/testing/SKILL.md", "value": 1, "detail_meta": ["Skill path: skills/backend/testing/SKILL.md", "Decision: split"]}, {"name": "Auth", "summary": "Generated skill path: skills/backend/auth/SKILL.md", "value": 1, "detail_meta": ["Skill path: skills/backend/auth/SKILL.md", "Decision: split"]}]}, {"name": "Experience", "summary": "User-facing delivery domain covering route composition, reusable UI, state, and design-system concerns.", "value": 5, "detail_meta": ["Evidence paths: 3", "Responsibilities: 4", "Recommended skill path: skills/frontend/SKILL.md"], "children": [{"name": "Components", "summary": "Generated skill path: skills/frontend/components/SKILL.md", "value": 1, "detail_meta": ["Skill path: skills/frontend/components/SKILL.md", "Decision: keep"]}]}, {"name": "Delivery", "summary": "Delivery sequencing domain that keeps phases, next steps, and implementation order explicit for agents.", "value": 4, "detail_meta": ["Evidence paths: 2", "Responsibilities: 4", "Recommended skill path: skills/roadmap/SKILL.md"], "children": [{"name": "Phase 0", "summary": "Generated skill path: skills/roadmap/phase-0/SKILL.md", "value": 1, "detail_meta": ["Skill path: skills/roadmap/phase-0/SKILL.md", "Decision: split"]}, {"name": "Phase 1", "summary": "Generated skill path: skills/roadmap/phase-1/SKILL.md", "value": 1, "detail_meta": ["Skill path: skills/roadmap/phase-1/SKILL.md", "Decision: split"]}, {"name": "Phase 2", "summary": "Generated skill path: skills/roadmap/phase-2/SKILL.md", "value": 1, "detail_meta": ["Skill path: skills/roadmap/phase-2/SKILL.md", "Decision: split"]}, {"name": "Phase 3", "summary": "Generated skill path: skills/roadmap/phase-3/SKILL.md", "value": 1, "detail_meta": ["Skill path: skills/roadmap/phase-3/SKILL.md", "Decision: split"]}]}, {"name": "Security", "summary": "Standalone security domain inferred from authentication, authorization, or session management files.", "value": 6, "detail_meta": ["Evidence paths: 4", "Responsibilities: 3", "Recommended skill path: skills/security/SKILL.md"], "children": [{"name": "test_tool_permissions.py", "summary": "Evidence path: e2e-tests/test_tool_permissions.py", "value": 1, "detail_meta": ["Path: e2e-tests/test_tool_permissions.py", "This evidence stayed attached to the parent capability instead of becoming a new skill node."]}, {"name": "tool_permission_callback.py", "summary": "Evidence path: examples/tool_permission_callback.py", "value": 1, "detail_meta": ["Path: examples/tool_permission_callback.py", "This evidence stayed attached to the parent capability instead of becoming a new skill node."]}, {"name": "session_mutations.py", "summary": "Evidence path: src/claude_agent_sdk/_internal/session_mutations.py", "value": 1, "detail_meta": ["Path: src/claude_agent_sdk/_internal/session_mutations.py", "This evidence stayed attached to the parent capability instead of becoming a new skill node."]}, {"name": "sessions.py", "summary": "Evidence path: src/claude_agent_sdk/_internal/sessions.py", "value": 1, "detail_meta": ["Path: src/claude_agent_sdk/_internal/sessions.py", "This evidence stayed attached to the parent capability instead of becoming a new skill node."]}]}]};
+window.__SKILGEN_SANKEY__ = {"evidence": {"nodes": [{"id": "repo", "name": "Repository", "layer": 0, "detail": "Skilgen is traversing the whole repository and grounding evidence into a connected flow."}, {"id": "lang::python", "name": "python", "layer": 1, "detail": "Dominant language signal. Skilgen found concrete repository evidence in python and used it to anchor domain reasoning.", "detail_meta": ["File-by-file evidence is grouped under language before deeper domain synthesis happens."]}, {"id": "item::e2e-tests/test_dynamic_control.py", "name": "CODEBASE_ONLY", "layer": 3, "detail": "e2e-tests/test_include_partial_messages.py \u2014 \"\"\"End-to-end tests for include_partial_messages option with real Claude API calls. These tests verify that the SDK properly handles partial message streaming,", "detail_meta": ["Path: e2e-tests/test_include_partial_messages.py", "Language: python", "Kinds: source"]}, {"id": "kind::requirements", "name": "requirements", "layer": 2, "detail": "Evidence kind: requirements. This bucket groups repo signals before Skilgen hands them to architecture synthesis.", "detail_meta": ["Bucket: requirements", "Used to separate code, config, docs, tests, and runtime clues."]}, {"id": "kind::source", "name": "source", "layer": 2, "detail": "Evidence kind: source. This bucket groups repo signals before Skilgen hands them to architecture synthesis.", "detail_meta": ["Bucket: source", "Used to separate code, config, docs, tests, and runtime clues."]}, {"id": "kind::structure", "name": "structure", "layer": 2, "detail": "Evidence kind: structure. This bucket groups repo signals before Skilgen hands them to architecture synthesis.", "detail_meta": ["Bucket: structure", "Used to separate code, config, docs, tests, and runtime clues."]}], "links": [{"source": "repo", "target": "lang::python", "value": 2}, {"source": "repo", "target": "kind::requirements", "value": 1}, {"source": "kind::requirements", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::structure", "value": 1}, {"source": "kind::structure", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::structure", "value": 1}, {"source": "kind::structure", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::structure", "value": 1}, {"source": "kind::structure", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}, {"source": "lang::python", "target": "kind::source", "value": 1}, {"source": "kind::source", "target": "item::e2e-tests/test_dynamic_control.py", "value": 1}]}, "skills": {"nodes": [{"id": "root", "name": "Skill System", "layer": 0, "detail": "Skilgen\u2019s living skill map combines generated domains, deeper nuances, and imported ecosystem capability.", "detail_meta": ["Generated skills, merged nuance, and external skill packs all live in one connected layer."]}, {"id": "domain::backend", "name": "Services", "layer": 1, "detail": "Service Architecture is a materialized architecture family. Decision: split. Rationale: Split because 3 concrete child skill surfaces emerged from 6 grounded evidence paths. The parent skill can hold shared context while child skills isolate the distinct capability seams around backend-api, backend-testing, backend-auth.", "detail_meta": ["Decision: SPLIT", "Parent skill: skills/backend/SKILL.md"]}, {"id": "parent::skills/backend/SKILL.md", "name": "Parent \u00b7 Services", "layer": 2, "detail": "Parent skill path: skills/backend/SKILL.md. This skill stays close to the dominant evidence and coordinates the subskills under Service Architecture.", "detail_meta": ["Parent skills organize the domain before child skills or retained nuance are loaded by an agent."]}, {"id": "child::skills/backend/api/SKILL.md", "name": "Skill \u00b7 Api", "layer": 3, "detail": "Generated child skill: skills/backend/api/SKILL.md. Skilgen split this out because the repo showed a repeatable nuance that would be easy for an agent to miss if it stayed buried in the parent skill.", "detail_meta": ["Child skill path: skills/backend/api/SKILL.md", "Parent domain: Service Architecture", "Created only where the evidence was strong enough to justify a dedicated reusable guide."]}, {"id": "child::skills/backend/testing/SKILL.md", "name": "Skill \u00b7 Testing", "layer": 3, "detail": "Generated child skill: skills/backend/testing/SKILL.md. Skilgen split this out because the repo showed a repeatable nuance that would be easy for an agent to miss if it stayed buried in the parent skill.", "detail_meta": ["Child skill path: skills/backend/testing/SKILL.md", "Parent domain: Service Architecture", "Created only where the evidence was strong enough to justify a dedicated reusable guide."]}, {"id": "child::skills/backend/auth/SKILL.md", "name": "Skill \u00b7 Auth", "layer": 3, "detail": "Generated child skill: skills/backend/auth/SKILL.md. Skilgen split this out because the repo showed a repeatable nuance that would be easy for an agent to miss if it stayed buried in the parent skill.", "detail_meta": ["Child skill path: skills/backend/auth/SKILL.md", "Parent domain: Service Architecture", "Created only where the evidence was strong enough to justify a dedicated reusable guide."]}, {"id": "domain::frontend", "name": "Experience", "layer": 1, "detail": "Experience System is a materialized architecture family. Decision: keep. Rationale: Keep as a first-class boundary because confidence is 0.88, 3 evidence paths cluster around one coherent responsibility set, and the boundary is clearer as a single skill than as shallower splits.", "detail_meta": ["Decision: KEEP", "Parent skill: skills/frontend/SKILL.md"]}, {"id": "parent::skills/frontend/SKILL.md", "name": "Parent \u00b7 Experience", "layer": 2, "detail": "Parent skill path: skills/frontend/SKILL.md. This skill stays close to the dominant evidence and coordinates the subskills under Experience System.", "detail_meta": ["Parent skills organize the domain before child skills or retained nuance are loaded by an agent."]}, {"id": "child::skills/frontend/components/SKILL.md", "name": "Skill \u00b7 Components", "layer": 3, "detail": "Generated child skill: skills/frontend/components/SKILL.md. Skilgen split this out because the repo showed a repeatable nuance that would be easy for an agent to miss if it stayed buried in the parent skill.", "detail_meta": ["Child skill path: skills/frontend/components/SKILL.md", "Parent domain: Experience System", "Created only where the evidence was strong enough to justify a dedicated reusable guide."]}, {"id": "domain::roadmap", "name": "Delivery", "layer": 1, "detail": "Delivery Phases is a materialized architecture family. Decision: split. Rationale: Split because 4 concrete child skill surfaces emerged from 2 grounded evidence paths. The parent skill can hold shared context while child skills isolate the distinct capability seams around roadmap-phase-0, roadmap-phase-1, roadmap-phase-2.", "detail_meta": ["Decision: SPLIT", "Parent skill: skills/roadmap/SKILL.md"]}, {"id": "parent::skills/roadmap/SKILL.md", "name": "Parent \u00b7 Delivery", "layer": 2, "detail": "Parent skill path: skills/roadmap/SKILL.md. This skill stays close to the dominant evidence and coordinates the subskills under Delivery Phases.", "detail_meta": ["Parent skills organize the domain before child skills or retained nuance are loaded by an agent."]}, {"id": "child::skills/roadmap/phase-0/SKILL.md", "name": "Skill \u00b7 Phase 0", "layer": 3, "detail": "Generated child skill: skills/roadmap/phase-0/SKILL.md. Skilgen split this out because the repo showed a repeatable nuance that would be easy for an agent to miss if it stayed buried in the parent skill.", "detail_meta": ["Child skill path: skills/roadmap/phase-0/SKILL.md", "Parent domain: Delivery Phases", "Created only where the evidence was strong enough to justify a dedicated reusable guide."]}, {"id": "child::skills/roadmap/phase-1/SKILL.md", "name": "Skill \u00b7 Phase 1", "layer": 3, "detail": "Generated child skill: skills/roadmap/phase-1/SKILL.md. Skilgen split this out because the repo showed a repeatable nuance that would be easy for an agent to miss if it stayed buried in the parent skill.", "detail_meta": ["Child skill path: skills/roadmap/phase-1/SKILL.md", "Parent domain: Delivery Phases", "Created only where the evidence was strong enough to justify a dedicated reusable guide."]}, {"id": "child::skills/roadmap/phase-2/SKILL.md", "name": "Skill \u00b7 Phase 2", "layer": 3, "detail": "Generated child skill: skills/roadmap/phase-2/SKILL.md. Skilgen split this out because the repo showed a repeatable nuance that would be easy for an agent to miss if it stayed buried in the parent skill.", "detail_meta": ["Child skill path: skills/roadmap/phase-2/SKILL.md", "Parent domain: Delivery Phases", "Created only where the evidence was strong enough to justify a dedicated reusable guide."]}, {"id": "child::skills/roadmap/phase-3/SKILL.md", "name": "Skill \u00b7 Phase 3", "layer": 3, "detail": "Generated child skill: skills/roadmap/phase-3/SKILL.md. Skilgen split this out because the repo showed a repeatable nuance that would be easy for an agent to miss if it stayed buried in the parent skill.", "detail_meta": ["Child skill path: skills/roadmap/phase-3/SKILL.md", "Parent domain: Delivery Phases", "Created only where the evidence was strong enough to justify a dedicated reusable guide."]}, {"id": "domain::security", "name": "Security", "layer": 1, "detail": "Security is a materialized architecture family. Decision: keep. Rationale: Keep as a first-class boundary because confidence is 0.83, 4 evidence paths cluster around one coherent responsibility set, and the boundary is clearer as a single skill than as shallower splits.", "detail_meta": ["Decision: KEEP", "Parent skill: skills/security/SKILL.md"]}, {"id": "parent::skills/security/SKILL.md", "name": "Parent \u00b7 Security", "layer": 2, "detail": "Parent skill path: skills/security/SKILL.md. This skill stays close to the dominant evidence and coordinates the subskills under Security.", "detail_meta": ["Parent skills organize the domain before child skills or retained nuance are loaded by an agent."]}, {"id": "leaf::skills/security/SKILL.md", "name": "Nuance \u00b7 Security", "layer": 3, "detail": "Deep nuance retained inside the parent skill. Skilgen decided not to split skills/security/SKILL.md because the evidence is stronger as concentrated guidance. Keep as a first-class boundary because confidence is 0.83, 4 evidence paths cluster around one coherent responsibility set, and the boundary is clearer as a single skill than as shallower splits.", "detail_meta": ["Retained in: skills/security/SKILL.md", "Kept merged to avoid shallow or redundant sub-skills."]}, {"id": "ecosystem::external", "name": "Ecosystem Packs", "layer": 1, "detail": "External skill packs that Skilgen activated because the repository signaled they add real capability on top of the repo-native tree.", "detail_meta": ["These packs are shown separately so repo-generated skills do not get visually buried by imported ecosystems."]}, {"id": "external::anthropic-skills", "name": "Pack \u00b7 anthropic-skills", "layer": 3, "detail": "External skill pack already installed because the repo signaled it was useful: anthropic-skills.", "detail_meta": ["Installed from repo signals", "Adds ecosystem knowledge beside the repo-native skills."]}], "links": [{"source": "root", "target": "domain::backend", "value": 3}, {"source": "domain::backend", "target": "parent::skills/backend/SKILL.md", "value": 3}, {"source": "parent::skills/backend/SKILL.md", "target": "child::skills/backend/api/SKILL.md", "value": 1}, {"source": "parent::skills/backend/SKILL.md", "target": "child::skills/backend/testing/SKILL.md", "value": 1}, {"source": "parent::skills/backend/SKILL.md", "target": "child::skills/backend/auth/SKILL.md", "value": 1}, {"source": "root", "target": "domain::frontend", "value": 1}, {"source": "domain::frontend", "target": "parent::skills/frontend/SKILL.md", "value": 1}, {"source": "parent::skills/frontend/SKILL.md", "target": "child::skills/frontend/components/SKILL.md", "value": 1}, {"source": "root", "target": "domain::roadmap", "value": 4}, {"source": "domain::roadmap", "target": "parent::skills/roadmap/SKILL.md", "value": 4}, {"source": "parent::skills/roadmap/SKILL.md", "target": "child::skills/roadmap/phase-0/SKILL.md", "value": 1}, {"source": "parent::skills/roadmap/SKILL.md", "target": "child::skills/roadmap/phase-1/SKILL.md", "value": 1}, {"source": "parent::skills/roadmap/SKILL.md", "target": "child::skills/roadmap/phase-2/SKILL.md", "value": 1}, {"source": "parent::skills/roadmap/SKILL.md", "target": "child::skills/roadmap/phase-3/SKILL.md", "value": 1}, {"source": "root", "target": "domain::security", "value": 1}, {"source": "domain::security", "target": "parent::skills/security/SKILL.md", "value": 1}, {"source": "parent::skills/security/SKILL.md", "target": "leaf::skills/security/SKILL.md", "value": 1}, {"source": "root", "target": "ecosystem::external", "value": 1}, {"source": "ecosystem::external", "target": "external::anthropic-skills", "value": 1}]}};
+window.__SKILGEN_RADIAL__ = {"analytics": [{"skill": "external::anthropic-skills", "title": "anthropic-skills", "family": "external", "kind": "external", "summary": "Installed external skill pack available to the repo.", "loads": 14, "recorded_loads": 0, "usage_label": "Modeled attention", "load_score": 100.0, "depth_score": 22, "richness_score": 100.0, "depth": 1, "richness": 2, "headings": 0, "bullets": 0, "references": 0, "words": 0}]};
+const tabs=[...document.querySelectorAll('.graph-tab')];
+const panels=[...document.querySelectorAll('.graph-stage .graph-panel')];
+const copies=[...document.querySelectorAll('.graph-aside .graph-copy')];
+const opsTabs=[...document.querySelectorAll('.ops-tab')];
+const opsCopies=[...document.querySelectorAll('.ops-copy')];
+const surfaceTabs=[...document.querySelectorAll('.surface-tab')];
+const surfaceCopies=[...document.querySelectorAll('.surface-copy')];
+const tooltip=document.createElement('div');
+tooltip.className='tooltip';
+document.body.appendChild(tooltip);
+const showTooltip=(event,title,body='')=>{
+  const escapeHtml=(value)=>String(value)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+  tooltip.innerHTML=`<strong>${escapeHtml(title)}</strong>${escapeHtml(body).replace(/\n/g,'<br>')}`;
+  const viewportWidth=window.innerWidth||document.documentElement.clientWidth||1280;
+  const viewportHeight=window.innerHeight||document.documentElement.clientHeight||720;
+  const tooltipWidth=Math.max(220, tooltip.offsetWidth || 280);
+  const tooltipHeight=Math.max(64, tooltip.offsetHeight || 96);
+  const preferredTop=event.pageY-16;
+  const clampedX=Math.min(Math.max(tooltipWidth/2+8,event.pageX),viewportWidth-(tooltipWidth/2)-8);
+  const placeBelow=(preferredTop-tooltipHeight) < 8;
+  const clampedY=placeBelow ? Math.min(viewportHeight-tooltipHeight-8, event.pageY+18) : Math.min(Math.max(tooltipHeight+8, preferredTop),viewportHeight-8);
+  tooltip.style.left=`${clampedX}px`;
+  tooltip.style.top=`${clampedY}px`;
+  tooltip.style.transform=placeBelow ? 'translate(-50%, 0)' : 'translate(-50%, -100%)';
+  tooltip.style.opacity='1';
+};
+const hideTooltip=()=>{ tooltip.style.opacity='0'; tooltip.style.transform='translate(-50%, -100%)'; };
+const activateSet=(buttons,panels,target,buttonKey,panelKey)=>{
+  buttons.forEach((button)=>{
+    const active=button.dataset[buttonKey]===target;
+    button.classList.toggle('active',active);
+    if(button.getAttribute('role')==='tab') button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  panels.forEach((panel)=>{
+    const active=panel.dataset[panelKey]===target;
+    panel.classList.toggle('active',active);
+    if(panel.getAttribute('role')==='tabpanel') panel.setAttribute('aria-hidden', active ? 'false' : 'true');
+  });
+};
+const detailDefaults={
+  architecture:{
+    title:'Architecture Sunburst',
+    body:'Skilgen starts from parser-backed evidence, then lets the architecture view reveal how responsibilities split across the repo. Click an arc to inspect that specific capability boundary.',
+    meta:[
+      'Color separates architecture families so the high-level shape is easy to scan.',
+      'Clicking a domain replaces this summary with node-specific detail.',
+    ],
+  },
+  evidence:{
+    title:'Evidence Flow',
+    body:'Skilgen walks file by file and groups the repo into languages, evidence kinds, and concrete artifacts. Click any node to inspect the exact nuance that was extracted.',
+    meta:[
+      'Evidence is grounded in real files, snippets, configs, docs, and tests.',
+      'This is the proof layer beneath every generated skill.',
+    ],
+  },
+  dependencies:{
+    title:'Dependency Network',
+    body:'Skilgen turns import relationships into a navigable map so you can see what will feel expensive, central, or risky before an agent starts editing.',
+    meta:['Click a node to inspect its exact file path and dependency role.'],
+  },
+  skills:{
+    title:'Skill Flow',
+    body:'Skilgen does not stop at high-level domains. It goes file by file, then decides where nuance deserves its own child skill, where it should stay merged, and where external packs strengthen the repo-native tree.',
+    meta:[
+      'Click a skill node to inspect why that skill exists.',
+      'External packs show which ecosystem skills are already active in the map.',
+    ],
+  },
+  analytics:{
+    title:'Usage Analytics',
+    body:'Skilgen shows every tracked skill as its own radial bar, layering real usage, structural depth, and content richness together so the most meaningful skills stand out immediately.',
+    meta:[
+      'Gold measures usage intensity.',
+      'Blue measures structural depth in the skill tree.',
+      'Green measures content richness inside the skill.',
+    ],
+  },
+};
+const setDetail=(target,title,body,meta=[])=>{
+  const titleSlot=document.querySelector(`[data-copy-title="${target}"]`);
+  if(titleSlot) titleSlot.textContent=title;
+  const bodySlot=document.querySelector(`[data-copy-body="${target}"]`);
+  if(bodySlot) bodySlot.textContent=body;
+  const box=document.querySelector(`[data-detail="${target}"]`);
+  if(!box) return;
+  const safeMeta=(meta||[]).slice(0,4);
+  box.innerHTML=`<h4>${title}</h4><p>${body}</p><ul class="graph-detail-meta">${safeMeta.map((item)=>`<li>${item}</li>`).join('')}</ul>`;
+};
+Object.entries(detailDefaults).forEach(([key,value])=>setDetail(key,value.title,value.body,value.meta));
+const networkOptions={
+  autoResize:true,
+  physics:{stabilization:true,barnesHut:{gravitationalConstant:-3200,centralGravity:0.18,springLength:132,springConstant:0.03}},
+  interaction:{hover:true,navigationButtons:true,keyboard:true},
+  nodes:{shape:'dot',borderWidth:2,font:{color:'#F6F7FB',face:'Inter'},color:{border:'#EFD37A',background:'#11161E',highlight:{border:'#F8DF8E',background:'#1B2430'}}},
+  edges:{color:{color:'rgba(255,255,255,0.26)',highlight:'#EFD37A'},smooth:true,width:1.2},
+  groups:{repo:{size:38,color:{border:'#F8DF8E',background:'#1B1A12'}},source:{size:15,color:{border:'#7DD8FF',background:'#131D29'}},target:{size:13,color:{border:'#8FD9A8',background:'#101A17'}},language:{size:18,color:{border:'#F6F7FB',background:'#171A21'}},reference:{size:11,color:{border:'#C99BFF',background:'#151125'}}},
+};
+const renderedNetworks=new Map();
+const renderNetwork=(target, canvas)=>{
+  if(!window.vis) return;
+  const graph=window.__SKILGEN_NETWORKS__[target];
+  if(renderedNetworks.has(target)){
+    const existing=renderedNetworks.get(target);
+    existing.setData({nodes:new vis.DataSet(graph.nodes),edges:new vis.DataSet(graph.edges)});
+    existing.setSize('100%','100%');
+    existing.redraw();
+    existing.fit({animation:true});
+    return;
+  }
+  const data={nodes:new vis.DataSet(graph.nodes),edges:new vis.DataSet(graph.edges)};
+  const network=new vis.Network(canvas,data,networkOptions);
+  renderedNetworks.set(target,network);
+  network.once('stabilized',()=>{ network.setSize('100%','100%'); network.redraw(); network.fit({animation:true}); });
+  network.on('hoverNode',(params)=>{
+    const node=graph.nodes.find((entry)=>entry.id===params.node);
+    if(node) showTooltip(params.event.event,node.label,node.title||'');
+  });
+  network.on('blurNode',hideTooltip);
+  network.on('click',(params)=>{
+    if(!params.nodes.length) return;
+    const node=graph.nodes.find((entry)=>entry.id===params.nodes[0]);
+    if(!node) return;
+    const prefix = target === 'dependencies' ? 'Dependency' : target === 'evidence' ? 'Evidence' : target === 'skills' ? 'Skill' : 'Graph';
+    setDetail(
+      target,
+      `${prefix} · ${node.detail_title || node.label}`,
+      node.detail_body || node.title || node.label,
+      node.detail_meta || []
+    );
+  });
+  setTimeout(()=>{ network.setSize('100%','100%'); network.redraw(); network.fit({animation:true}); },120);
+};
+const renderSunburst=(container)=>{
+  if(container.dataset.loaded||!window.d3) return;
+  container.dataset.loaded='1';
+  const width=container.clientWidth||860;
+  const height=container.clientHeight||560;
+  const radius=Math.min(width,height)/2-18;
+  const root=d3.hierarchy(window.__SKILGEN_SUNBURST__).sum((d)=>d.value||1).sort((a,b)=>b.value-a.value);
+  d3.partition().size([2*Math.PI, root.height+1])(root);
+  root.each((d)=>d.current=d);
+  const color=d3.scaleOrdinal()
+    .domain(root.descendants().map((d)=>d.data.name))
+    .range(['#F4D76A','#46C9FF','#7AF0AE','#FF8D5C','#C685FF','#FF5CA8','#3FE0C6','#6F8CFF']);
+  const svg=d3.select(container).append('svg').attr('viewBox',`${-width/2} ${-height/2} ${width} ${height}`).attr('role','img').attr('aria-label','Architecture sunburst showing top-level domains, child skills, and evidence-backed capability boundaries.').style('font','12px Inter');
+  const ringScale=radius/(root.height+1);
+  const arc=d3.arc()
+    .startAngle((d)=>d.x0)
+    .endAngle((d)=>d.x1)
+    .padAngle((d)=>Math.min((d.x1-d.x0)/2,0.01))
+    .padRadius(radius*1.4)
+    .innerRadius((d)=>Math.max(0,d.y0*ringScale))
+    .outerRadius((d)=>Math.max(d.y0*ringScale,d.y1*ringScale-2));
+  const arcVisible=(d)=>d.y1<=3&&d.y0>=1&&d.x1>d.x0;
+  const labelVisible=(d)=>arcVisible(d)&&((d.x1-d.x0)*(d.y1-d.y0))>0.1;
+  const labelTransform=(d)=>{
+    const x=(d.x0+d.x1)/2*180/Math.PI;
+    const y=(d.y0+d.y1)/2*ringScale;
+    return `rotate(${x-90}) translate(${y},0) rotate(${x<180?0:180})`;
+  };
+  const center=svg.append('g').attr('pointer-events','none');
+  const label=center.append('text').attr('text-anchor','middle').attr('fill','#F6F7FB').style('font-size','18px').style('font-weight','700').text(root.data.name);
+  center.append('text').attr('text-anchor','middle').attr('fill','#98A1B2').attr('dy','1.8em').text('click to zoom');
+  const applyDetail=(node)=>{
+    const title=node.depth ? `Architecture · ${node.data.name}` : 'Architecture Sunburst';
+    setDetail('architecture', title, node.data.summary || node.data.name, node.data.detail_meta || []);
+  };
+  const path=svg.append('g').selectAll('path')
+    .data(root.descendants().slice(1))
+    .join('path')
+    .attr('fill',(d)=>{ let current=d; while(current.depth>1) current=current.parent; return color(current.data.name); })
+    .attr('fill-opacity',(d)=>d.children?1:0.92)
+    .attr('stroke','#050608')
+    .attr('stroke-width',1.5)
+    .attr('d',(d)=>arc(d.current))
+    .style('cursor','pointer')
+    .on('click',(_,p)=>clicked(p))
+    .on('mousemove',(event,d)=>showTooltip(event,d.data.name,d.data.summary||d.data.name))
+    .on('mouseleave',hideTooltip);
+  const text=svg.append('g')
+    .attr('pointer-events','none')
+    .attr('text-anchor','middle')
+    .style('user-select','none')
+    .selectAll('text')
+    .data(root.descendants().slice(1))
+    .join('text')
+    .attr('dy','0.35em')
+    .attr('fill','#F6F7FB')
+    .style('font-size','11px')
+    .attr('fill-opacity',(d)=>+labelVisible(d.current))
+    .attr('transform',(d)=>labelTransform(d.current))
+    .text((d)=>d.data.name);
+  const parent=svg.append('circle').datum(root).attr('r',radius/(root.height+1)).attr('fill','transparent').attr('pointer-events','all').on('click',(_,p)=>clicked(p));
+  function clicked(p){
+    applyDetail(p);
+    parent.datum(p.parent||root);
+    root.each((d)=>d.target={
+      x0:Math.max(0,Math.min(1,(d.x0-p.x0)/(p.x1-p.x0)))*2*Math.PI,
+      x1:Math.max(0,Math.min(1,(d.x1-p.x0)/(p.x1-p.x0)))*2*Math.PI,
+      y0:Math.max(0,d.y0-p.depth),
+      y1:Math.max(0,d.y1-p.depth)
+    });
+    const t=svg.transition().duration(750);
+    path.transition(t)
+      .tween('data',(d)=>{ const i=d3.interpolate(d.current,d.target); return (tick)=>d.current=i(tick); })
+      .filter(function(d){ return +this.getAttribute('fill-opacity')||arcVisible(d.target); })
+      .attr('fill-opacity',(d)=>arcVisible(d.target)?(d.children?0.96:0.86):0)
+      .attrTween('d',(d)=>()=>arc(d.current));
+    text.filter(function(d){ return +this.getAttribute('fill-opacity')||labelVisible(d.target); })
+      .transition(t)
+      .attr('fill-opacity',(d)=>+labelVisible(d.target))
+      .attrTween('transform',(d)=>()=>labelTransform(d.current));
+    label.text(p.data.name);
+  }
+  applyDetail(root);
+};
+const renderedSankeys=new Map();
+const renderSankey=(target, container)=>{
+  if(!window.d3||!window.d3.sankey) return;
+  if(renderedSankeys.has(target) && container.dataset.loaded==='1') return;
+  container.dataset.loaded='1';
+  container.innerHTML='';
+  const width=container.clientWidth||860;
+  const height=container.clientHeight||560;
+  const raw=window.__SKILGEN_SANKEY__[target];
+  const graph={nodes:raw.nodes.map((d)=>({...d})),links:raw.links.map((d)=>({...d}))};
+  const svg=d3.select(container).append('svg').attr('viewBox',`0 0 ${width} ${height}`).attr('role','img').attr('aria-label', target==='skills' ? 'Skill flow sankey showing domains, parent skills, child skills, and ecosystem packs.' : 'Evidence sankey showing languages, evidence kinds, and grounded repository artifacts.');
+  const sankey=d3.sankey().nodeId((d)=>d.id).nodeWidth(18).nodePadding(20).extent([[16,18],[width-16,height-18]]);
+  const {nodes,links}=sankey(graph);
+  const linkColor = target==='skills' ? 'rgba(103,213,255,0.34)' : 'rgba(239,211,122,0.42)';
+  svg.append('g').selectAll('path').data(links).join('path')
+    .attr('d',d3.sankeyLinkHorizontal())
+    .attr('stroke',linkColor)
+    .attr('stroke-width',(d)=>Math.max(1,d.width))
+    .attr('fill','none')
+    .attr('stroke-opacity',0.82)
+    .on('mousemove',(event,d)=>showTooltip(event,`${d.source.name} → ${d.target.name}`,`Value ${d.value}`))
+    .on('mouseleave',hideTooltip);
+  const node=svg.append('g').selectAll('g').data(nodes).join('g');
+  node.append('rect')
+    .attr('x',(d)=>d.x0)
+    .attr('y',(d)=>d.y0)
+    .attr('height',(d)=>Math.max(1,d.y1-d.y0))
+    .attr('width',(d)=>d.x1-d.x0)
+    .attr('rx',7)
+    .attr('fill',(d)=>d.layer===1 ? (target==='skills' ? '#67D5FF' : '#EFD37A') : d.layer===2 ? (target==='skills' ? '#8FD9A8' : '#B9C2D4') : '#11161E')
+    .attr('stroke','#F6F7FB')
+    .attr('stroke-opacity',0.32)
+    .style('cursor','pointer')
+    .on('mousemove',(event,d)=>showTooltip(event,d.name,`Layer ${d.layer}`))
+    .on('mouseleave',hideTooltip)
+    .on('click',(_,d)=>{
+      if(detailDefaults[target]) {
+        const prefix = target === 'skills' ? 'Skill' : 'Evidence';
+        setDetail(target, `${prefix} · ${d.name}`, d.detail || d.name, d.detail_meta || []);
+      }
+    });
+  node.append('text')
+    .attr('x',(d)=>d.x0<width/2?d.x1+8:d.x0-8)
+    .attr('y',(d)=>(d.y1+d.y0)/2)
+    .attr('dy','0.35em')
+    .attr('text-anchor',(d)=>d.x0<width/2?'start':'end')
+    .attr('fill','#F6F7FB')
+    .style('font','12px Inter')
+    .text((d)=>d.name);
+  renderedSankeys.set(target,true);
+  if(detailDefaults[target]) setDetail(target, detailDefaults[target].title, detailDefaults[target].body, detailDefaults[target].meta);
+};
+const renderAnalyticsRadial=(container)=>{
+  if(!window.d3 || container.dataset.loaded==='1') return;
+  container.dataset.loaded='1';
+  const data=(window.__SKILGEN_RADIAL__ && window.__SKILGEN_RADIAL__.analytics) || [];
+  container.innerHTML='';
+  const width=container.clientWidth||860;
+  const height=container.clientHeight||560;
+  const innerRadius=88;
+  const outerRadius=Math.min(width,height)/2-30;
+  const svg=d3.select(container).append('svg').attr('viewBox',`${-width/2} ${-height/2} ${width} ${height}`).attr('role','img').attr('aria-label','Radial analytics chart showing per-skill usage, depth, and content richness.');
+  if(!data.length){
+    svg.append('text').attr('fill','#98A1B2').attr('text-anchor','middle').text('No skill usage recorded yet');
+    return;
+  }
+  const keys=['load_score','depth_score','richness_score'];
+  const colors={
+    load_score:'#EFD37A',
+    depth_score:'#67D5FF',
+    richness_score:'#8FD9A8',
+  };
+  const x=d3.scaleBand().domain(data.map((d)=>d.title)).range([0,2*Math.PI]).align(0);
+  const maxValue=d3.max(data,(d)=>d.load_score+d.depth_score+d.richness_score)||100;
+  const y=d3.scaleLinear().domain([0,maxValue]).range([innerRadius,outerRadius]);
+  const stack=d3.stack().keys(keys);
+  const stacked=stack(data);
+  const arc=d3.arc()
+    .innerRadius((d)=>y(d[0]))
+    .outerRadius((d)=>y(d[1]))
+    .startAngle((d)=>x(d.data.title))
+    .endAngle((d)=>x(d.data.title)+x.bandwidth())
+    .padAngle(0.018)
+    .padRadius(innerRadius);
+  const layers=svg.append('g').selectAll('g').data(stacked).join('g').attr('fill',(d)=>colors[d.key]);
+  layers.selectAll('path').data((d)=>d.map((entry)=>Object.assign(entry,{key:d.key}))).join('path')
+    .attr('d',arc)
+    .attr('stroke','#050608')
+    .attr('stroke-width',1.2)
+    .style('cursor','pointer')
+    .on('mousemove',(event,d)=>showTooltip(event,d.data.title,`${d.key.replace('_score','').replace('_',' ')} · ${Math.round(d.data[d.key])}`))
+    .on('mouseleave',hideTooltip)
+    .on('click',(_,d)=>setDetail('analytics', `Usage · ${d.data.title}`, d.data.summary, [
+      `${d.data.usage_label}: ${d.data.loads}`,
+      `Recorded loads: ${d.data.recorded_loads}`,
+      `Depth score: ${Math.round(d.data.depth_score)}`,
+      `Richness score: ${Math.round(d.data.richness_score)}`,
+      `Headings: ${d.data.headings}, bullets: ${d.data.bullets}, references: ${d.data.references}`,
+    ]));
+  svg.append('g').selectAll('text').data(data).join('text')
+    .attr('text-anchor',(d)=>((x(d.title)+x.bandwidth()/2+Math.PI/2)%(2*Math.PI))<Math.PI?'start':'end')
+    .attr('transform',(d)=>{
+      const angle=(x(d.title)+x.bandwidth()/2)-Math.PI/2;
+      const radius=outerRadius+10;
+      const rotation=angle*180/Math.PI;
+      const flip=rotation>90&&rotation<270?180:0;
+      return `rotate(${rotation}) translate(${radius},0) rotate(${flip})`;
+    })
+    .attr('fill','#F6F7FB')
+    .style('font','10px Inter')
+    .text((d)=>d.title);
+  const legend=svg.append('g').attr('transform',`translate(${-outerRadius + 28},${-outerRadius + 28})`);
+  [
+    ['Usage','#EFD37A'],
+    ['Depth','#67D5FF'],
+    ['Content','#8FD9A8'],
+  ].forEach(([label,color],index)=>{
+    const row=legend.append('g').attr('transform',`translate(0,${index*18})`);
+    row.append('circle').attr('r',5).attr('cx',0).attr('cy',0).attr('fill',color);
+    row.append('text').attr('x',12).attr('y',4).attr('fill','#98A1B2').style('font','11px Inter').text(label);
+  });
+  const usageMode = data[0] ? data[0].usage_label : 'Usage';
+  const hasLiveUsage = data.some((entry)=>Number(entry.recorded_loads || 0) > 0);
+  svg.append('text').attr('text-anchor','middle').attr('fill','#F6F7FB').style('font','700 15px Inter').text(hasLiveUsage ? 'Live Usage' : 'Modeled Usage');
+  svg.append('text').attr('text-anchor','middle').attr('dy','1.6em').attr('fill','#98A1B2').style('font','11px Inter').text(hasLiveUsage ? 'depth + content' : 'content signal only');
+  if(data[0]){
+    setDetail('analytics', `Usage · ${data[0].title}`, data[0].summary, [
+      `${data[0].usage_label}: ${data[0].loads}`,
+      `Recorded loads: ${data[0].recorded_loads}`,
+      `Depth score: ${Math.round(data[0].depth_score)}`,
+      `Richness score: ${Math.round(data[0].richness_score)}`,
+      `Headings: ${data[0].headings}, bullets: ${data[0].bullets}, references: ${data[0].references}`,
+    ]);
+  }
+};
+const setPanel=(target)=>{
+  activateSet(tabs,panels,target,'target','panel');
+  activateSet(tabs,copies,target,'target','copy');
+  window.requestAnimationFrame(()=>{
+    const panel=document.querySelector(`.graph-panel[data-panel="${target}"]`);
+    const networkCanvas=panel?.querySelector('.network-canvas');
+    if(networkCanvas){ renderNetwork(target,networkCanvas); return; }
+    const sunburstCanvas=panel?.querySelector('.sunburst-canvas');
+    if(sunburstCanvas){ renderSunburst(sunburstCanvas); return; }
+    const sankeyCanvas=panel?.querySelector('.sankey-canvas');
+    if(sankeyCanvas){ renderSankey(target,sankeyCanvas); }
+  });
+};
+tabs.forEach((tab)=>tab.addEventListener('click',()=>setPanel(tab.dataset.target)));
+opsTabs.forEach((tab)=>tab.addEventListener('click',()=>activateSet(opsTabs,opsCopies,tab.dataset.target,'target','copy')));
+surfaceTabs.forEach((tab)=>tab.addEventListener('click',()=>activateSet(surfaceTabs,surfaceCopies,tab.dataset.target,'target','copy')));
+const analyticsCanvas=document.querySelector('[data-radial="analytics"]');
+if(analyticsCanvas) renderAnalyticsRadial(analyticsCanvas);
+setPanel('architecture');
+if(opsTabs.length) activateSet(opsTabs,opsCopies,'worker','target','copy');
+if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target','copy');
+window.addEventListener('resize',()=>{
+  const activePanel=document.querySelector('.graph-panel.active');
+  const activeTarget=activePanel ? activePanel.dataset.panel : 'architecture';
+  if(activeTarget) setPanel(activeTarget);
+});</script>
+</body>
+</html>

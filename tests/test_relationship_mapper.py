@@ -44,6 +44,16 @@ class RelationshipMapperTests(unittest.TestCase):
             self.assertIn("src/routes/dashboard.tsx", graph)
             self.assertIn("src/components/SkillCard.tsx", graph["src/routes/dashboard.tsx"])
 
+    def test_build_import_graph_ignores_invalid_utf8_python_bytes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "app.py").write_bytes(b"import json\n# \xb1\n")
+
+            graph = build_import_graph(root)
+
+            self.assertIn("app.py", graph)
+            self.assertIn("json", graph["app.py"])
+
 
 if __name__ == "__main__":
     unittest.main()

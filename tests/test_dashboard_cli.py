@@ -1,12 +1,16 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from datetime import UTC, datetime, timedelta
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 import json
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 from skilgen.autoupdate import stop_auto_update_worker
+from skilgen.cli.main import main
 
 
 class DashboardCliTests(unittest.TestCase):
@@ -207,6 +211,36 @@ class DashboardCliTests(unittest.TestCase):
             self.assertIn("Score has stayed at", html)
             self.assertLessEqual(html.count("<div class='spark-point'"), 2)
             self.assertIn(">Stable<", html)
+
+    def test_dashboard_command_handles_fallback_payload_shapes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_path = root / "dashboard.html"
+            stdout = StringIO()
+            stderr = StringIO()
+            payload = {
+                "html": "<html><body>fallback</body></html>",
+                "score": 7,
+                "graphs": {"domain_graph": {"nodes": []}},
+                "architecture": {"domainSummary": {"backend": {"confidence": 0.8}}},
+            }
+
+            with (
+                patch("skilgen.cli.main.dashboard_payload", return_value=payload),
+                patch("skilgen.cli.main.current_runtime_mode", return_value="model_backed"),
+                patch.object(sys, "argv", ["skilgen", "dashboard", "--project-root", str(root), "--output", str(output_path)]),
+                redirect_stdout(stdout),
+                redirect_stderr(stderr),
+            ):
+                main()
+
+            result = json.loads(stdout.getvalue())
+            self.assertEqual(result["dashboard_file"], str(output_path.resolve()))
+            self.assertEqual(result["headline"], f"Dashboard for {root.name}")
+            self.assertEqual(result["score"], 7)
+            self.assertEqual(result["stale_skill_count"], 0)
+            self.assertEqual(result["graph_panels"], ["domain_graph"])
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "<html><body>fallback</body></html>")
 
 
 if __name__ == "__main__":
