@@ -18,6 +18,7 @@ from skilgen.agents.decision_planner import build_agent_decision
 from skilgen.autoupdate import auto_update_status
 from skilgen.core.config import load_config
 from skilgen.core.context import build_codebase_context
+from skilgen.core.corpus_index import ensure_corpus_index
 from skilgen.core.analytics import analytics_summary
 from skilgen.core.diff import compute_diff
 from skilgen.core.requirements import load_project_context, load_requirements
@@ -300,8 +301,16 @@ def native_analyze_payload(project_root: str | Path, requirements: str | Path | 
     return payload
 
 
-def native_architecture_payload(project_root: str | Path, requirements: str | Path | None = None) -> dict[str, Any]:
+def native_architecture_payload(
+    project_root: str | Path,
+    requirements: str | Path | None = None,
+    *,
+    skip_index: bool = False,
+) -> dict[str, Any]:
     root = Path(project_root).resolve()
+    config = load_config(root)
+    if not skip_index and config.corpus.enabled:
+        ensure_corpus_index(root, config)
     context = load_project_context(root, Path(requirements).resolve() if requirements is not None else None)
     bundle = _analysis_bundle(context, root)
     return {
@@ -503,9 +512,12 @@ def native_run_delivery(
     targets: tuple[str, ...] = ("docs", "skills"),
     domains: tuple[str, ...] = (),
     dry_run: bool = False,
+    skip_index: bool = False,
 ) -> list[Path]:
     root = Path(project_root).resolve()
-    load_config(root)
+    config = load_config(root)
+    if not skip_index and config.corpus.enabled:
+        ensure_corpus_index(root, config)
     context = load_project_context(root, Path(requirements_path).resolve() if requirements_path is not None else None)
     fingerprint_project(root)
     build_codebase_context(root, context)

@@ -4,6 +4,10 @@ import ast
 import re
 from pathlib import Path
 
+from skilgen.core.config import load_config
+from skilgen.core.corpus_index import load_corpus_index
+from skilgen.core.deep_sampler import select_deep_read_targets
+from skilgen.core.document_ingestion import extract_document_text
 from skilgen.core.models import CodebaseSignals
 
 
@@ -312,51 +316,26 @@ def _language_structure(path: Path, text: str) -> list[str]:
 
 def collect_code_evidence(project_root: Path, *, limit: int = 12) -> list[dict[str, object]]:
     root = project_root.resolve()
+    config = load_config(root)
+    indexed = load_corpus_index(root, config)
+    indexed_lookup = {
+        entry["path"]: entry
+        for entry in (indexed or {}).get("entries", [])
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    }
     signals = analyze_codebase(root)
-    prioritized_paths = [
-        *signals.backend_routes,
-        *signals.services,
-        *signals.data_models,
-        *signals.persistence_layers,
-        *signals.auth_files,
-        *signals.background_jobs,
-        *signals.copybooks,
-        *signals.legacy_programs,
-        *signals.frontend_routes,
-        *signals.components,
-    ]
-    seen: set[str] = set()
-    evidence_paths: list[Path] = []
-    for relative in prioritized_paths:
-        if relative in seen:
-            continue
-        candidate = root / relative
-        if candidate.exists() and candidate.is_file():
-            evidence_paths.append(candidate)
-            seen.add(relative)
-        if len(evidence_paths) >= limit:
-            break
-    if len(evidence_paths) < limit:
-        for path in _iter_code_files(root):
-            relative = path.relative_to(root).as_posix()
-            if relative in seen:
-                continue
-            evidence_paths.append(path)
-            seen.add(relative)
-            if len(evidence_paths) >= limit:
-                break
+    evidence_paths = _select_evidence_paths(root, signals, config, indexed, limit)
 
     evidence: list[dict[str, object]] = []
     for path in evidence_paths:
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+        relative = path.relative_to(root).as_posix()
+        text = _evidence_text(path)
+        if not text:
             continue
         snippet = _snippet_lines(text)
         if not snippet:
             continue
-        relative = path.relative_to(root).as_posix()
-        tags = []
+        tags = [category for category in _index_tags(indexed_lookup, relative)]
         for name, bucket in [
             ("backend_routes", signals.backend_routes),
             ("frontend_routes", signals.frontend_routes),
@@ -377,12 +356,90 @@ def collect_code_evidence(project_root: Path, *, limit: int = 12) -> list[dict[s
         evidence.append(
             {
                 "path": relative,
-                "language": _language_for_path(path),
-                "tags": tags,
+                "language": _evidence_language(path, indexed_lookup, relative),
+                "tags": sorted(set(tags)),
                 "snippet": snippet,
             }
         )
     return evidence
+
+
+def _select_evidence_paths(project_root: Path, signals: CodebaseSignals, config, indexed, limit: int) -> list[Path]:
+    if config.corpus.enabled and indexed is not None:
+        budget = limit if limit != 12 else None
+        selected = select_deep_read_targets(indexed, project_root=project_root, config=config, total_budget=budget)
+        paths: list[Path] = []
+        for relative in selected:
+            candidate = project_root / relative
+            if candidate.exists() and candidate.is_file():
+                paths.append(candidate)
+        if paths:
+            return paths
+
+    prioritized_paths = [
+        *signals.backend_routes,
+        *signals.services,
+        *signals.data_models,
+        *signals.persistence_layers,
+        *signals.auth_files,
+        *signals.background_jobs,
+        *signals.copybooks,
+        *signals.legacy_programs,
+        *signals.frontend_routes,
+        *signals.components,
+    ]
+    seen: set[str] = set()
+    evidence_paths: list[Path] = []
+    for relative in prioritized_paths:
+        if relative in seen:
+            continue
+        candidate = project_root / relative
+        if candidate.exists() and candidate.is_file():
+            evidence_paths.append(candidate)
+            seen.add(relative)
+        if len(evidence_paths) >= limit:
+            break
+    if len(evidence_paths) < limit:
+        for path in _iter_code_files(project_root):
+            relative = path.relative_to(project_root).as_posix()
+            if relative in seen:
+                continue
+            evidence_paths.append(path)
+            seen.add(relative)
+            if len(evidence_paths) >= limit:
+                break
+    return evidence_paths
+
+
+def _evidence_text(path: Path) -> str:
+    try:
+        if path.suffix.lower() in CODE_EXTENSIONS:
+            return path.read_text(encoding="utf-8", errors="ignore")
+        return extract_document_text(path)
+    except Exception:
+        return ""
+
+
+def _index_tags(indexed_lookup: dict[str, dict[str, object]], relative: str) -> list[str]:
+    if not indexed_lookup:
+        return []
+    entry = indexed_lookup.get(relative)
+    if entry is not None:
+        category = entry.get("category")
+        return [str(category)] if isinstance(category, str) and category != "source" else []
+    return []
+
+
+def _evidence_language(path: Path, indexed_lookup: dict[str, dict[str, object]], relative: str) -> str:
+    entry = indexed_lookup.get(relative)
+    if entry is not None:
+        language = entry.get("language")
+        if isinstance(language, str) and language:
+            return language
+        category = entry.get("category")
+        if isinstance(category, str) and category != "source":
+            return category
+    return _language_for_path(path)
 
 
 def collect_structural_evidence(project_root: Path, *, limit: int = 16) -> list[dict[str, object]]:

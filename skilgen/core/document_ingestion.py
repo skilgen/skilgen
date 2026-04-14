@@ -9,11 +9,26 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-import yaml
-from bs4 import BeautifulSoup
-from openpyxl import load_workbook
-from pypdf import PdfReader
-from pptx import Presentation
+try:  # pragma: no cover - optional dependency
+    import yaml
+except ImportError:  # pragma: no cover - optional dependency
+    yaml = None
+try:  # pragma: no cover - optional dependency
+    from bs4 import BeautifulSoup
+except ImportError:  # pragma: no cover - optional dependency
+    BeautifulSoup = None
+try:  # pragma: no cover - optional dependency
+    from openpyxl import load_workbook
+except ImportError:  # pragma: no cover - optional dependency
+    load_workbook = None
+try:  # pragma: no cover - optional dependency
+    from pypdf import PdfReader
+except ImportError:  # pragma: no cover - optional dependency
+    PdfReader = None
+try:  # pragma: no cover - optional dependency
+    from pptx import Presentation
+except ImportError:  # pragma: no cover - optional dependency
+    Presentation = None
 
 
 PLAIN_TEXT_EXTENSIONS = {".md", ".markdown", ".txt", ".rst", ".log"}
@@ -111,6 +126,8 @@ def _extract_docx(path: Path) -> str:
 
 
 def _extract_pdf(path: Path) -> str:
+    if PdfReader is None:
+        return ""
     reader = PdfReader(str(path))
     pages: list[str] = []
     for page in reader.pages:
@@ -121,7 +138,10 @@ def _extract_pdf(path: Path) -> str:
 
 
 def _extract_html(path: Path) -> str:
-    soup = BeautifulSoup(path.read_text(encoding="utf-8", errors="ignore"), "html.parser")
+    raw = path.read_text(encoding="utf-8", errors="ignore")
+    if BeautifulSoup is None:
+        return re.sub(r"<[^>]+>", " ", raw)
+    soup = BeautifulSoup(raw, "html.parser")
     return soup.get_text("\n")
 
 
@@ -131,7 +151,10 @@ def _extract_json(path: Path) -> str:
 
 
 def _extract_yaml(path: Path) -> str:
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw = path.read_text(encoding="utf-8", errors="ignore")
+    if yaml is None:
+        return raw
+    payload = yaml.safe_load(raw)
     return "\n".join(_flatten(payload))
 
 
@@ -162,6 +185,8 @@ def _extract_config(path: Path) -> str:
 
 
 def _extract_xlsx(path: Path) -> str:
+    if load_workbook is None:
+        return ""
     workbook = load_workbook(filename=path, read_only=True, data_only=True)
     lines: list[str] = []
     for sheet in workbook.worksheets:
@@ -174,6 +199,8 @@ def _extract_xlsx(path: Path) -> str:
 
 
 def _extract_pptx(path: Path) -> str:
+    if Presentation is None:
+        return ""
     presentation = Presentation(path)
     lines: list[str] = []
     for index, slide in enumerate(presentation.slides, start=1):

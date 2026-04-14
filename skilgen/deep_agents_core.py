@@ -31,6 +31,10 @@ def _provider_docs_url(provider: str | None) -> str:
         "huggingface": "https://huggingface.co/docs",
         "groq": "https://console.groq.com/docs",
         "openrouter": "https://openrouter.ai/docs",
+        "azure_openai": "https://learn.microsoft.com/azure/ai-services/openai/",
+        "bedrock": "https://docs.aws.amazon.com/bedrock/",
+        "ollama": "https://github.com/ollama/ollama",
+        "openai_compatible": "https://docs.langchain.com/oss/python/langchain-models",
     }
     return mapping.get(provider or "openai", "https://platform.openai.com/docs")
 
@@ -113,7 +117,7 @@ def deep_agents_unavailable_reason(project_root: str | Path = ".") -> str | None
     if not provider_supported(settings.provider):
         return (
             f"Unsupported model provider: {settings.provider}. "
-            "Supported providers are openai, anthropic, google_genai/gemini, huggingface, groq, and openrouter."
+            "Supported providers are openai, anthropic, google_genai/gemini, huggingface, groq, openrouter, azure_openai, bedrock, ollama, and openai_compatible."
         )
     if create_deep_agent is None:
         return (
@@ -125,8 +129,8 @@ def deep_agents_unavailable_reason(project_root: str | Path = ".") -> str | None
             "Chat model initialization is unavailable in this Python environment. "
             "Reinstall Skilgen with the required LangChain provider packages."
         )
-    key_env = settings.api_key_env or "OPENAI_API_KEY"
-    if not os.getenv(key_env):
+    key_env = settings.api_key_env
+    if key_env and not os.getenv(key_env):
         return f"Missing model credential environment variable: {key_env}"
     return None
 
@@ -183,6 +187,7 @@ def runtime_diagnostics(project_root: str | Path = ".") -> dict[str, object]:
         "model": settings.model,
         "api_key_env": settings.api_key_env,
         "api_key_present": settings.api_key_present,
+        "model_endpoint": settings.endpoint,
         "temperature": settings.temperature,
         "max_tokens": settings.max_tokens,
         "retry_attempts": settings.retry_attempts,
@@ -196,24 +201,64 @@ def _build_chat_model(project_root: str | Path = "."):
     if init_chat_model is None:
         raise RuntimeError("Chat model initialization is unavailable")
     settings = _resolved_settings(project_root)
-    if settings.provider == "huggingface":
-        kwargs: dict[str, object] = {
-            "base_url": "https://router.huggingface.co/v1",
-            "api_key": os.getenv(settings.api_key_env or "HUGGINGFACEHUB_API_TOKEN"),
-            "use_responses_api": False,
-        }
-        if settings.temperature is not None:
-            kwargs["temperature"] = settings.temperature
-        if settings.max_tokens is not None:
-            kwargs["max_tokens"] = settings.max_tokens
-        model = settings.model or DEFAULT_CONFIG.model or "meta-llama/Llama-3.1-70B-Instruct"
-        return init_chat_model(f"openai:{model}", **kwargs)
-    model_name = _model_name(project_root)
+    extra_kwargs = dict(settings.extra_kwargs)
     kwargs: dict[str, object] = {}
     if settings.temperature is not None:
         kwargs["temperature"] = settings.temperature
     if settings.max_tokens is not None:
         kwargs["max_tokens"] = settings.max_tokens
+    if settings.provider == "huggingface":
+        huggingface_kwargs: dict[str, object] = {
+            "base_url": "https://router.huggingface.co/v1",
+            "api_key": os.getenv(settings.api_key_env or "HUGGINGFACEHUB_API_TOKEN"),
+            "use_responses_api": False,
+            **extra_kwargs,
+        }
+        huggingface_kwargs.update(kwargs)
+        model = settings.model or DEFAULT_CONFIG.model or "meta-llama/Llama-3.1-70B-Instruct"
+        return init_chat_model(f"openai:{model}", **huggingface_kwargs)
+    if settings.provider == "azure_openai":
+        model = settings.model or DEFAULT_CONFIG.model or "gpt-4o"
+        azure_kwargs = {
+            "model_provider": "azure_openai",
+            "azure_deployment": model,
+            **kwargs,
+            **extra_kwargs,
+        }
+        if settings.endpoint:
+            azure_kwargs["azure_endpoint"] = settings.endpoint
+        if settings.api_key_env:
+            azure_kwargs["api_key"] = os.getenv(settings.api_key_env)
+        api_version = extra_kwargs.get("api_version")
+        if api_version is not None:
+            azure_kwargs["api_version"] = api_version
+        return init_chat_model(model=model, **azure_kwargs)
+    if settings.provider == "bedrock":
+        model = settings.model or "anthropic.claude-3-5-sonnet-20241022-v2:0"
+        region = extra_kwargs.pop("region", None) or extra_kwargs.pop("region_name", None)
+        bedrock_kwargs = {"model_provider": "bedrock", **kwargs, **extra_kwargs}
+        if region is not None:
+            bedrock_kwargs["region_name"] = region
+        return init_chat_model(model=model, **bedrock_kwargs)
+    if settings.provider == "ollama":
+        model = settings.model or "llama3.1:70b"
+        ollama_kwargs = {
+            "model_provider": "ollama",
+            "base_url": settings.endpoint or "http://localhost:11434",
+            **kwargs,
+            **extra_kwargs,
+        }
+        return init_chat_model(model=model, **ollama_kwargs)
+    if settings.provider == "openai_compatible":
+        model = settings.model or DEFAULT_CONFIG.model or "gpt-4.1-mini"
+        compatible_kwargs = {"model_provider": "openai", **kwargs, **extra_kwargs}
+        if settings.endpoint:
+            compatible_kwargs["base_url"] = settings.endpoint
+        if settings.api_key_env:
+            compatible_kwargs["api_key"] = os.getenv(settings.api_key_env)
+        return init_chat_model(model=model, **compatible_kwargs)
+    model_name = _model_name(project_root)
+    kwargs.update(extra_kwargs)
     return init_chat_model(model_name, **kwargs)
 
 

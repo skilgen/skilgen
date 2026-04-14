@@ -16,6 +16,7 @@ from skilgen.agents import build_import_graph, build_roadmap_plan, extract_featu
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
+from skilgen.core.corpus_index import build_corpus_index
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
 from skilgen.enterprise_skills import (
@@ -158,9 +159,25 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--project-root", default=".")
     init.add_argument(
         "--provider",
-        choices=["openai", "anthropic", "gemini", "google", "google_genai", "huggingface", "hugging_face", "hf"],
+        choices=[
+            "openai",
+            "anthropic",
+            "gemini",
+            "google",
+            "google_genai",
+            "huggingface",
+            "hugging_face",
+            "hf",
+            "azure_openai",
+            "bedrock",
+            "ollama",
+            "openai_compatible",
+        ],
         help="Optionally scaffold provider-specific model defaults instead of a neutral template.",
     )
+
+    index = subparsers.add_parser("index", help="Build or refresh the full-corpus index used for deep evidence selection.")
+    index.add_argument("--project-root", default=".")
 
     scan = subparsers.add_parser("scan", help="Generate docs and skills from a requirements file.")
     scan.add_argument("--requirements")
@@ -168,6 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--target", choices=["all", "docs", "skills"], default="all")
     scan.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     scan.add_argument("--dry-run", action="store_true")
+    scan.add_argument("--skip-index", action="store_true")
 
     deliver = subparsers.add_parser("deliver", help="Alias for scan for now; intended to grow into full delivery automation.")
     deliver.add_argument("--requirements")
@@ -175,6 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
     deliver.add_argument("--target", choices=["all", "docs", "skills"], default="all")
     deliver.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     deliver.add_argument("--dry-run", action="store_true")
+    deliver.add_argument("--skip-index", action="store_true")
 
     update = subparsers.add_parser("update", help="Refresh generated outputs for all or selected domains.")
     update.add_argument("--requirements")
@@ -182,6 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--target", choices=["all", "docs", "skills"], default="all")
     update.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     update.add_argument("--dry-run", action="store_true")
+    update.add_argument("--skip-index", action="store_true")
 
     watch = subparsers.add_parser("watch", help="Watch the project and rerun generation when files change.")
     watch.add_argument("--requirements")
@@ -237,6 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
     architecture.add_argument("--json", action="store_true", help="Emit the raw architecture payload as JSON.")
     architecture.add_argument("--graph-file", help="Write the architecture graph export to a file.")
     architecture.add_argument("--graph-format", choices=["mermaid", "json", "html"], default="mermaid")
+    architecture.add_argument("--skip-index", action="store_true")
 
     dashboard = subparsers.add_parser("dashboard", help="Generate a branded HTML dashboard for the current Skilgen project state.")
     dashboard.add_argument("--project-root", default=".")
@@ -418,6 +439,26 @@ def main() -> None:
         worker = ensure_auto_update_worker(project_root)
         print(json.dumps({"config_path": str(config_path), "auto_update": worker}, indent=2))
         return
+    if args.command == "index":
+        root = Path(args.project_root).resolve()
+        emit_progress("Indexing the full repository corpus so Skilgen can sample architectural hubs, configs, docs, and isolated subsystems.")
+        payload = build_corpus_index(root)
+        counts = {"source": 0, "config": 0, "documentation": 0, "enterprise_document": 0, "other": 0}
+        for entry in payload["entries"]:
+            category = str(entry.get("category", "other"))
+            counts[category] = counts.get(category, 0) + 1
+        print(
+            json.dumps(
+                {
+                    "index_path": payload["cache_path"],
+                    "entry_count": len(payload["entries"]),
+                    "cluster_count": len(payload.get("clusters", {})),
+                    "counts": counts,
+                },
+                indent=2,
+            )
+        )
+        return
     if args.command == "autoupdate":
         root = Path(args.project_root).resolve()
         if args.autoupdate_command == "enable":
@@ -506,7 +547,7 @@ def main() -> None:
         emit_progress(
             f"Collecting code, config, and requirements evidence with the {current_runtime_mode(root)} runtime before synthesizing the architecture blueprint."
         )
-        payload = architecture_payload(root, Path(args.requirements).resolve() if args.requirements else None)
+        payload = architecture_payload(root, Path(args.requirements).resolve() if args.requirements else None, skip_index=args.skip_index)
         if args.graph_file:
             graph_content = payload["graph_export"][args.graph_format]
             graph_path = Path(args.graph_file).resolve()
@@ -835,6 +876,7 @@ def main() -> None:
             targets=targets,
             domains=domains,
             dry_run=args.dry_run,
+            skip_index=args.skip_index,
             progress_callback=progress.emit,
         )
     finally:

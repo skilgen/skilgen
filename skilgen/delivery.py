@@ -8,6 +8,7 @@ from skilgen.agents import build_agent_decision, fingerprint_project
 from skilgen.core.analytics import log_skill_usage
 from skilgen.core.config import load_config
 from skilgen.core.context import build_codebase_context
+from skilgen.core.corpus_index import ensure_corpus_index
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state, save_freshness_state, snapshot_freshness_state
 from skilgen.core.models import RunMemory
 from skilgen.core.repo_state import classify_repo_change, git_repo_state
@@ -36,12 +37,16 @@ def run_delivery(
     targets: tuple[str, ...] = ("docs", "skills"),
     domains: tuple[str, ...] = (),
     dry_run: bool = False,
+    skip_index: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> list[Path]:
     root = Path(project_root).resolve()
     input_mode = "codebase and requirements" if requirements_path is not None else "codebase only"
     _emit(progress_callback, f"Reading your {input_mode} and loading the Skilgen project configuration.")
     config = load_config(root)
+    if not skip_index and config.corpus.enabled:
+        _emit(progress_callback, "Indexing the full repository corpus so evidence selection covers every subsystem, config, and architecture doc.")
+        ensure_corpus_index(root, config)
     if config.auto_install_external_skills:
         _emit(progress_callback, "Scanning the repository for known external skill ecosystems that Skilgen can auto-install.")
         external_skill_summary = ensure_external_skills_for_project(root)

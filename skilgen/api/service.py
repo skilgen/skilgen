@@ -146,7 +146,12 @@ def analyze_payload(project_root: str | Path, requirements: str | Path | None = 
     )
 
 
-def architecture_payload(project_root: str | Path, requirements: str | Path | None = None) -> dict[str, object]:
+def architecture_payload(
+    project_root: str | Path,
+    requirements: str | Path | None = None,
+    *,
+    skip_index: bool = False,
+) -> dict[str, object]:
     root = Path(project_root).resolve()
     req = Path(requirements).resolve() if requirements is not None else None
     runtime = DeepAgentsRuntime(root)
@@ -154,7 +159,7 @@ def architecture_payload(project_root: str | Path, requirements: str | Path | No
         runtime.run(
             "architecture",
             f"Synthesize an evidence-backed architecture blueprint for project_root={root} requirements={req}. Return JSON with requirements_context, evidence_graph, and architecture.",
-            lambda: native_architecture_payload(root, req),
+            lambda: native_architecture_payload(root, req, skip_index=skip_index),
         )
     )
 

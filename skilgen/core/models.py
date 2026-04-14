@@ -62,6 +62,20 @@ class FrameworkFingerprint:
 
 
 @dataclass(frozen=True)
+class CorpusSettings:
+    enabled: bool = True
+    budget: int = 60
+    hub_budget: int = 40
+    cluster_budget: int = 10
+    config_budget: int = 5
+    doc_budget: int = 5
+    exclude_generated: bool = True
+    min_cluster_size: int = 3
+    exclude_patterns: list[str] = field(default_factory=list)
+    cache_path: str = ".skilgen/corpus/index.json"
+
+
+@dataclass(frozen=True)
 class SkilgenConfig:
     include_paths: list[str]
     exclude_paths: list[str]
@@ -72,10 +86,13 @@ class SkilgenConfig:
     model_provider: str | None
     model: str | None
     api_key_env: str | None
+    model_endpoint: str | None = None
+    model_extra_kwargs: dict[str, object] = field(default_factory=dict)
     model_temperature: float | None = None
     model_max_tokens: int | None = None
     model_retry_attempts: int = 3
     model_retry_base_delay_seconds: float = 1.0
+    corpus: CorpusSettings = field(default_factory=CorpusSettings)
     auto_install_external_skills: bool = True
     external_skills_allowed_trust_levels: list[str] = field(default_factory=list)
     external_skills_allowlist: list[str] = field(default_factory=list)
@@ -99,6 +116,8 @@ class ModelSettings:
     model: str | None
     api_key_env: str | None
     api_key_present: bool
+    endpoint: str | None
+    extra_kwargs: dict[str, object]
     temperature: float | None
     max_tokens: int | None
     retry_attempts: int
