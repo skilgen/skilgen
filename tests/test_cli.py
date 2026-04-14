@@ -210,6 +210,41 @@ class CliTests(unittest.TestCase):
             self.assertIn("history", json.loads(history.stdout))
             self.assertIn("top_skills", json.loads(analytics.stdout))
 
+    def test_analytics_command_can_record_real_skill_load_events(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "skills" / "backend").mkdir(parents=True)
+            (root / "skills" / "backend" / "SKILL.md").write_text("# Backend\n\nCore backend skill.\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "analytics",
+                    "--project-root",
+                    str(root),
+                    "--record-skill",
+                    "skills/backend/SKILL.md",
+                    "--agent",
+                    "codex",
+                    "--context",
+                    "codex_live",
+                    "--session-id",
+                    "session-42",
+                    "--task",
+                    "build feature",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["recorded"], 1)
+            self.assertEqual(payload["skills"], ["skills/backend/SKILL.md"])
+            self.assertEqual(payload["agent"], "codex")
+            self.assertEqual(payload["context"], "codex_live")
+
     def test_features_works_with_codebase_only(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

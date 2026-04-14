@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 import re
@@ -23,6 +23,22 @@ def _iter_repo_skill_files(project_root: str | Path) -> list[Path]:
     if not root.exists():
         return []
     return sorted(path for path in root.rglob("SKILL.md") if path.is_file())
+
+
+def _normalize_skill_path(project_root: str | Path, skill_path: str) -> str:
+    raw = skill_path.strip()
+    if not raw:
+        return raw
+    if raw.startswith("external::"):
+        return raw
+    root = Path(project_root).resolve()
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        try:
+            return candidate.resolve().relative_to(root).as_posix()
+        except ValueError:
+            return candidate.as_posix()
+    return raw.removeprefix("./").replace("\\", "/")
 
 
 def _skill_title_and_summary(path: Path) -> tuple[str, str]:
@@ -89,22 +105,29 @@ def log_skill_usage(
     event: str = "loaded",
     agent: str | None = None,
     context: str = "skilgen",
+    session_id: str | None = None,
+    task: str | None = None,
 ) -> None:
     if not skill_paths:
         return
     path = _analytics_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     agent_name = agent or os.getenv("SKILGEN_AGENT_NAME") or "skilgen"
+    session = session_id or os.getenv("SKILGEN_SESSION_ID")
+    task_name = task or os.getenv("SKILGEN_TASK_NAME")
     existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     for skill_path in skill_paths:
+        normalized_skill = _normalize_skill_path(project_root, skill_path)
         existing.append(
             json.dumps(
                 {
                     "timestamp": _timestamp(),
-                    "skill": skill_path,
+                    "skill": normalized_skill,
                     "event": event,
                     "agent": agent_name,
                     "context": context,
+                    "session_id": session,
+                    "task": task_name,
                 }
             )
         )
@@ -124,14 +147,36 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
                 continue
     live_events = [event for event in events if str(event.get("context", "")) != "decision_planner"]
     planner_events = [event for event in events if str(event.get("context", "")) == "decision_planner"]
-    counts = Counter(str(event.get("skill", "")) for event in live_events if event.get("skill"))
+    live_counts = Counter(str(event.get("skill", "")) for event in live_events if event.get("skill"))
+    planner_counts = Counter(str(event.get("skill", "")) for event in planner_events if event.get("skill"))
+    agents_by_skill: dict[str, set[str]] = defaultdict(set)
+    contexts_by_skill: dict[str, set[str]] = defaultdict(set)
+    sessions_by_skill: dict[str, set[str]] = defaultdict(set)
+    last_loaded_at: dict[str, str] = {}
+    for event in live_events:
+        skill = str(event.get("skill", "")).strip()
+        if not skill:
+            continue
+        agent = str(event.get("agent", "")).strip()
+        context = str(event.get("context", "")).strip()
+        session_id = str(event.get("session_id", "")).strip()
+        timestamp = str(event.get("timestamp", "")).strip()
+        if agent:
+            agents_by_skill[skill].add(agent)
+        if context:
+            contexts_by_skill[skill].add(context)
+        if session_id:
+            sessions_by_skill[skill].add(session_id)
+        if timestamp and timestamp > last_loaded_at.get(skill, ""):
+            last_loaded_at[skill] = timestamp
     skill_usage: list[dict[str, object]] = []
     repo_skill_files = _iter_repo_skill_files(project_root)
     for skill_path in repo_skill_files:
         rel = skill_path.relative_to(Path(project_root).resolve()).as_posix()
         title, summary = _skill_title_and_summary(skill_path)
         metrics = _skill_content_metrics(skill_path)
-        loads = counts.get(rel, 0)
+        loads = live_counts.get(rel, 0)
+        planner_loads = planner_counts.get(rel, 0)
         parts = Path(rel).parts
         family = parts[1] if len(parts) > 2 else "other"
         depth = max(1, len(parts) - 2)
@@ -144,17 +189,24 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
                 "summary": summary,
                 "family": family,
                 "loads": loads,
+                "live_loads": loads,
+                "planner_loads": planner_loads,
                 "depth": depth,
                 "richness": richness,
                 "metrics": metrics,
                 "modeled_loads": modeled_loads,
+                "agents": sorted(agents_by_skill.get(rel, set())),
+                "contexts": sorted(contexts_by_skill.get(rel, set())),
+                "session_count": len(sessions_by_skill.get(rel, set())),
+                "last_loaded_at": last_loaded_at.get(rel),
                 "kind": "repo",
             }
         )
     for external in active_external_skills(project_root):
         slug = str(external.get("slug", "external-skill"))
         key = f"external::{slug}"
-        loads = counts.get(key, counts.get(slug, 0))
+        loads = live_counts.get(key, live_counts.get(slug, 0))
+        planner_loads = planner_counts.get(key, planner_counts.get(slug, 0))
         metrics = {"headings": 0, "bullets": 0, "references": 0, "words": 0}
         skill_usage.append(
             {
@@ -163,19 +215,22 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
                 "summary": str(external.get("summary") or "Installed external skill pack available to the repo."),
                 "family": "external",
                 "loads": loads,
+                "live_loads": loads,
+                "planner_loads": planner_loads,
                 "depth": 1,
                 "richness": 2,
                 "metrics": metrics,
                 "modeled_loads": _modeled_attention_score(depth=1, richness=2, metrics=metrics, kind="external"),
+                "agents": sorted(agents_by_skill.get(key, set())),
+                "contexts": sorted(contexts_by_skill.get(key, set())),
+                "session_count": len(sessions_by_skill.get(key, set())),
+                "last_loaded_at": last_loaded_at.get(key),
                 "kind": "external",
             }
         )
-    live_loads = [int(item["loads"]) for item in skill_usage]
-    non_zero_live = [value for value in live_loads if value > 0]
-    live_mode = bool(non_zero_live) and (max(non_zero_live) - min(non_zero_live) > 1 or len(set(non_zero_live)) > 1)
-    usage_mode = "live" if live_mode else "modeled"
+    usage_mode = "live" if live_events else "modeled"
     for item in skill_usage:
-        effective_loads = int(item["loads"]) if usage_mode == "live" else int(item["modeled_loads"])
+        effective_loads = int(item["live_loads"]) if usage_mode == "live" else int(item["modeled_loads"])
         item["effective_loads"] = effective_loads
     max_effective = max((int(item["effective_loads"]) for item in skill_usage), default=1)
     for item in skill_usage:
@@ -199,5 +254,8 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
         "live_event_count": len(live_events),
         "planner_event_count": len(planner_events),
         "usage_mode": usage_mode,
+        "traced_agents": sorted({str(event.get("agent", "")).strip() for event in live_events if str(event.get("agent", "")).strip()}),
+        "traced_contexts": sorted({str(event.get("context", "")).strip() for event in live_events if str(event.get("context", "")).strip()}),
+        "traced_session_count": len({str(event.get("session_id", "")).strip() for event in live_events if str(event.get("session_id", "")).strip()}),
         "skill_usage": skill_usage,
     }

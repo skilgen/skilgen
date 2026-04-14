@@ -23,6 +23,7 @@ class AnalyticsTests(unittest.TestCase):
             self.assertIn("skill_usage", summary)
             self.assertEqual(summary["skill_usage"][0]["skill"], "skills/backend/api/SKILL.md")
             self.assertEqual(summary["skill_usage"][0]["loads"], 2)
+            self.assertEqual(summary["skill_usage"][0]["live_loads"], 2)
             self.assertEqual(summary["skill_usage"][0]["family"], "backend")
             self.assertGreater(summary["skill_usage"][0]["richness"], 0)
             self.assertIn("summary", summary["skill_usage"][0])
@@ -41,6 +42,50 @@ class AnalyticsTests(unittest.TestCase):
 
             self.assertEqual(summary["planner_event_count"], 1)
             self.assertEqual(summary["live_event_count"], 1)
+            self.assertEqual(summary["usage_mode"], "live")
+            self.assertEqual(summary["skill_usage"][0]["loads"], 1)
+            self.assertEqual(summary["skill_usage"][0]["planner_loads"], 1)
+
+    def test_analytics_summary_tracks_agents_contexts_and_sessions_for_live_usage(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "skills" / "backend" / "api"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("# Backend API\n\nLive route guidance.\n", encoding="utf-8")
+
+            log_skill_usage(
+                root,
+                ["skills/backend/api/SKILL.md"],
+                agent="codex",
+                context="codex_live",
+                session_id="session-123",
+                task="implement retry policy",
+            )
+
+            summary = analytics_summary(root, limit=10)
+
+            self.assertEqual(summary["usage_mode"], "live")
+            self.assertIn("codex", summary["traced_agents"])
+            self.assertIn("codex_live", summary["traced_contexts"])
+            self.assertEqual(summary["traced_session_count"], 1)
+            self.assertEqual(summary["skill_usage"][0]["agents"], ["codex"])
+            self.assertEqual(summary["skill_usage"][0]["contexts"], ["codex_live"])
+            self.assertEqual(summary["skill_usage"][0]["session_count"], 1)
+            self.assertTrue(summary["skill_usage"][0]["last_loaded_at"])
+
+    def test_log_skill_usage_normalizes_absolute_repo_paths(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "skills" / "backend"
+            skill_dir.mkdir(parents=True)
+            skill_file = skill_dir / "SKILL.md"
+            skill_file.write_text("# Backend\n\nCore backend skill.\n", encoding="utf-8")
+
+            log_skill_usage(root, [str(skill_file.resolve())], agent="codex", context="codex_live")
+
+            summary = analytics_summary(root, limit=10)
+
+            self.assertEqual(summary["skill_usage"][0]["skill"], "skills/backend/SKILL.md")
             self.assertEqual(summary["skill_usage"][0]["loads"], 1)
 
     def test_analytics_summary_models_attention_when_no_live_usage_exists(self) -> None:

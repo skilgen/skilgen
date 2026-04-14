@@ -15,6 +15,7 @@ from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
+from skilgen.core.analytics import log_skill_usage
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
 from skilgen.core.corpus_index import build_corpus_index
 from skilgen.delivery import run_delivery, watch_delivery
@@ -414,6 +415,12 @@ def build_parser() -> argparse.ArgumentParser:
     analytics = subparsers.add_parser("analytics", help="Summarize generated skill usage and load history.")
     analytics.add_argument("--project-root", default=".")
     analytics.add_argument("--limit", type=int, default=10)
+    analytics.add_argument("--record-skill", action="append", default=[], help="Record a real skill-load event for a repo skill path such as skills/backend/api/SKILL.md.")
+    analytics.add_argument("--event", default="loaded")
+    analytics.add_argument("--agent")
+    analytics.add_argument("--context", default="agent_runtime")
+    analytics.add_argument("--session-id")
+    analytics.add_argument("--task")
 
     validate = subparsers.add_parser("validate", help="Validate generated outputs and skill references.")
     validate.add_argument("--project-root", default=".")
@@ -826,7 +833,33 @@ def main() -> None:
         print(json.dumps(report_payload(Path(args.project_root).resolve()), indent=2))
         return
     if args.command == "analytics":
-        print(json.dumps(analytics_payload(Path(args.project_root).resolve(), limit=args.limit), indent=2))
+        root = Path(args.project_root).resolve()
+        if args.record_skill:
+            log_skill_usage(
+                root,
+                list(args.record_skill),
+                event=args.event,
+                agent=args.agent,
+                context=args.context,
+                session_id=args.session_id,
+                task=args.task,
+            )
+            print(
+                json.dumps(
+                    {
+                        "recorded": len(args.record_skill),
+                        "skills": list(args.record_skill),
+                        "event": args.event,
+                        "agent": args.agent,
+                        "context": args.context,
+                        "session_id": args.session_id,
+                        "task": args.task,
+                    },
+                    indent=2,
+                )
+            )
+            return
+        print(json.dumps(analytics_payload(root, limit=args.limit), indent=2))
         return
     if args.command == "doctor":
         payload = doctor_payload(Path(args.project_root).resolve())

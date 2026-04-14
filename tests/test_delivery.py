@@ -162,6 +162,8 @@ class DeliveryTests(unittest.TestCase):
             self.assertIn("## Inferred Domains", agents_text)
             self.assertIn("Decision planner refresh recommendation", agents_text)
             self.assertIn("Load these prioritized skills first:", agents_text)
+            self.assertIn("## Skill Telemetry Hook", agents_text)
+            self.assertIn("analytics --project-root . --record-skill", agents_text)
             self.assertIn("skills/backend/SKILL.md", agents_text)
             self.assertIn("## Architecture Domains", architecture_text)
             self.assertIn("## Architecture Blueprint", graph_text)
