@@ -583,10 +583,10 @@ def main() -> None:
             score_value = score_info.get("score", 0)
         elif isinstance(score_info, (int, float)):
             score_value = score_info
-        diff_payload = payload.get("diff")
+        diff_info = payload.get("diff")
         stale_skill_count = 0
-        if isinstance(diff_payload, dict):
-            stale_skill_count = len(diff_payload.get("stale_skill_paths", []))
+        if isinstance(diff_info, dict):
+            stale_skill_count = len(diff_info.get("stale_skill_paths", []))
         graph_payload = payload.get("graph_export")
         if not isinstance(graph_payload, dict):
             graph_payload = payload.get("graphs")
