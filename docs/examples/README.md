@@ -10,7 +10,7 @@ GitHub will show the HTML source in the repo view. Download the file or open it 
 - Source commit: `86d0ba2`
 - Dashboard file: [`claude-agent-sdk-python-dashboard.html`](claude-agent-sdk-python-dashboard.html)
 
-Generated from the upstream repository snapshot with the current Skilgen dashboard pipeline. This bundle includes the richer graph panels and branded HTML surface.
+Generated from the upstream repository snapshot with the repo-native package planner. This example shows Skilgen moving from a repo-only baseline of `25 / 100` to a generated skill-system score of `95 / 100` by materializing package, testing, e2e, examples, scripts, and roadmap skills.
 
 ## LangChain
 

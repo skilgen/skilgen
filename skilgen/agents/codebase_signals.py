@@ -121,7 +121,7 @@ def _is_test(relative_path: str, stem: str) -> bool:
     lowered = relative_path.lower()
     return (
         "/tests/" in lowered
-        or lowered.startswith("tests/")
+        or lowered.startswith(("tests/", "test/", "e2e-tests/", "e2e/"))
         or stem.endswith(".test")
         or stem.endswith(".spec")
         or lowered.endswith("_test.py")

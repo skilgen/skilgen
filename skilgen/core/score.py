@@ -53,6 +53,8 @@ def _coverage_unit(relative_path: str) -> str:
         return "project-root"
     if parts[0] == "scripts":
         return "scripts"
+    if parts[0] in {"examples", "e2e-tests", "e2e"}:
+        return parts[0]
     if parts[0] == "skilgen":
         return parts[0] if len(parts) == 2 else "/".join(parts[:2])
     if parts[0] in {"tests", "test"}:

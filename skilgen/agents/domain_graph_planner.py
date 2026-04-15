@@ -47,7 +47,19 @@ def _python_package_root(project_root: Path) -> Path | None:
         and (path / "__init__.py").exists()
         and path.name not in {"tests", "docs", "scripts", "skills"}
     ]
-    return candidates[0] if candidates else None
+    if candidates:
+        return candidates[0]
+    src_root = project_root / "src"
+    if not src_root.exists():
+        return None
+    src_candidates = [
+        path
+        for path in sorted(src_root.iterdir())
+        if path.is_dir()
+        and (path / "__init__.py").exists()
+        and path.name not in {"tests", "docs", "scripts", "skills"}
+    ]
+    return src_candidates[0] if src_candidates else None
 
 
 def _relative_py_files(project_root: Path, directory: Path, *, top_level_only: bool = False, limit: int = 6) -> list[str]:
@@ -141,7 +153,7 @@ def _package_module_slug(path: str) -> str:
         return "cli"
     if stem == "__init__":
         return "core"
-    return stem.replace("_", "-")
+    return stem.replace("_", "-").strip("-") or "module"
 
 
 def _package_module_summary(package_name: str, path: str) -> str:
@@ -212,17 +224,17 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
     requirements_path = requirements.requirements_path if requirements.requirements_path.exists() else None
     intent = parse_project_intent_native(root, requirements_path)
     package_root = _python_package_root(root)
-    package_runtime_files = _relative_py_files(root, package_root, top_level_only=True, limit=100) if package_root is not None else []
+    package_runtime_files = _relative_py_files(root, package_root, top_level_only=False, limit=100) if package_root is not None else []
+    package_top_level_files = _relative_py_files(root, package_root, top_level_only=True, limit=100) if package_root is not None else []
     package_focused_repo = bool(
         package_root is not None
-        and len(package_runtime_files) >= 4
+        and len(package_top_level_files) >= 4
         and not signals.backend_routes
         and not signals.services
         and not signals.frontend_routes
         and not signals.components
         and not signals.data_models
         and not signals.persistence_layers
-        and not signals.background_jobs
         and not signals.legacy_programs
         and not signals.copybooks
     )
@@ -333,7 +345,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
         )
 
     platform_areas: list[tuple[str, str, list[str], list[str], str]] = []
-    if package_root is not None:
+    if package_root is not None and package_root.name == "skilgen":
         runtime_files = _relative_py_files(root, package_root, top_level_only=True)
         agents_files = _relative_py_files(root, package_root / "agents")
         cli_files = _relative_py_files(root, package_root / "cli")
@@ -440,8 +452,11 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
     if package_focused_repo and package_root is not None:
         package_name = package_root.name.replace("_", "-")
         package_parent = f"{package_name}-core"
-        module_paths = [path for path in package_runtime_files if not path.endswith("__init__.py")]
+        module_paths = [path for path in package_top_level_files if not path.endswith("__init__.py")]
         worked_paths = _relative_code_files(root, root / "worked", limit=12)
+        example_paths = _relative_code_files(root, root / "examples", limit=12)
+        script_paths = _relative_code_files(root, root / "scripts", limit=12)
+        e2e_paths = _relative_code_files(root, root / "e2e-tests", limit=12)
         child_domains: list[str] = []
         nodes.append(
             _node(
@@ -471,7 +486,27 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
                     skill_path=f"skills/{package_root.name}/{slug}/SKILL.md",
                 )
             )
-        if signals.tests:
+        for child_dir in sorted(path for path in package_root.iterdir() if path.is_dir() and not path.name.startswith(".")):
+            child_files = _relative_code_files(root, child_dir, limit=12)
+            if len(child_files) < 2:
+                continue
+            child_slug = child_dir.name.replace("_", "-").strip("-") or "module"
+            child_name = f"{package_name}-{child_slug}"
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=f"{package_root.name} subpackage guidance for `{child_dir.name}` internals and its closely related implementation seams.",
+                    confidence=0.81,
+                    key_files=child_files,
+                    key_patterns=[f"{package_root.name} subpackage: {child_dir.name}", "Stay close to the package submodule boundary before widening scope."],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/{child_slug}/SKILL.md",
+                )
+            )
+        unit_test_paths = _relative_code_files(root, root / "tests", limit=12)
+        if unit_test_paths or signals.tests:
             child_name = f"{package_name}-testing"
             child_domains.append(child_name)
             nodes.append(
@@ -479,26 +514,57 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
                     child_name,
                     summary=f"Testing guidance for {package_root.name}, including repo-local verification, regression checks, and module-level confidence work.",
                     confidence=0.82,
-                    key_files=signals.tests[:8],
+                    key_files=(unit_test_paths or signals.tests)[:12],
                     key_patterns=["module verification", "regression coverage", "repo-native test discipline"],
                     parent_domain=package_parent,
                     related_domains=["roadmap"],
                     skill_path=f"skills/{package_root.name}/testing/SKILL.md",
                 )
             )
-        if worked_paths:
+        if e2e_paths:
+            child_name = f"{package_name}-e2e"
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=f"End-to-end testing guidance for {package_root.name}, including integration scenarios, permissions, hooks, and SDK behavior coverage.",
+                    confidence=0.8,
+                    key_files=e2e_paths,
+                    key_patterns=["end-to-end verification", "SDK behavior coverage", "integration guardrails"],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/e2e/SKILL.md",
+                )
+            )
+        if worked_paths or example_paths:
             child_name = f"{package_name}-examples"
+            example_key_files = [*worked_paths, *example_paths]
             child_domains.append(child_name)
             nodes.append(
                 _node(
                     child_name,
                     summary=f"Example and worked-corpus guidance for {package_root.name}, including sample inputs, fixtures, and demonstration flows.",
                     confidence=0.78,
-                    key_files=worked_paths[:8],
+                    key_files=example_key_files[:12],
                     key_patterns=["worked examples", "sample corpus", "fixture-backed exploration"],
                     parent_domain=package_parent,
                     related_domains=["roadmap"],
                     skill_path=f"skills/{package_root.name}/examples/SKILL.md",
+                )
+            )
+        if script_paths:
+            child_name = f"{package_name}-scripts"
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=f"Maintenance script guidance for {package_root.name}, including build helpers, release automation, and package support workflows.",
+                    confidence=0.77,
+                    key_files=script_paths,
+                    key_patterns=["maintenance scripts", "release helpers", "package support automation"],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/scripts/SKILL.md",
                 )
             )
 
