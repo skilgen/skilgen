@@ -19,3 +19,13 @@ Generated from the upstream repository snapshot with the current Skilgen dashboa
 - Dashboard file: [`langchain-dashboard.html`](langchain-dashboard.html)
 
 Generated from the upstream repository snapshot with the current Skilgen dashboard command. This example is useful as a large polyglot/monorepo reference point.
+
+## LibreChat
+
+- Source repo: [danny-avila/LibreChat](https://github.com/danny-avila/LibreChat)
+- Source commit: `5cc783b`
+- Dashboard file: [`librechat-dashboard.html`](librechat-dashboard.html)
+- Generated skill tree: [`librechat-skills.md`](librechat-skills.md)
+- Live `skills/` snapshot: [`librechat-skill-tree/skills/MANIFEST.md`](librechat-skill-tree/skills/MANIFEST.md)
+
+Generated from the upstream repository snapshot with the repo-native app planner. This example shows Skilgen moving from a repo-only baseline of `20 / 100` to a generated skill-system score of `87 / 100` by materializing `26` skills across `api`, `client`, `config`, `e2e`, `packages`, and `roadmap`.

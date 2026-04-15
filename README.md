@@ -41,8 +41,33 @@ skilgen dashboard --project-root . --requirements docs/requirements.docx
 Live example bundles generated with Skilgen:
 - [Anthropic claude-agent-sdk-python dashboard](docs/examples/README.md#anthropic-claude-agent-sdk-python)
 - [LangChain dashboard](docs/examples/README.md#langchain)
+- [LibreChat dashboard + generated skills](docs/examples/README.md#librechat)
 
 The dashboard ships as a self-contained HTML file you can open locally, share with your team, or commit to the repo. No server needed.
+
+### Live Generated Skills
+
+Skilgen does not just draw a dashboard. It materializes a repo-local skill system that agents can load before editing code.
+
+Latest generated example: [danny-avila/LibreChat](https://github.com/danny-avila/LibreChat) at `5cc783b`.
+
+| View | Before Skilgen | With Skilgen |
+| --- | ---: | ---: |
+| Repo skill readiness | `20 / 100` | `87 / 100` |
+| Grounded reusable skills | `0 / 25` | `20 / 25` |
+| Freshness contract | `0 / 25` | `25 / 25` |
+| Agent operating structure | `0 / 25` | `21 / 25` |
+
+What got created:
+- `26` generated skills from the real repo shape.
+- `6` repo-native top-level domains: `api`, `client`, `config`, `e2e`, `packages`, and `roadmap`.
+- `20` child skills such as `api/app`, `api/cache`, `api/db`, `client/src`, `packages/api`, and `packages/data-schemas`.
+- `9` operating artifacts including `AGENTS.md`, `skills/MANIFEST.md`, `skills/GRAPH.md`, `TRACEABILITY.md`, and `skilgen-dashboard.html`.
+
+Inspect the committed examples:
+- [LibreChat generated dashboard](docs/examples/librechat-dashboard.html)
+- [LibreChat generated skill summary](docs/examples/librechat-skills.md)
+- [LibreChat live `skills/` snapshot](docs/examples/librechat-skill-tree/skills/MANIFEST.md)
 
 ---
 

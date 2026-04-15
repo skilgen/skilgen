@@ -1,0 +1,61 @@
+# Skilgen configuration
+include_paths:
+  - .
+exclude_paths:
+  - .git
+  - __pycache__
+  - .venv
+  - node_modules
+  - .skilgen
+domains_override:
+skill_depth: 2
+update_trigger: auto
+langsmith_project:
+# Set these to your preferred provider. For example:
+# openai / gpt-4.1-mini / OPENAI_API_KEY
+# anthropic / claude-sonnet-4-5 / ANTHROPIC_API_KEY
+# gemini / gemini-2.5-pro / GOOGLE_API_KEY
+# huggingface / meta-llama/Llama-3.1-70B-Instruct / HUGGINGFACEHUB_API_TOKEN
+# azure_openai / gpt-4o / AZURE_OPENAI_API_KEY
+# bedrock / anthropic.claude-3-5-sonnet-20241022-v2:0 / IAM auth
+# ollama / llama3.1:70b / local endpoint
+# openai_compatible / your-private-model / MODEL_API_KEY
+model_provider: 
+model: 
+api_key_env: 
+model_endpoint:
+model_extra_kwargs: {}
+model_temperature:
+model_max_tokens:
+model_retry_attempts: 3
+model_retry_base_delay_seconds: 1.0
+corpus:
+  enabled: true
+  budget: 60
+  hub_budget: 40
+  cluster_budget: 10
+  config_budget: 5
+  doc_budget: 5
+  exclude_generated: true
+  min_cluster_size: 3
+  exclude_patterns: []
+  cache_path: .skilgen/corpus/index.json
+auto_install_external_skills: true
+external_skills_allowed_trust_levels:
+  - official
+  - spec
+  - community
+  - curated
+external_skills_allowlist:
+external_skills_denylist:
+external_skills_auto_activate: true
+external_skills_policy_mode: permissive
+auto_activate_mcp_connectors: true
+mcp_connectors_require_official_source: true
+mcp_connectors_require_oauth: true
+mcp_connector_allowlist:
+mcp_connector_denylist:
+mcp_policy_pack_path:
+enterprise_skill_paths:
+enterprise_skill_git_urls:
+enterprise_skill_urls:
