@@ -126,6 +126,39 @@ def _top_level_app_surfaces(project_root: Path) -> list[tuple[str, Path, list[st
     return surfaces
 
 
+def _classify_repo_archetype(
+    project_root: Path,
+    signals: CodebaseSignals,
+    *,
+    package_root: Path | None,
+    package_top_level_files: list[str],
+    monorepo_libraries: list[tuple[str, Path, Path | None]],
+    app_surfaces: list[tuple[str, Path, list[str]]],
+) -> str:
+    if package_root is not None and package_root.name == "skilgen":
+        return "skilgen-platform"
+    if (
+        package_root is not None
+        and len(package_top_level_files) >= 4
+        and not signals.backend_routes
+        and not signals.services
+        and not signals.frontend_routes
+        and not signals.components
+        and not signals.data_models
+        and not signals.persistence_layers
+        and not signals.legacy_programs
+        and not signals.copybooks
+    ):
+        return "python-package"
+    if len(monorepo_libraries) >= 2 and (project_root / "libs").exists():
+        return "python-monorepo"
+    if len(app_surfaces) >= 3 and {name for name, _, _ in app_surfaces} & {"api", "client", "packages"}:
+        return "repo-native-app"
+    if len(app_surfaces) >= 2:
+        return "folder-native"
+    return "generic"
+
+
 def _confidence_value(raw: object) -> float:
     if isinstance(raw, (int, float)):
         return float(raw)
@@ -226,31 +259,21 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
     package_root = _python_package_root(root)
     package_runtime_files = _relative_py_files(root, package_root, top_level_only=False, limit=100) if package_root is not None else []
     package_top_level_files = _relative_py_files(root, package_root, top_level_only=True, limit=100) if package_root is not None else []
-    package_focused_repo = bool(
-        package_root is not None
-        and len(package_top_level_files) >= 4
-        and not signals.backend_routes
-        and not signals.services
-        and not signals.frontend_routes
-        and not signals.components
-        and not signals.data_models
-        and not signals.persistence_layers
-        and not signals.legacy_programs
-        and not signals.copybooks
-    )
     monorepo_libraries = _python_monorepo_libraries(root)
-    monorepo_focused_repo = bool(
-        not package_focused_repo
-        and len(monorepo_libraries) >= 2
-        and (root / "libs").exists()
-    )
     app_surfaces = _top_level_app_surfaces(root)
-    app_native_repo = bool(
-        not package_focused_repo
-        and not monorepo_focused_repo
-        and len(app_surfaces) >= 3
-        and {name for name, _, _ in app_surfaces} & {"api", "client", "packages"}
+    repo_archetype = _classify_repo_archetype(
+        root,
+        signals,
+        package_root=package_root,
+        package_top_level_files=package_top_level_files,
+        monorepo_libraries=monorepo_libraries,
+        app_surfaces=app_surfaces,
     )
+    package_focused_repo = repo_archetype == "python-package"
+    monorepo_focused_repo = repo_archetype == "python-monorepo"
+    app_native_repo = repo_archetype == "repo-native-app"
+    folder_native_repo = repo_archetype == "folder-native"
+    generic_repo = repo_archetype == "generic"
 
     backend_children = ["backend-api", "backend-testing"]
     if signals.backend_routes:
@@ -300,7 +323,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             signals.copybooks,
         ]
     )
-    if not package_focused_repo and not monorepo_focused_repo and not app_native_repo and (requirements.domains.get("backend") or backend_detected):
+    if generic_repo and (requirements.domains.get("backend") or backend_detected):
         nodes.append(
             _node(
                 "backend",
@@ -327,7 +350,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
     frontend_detected = any(
         [signals.frontend_routes, signals.components, signals.state_files, signals.design_system_files]
     )
-    if not package_focused_repo and not monorepo_focused_repo and not app_native_repo and (requirements.domains.get("frontend") or frontend_detected):
+    if generic_repo and (requirements.domains.get("frontend") or frontend_detected):
         nodes.append(
             _node(
                 "frontend",
@@ -662,6 +685,48 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
                     )
                 )
 
+    if folder_native_repo:
+        for surface_name, surface_dir, key_files in app_surfaces:
+            child_domains: list[str] = []
+            relative_root = surface_dir.relative_to(root).as_posix()
+            nodes.append(
+                _node(
+                    surface_name,
+                    summary=f"Folder-native guidance for the repo's `{relative_root}` surface, using its own implementation boundary instead of a static backend/frontend assumption.",
+                    confidence=0.82,
+                    key_files=key_files[:24],
+                    key_patterns=["folder-native repo shape", "top-level code surface", "safe unknown-repo mapping"],
+                    child_domains=child_domains,
+                    related_domains=["roadmap", "requirements"] if requirements.requirements_path.exists() else ["roadmap"],
+                    skill_path=f"skills/{surface_name}/SKILL.md",
+                )
+            )
+            child_entries: list[tuple[str, list[str], str]] = []
+            for child_dir in sorted(path for path in surface_dir.iterdir() if path.is_dir() and not path.name.startswith(".")):
+                child_files = _relative_code_files(root, child_dir, limit=12)
+                if len(child_files) < 2:
+                    continue
+                child_entries.append((child_dir.name.replace("_", "-").strip("-") or "surface", child_files, child_dir.name))
+            seen_child_names: set[str] = set()
+            for child_slug, child_files, child_label in child_entries[:8]:
+                if child_slug in seen_child_names:
+                    continue
+                seen_child_names.add(child_slug)
+                child_name = f"{surface_name}-{child_slug}"
+                child_domains.append(child_name)
+                nodes.append(
+                    _node(
+                        child_name,
+                        summary=f"{surface_name.replace('-', ' ').title()} guidance for `{child_label}` and its nearest repo-native implementation seam.",
+                        confidence=0.76,
+                        key_files=child_files,
+                        key_patterns=[f"{surface_name} folder surface: {child_label}", "Stay close to the folder-native seam before widening scope."],
+                        parent_domain=surface_name,
+                        related_domains=["roadmap"],
+                        skill_path=f"skills/{surface_name}/{child_slug}/SKILL.md",
+                    )
+                )
+
     nodes.append(
         _node(
             "roadmap",
@@ -675,7 +740,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
         )
     )
 
-    if signals.design_system_files and not package_focused_repo and not monorepo_focused_repo and not app_native_repo and not (signals.frontend_routes or signals.components):
+    if signals.design_system_files and generic_repo and not (signals.frontend_routes or signals.components):
         nodes.append(
             _node(
                 "design-system",
@@ -688,7 +753,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
-    if signals.auth_files and not package_focused_repo and not monorepo_focused_repo and not app_native_repo and not (signals.backend_routes or signals.services):
+    if signals.auth_files and generic_repo and not (signals.backend_routes or signals.services):
         nodes.append(
             _node(
                 "security",
@@ -701,7 +766,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
-    if signals.background_jobs and not package_focused_repo and not monorepo_focused_repo and not app_native_repo and not (signals.backend_routes or signals.services or signals.legacy_programs):
+    if signals.background_jobs and generic_repo and not (signals.backend_routes or signals.services or signals.legacy_programs):
         nodes.append(
             _node(
                 "operations",
@@ -714,7 +779,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
-    if not package_focused_repo and not monorepo_focused_repo and not app_native_repo and (signals.data_models or signals.persistence_layers or signals.copybooks) and not (
+    if generic_repo and (signals.data_models or signals.persistence_layers or signals.copybooks) and not (
         signals.backend_routes or signals.services or signals.legacy_programs
     ):
         nodes.append(
@@ -787,7 +852,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             "skills/backend/jobs/SKILL.md",
         ),
     ]:
-        if not package_focused_repo and not monorepo_focused_repo and not app_native_repo and name in backend_children:
+        if generic_repo and name in backend_children:
             nodes.append(
                 _node(
                     name,
@@ -831,7 +896,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             "skills/frontend/design-system/SKILL.md",
         ),
     ]:
-        if not package_focused_repo and not monorepo_focused_repo and not app_native_repo and name in frontend_children:
+        if generic_repo and name in frontend_children:
             nodes.append(
                 _node(
                     name,
@@ -860,6 +925,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
         )
 
     recommendations = [
+        f"Repo archetype detected as `{repo_archetype}`; keep generated skills aligned to that repo shape before applying generic labels.",
         "Use the inferred domain graph to decide which parent and child skills need regeneration.",
         "Refresh AGENTS.md whenever parent skill entry points or core domain relationships change.",
     ]

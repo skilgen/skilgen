@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from skilgen.core.models import ArchitectureBlueprint, ArchitectureDomain, SkillMaterializationPlan
+from skilgen.core.score import compute_skillgen_score
 from skilgen.delivery import run_delivery
 
 
@@ -101,6 +102,38 @@ class DeliveryTests(unittest.TestCase):
             self.assertTrue((root / "FEATURES.md").exists())
             self.assertTrue((root / "skills" / "MANIFEST.md").exists())
             self.assertTrue((root / "skills" / "backend" / "SKILL.md").exists())
+            self.assertGreaterEqual(len(generated), 4)
+
+    def test_run_delivery_end_to_end_handles_src_package_repo(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            package_root = root / "src" / "sample_sdk"
+            package_root.mkdir(parents=True)
+            for file_name in ["__init__.py", "client.py", "query.py", "types.py", "_errors.py", "version.py"]:
+                (package_root / file_name).write_text("VALUE = 1\n", encoding="utf-8")
+            (package_root / "_internal").mkdir()
+            (package_root / "_internal" / "__init__.py").write_text("", encoding="utf-8")
+            (package_root / "_internal" / "transport.py").write_text("def run():\n    return None\n", encoding="utf-8")
+            (root / "tests").mkdir()
+            (root / "tests" / "test_client.py").write_text("def test_client():\n    assert True\n", encoding="utf-8")
+            (root / "e2e-tests").mkdir()
+            (root / "e2e-tests" / "test_cli.py").write_text("def test_cli():\n    assert True\n", encoding="utf-8")
+            (root / "examples").mkdir()
+            (root / "examples" / "basic.py").write_text("from sample_sdk import client\n", encoding="utf-8")
+            (root / "scripts").mkdir()
+            (root / "scripts" / "release.py").write_text("print('release')\n", encoding="utf-8")
+
+            generated = run_delivery(None, root, skip_index=True)
+            score = compute_skillgen_score(root)
+
+            self.assertTrue((root / "skilgen-dashboard.html").exists())
+            self.assertTrue((root / "skills" / "sample-sdk-core" / "SKILL.md").exists())
+            self.assertTrue((root / "skills" / "sample_sdk" / "client" / "SKILL.md").exists())
+            self.assertTrue((root / "skills" / "sample_sdk" / "testing" / "SKILL.md").exists())
+            self.assertTrue((root / "skills" / "sample_sdk" / "e2e" / "SKILL.md").exists())
+            self.assertTrue((root / "skills" / "sample_sdk" / "examples" / "SKILL.md").exists())
+            self.assertFalse((root / "skills" / "backend" / "SKILL.md").exists())
+            self.assertGreaterEqual(score["score"], 80)
             self.assertGreaterEqual(len(generated), 4)
 
     def test_run_delivery_persists_freshness_and_regenerates_impacted_domains(self) -> None:
