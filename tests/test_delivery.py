@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from skilgen.core.models import ArchitectureBlueprint, ArchitectureDomain, SkillMaterializationPlan
 from skilgen.core.score import compute_skillgen_score
-from skilgen.delivery import run_delivery
+from skilgen.delivery import run_delivery, watch_delivery
 
 
 class DeliveryTests(unittest.TestCase):
@@ -178,6 +178,63 @@ class DeliveryTests(unittest.TestCase):
             self.assertNotIn(root / "skills" / "roadmap" / "SKILL.md", second_generated)
             memory_text = (root / ".skilgen" / "memory" / "current_run.json").read_text(encoding="utf-8")
             self.assertIn("Reuse the current skill tree", memory_text)
+
+    def test_watch_delivery_ignores_generated_output_churn(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "src").mkdir()
+            (root / "src" / "app.py").write_text("def run():\n    return True\n", encoding="utf-8")
+            calls: list[str] = []
+
+            def fake_run_delivery(*args, **kwargs):
+                calls.append("run")
+                (root / "skills" / "backend").mkdir(parents=True, exist_ok=True)
+                (root / "skills" / "backend" / "SKILL.md").write_text(f"# Backend {len(calls)}\n", encoding="utf-8")
+                (root / ".skilgen" / "state").mkdir(parents=True, exist_ok=True)
+                (root / ".skilgen" / "state" / "freshness.json").write_text("{}", encoding="utf-8")
+                (root / "ARCHITECTURE.md").write_text(f"# Architecture {len(calls)}\n", encoding="utf-8")
+                (root / "skilgen-dashboard.html").write_text(f"<html>{len(calls)}</html>\n", encoding="utf-8")
+                return [root / "skilgen-dashboard.html"]
+
+            def mutate_generated_only(_seconds: float) -> None:
+                (root / "skilgen-dashboard.html").write_text("<html>generated churn</html>\n", encoding="utf-8")
+                (root / "ARCHITECTURE.md").write_text("# generated churn\n", encoding="utf-8")
+
+            with patch("skilgen.delivery.run_delivery", side_effect=fake_run_delivery), patch("skilgen.delivery.time.sleep", side_effect=mutate_generated_only):
+                runs = watch_delivery(None, root, cycles=1)
+
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(len(runs), 1)
+
+    def test_watch_delivery_regenerates_once_after_source_change(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "src").mkdir()
+            source = root / "src" / "app.py"
+            source.write_text("def run():\n    return True\n", encoding="utf-8")
+            calls: list[str] = []
+            sleep_calls = 0
+
+            def fake_run_delivery(*args, **kwargs):
+                calls.append("run")
+                (root / "skills" / "backend").mkdir(parents=True, exist_ok=True)
+                (root / "skills" / "backend" / "SKILL.md").write_text(f"# Backend {len(calls)}\n", encoding="utf-8")
+                (root / "skilgen-dashboard.html").write_text(f"<html>{len(calls)}</html>\n", encoding="utf-8")
+                return [root / "skilgen-dashboard.html"]
+
+            def mutate_source_once(_seconds: float) -> None:
+                nonlocal sleep_calls
+                sleep_calls += 1
+                if sleep_calls == 1:
+                    source.write_text("def run():\n    return False\n", encoding="utf-8")
+                else:
+                    (root / "skilgen-dashboard.html").write_text("<html>generated churn</html>\n", encoding="utf-8")
+
+            with patch("skilgen.delivery.run_delivery", side_effect=fake_run_delivery), patch("skilgen.delivery.time.sleep", side_effect=mutate_source_once):
+                runs = watch_delivery(None, root, cycles=2)
+
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(runs), 2)
 
     def test_agents_contract_reflects_inferred_domains_and_prioritized_skills(self) -> None:
         with TemporaryDirectory() as tmp:

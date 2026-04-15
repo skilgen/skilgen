@@ -1828,6 +1828,8 @@ window.addEventListener('resize',()=>{{
 
 def ensure_file(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return path
     path.write_text(content, encoding="utf-8")
     return path
 

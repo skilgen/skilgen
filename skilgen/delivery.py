@@ -10,6 +10,7 @@ from skilgen.core.config import load_config
 from skilgen.core.context import build_codebase_context
 from skilgen.core.corpus_index import ensure_corpus_index
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state, save_freshness_state, snapshot_freshness_state
+from skilgen.core.generated_outputs import is_generated_output_path
 from skilgen.core.models import RunMemory
 from skilgen.core.repo_state import classify_repo_change, git_repo_state
 from skilgen.core.run_memory import append_run_event, create_run_memory, finalize_run_memory
@@ -204,13 +205,15 @@ def watch_delivery(
 
     def snapshot() -> dict[str, object]:
         tracked: dict[str, int] = {}
+        ignored_parts = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build"}
         for path in root.rglob("*"):
             if not path.is_file():
                 continue
             relative = path.relative_to(root).as_posix()
-            if relative.startswith((".git/", "skills/", "__pycache__/")):
+            relative_parts = Path(relative).parts
+            if set(relative_parts) & ignored_parts:
                 continue
-            if path.name in {"ANALYSIS.md", "FEATURES.md", "REPORT.md"}:
+            if is_generated_output_path(relative):
                 continue
             tracked[relative] = path.stat().st_mtime_ns
         return {

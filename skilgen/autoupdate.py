@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from skilgen.core.config import load_config
+from skilgen.core.generated_outputs import is_generated_output_path
 from skilgen.core.repo_state import classify_repo_change, git_repo_state
 from skilgen.delivery import run_delivery
 
@@ -85,13 +86,15 @@ def _record_requirements_path(project_root: Path, requirements_path: str | Path 
 
 def _file_snapshot(project_root: Path) -> dict[str, int]:
     tracked: dict[str, int] = {}
+    ignored_parts = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build"}
     for path in project_root.rglob("*"):
         if not path.is_file():
             continue
         relative = path.relative_to(project_root).as_posix()
-        if relative.startswith((".git/", ".skilgen/", "skills/", "__pycache__/")):
+        relative_parts = Path(relative).parts
+        if set(relative_parts) & ignored_parts:
             continue
-        if path.name in {"AGENTS.md", "ANALYSIS.md", "FEATURES.md", "REPORT.md", "TRACEABILITY.md"}:
+        if is_generated_output_path(relative):
             continue
         tracked[relative] = path.stat().st_mtime_ns
     return tracked

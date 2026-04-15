@@ -39,6 +39,33 @@ class DiffTests(unittest.TestCase):
             self.assertEqual(payload["changed_file_count"], 0)
             self.assertTrue(payload["current_domains"])
 
+    def test_diff_ignores_generated_output_changes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "users.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            _save_baseline(root)
+            for file_name in [
+                "AGENTS.md",
+                "ANALYSIS.md",
+                "ARCHITECTURE.md",
+                "FEATURES.md",
+                "REPORT.md",
+                "TRACEABILITY.md",
+                "skilgen-dashboard.html",
+                "skilgen.yml",
+            ]:
+                (root / file_name).write_text("generated update\n", encoding="utf-8")
+            (root / "skills" / "backend").mkdir(parents=True)
+            (root / "skills" / "backend" / "SKILL.md").write_text("# Backend\n", encoding="utf-8")
+            (root / ".skilgen" / "state").mkdir(parents=True, exist_ok=True)
+            (root / ".skilgen" / "state" / "autoupdate.json").write_text("{}", encoding="utf-8")
+
+            payload = compute_diff(root)
+
+            self.assertEqual(payload["reason"], "no_source_changes")
+            self.assertEqual(payload["changed_files"], [])
+
     def test_diff_detects_modified_file_and_impacted_domain(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
