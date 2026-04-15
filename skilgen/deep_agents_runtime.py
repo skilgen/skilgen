@@ -22,7 +22,7 @@ from skilgen.core.corpus_index import ensure_corpus_index
 from skilgen.core.analytics import analytics_summary
 from skilgen.core.diff import compute_diff
 from skilgen.core.requirements import load_project_context, load_requirements
-from skilgen.core.score import compute_skillgen_score, score_history_payload
+from skilgen.core.score import compute_skillgen_score, score_comparison_payload, score_history_payload
 from skilgen.core.validation import validate_project
 from skilgen.enterprise_skills import active_enterprise_skills, active_mcp_connectors, list_enterprise_skills, recommend_mcp_connectors
 from skilgen.generators.package import (
@@ -349,6 +349,7 @@ def native_dashboard_payload_with_progress(
         "requirements_context": _serialize(context),
         "status": native_status_payload(root),
         "score": score_bundle["current"],
+        "score_compare": score_comparison_payload(root, score_bundle["current"]),
         "score_history": score_bundle["history"],
         "score_trend": score_bundle["trend"],
         "diff": compute_diff(root),

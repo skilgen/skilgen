@@ -5,6 +5,7 @@ from datetime import datetime
 from html import escape
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Callable
 
@@ -431,6 +432,129 @@ def render_dependency_network_data(context: RequirementsContext, project_root: P
     return {"nodes": list(nodes.values()), "edges": edges}
 
 
+def render_dependency_sankey_data(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> dict[str, object]:
+    bundle = bundle or _analysis_bundle(context, project_root)
+    nodes: list[dict[str, object]] = [
+        {
+            "id": "dependencies",
+            "name": "Dependencies",
+            "layer": 0,
+            "detail": "Skilgen is tracing import pressure from source files into repo modules, the Python standard library, and external packages.",
+            "detail_meta": [
+                "This flow surfaces which files create the most dependency pull before an agent starts editing.",
+            ],
+        }
+    ]
+    node_ids = {"dependencies"}
+    links: list[dict[str, object]] = []
+    internal_prefixes = {
+        prefix
+        for source in bundle.import_graph
+        for prefix in [source.split("/", 1)[0].split(".", 1)[0]]
+        if prefix
+    }
+    internal_prefixes.update(part for part in [project_root.name, project_root.name.replace("-", "_")] if part)
+    stdlib_modules = set(getattr(sys, "stdlib_module_names", ()))
+    inbound_counts: dict[str, int] = {}
+    for targets in bundle.import_graph.values():
+        for target in targets:
+            inbound_counts[target] = inbound_counts.get(target, 0) + 1
+
+    def ensure_node(node_id: str, name: str, layer: int) -> None:
+        if node_id in node_ids:
+            return
+        node_ids.add(node_id)
+        nodes.append({"id": node_id, "name": name, "layer": layer, "detail": name, "detail_meta": []})
+
+    def classify_target(target: str) -> tuple[str, str, str, list[str]]:
+        normalized = target.strip()
+        primary = normalized.split("/", 1)[0].split(".", 1)[0]
+        if normalized.startswith("tests/") or normalized.startswith("tests.") or primary == "tests":
+            return (
+                "bucket::tests",
+                "test boundary",
+                "Test-only imports that shape verification pressure and blast radius during changes.",
+                ["Bucket: test boundary", "Use this to see which dependencies are mostly test scaffolding or validation paths."],
+            )
+        if "/" in normalized or primary in internal_prefixes:
+            return (
+                "bucket::internal",
+                "repo modules",
+                "Repo-local modules and files that create direct coupling inside the codebase.",
+                ["Bucket: repo modules", "These edges reveal where edits can ripple across internal implementation seams."],
+            )
+        if primary in stdlib_modules:
+            return (
+                "bucket::stdlib",
+                "python stdlib",
+                "Standard-library imports that shape runtime behavior without adding third-party package risk.",
+                ["Bucket: python stdlib", "Useful for spotting utility-heavy files versus package-heavy files."],
+            )
+        return (
+            "bucket::external",
+            "external packages",
+            "Third-party package imports that create supply, upgrade, or environment surface area.",
+            ["Bucket: external packages", "Use this to spot files that rely on vendor libraries or ecosystem glue."],
+        )
+
+    edge_budget = 0
+    ordered_sources = sorted(bundle.import_graph.items(), key=lambda item: (-len(item[1]), item[0]))
+    for source, targets in ordered_sources[:12]:
+        selected_targets = sorted(
+            set(targets),
+            key=lambda item: (
+                0 if item.split("/", 1)[0].split(".", 1)[0] in internal_prefixes or "/" in item else 1,
+                item,
+            ),
+        )[:4]
+        if not selected_targets:
+            continue
+        source_id = f"source::{source}"
+        ensure_node(source_id, source.split("/")[-1], 1)
+        for node in nodes:
+            if node["id"] == source_id:
+                node["detail"] = f"{source} is a dependency source hotspot. Skilgen tracked {_count_phrase(len(targets), 'import edge')} leaving this file."
+                node["detail_meta"] = [
+                    f"Source path: {source}",
+                    f"Tracked outgoing edges: {len(targets)}",
+                ]
+        links.append({"source": "dependencies", "target": source_id, "value": max(1, min(3, len(selected_targets)))})
+        for target in selected_targets:
+            bucket_id, bucket_name, bucket_detail, bucket_meta = classify_target(target)
+            ensure_node(bucket_id, bucket_name, 2)
+            for node in nodes:
+                if node["id"] == bucket_id:
+                    node["detail"] = bucket_detail
+                    node["detail_meta"] = bucket_meta
+            target_id = f"target::{target}"
+            target_label = target.split("/")[-1] if "/" in target else target.split(".")[-1]
+            ensure_node(target_id, target_label, 3)
+            for node in nodes:
+                if node["id"] == target_id:
+                    node["detail"] = f"{target} is a concrete dependency endpoint in the current codebase slice."
+                    node["detail_meta"] = [
+                        f"Target: {target}",
+                        f"Imported by {_count_phrase(inbound_counts.get(target, 0), 'tracked source file')}",
+                        f"Bucket: {bucket_name}",
+                    ]
+            links.append({"source": source_id, "target": bucket_id, "value": 1})
+            links.append({"source": bucket_id, "target": target_id, "value": 1})
+            edge_budget += 1
+            if edge_budget >= 40:
+                break
+        if edge_budget >= 40:
+            break
+
+    if len(nodes) == 1:
+        ensure_node("bucket::empty", "no dependencies", 2)
+        links.append({"source": "dependencies", "target": "bucket::empty", "value": 1})
+        for node in nodes:
+            if node["id"] == "bucket::empty":
+                node["detail"] = "Skilgen did not detect enough import relationships to build a dependency flow yet."
+                node["detail_meta"] = ["This usually happens in very small repos or repos without import-heavy code." ]
+    return {"nodes": nodes, "links": links}
+
+
 def render_architecture_sunburst_data(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> dict[str, object]:
     bundle = bundle or _analysis_bundle(context, project_root)
     architecture = bundle.architecture
@@ -532,13 +656,21 @@ def render_evidence_sankey_data(context: RequirementsContext, project_root: Path
         path = str(entry["path"])
         language = str(entry["language"] or "")
         kinds = [str(kind) for kind in entry["kinds"]]
-        item_id = f"item::{item.path}"
-        file_label = path.split("/")[-1]
+        item_id = f"item::{path}"
+        file_label = "Codebase Snapshot" if path == "CODEBASE_ONLY" else path.split("/")[-1]
         ensure_node(item_id, file_label, 3)
         for node in nodes:
             if node["id"] == item_id:
-                node["detail"] = f"{path} — {' '.join(entry['snippet']).strip() or 'No snippet captured.'}"
-                node["detail_meta"] = [f"Path: {path}", f"Language: {language or 'unknown'}", f"Kinds: {', '.join(kinds) or 'unknown'}"]
+                node["detail"] = (
+                    "Codebase-only analysis input. Skilgen used the current repository state as the planning baseline because no standalone requirements file was supplied."
+                    if path == "CODEBASE_ONLY"
+                    else f"{path} — {' '.join(entry['snippet']).strip() or 'No snippet captured.'}"
+                )
+                node["detail_meta"] = [
+                    f"Path: {path}",
+                    f"Language: {language or 'unknown'}",
+                    f"Kinds: {', '.join(kinds) or 'unknown'}",
+                ]
         if language:
             language_id = f"lang::{language}"
             ensure_node(language_id, language, 1)
@@ -698,6 +830,7 @@ def render_dashboard_html(
     mcp_connectors = dashboard_payload["mcp_connectors"]
     architecture = dashboard_payload["architecture"]
     evidence_graph = dashboard_payload["evidence_graph"]
+    score_compare = dashboard_payload.get("score_compare", {})
     repo_name = project_root.name
     score_value = float(score["score"])
     score_percent = max(0.0, min(100.0, score_value))
@@ -725,11 +858,21 @@ def render_dashboard_html(
     dependency_network = render_dependency_network_data(context, project_root, bundle)
     architecture_sunburst = render_architecture_sunburst_data(context, project_root, bundle)
     evidence_sankey = render_evidence_sankey_data(context, project_root, bundle)
+    dependency_sankey = render_dependency_sankey_data(context, project_root, bundle)
     skill_sankey = render_skill_sankey_data(context, project_root, bundle)
     analytics_radial = render_analytics_radial_data(project_root, analytics)
     external_skill_labels = [item.get("slug", "unknown") for item in external_skills["installed"][:6]]
     brand_mark = _skilgen_logo_svg()
     usage_mode = str(analytics.get("usage_mode", "live"))
+    baseline_scorecard = score_compare.get("baseline", {})
+    baseline_value = float(baseline_scorecard.get("score", 0.0))
+    baseline_label = escape(str(baseline_scorecard.get("rating", "baseline")).replace("-", " ").title())
+    score_delta_value = float(score_compare.get("delta", score_value - baseline_value))
+    subscore_delta = score_compare.get("subscore_delta", {})
+    total_skills = len(score.get("skills", []))
+    top_level_domains = len(architecture["domains"])
+    child_skill_count = max(0, total_skills - top_level_domains)
+    outputs_ready = sum(1 for _, exists in generated_outputs if exists)
     trend_points = _meaningful_trend_points(score_history, score, limit=8)
     trend_scores = [float(item.get("score", score_value)) for item in trend_points]
     trend_is_flat = len({round(item, 2) for item in trend_scores}) <= 1
@@ -740,14 +883,14 @@ def render_dashboard_html(
         duplicate_count = seen_trend_labels.get(base_label, 0)
         seen_trend_labels[base_label] = duplicate_count + 1
         trend_labels.append(base_label if duplicate_count == 0 else f"{base_label} · {duplicate_count + 1}")
-    visible_trend_points = trend_points[:1] if trend_is_flat and len(trend_points) > 1 else trend_points
+    visible_trend_points = trend_points
     trend_markup = "\n".join(
         f"<div class='spark-point' style='height:{max(18, min(100, float(item.get('score', 0))))}%'><span>{int(round(float(item.get('score', 0))))}</span></div>"
         for item in visible_trend_points
     ) or "<div class='spark-empty'>Score history will appear after a few runs.</div>"
     trend_ticks_markup = "\n".join(
         f"<span>{escape(label)}</span>"
-        for label in (["Stable"] if trend_is_flat and len(trend_labels) > 1 else trend_labels)
+        for label in trend_labels
     )
     if len(trend_points) <= 1:
         trend_summary = "This is the current baseline. Trend history will become more useful after a few distinct runs."
@@ -898,6 +1041,40 @@ def render_dashboard_html(
         f"<li><strong><span class='legend-dot' style='background:{architecture_palette[index % len(architecture_palette)]}'></span>{escape(_display_domain_name(str(domain['name'])))}</strong><span>{escape(domain['recommended_skill_path'] or 'domain')}</span></li>"
         for index, domain in enumerate(architecture["domains"][:8])
     ) or "<li class='muted'>No architecture domains yet.</li>"
+    score_compare_markup = "\n".join(
+        (
+            "<li>"
+            f"<span>{escape(name.title())}</span>"
+            f"{pill(f'{delta:+.0f}', 'good' if delta > 0 else 'default')}"
+            "</li>"
+        )
+        for name, delta in subscore_delta.items()
+    ) or "<li class='muted'>Score deltas will appear once comparison data is available.</li>"
+    process_cards_markup = "\n".join(
+        [
+            (
+                "<article class='process-card'>"
+                "<div class='micro-label'>1. Read The Repo</div>"
+                f"<strong>{total_symbol_files} parser-backed files</strong>"
+                f"<p class='nuance-copy'>Skilgen starts from {evidence_count} evidence items, {dependency_edges} dependency edges, {call_edges} call edges, and {_count_phrase(test_links, 'test mapping')} so the skill system is grounded in the actual repo rather than a template.</p>"
+                "</article>"
+            ),
+            (
+                "<article class='process-card'>"
+                "<div class='micro-label'>2. Materialize Skills</div>"
+                f"<strong>{top_level_domains} top-level domains, {child_skill_count} child skills</strong>"
+                f"<p class='nuance-copy'>Those repo seams become reusable parent and child skills, plus {outputs_ready} operating artifacts such as AGENTS, MANIFEST, TRACEABILITY, and the dashboard itself.</p>"
+                "</article>"
+            ),
+            (
+                "<article class='process-card'>"
+                "<div class='micro-label'>3. Help Agents Work Better</div>"
+                f"<strong>{score_delta_value:+.2f} score lift</strong>"
+                f"<p class='nuance-copy'>The lift comes from grounded references, freshness tracking, and an explicit operating system that tells agents where to start, what to trust, and how the repo is split.</p>"
+                "</article>"
+            ),
+        ]
+    )
     plan_rows = "\n".join(
         (
             "<tr>"
@@ -914,8 +1091,17 @@ def render_dashboard_html(
 
     network_payload_json = json.dumps({"dependencies": dependency_network})
     sunburst_payload_json = json.dumps(architecture_sunburst)
-    sankey_payload_json = json.dumps({"evidence": evidence_sankey, "skills": skill_sankey})
+    sankey_payload_json = json.dumps({"evidence": evidence_sankey, "dependencies": dependency_sankey, "skills": skill_sankey})
     radial_payload_json = json.dumps({"analytics": analytics_radial})
+    score_signal = (
+        "Needs work"
+        if score_value < 60
+        else "Fair quality"
+        if score_value < 75
+        else "Strong quality"
+        if score_value < 90
+        else "Excellent quality"
+    )
     dashboard_styles = """
 :root{--bg:#050608;--bg-soft:#090b0f;--panel:#10141b;--panel-strong:#0d1117;--line:rgba(255,255,255,.08);--line-strong:rgba(239,211,122,.18);--text:#f6f7fb;--muted:#98a1b2;--gold:#efd37a;--gold-strong:#f8df8e;--white:#f3f4f8;--good:#8fd9a8;--warning:#ffb86b;--danger:#ff7a7a;--shadow:0 28px 90px rgba(0,0,0,.42);}
 *{box-sizing:border-box}html,body{min-height:100%}body{margin:0;font-family:'Sora','Inter',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:radial-gradient(circle at left top, rgba(239,211,122,.12), transparent 28%),radial-gradient(circle at right top, rgba(243,244,248,.07), transparent 22%),var(--bg);color:var(--text)}
@@ -926,18 +1112,18 @@ a{color:inherit}.page{max-width:1500px;margin:0 auto;padding:24px 24px 64px}.her
 .hero-copy h1{margin:0;font-size:clamp(2.2rem,4vw,4.2rem);line-height:.94;max-width:12ch}.hero-note{margin:14px 0 0;max-width:54ch;color:#d8dde7;font-size:1.02rem;line-height:1.55;font-style:italic}.hero-context{margin:12px 0 0;max-width:64ch;color:var(--muted);font-size:1rem;line-height:1.55;overflow-wrap:anywhere}.hero-context strong{overflow-wrap:anywhere}.hero-actions{display:flex;gap:10px;flex-wrap:wrap}
 .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);font-size:.84rem}.pill.good{border-color:rgba(143,217,168,.3);color:var(--good)}.pill.warning{border-color:rgba(255,184,107,.32);color:var(--warning)}.hero-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.metric-card{padding:18px;border-radius:22px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.02))}
 .metric-eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.16em;color:var(--gold)}.metric-value{font-size:2rem;font-weight:700;margin-top:10px}.metric-subtitle{margin-top:8px;color:var(--muted);font-size:.92rem;line-height:1.4}.hero-right{display:grid;gap:18px}.score-top{display:grid;gap:18px;justify-items:center}.score-ring{width:220px;height:220px;border-radius:50%;background:conic-gradient(var(--gold) 0% calc(var(--score) * 1%), rgba(255,255,255,.08) 0% 100%);display:grid;place-items:center;position:relative}
-.score-ring::before{content:'';width:164px;height:164px;border-radius:50%;background:var(--bg-soft);border:1px solid rgba(255,255,255,.08)}.score-ring-content{position:absolute;text-align:center}.score-ring-content strong{display:block;font-size:3.2rem;line-height:1}.score-ring-content span{display:block;color:var(--muted);text-transform:uppercase;letter-spacing:.18em;font-size:.76rem;margin-top:8px}.score-rail{display:grid;grid-template-columns:1fr 1fr;gap:14px}.stat-card{padding:16px 18px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.03)}.stat-label{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}.stat-value{font-size:1.8rem;font-weight:700;margin-top:10px}.stat-note{margin-top:6px;color:var(--muted);font-size:.9rem;line-height:1.35}
-.layout{display:grid;gap:24px;margin-top:24px}.panel{padding:24px}.panel h2{margin:0;font-size:1.1rem}.section-copy{margin:8px 0 0;color:var(--muted);line-height:1.5}.score-board{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:24px}.subscore-stack{display:grid;gap:12px;margin-top:20px}.subscore-row{display:grid;grid-template-columns:120px 1fr 70px;gap:12px;align-items:center}.subscore-label{font-size:.92rem;color:#e4e8ef}.subscore-bar{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}.subscore-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--gold),#fff3be)}.subscore-value{text-align:right;color:var(--muted);font-size:.86rem}
+.score-ring::before{content:'';width:164px;height:164px;border-radius:50%;background:var(--bg-soft);border:1px solid rgba(255,255,255,.08)}.score-ring-content{position:absolute;text-align:center}.score-ring-content strong{display:block;font-size:3.2rem;line-height:1}.score-ring-content strong small{font-size:1rem;color:var(--muted);font-weight:600}.score-ring-content span{display:block;color:var(--muted);text-transform:uppercase;letter-spacing:.18em;font-size:.76rem;margin-top:8px}.score-ring-note{margin-top:10px;color:var(--muted);font-size:.86rem;text-align:center;max-width:22ch}.score-rail{display:grid;grid-template-columns:1fr 1fr;gap:14px}.stat-card{padding:16px 18px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.03)}.stat-label{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}.stat-value{font-size:1.8rem;font-weight:700;margin-top:10px}.stat-note{margin-top:6px;color:var(--muted);font-size:.9rem;line-height:1.35}
+.layout{display:grid;gap:24px;margin-top:24px}.panel{padding:24px}.panel h2{margin:0;font-size:1.1rem}.section-copy{margin:8px 0 0;color:var(--muted);line-height:1.5}.compare-grid,.process-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:20px}.compare-card,.process-card{padding:20px;border-radius:24px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.02));display:grid;gap:12px}.compare-card strong,.process-card strong{font-size:1.18rem}.compare-score{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.compare-score-value{font-size:2.6rem;font-weight:700;line-height:1}.compare-score-label{color:var(--muted);text-transform:uppercase;letter-spacing:.16em;font-size:.72rem}.compare-list{list-style:none;padding:0;margin:0;display:grid;gap:10px}.compare-list li{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.score-board{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:24px}.subscore-stack{display:grid;gap:12px;margin-top:20px}.subscore-row{display:grid;grid-template-columns:120px 1fr 70px;gap:12px;align-items:center}.subscore-label{font-size:.92rem;color:#e4e8ef}.subscore-bar{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}.subscore-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--gold),#fff3be)}.subscore-value{text-align:right;color:var(--muted);font-size:.86rem}
 .quality-gates{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:12px}.quality-gates li{padding:14px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.03)}.quality-gates li p{margin:8px 0 0;color:var(--muted)}.quality-gates li span{float:right;color:var(--gold)}.trend-shell{display:grid;gap:16px}.sparkline{display:flex;align-items:flex-end;gap:10px;height:152px;padding:18px;border-radius:22px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.spark-point{flex:1;border-radius:18px 18px 8px 8px;background:linear-gradient(180deg,var(--gold),rgba(239,211,122,.18));position:relative;min-height:18px}.spark-point span{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);font-size:.75rem;color:var(--muted)}.spark-empty{color:var(--muted)}.trend-ticks{display:flex;gap:10px;justify-content:space-between;color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.12em}
 .legend{display:flex;flex-wrap:wrap;gap:10px}.graph-shell{display:grid;gap:18px}.graph-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-end;flex-wrap:wrap}.graph-tabs{display:flex;gap:10px;flex-wrap:wrap}.graph-tab{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600}.graph-tab.active{background:rgba(239,211,122,.14);border-color:rgba(239,211,122,.35);color:var(--gold-strong)}.graph-frame{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(320px,.55fr);gap:18px;align-items:stretch}
-.graph-panel{display:none;height:100%}.graph-panel.active{display:block;height:100%}.graph-stage{height:600px;border-radius:26px;border:1px solid var(--line-strong);background:linear-gradient(180deg,#0a0d13,#06080d);padding:16px;overflow:hidden}.graph-aside{padding:20px;border-radius:26px;border:1px solid rgba(255,255,255,.07);background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.02));display:grid;align-content:start;gap:16px;min-width:0}.graph-copy{display:none;gap:16px;min-width:0}.graph-copy.active{display:grid}.graph-aside h3{margin:0;font-size:1rem}.graph-aside p{margin:0;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}.graph-aside ul{margin:0;padding-left:18px;color:#dce1ea}.graph-detail{padding:16px;border-radius:18px;border:1px solid rgba(239,211,122,.14);background:rgba(255,255,255,.03);display:grid;gap:10px;min-width:0}.graph-detail h4{margin:0;font-size:1rem;color:var(--text);overflow-wrap:anywhere}.graph-detail p{margin:0;color:var(--muted);overflow-wrap:anywhere}.graph-detail-meta{display:grid;gap:8px;list-style:none;padding:0;margin:0}.graph-detail-meta li{padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);list-style:none;color:#dce1ea;overflow-wrap:anywhere}
-.sunburst-canvas,.sankey-canvas,.network-canvas{width:100%;height:100%;min-height:540px;border-radius:20px;position:relative;overflow:hidden;background:radial-gradient(circle at top, rgba(239,211,122,.08), transparent 38%), rgba(255,255,255,.02)}.network-canvas canvas{width:100%!important;height:100%!important;display:block}.graph-stage svg{width:100%;height:100%;display:block}.graph-legend{list-style:none;padding:0;margin:0;display:grid;gap:10px}.graph-legend li{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);min-width:0}.graph-legend li strong,.graph-legend li span{overflow-wrap:anywhere;word-break:break-word}.graph-legend li span{color:var(--muted);font-size:.88rem}
+.graph-panel{display:none;height:100%}.graph-panel.active{display:block;height:100%}.graph-stage{height:600px;border-radius:26px;border:1px solid var(--line-strong);background:linear-gradient(180deg,#0a0d13,#06080d);padding:16px;overflow:hidden}.graph-aside{padding:20px;border-radius:26px;border:1px solid rgba(255,255,255,.07);background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.02));display:grid;align-content:start;gap:16px;min-width:0}.graph-copy{display:none;gap:16px;min-width:0}.graph-copy.active{display:grid}.graph-aside h3{margin:0;font-size:1rem}.graph-aside p{margin:0;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}.graph-aside ul{margin:0;padding-left:18px;color:#dce1ea}.graph-detail{padding:16px;border-radius:18px;border:1px solid rgba(239,211,122,.14);background:rgba(255,255,255,.03);display:grid;gap:10px;min-width:0}.graph-detail h4{margin:0;font-size:1rem;color:var(--text);overflow-wrap:anywhere}.graph-detail p{margin:0;color:var(--muted);overflow-wrap:anywhere}.graph-detail-meta{display:grid;gap:8px;list-style:none;padding:0;margin:0;max-height:240px;overflow:auto}.graph-detail-meta li{padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);list-style:none;color:#dce1ea;overflow-wrap:anywhere}
+.sunburst-canvas,.sankey-canvas,.network-canvas,.radial-canvas{width:100%;height:100%;min-height:540px;border-radius:20px;position:relative;overflow:hidden;background:radial-gradient(circle at top, rgba(239,211,122,.08), transparent 38%), rgba(255,255,255,.02)}.network-canvas canvas{width:100%!important;height:100%!important;display:block}.graph-stage svg{width:100%;height:100%;display:block}.graph-legend{list-style:none;padding:0;margin:0;display:grid;gap:10px;max-height:300px;overflow:auto}.graph-legend li{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);min-width:0}.graph-legend li strong,.graph-legend li span{overflow-wrap:anywhere;word-break:break-word}.graph-legend li span{color:var(--muted);font-size:.88rem}.canvas-fallback{display:grid;place-items:center;min-height:280px;padding:24px;border:1px dashed rgba(255,255,255,.12);border-radius:20px;color:var(--muted);text-align:center;line-height:1.6}.network-mobile-note{display:none}
 .dashboard-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}.list{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:10px}.list li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.list li div{display:grid;gap:4px}.list li span{color:var(--muted)}.change-type{text-transform:uppercase;font-size:.74rem;letter-spacing:.12em;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.08);color:var(--text)}.change-type.added{color:var(--good)}.change-type.modified{color:var(--warning)}.change-type.deleted{color:var(--danger)}.muted{color:var(--muted)!important}.section-stack{display:grid;gap:24px}
 .domain-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:18px}.domain-card{padding:20px;border-radius:22px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02))}.domain-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.domain-card h3{margin:0;font-size:1.02rem}.domain-card p{color:#d6dbe5}.micro-label{margin-top:14px;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}.domain-card ul{padding-left:18px;color:var(--muted)}table{width:100%;border-collapse:collapse;border-spacing:0;margin-top:18px}th,td{padding:14px 12px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;vertical-align:top}th{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.14em}
 .systems-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.mini-panel{padding:18px;border-radius:22px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03)}.mini-panel ul{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:10px}.mini-panel li{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.mini-panel li span{overflow-wrap:anywhere;word-break:break-word}.ops-board{display:grid;gap:18px;margin-top:18px}.ops-tabs,.surface-tabs{display:flex;flex-wrap:wrap;gap:10px}.ops-tab,.surface-tab{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600}.ops-tab.active,.surface-tab.active{background:rgba(239,211,122,.14);border-color:rgba(239,211,122,.35);color:var(--gold-strong)}.ops-copy,.surface-copy{display:none}.ops-copy.active,.surface-copy.active{display:block}.ops-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.ops-tile{padding:16px;border-radius:18px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03)}.ops-tile strong{display:block;font-size:1rem;margin-bottom:6px}
 .analytics-board{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:18px;align-items:stretch}.analytics-side{display:grid;gap:16px}.analytics-side .mini-panel li div{display:grid;gap:3px}.analytics-side .mini-panel li span{font-size:.82rem;color:var(--muted)}.radial-canvas{width:100%;height:100%;min-height:540px;border-radius:20px;position:relative;overflow:hidden;background:radial-gradient(circle at center, rgba(239,211,122,.08), transparent 42%), rgba(255,255,255,.02)}.radial-legend{display:grid;gap:10px}.legend-dot{display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:8px}.nuance-copy,.rationale-note{margin-top:8px;color:var(--muted);font-size:.92rem;line-height:1.5}.footer-note{margin-top:12px;color:var(--muted);font-size:.92rem}.tooltip{position:absolute;pointer-events:none;background:rgba(6,8,11,.98);border:1px solid rgba(239,211,122,.3);border-radius:14px;padding:12px 14px;color:#f6f7fb;font-size:.86rem;line-height:1.45;box-shadow:0 18px 40px rgba(0,0,0,.28);opacity:0;transform:translate(-50%,-100%);transition:opacity .16s ease;max-width:280px}.tooltip strong{display:block;color:var(--gold);margin-bottom:6px}.corner-badge{position:fixed;top:18px;right:22px;z-index:20;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(5,6,8,.76);backdrop-filter:blur(12px);color:var(--muted);font-size:.8rem;letter-spacing:.08em;text-transform:uppercase}
-@media (max-width:1180px){.hero-grid,.score-board,.dashboard-columns,.graph-frame,.analytics-board{grid-template-columns:1fr}.hero-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.systems-grid,.domain-grid,.ops-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:760px){.page{padding:18px}.hero-panel,.panel{padding:20px}.hero-metrics,.score-rail,.systems-grid,.domain-grid,.ops-grid{grid-template-columns:1fr}.hero-copy h1{font-size:clamp(2.1rem,14vw,3.4rem)}.skilgen-mark{width:240px}.graph-stage{height:420px}.sunburst-canvas,.sankey-canvas,.network-canvas{min-height:360px}.subscore-row{grid-template-columns:1fr}.subscore-value{text-align:left}.corner-badge{top:12px;right:12px;font-size:.72rem}}
+@media (max-width:1180px){.hero-grid,.score-board,.dashboard-columns,.graph-frame,.analytics-board,.compare-grid,.process-grid{grid-template-columns:1fr}.hero-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.systems-grid,.domain-grid,.ops-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:760px){.page{padding:18px}.hero-panel,.panel{padding:20px}.hero-metrics,.score-rail,.systems-grid,.domain-grid,.ops-grid{grid-template-columns:1fr}.hero-copy h1{font-size:clamp(2.1rem,14vw,3.4rem)}.skilgen-mark{width:240px}.graph-stage{height:auto;min-height:260px}.sunburst-canvas,.sankey-canvas,.radial-canvas{min-height:320px}.network-canvas{display:none}.network-mobile-note{display:grid}.graph-aside{gap:12px}.subscore-row{grid-template-columns:1fr}.subscore-value{text-align:left}.corner-badge{top:12px;right:12px;font-size:.72rem}}
 """.strip()
 
     dashboard_script = f"""
@@ -955,6 +1141,11 @@ const surfaceCopies=[...document.querySelectorAll('.surface-copy')];
 const tooltip=document.createElement('div');
 tooltip.className='tooltip';
 document.body.appendChild(tooltip);
+const renderFallback=(container,title,message)=>{{
+  if(!container) return;
+  container.dataset.loaded='1';
+  container.innerHTML=`<div class="canvas-fallback"><div><strong>${{title}}</strong><br>${{message}}</div></div>`;
+}};
 const showTooltip=(event,title,body='')=>{{
   const escapeHtml=(value)=>String(value)
     .replace(/&/g,'&amp;')
@@ -1007,9 +1198,13 @@ const detailDefaults={{
     ],
   }},
   dependencies:{{
-    title:'Dependency Network',
-    body:'Skilgen turns import relationships into a navigable map so you can see what will feel expensive, central, or risky before an agent starts editing.',
-    meta:['Click a node to inspect its exact file path and dependency role.'],
+    title:'Dependency Flow',
+    body:'Skilgen groups high-fanout source files into dependency buckets, then fans back out into the exact modules they pull in. This makes coupling and blast radius easier to read than a force-directed graph.',
+    meta:[
+      'Left: source files creating dependency pressure.',
+      'Middle: dependency buckets such as repo modules, stdlib, tests, or external packages.',
+      'Right: concrete modules or files the source depends on.',
+    ],
   }},
   skills:{{
     title:'Skill Flow',
@@ -1050,7 +1245,14 @@ const networkOptions={{
 }};
 const renderedNetworks=new Map();
 const renderNetwork=(target, canvas)=>{{
-  if(!window.vis) return;
+  if(window.innerWidth <= 760 && target === 'dependencies') {{
+    renderFallback(canvas, 'Dependency network hidden on small screens', 'Open this dashboard on a wider screen to inspect the interactive network, or use the detail panel to understand hotspot guidance.');
+    return;
+  }}
+  if(!window.vis) {{
+    renderFallback(canvas, 'Dependency network unavailable', 'The network library did not load, so Skilgen cannot render the interactive dependency map in this browser session.');
+    return;
+  }}
   const graph=window.__SKILGEN_NETWORKS__[target];
   if(renderedNetworks.has(target)){{
     const existing=renderedNetworks.get(target);
@@ -1084,7 +1286,11 @@ const renderNetwork=(target, canvas)=>{{
   setTimeout(()=>{{ network.setSize('100%','100%'); network.redraw(); network.fit({{animation:true}}); }},120);
 }};
 const renderSunburst=(container)=>{{
-  if(container.dataset.loaded||!window.d3) return;
+  if(container.dataset.loaded) return;
+  if(!window.d3) {{
+    renderFallback(container, 'Architecture visualization unavailable', 'D3 did not load, so the sunburst could not render. The detail panel still explains the architecture split.');
+    return;
+  }}
   container.dataset.loaded='1';
   const width=container.clientWidth||860;
   const height=container.clientHeight||560;
@@ -1169,7 +1375,11 @@ const renderSunburst=(container)=>{{
 }};
 const renderedSankeys=new Map();
 const renderSankey=(target, container)=>{{
-  if(!window.d3||!window.d3.sankey) return;
+  if(!window.d3||!window.d3.sankey) {{
+    const fallbackTitle = (target === 'skills' ? 'Skill flow' : target === 'dependencies' ? 'Dependency flow' : 'Evidence flow') + ' unavailable';
+    renderFallback(container, fallbackTitle, 'The Sankey libraries did not load, so this graph could not render. The detail panel still contains the explanatory copy.');
+    return;
+  }}
   if(renderedSankeys.has(target) && container.dataset.loaded==='1') return;
   container.dataset.loaded='1';
   container.innerHTML='';
@@ -1177,10 +1387,10 @@ const renderSankey=(target, container)=>{{
   const height=container.clientHeight||560;
   const raw=window.__SKILGEN_SANKEY__[target];
   const graph={{nodes:raw.nodes.map((d)=>({{...d}})),links:raw.links.map((d)=>({{...d}}))}};
-  const svg=d3.select(container).append('svg').attr('viewBox',`0 0 ${{width}} ${{height}}`).attr('role','img').attr('aria-label', target==='skills' ? 'Skill flow sankey showing domains, parent skills, child skills, and ecosystem packs.' : 'Evidence sankey showing languages, evidence kinds, and grounded repository artifacts.');
+  const svg=d3.select(container).append('svg').attr('viewBox',`0 0 ${{width}} ${{height}}`).attr('role','img').attr('aria-label', target==='skills' ? 'Skill flow sankey showing domains, parent skills, child skills, and ecosystem packs.' : target==='dependencies' ? 'Dependency flow sankey showing source files, dependency buckets, and concrete imported modules.' : 'Evidence sankey showing languages, evidence kinds, and grounded repository artifacts.');
   const sankey=d3.sankey().nodeId((d)=>d.id).nodeWidth(18).nodePadding(20).extent([[16,18],[width-16,height-18]]);
   const {{nodes,links}}=sankey(graph);
-  const linkColor = target==='skills' ? 'rgba(103,213,255,0.34)' : 'rgba(239,211,122,0.42)';
+  const linkColor = target==='skills' ? 'rgba(103,213,255,0.34)' : target==='dependencies' ? 'rgba(143,217,168,0.42)' : 'rgba(239,211,122,0.42)';
   svg.append('g').selectAll('path').data(links).join('path')
     .attr('d',d3.sankeyLinkHorizontal())
     .attr('stroke',linkColor)
@@ -1196,7 +1406,7 @@ const renderSankey=(target, container)=>{{
     .attr('height',(d)=>Math.max(1,d.y1-d.y0))
     .attr('width',(d)=>d.x1-d.x0)
     .attr('rx',7)
-    .attr('fill',(d)=>d.layer===1 ? (target==='skills' ? '#67D5FF' : '#EFD37A') : d.layer===2 ? (target==='skills' ? '#8FD9A8' : '#B9C2D4') : '#11161E')
+    .attr('fill',(d)=>d.layer===1 ? (target==='skills' ? '#67D5FF' : target==='dependencies' ? '#EFD37A' : '#EFD37A') : d.layer===2 ? (target==='skills' ? '#8FD9A8' : target==='dependencies' ? '#67D5FF' : '#B9C2D4') : target==='dependencies' ? '#8FD9A8' : '#11161E')
     .attr('stroke','#F6F7FB')
     .attr('stroke-opacity',0.32)
     .style('cursor','pointer')
@@ -1204,7 +1414,7 @@ const renderSankey=(target, container)=>{{
     .on('mouseleave',hideTooltip)
     .on('click',(_,d)=>{{
       if(detailDefaults[target]) {{
-        const prefix = target === 'skills' ? 'Skill' : 'Evidence';
+        const prefix = target === 'skills' ? 'Skill' : target === 'dependencies' ? 'Dependency' : 'Evidence';
         setDetail(target, `${{prefix}} · ${{d.name}}`, d.detail || d.name, d.detail_meta || []);
       }}
     }});
@@ -1220,7 +1430,11 @@ const renderSankey=(target, container)=>{{
   if(detailDefaults[target]) setDetail(target, detailDefaults[target].title, detailDefaults[target].body, detailDefaults[target].meta);
 }};
 const renderAnalyticsRadial=(container)=>{{
-  if(!window.d3 || container.dataset.loaded==='1') return;
+  if(container.dataset.loaded==='1') return;
+  if(!window.d3) {{
+    renderFallback(container, 'Usage analytics unavailable', 'D3 did not load, so the radial analytics view could not render. The ranking cards still summarize the most important skills.');
+    return;
+  }}
   container.dataset.loaded='1';
   const data=(window.__SKILGEN_RADIAL__ && window.__SKILGEN_RADIAL__.analytics) || [];
   container.innerHTML='';
@@ -1315,7 +1529,17 @@ const setPanel=(target)=>{{
     if(sankeyCanvas){{ renderSankey(target,sankeyCanvas); }}
   }});
 }};
-tabs.forEach((tab)=>tab.addEventListener('click',()=>setPanel(tab.dataset.target)));
+tabs.forEach((tab,index)=>{{
+  tab.addEventListener('click',()=>setPanel(tab.dataset.target));
+  tab.addEventListener('keydown',(event)=>{{
+    if(event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+    event.preventDefault();
+    const offset = event.key === 'ArrowRight' ? 1 : -1;
+    const nextIndex = (index + offset + tabs.length) % tabs.length;
+    tabs[nextIndex].focus();
+    setPanel(tabs[nextIndex].dataset.target);
+  }});
+}});
 opsTabs.forEach((tab)=>tab.addEventListener('click',()=>activateSet(opsTabs,opsCopies,tab.dataset.target,'target','copy')));
 surfaceTabs.forEach((tab)=>tab.addEventListener('click',()=>activateSet(surfaceTabs,surfaceCopies,tab.dataset.target,'target','copy')));
 const analyticsCanvas=document.querySelector('[data-radial="analytics"]');
@@ -1360,7 +1584,7 @@ window.addEventListener('resize',()=>{{
             "</div>",
             "<div class='hero-copy'>",
             "<h1>Skilgen Operating System</h1>",
-            "<p class='hero-note'><em>All your skill intelligence — alive, connected, and visible on a single surface. Not a dashboard. A living map.</em></p>",
+            "<p class='hero-note'><em>All your skill intelligence — alive, connected, and visible on a single surface. A living dashboard and repo map.</em></p>",
             f"<p class='hero-context'><strong>{escape(repo_name)}</strong> is translated into one operating surface for coding agents: architecture, evidence, dependencies, skill flows, score, freshness, analytics, auto-update, and capability context together.</p>",
             "</div>",
             "<div class='hero-actions'>",
@@ -1378,7 +1602,7 @@ window.addEventListener('resize',()=>{{
             "<aside class='hero-panel hero-right'>",
             "<div class='score-top'>",
             "<div class='eyebrow'>Quality + freshness in one surface</div>",
-            f"<div class='score-ring' style='--score:{score_percent};'><div class='score-ring-content'><strong>{int(round(score_value))}</strong><span>{score_label}</span></div></div>",
+            f"<div class='score-ring' style='--score:{score_percent};'><div class='score-ring-content'><strong>{int(round(score_value))}<small>/100</small></strong><span>{score_label}</span></div></div><div class='score-ring-note'>{escape(score_signal)} · {int(round(score_value))} out of 100</div>",
             "</div>",
             "<div class='score-rail'>",
             f"<article class='stat-card'><div class='stat-label'>Freshness</div><div class='stat-value'>{int(round(float(diff['freshness_score'])))}/{int(diff['freshness_max'])}</div><div class='stat-note'>{escape(str(diff['reason']).replace('_', ' '))}</div></article>",
@@ -1389,6 +1613,41 @@ window.addEventListener('resize',()=>{{
             "</aside>",
             "</section>",
             "<section class='layout section-stack'>",
+            "<section class='panel'>",
+            "<h2>Before vs After</h2>",
+            "<div class='section-copy'>This makes the lift explicit: how the repo looked before Skilgen materialized any skills, what Skilgen created, and why that changes agent usefulness.</div>",
+            "<div class='compare-grid'>",
+            "<article class='compare-card'>",
+            "<div class='micro-label'>Before Skilgen</div>",
+            f"<div class='compare-score'><div class='compare-score-value'>{int(round(baseline_value))}</div><div class='compare-score-label'>{baseline_label}</div></div>",
+            f"<p class='nuance-copy'>{escape(str(baseline_scorecard.get('explanation', 'The repo is readable as code, but no reusable skill system exists yet.')))}</p>",
+            "<ul class='compare-list'>",
+            f"<li><span>Coverage from repo shape</span><strong>{int(round(float(baseline_scorecard.get('subscores', {}).get('coverage', {}).get('score', 0))))} / 25</strong></li>",
+            "<li><span>Grounded reusable skills</span><strong>0 / 25</strong></li>",
+            "<li><span>Freshness contract</span><strong>0 / 25</strong></li>",
+            "<li><span>Agent operating artifacts</span><strong>0 / 25</strong></li>",
+            "</ul>",
+            "</article>",
+            "<article class='compare-card'>",
+            "<div class='micro-label'>With Skilgen</div>",
+            f"<div class='compare-score'><div class='compare-score-value'>{int(round(score_value))}</div><div class='compare-score-label'>{score_label}</div>{pill(f'{score_delta_value:+.2f}', 'good' if score_delta_value > 0 else 'default')}</div>",
+            "<p class='nuance-copy'>Skilgen converts repo analysis into a maintained skill system with grounded references, explicit startup guidance, and freshness tracking that agents can actually use.</p>",
+            f"<ul class='compare-list'>{score_compare_markup}</ul>",
+            "</article>",
+            "<article class='compare-card'>",
+            "<div class='micro-label'>What Was Created</div>",
+            f"<div class='compare-score'><div class='compare-score-value'>{total_skills}</div><div class='compare-score-label'>Total Skills</div></div>",
+            f"<p class='nuance-copy'>{top_level_domains} top-level domains turned into {child_skill_count} child skills and {outputs_ready} repo-local operating artifacts, so the output is navigable instead of just descriptive.</p>",
+            "<ul class='compare-list'>",
+            f"<li><span>Top-level domains</span><strong>{top_level_domains}</strong></li>",
+            f"<li><span>Child skills</span><strong>{child_skill_count}</strong></li>",
+            f"<li><span>Ready outputs</span><strong>{outputs_ready}</strong></li>",
+            f"<li><span>Skills currently stale</span><strong>{stale_count}</strong></li>",
+            "</ul>",
+            "</article>",
+            "</div>",
+            f"<div class='process-grid'>{process_cards_markup}</div>",
+            "</section>",
             "<section class='panel'>",
             "<h2>Usage Analytics</h2>",
             "<div class='section-copy'>Skilgen tracks every skill separately, then layers in tree depth, content richness, and live runtime traces so you can see where agent attention actually lands.</div>",
@@ -1436,7 +1695,7 @@ window.addEventListener('resize',()=>{{
             "<div class='graph-stage'>",
             "<div class='graph-panel active' data-panel='architecture' role='tabpanel' aria-hidden='false'><div class='sunburst-canvas' data-sunburst='architecture'></div></div>",
             "<div class='graph-panel' data-panel='evidence' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='evidence'></div></div>",
-            "<div class='graph-panel' data-panel='dependencies' role='tabpanel' aria-hidden='true'><div class='network-canvas' data-network='dependencies' role='img' aria-label='Interactive dependency network showing repo-local import relationships.'></div></div>",
+            "<div class='graph-panel' data-panel='dependencies' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='dependencies'></div></div>",
             "<div class='graph-panel' data-panel='skills' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='skills'></div></div>",
             "</div>",
             "<aside class='graph-aside'>",
@@ -1444,7 +1703,7 @@ window.addEventListener('resize',()=>{{
             + architecture_legend
             + "</ul><div class='graph-detail' data-detail='architecture'><h4>Architecture Sunburst</h4><p>Skilgen starts from parser-backed evidence, then lets the architecture view reveal how responsibilities split across the repo. Click an arc to inspect that specific capability boundary.</p><ul class='graph-detail-meta'><li>Color separates architecture families so the high-level shape is easy to scan.</li><li>Clicking a domain replaces this summary with node-specific detail.</li></ul></div></div>",
             "<div class='graph-copy' data-copy='evidence'><h3 data-copy-title='evidence'>Evidence Flow</h3><p data-copy-body='evidence'>Follow how languages and evidence kinds feed concrete files. This is the visible proof behind the architecture Skilgen is synthesizing.</p><ul><li>Left: dominant languages or repo root.</li><li>Middle: evidence kinds.</li><li>Right: files or source artifacts.</li></ul><div class='graph-detail' data-detail='evidence'><h4>Evidence Flow</h4><p>Skilgen walks file by file and groups the repo into languages, evidence kinds, and concrete artifacts. Click any node to inspect the exact nuance that was extracted.</p><ul class='graph-detail-meta'><li>Evidence is grounded in real files, snippets, configs, docs, and tests.</li><li>This is the proof layer beneath every generated skill.</li></ul></div></div>",
-            "<div class='graph-copy' data-copy='dependencies'><h3 data-copy-title='dependencies'>Dependency Network</h3><p data-copy-body='dependencies'>Pan, zoom, and inspect the live import network. This makes coupling and high-fanout modules obvious before the agent ever starts coding.</p><ul><li>Use the built-in controls to zoom around.</li><li>Hover nodes to inspect exact paths.</li><li>Dense clusters often signal hot spots.</li></ul><div class='graph-detail' data-detail='dependencies'><h4>Dependency Network</h4><p>Skilgen turns import relationships into a navigable map so you can see what will feel expensive, central, or risky before an agent starts editing.</p><ul class='graph-detail-meta'><li>Click a node to inspect its exact file path and dependency role.</li></ul></div></div>",
+            "<div class='graph-copy' data-copy='dependencies'><h3 data-copy-title='dependencies'>Dependency Flow</h3><p data-copy-body='dependencies'>Follow how high-fanout source files pull on repo modules, stdlib, test boundaries, and external packages. This makes dependency risk readable in the same visual language as Evidence.</p><ul><li>Left: source files creating dependency pressure.</li><li>Middle: dependency buckets.</li><li>Right: exact imported modules or files.</li></ul><div class='graph-detail' data-detail='dependencies'><h4>Dependency Flow</h4><p>Skilgen turns import relationships into a dependency flow so you can see what will feel expensive, central, or risky before an agent starts editing.</p><ul class='graph-detail-meta'><li>Click any node to inspect the source hotspot, bucket meaning, or concrete dependency endpoint.</li><li>This uses the same reading pattern as Evidence so the dashboard stays visually consistent.</li></ul></div></div>",
             "<div class='graph-copy' data-copy='skills'><h3 data-copy-title='skills'>Skill Flow</h3><p data-copy-body='skills'>See how domains become parent skills, generated child skills, and external packs that Skilgen has already pulled in because the repo signaled they matter.</p><ul><li>Left: domain families.</li><li>Middle: parent skills.</li><li>Right: generated child skills and external skill packs.</li></ul><div class='micro-label'>External skills in play</div><ul class='graph-legend'>"
             + (
                 "".join(f"<li><strong>{escape(item)}</strong><span>installed from repo signals</span></li>" for item in external_skill_labels)

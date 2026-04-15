@@ -62,6 +62,58 @@ def _relative_py_files(project_root: Path, directory: Path, *, top_level_only: b
     return files[:limit]
 
 
+def _relative_code_files(project_root: Path, directory: Path, *, limit: int = 24) -> list[str]:
+    if not directory.exists():
+        return []
+    files = [
+        path.relative_to(project_root).as_posix()
+        for path in sorted(directory.rglob("*"))
+        if path.is_file() and path.suffix.lower() in {".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".java", ".rs"}
+    ]
+    return files[:limit]
+
+
+def _python_monorepo_libraries(project_root: Path) -> list[tuple[str, Path, Path | None]]:
+    libs_root = project_root / "libs"
+    if not libs_root.exists():
+        return []
+    libraries: list[tuple[str, Path, Path | None]] = []
+    for lib_dir in sorted(path for path in libs_root.iterdir() if path.is_dir()):
+        package_candidates = [
+            path
+            for path in sorted(lib_dir.rglob("*"))
+            if path.is_dir()
+            and (path / "__init__.py").exists()
+            and ".git" not in path.parts
+            and "tests" not in {part.lower() for part in path.relative_to(lib_dir).parts}
+        ]
+        package_root = min(package_candidates, key=lambda path: len(path.parts)) if package_candidates else None
+        libraries.append((lib_dir.name.replace("_", "-"), lib_dir, package_root))
+    return libraries
+
+
+def _top_level_app_surfaces(project_root: Path) -> list[tuple[str, Path, list[str]]]:
+    surfaces: list[tuple[str, Path, list[str]]] = []
+    ignored = {
+        "skills",
+        "docs",
+        "node_modules",
+        "dist",
+        "build",
+        "coverage",
+        "vendor",
+        "__pycache__",
+    }
+    for directory in sorted(path for path in project_root.iterdir() if path.is_dir() and not path.name.startswith(".")):
+        if directory.name in ignored:
+            continue
+        files = _relative_code_files(project_root, directory, limit=48)
+        if len(files) < 3 and directory.name not in {"config", "e2e"}:
+            continue
+        surfaces.append((directory.name.replace("_", "-"), directory, files))
+    return surfaces
+
+
 def _confidence_value(raw: object) -> float:
     if isinstance(raw, (int, float)):
         return float(raw)
@@ -83,12 +135,110 @@ def _confidence_value(raw: object) -> float:
         return 0.5
 
 
+def _package_module_slug(path: str) -> str:
+    stem = Path(path).stem
+    if stem == "__main__":
+        return "cli"
+    if stem == "__init__":
+        return "core"
+    return stem.replace("_", "-")
+
+
+def _package_module_summary(package_name: str, path: str) -> str:
+    slug = _package_module_slug(path)
+    labels = {
+        "analyze": "Graph analysis and insight guidance for metrics, surprising connections, and code understanding queries.",
+        "benchmark": "Benchmarking guidance for measuring context reduction, performance, and token efficiency.",
+        "build": "Graph construction guidance for assembling extracted artifacts into connected graph structures.",
+        "cache": "Cache guidance for skipping unchanged files and preserving extraction performance.",
+        "cluster": "Clustering guidance for community detection, cohesion scoring, and graph partitioning.",
+        "detect": "Detection guidance for file discovery, corpus classification, and repository health checks.",
+        "export": "Export guidance for turning graph data into HTML, JSON, SVG, GraphML, or other delivery surfaces.",
+        "extract": "Extraction guidance for parsing files, symbols, and relationships from repository inputs.",
+        "hooks": "Hook and automation guidance for install-time or git-integrated Graphify workflows.",
+        "ingest": "Ingestion guidance for bringing code, docs, and repo signals into the graph pipeline.",
+        "manifest": "Manifest guidance for graph metadata, packaging, and generated surface coordination.",
+        "report": "Reporting guidance for narrative summaries and consumable graph insights.",
+        "security": "Security guidance for URL validation, path safety, and defensive runtime boundaries.",
+        "serve": "Serving guidance for local dashboard or API-style delivery of graph outputs.",
+        "transcribe": "Transcription guidance for converting external artifacts into repo-usable graph inputs.",
+        "validate": "Validation guidance for integrity checks, graph sanity checks, and delivery guardrails.",
+        "watch": "Watch-mode guidance for incremental rebuilds, file watching, and refresh loops.",
+        "wiki": "Knowledge-surface guidance for wiki or docs-oriented graph publishing.",
+        "cli": "CLI guidance for command-line entrypoints and operator workflows exposed through the package.",
+        "core": f"Core {package_name} package guidance for shared entrypoints and package-level contracts.",
+    }
+    return labels.get(slug, f"{package_name} module guidance for `{Path(path).name}` and its closely related implementation seams.")
+
+
+def _library_summary(library_name: str, relative_root: str) -> str:
+    labels = {
+        "core": "Shared LangChain core abstractions for runnables, prompts, messages, tools, outputs, and execution plumbing.",
+        "langchain": "Primary LangChain library guidance for chains, agents, retrieval, memory, and higher-level orchestration.",
+        "langchain-v1": "Versioned LangChain v1 package guidance for the modern public API surface and migration-friendly entrypoints.",
+        "text-splitters": "Text splitting guidance for chunking, token-aware segmentation, and document preparation flows.",
+        "model-profiles": "Model profile guidance for provider capability metadata, compatibility, and runtime selection surfaces.",
+        "standard-tests": "Shared testing guidance for package-level conformance, integration baselines, and reusable validation fixtures.",
+        "partners": "Partner integration guidance for provider-specific packages shipped within the LangChain monorepo.",
+    }
+    return labels.get(library_name, f"Monorepo library guidance for `{relative_root}` and its package-specific implementation boundaries.")
+
+
+def _subpackage_summary(library_name: str, subpackage_name: str) -> str:
+    return f"{library_name.replace('-', ' ').title()} guidance for the `{subpackage_name}` subpackage and its closely related implementation seams."
+
+
+def _app_surface_summary(surface_name: str, relative_root: str) -> str:
+    labels = {
+        "api": "Backend application guidance for API routes, services, persistence, auth, and runtime orchestration under the repo's `api/` surface.",
+        "client": "Frontend application guidance for the user-facing client, routes, UI composition, and client-side runtime behavior.",
+        "packages": "Shared package guidance for reusable internal packages that support the app runtime and product surfaces.",
+        "config": "Configuration guidance for runtime configuration, feature flags, translation setup, and environment-driven behavior.",
+        "e2e": "End-to-end testing guidance for browser workflows, setup, and cross-surface regression coverage.",
+        "helm": "Deployment guidance for Helm charts, release packaging, and cluster-facing operational configuration.",
+        "utils": "Utility guidance for shared scripts, support code, and operational helpers that sit outside the main app surfaces.",
+        "src": "Source-surface guidance for repo-level source files that do not live under a more specific package boundary.",
+    }
+    return labels.get(surface_name, f"Repo-native app guidance for the `{relative_root}` surface and its closely related implementation seams.")
+
+
+def _app_child_summary(parent_name: str, child_name: str) -> str:
+    return f"{parent_name.replace('-', ' ').title()} guidance for the `{child_name}` surface and its closely related implementation seams."
+
+
 def build_domain_graph_native(project_root: Path, requirements: RequirementsContext) -> DomainGraph:
     root = project_root.resolve()
     signals = analyze_codebase(root)
     requirements_path = requirements.requirements_path if requirements.requirements_path.exists() else None
     intent = parse_project_intent_native(root, requirements_path)
     package_root = _python_package_root(root)
+    package_runtime_files = _relative_py_files(root, package_root, top_level_only=True, limit=100) if package_root is not None else []
+    package_focused_repo = bool(
+        package_root is not None
+        and len(package_runtime_files) >= 4
+        and not signals.backend_routes
+        and not signals.services
+        and not signals.frontend_routes
+        and not signals.components
+        and not signals.data_models
+        and not signals.persistence_layers
+        and not signals.background_jobs
+        and not signals.legacy_programs
+        and not signals.copybooks
+    )
+    monorepo_libraries = _python_monorepo_libraries(root)
+    monorepo_focused_repo = bool(
+        not package_focused_repo
+        and len(monorepo_libraries) >= 2
+        and (root / "libs").exists()
+    )
+    app_surfaces = _top_level_app_surfaces(root)
+    app_native_repo = bool(
+        not package_focused_repo
+        and not monorepo_focused_repo
+        and len(app_surfaces) >= 3
+        and {name for name, _, _ in app_surfaces} & {"api", "client", "packages"}
+    )
 
     backend_children = ["backend-api", "backend-testing"]
     if signals.backend_routes:
@@ -138,7 +288,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             signals.copybooks,
         ]
     )
-    if requirements.domains.get("backend") or backend_detected:
+    if not package_focused_repo and not monorepo_focused_repo and not app_native_repo and (requirements.domains.get("backend") or backend_detected):
         nodes.append(
             _node(
                 "backend",
@@ -165,7 +315,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
     frontend_detected = any(
         [signals.frontend_routes, signals.components, signals.state_files, signals.design_system_files]
     )
-    if requirements.domains.get("frontend") or frontend_detected:
+    if not package_focused_repo and not monorepo_focused_repo and not app_native_repo and (requirements.domains.get("frontend") or frontend_detected):
         nodes.append(
             _node(
                 "frontend",
@@ -287,6 +437,165 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
                 )
             )
 
+    if package_focused_repo and package_root is not None:
+        package_name = package_root.name.replace("_", "-")
+        package_parent = f"{package_name}-core"
+        module_paths = [path for path in package_runtime_files if not path.endswith("__init__.py")]
+        worked_paths = _relative_code_files(root, root / "worked", limit=12)
+        child_domains: list[str] = []
+        nodes.append(
+            _node(
+                package_parent,
+                summary=f"Primary {package_root.name} package domain covering the repo's core runtime modules, operator flows, and graph-processing seams.",
+                confidence=0.93,
+                key_files=package_runtime_files[:16],
+                key_patterns=["package-level runtime", "module-oriented tooling", "repo-native graph workflows"],
+                child_domains=child_domains,
+                related_domains=["roadmap", "requirements", "testing"] if requirements.requirements_path.exists() else ["roadmap", "testing"],
+                skill_path=f"skills/{package_parent}/SKILL.md",
+            )
+        )
+        for relative in module_paths[:16]:
+            slug = _package_module_slug(relative)
+            child_name = f"{package_name}-{slug}"
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=_package_module_summary(package_root.name, relative),
+                    confidence=0.84,
+                    key_files=[relative],
+                    key_patterns=[f"{package_root.name} module: {Path(relative).name}", "Stay close to the module boundary before widening scope."],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/{slug}/SKILL.md",
+                )
+            )
+        if signals.tests:
+            child_name = f"{package_name}-testing"
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=f"Testing guidance for {package_root.name}, including repo-local verification, regression checks, and module-level confidence work.",
+                    confidence=0.82,
+                    key_files=signals.tests[:8],
+                    key_patterns=["module verification", "regression coverage", "repo-native test discipline"],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/testing/SKILL.md",
+                )
+            )
+        if worked_paths:
+            child_name = f"{package_name}-examples"
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=f"Example and worked-corpus guidance for {package_root.name}, including sample inputs, fixtures, and demonstration flows.",
+                    confidence=0.78,
+                    key_files=worked_paths[:8],
+                    key_patterns=["worked examples", "sample corpus", "fixture-backed exploration"],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/examples/SKILL.md",
+                )
+            )
+
+    if monorepo_focused_repo:
+        for library_name, lib_dir, package_dir in monorepo_libraries:
+            relative_root = lib_dir.relative_to(root).as_posix()
+            key_files = _relative_code_files(root, package_dir or lib_dir, limit=24)
+            if not key_files:
+                continue
+            child_domains: list[str] = []
+            parent_domain = library_name
+            nodes.append(
+                _node(
+                    parent_domain,
+                    summary=_library_summary(library_name, relative_root),
+                    confidence=0.88,
+                    key_files=key_files,
+                    key_patterns=["library package surface", "monorepo implementation seam", "repo-native module guidance"],
+                    child_domains=child_domains,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{library_name}/SKILL.md",
+                )
+            )
+            if package_dir is None:
+                continue
+            child_items: list[tuple[str, list[str], str]] = []
+            for py_file in sorted(package_dir.glob("*.py"))[:8]:
+                if py_file.name == "__init__.py":
+                    continue
+                slug = py_file.stem.replace("_", "-")
+                child_items.append((slug, [py_file.relative_to(root).as_posix()], py_file.name))
+            for subdir in sorted(path for path in package_dir.iterdir() if path.is_dir() and (path / "__init__.py").exists())[:8]:
+                slug = subdir.name.replace("_", "-")
+                child_files = _relative_code_files(root, subdir, limit=8)
+                if child_files:
+                    child_items.append((slug, child_files, subdir.name))
+            seen_child_slugs: set[str] = set()
+            for slug, child_files, label in child_items:
+                if slug in seen_child_slugs:
+                    continue
+                seen_child_slugs.add(slug)
+                child_name = f"{library_name}-{slug}"
+                child_domains.append(child_name)
+                nodes.append(
+                    _node(
+                        child_name,
+                        summary=_subpackage_summary(library_name, label),
+                        confidence=0.8,
+                        key_files=child_files,
+                        key_patterns=[f"{library_name} subpackage: {label}", "Stay close to the inferred library seam before widening scope."],
+                        parent_domain=parent_domain,
+                        related_domains=["roadmap"],
+                        skill_path=f"skills/{library_name}/{slug}/SKILL.md",
+                    )
+                )
+
+    if app_native_repo:
+        for surface_name, surface_dir, key_files in app_surfaces:
+            child_domains: list[str] = []
+            nodes.append(
+                _node(
+                    surface_name,
+                    summary=_app_surface_summary(surface_name, surface_dir.relative_to(root).as_posix()),
+                    confidence=0.87,
+                    key_files=key_files[:24],
+                    key_patterns=["repo-native app surface", "top-level implementation boundary", "folder-driven capability map"],
+                    child_domains=child_domains,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{surface_name}/SKILL.md",
+                )
+            )
+            child_entries: list[tuple[str, list[str], str]] = []
+            for child_dir in sorted(path for path in surface_dir.iterdir() if path.is_dir() and not path.name.startswith(".")):
+                child_files = _relative_code_files(root, child_dir, limit=12)
+                if len(child_files) < 3:
+                    continue
+                child_entries.append((child_dir.name.replace("_", "-"), child_files, child_dir.name))
+            seen_child_names: set[str] = set()
+            for child_slug, child_files, child_label in child_entries[:8]:
+                if child_slug in seen_child_names:
+                    continue
+                seen_child_names.add(child_slug)
+                child_name = f"{surface_name}-{child_slug}"
+                child_domains.append(child_name)
+                nodes.append(
+                    _node(
+                        child_name,
+                        summary=_app_child_summary(surface_name, child_label),
+                        confidence=0.79,
+                        key_files=child_files,
+                        key_patterns=[f"{surface_name} surface: {child_label}", "Stay close to the repo-native folder seam before widening scope."],
+                        parent_domain=surface_name,
+                        related_domains=["roadmap"],
+                        skill_path=f"skills/{surface_name}/{child_slug}/SKILL.md",
+                    )
+                )
+
     nodes.append(
         _node(
             "roadmap",
@@ -300,7 +609,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
         )
     )
 
-    if signals.design_system_files and not (signals.frontend_routes or signals.components):
+    if signals.design_system_files and not package_focused_repo and not monorepo_focused_repo and not app_native_repo and not (signals.frontend_routes or signals.components):
         nodes.append(
             _node(
                 "design-system",
@@ -313,7 +622,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
-    if signals.auth_files and not (signals.backend_routes or signals.services):
+    if signals.auth_files and not package_focused_repo and not monorepo_focused_repo and not app_native_repo and not (signals.backend_routes or signals.services):
         nodes.append(
             _node(
                 "security",
@@ -326,7 +635,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
-    if signals.background_jobs and not (signals.backend_routes or signals.services or signals.legacy_programs):
+    if signals.background_jobs and not package_focused_repo and not monorepo_focused_repo and not app_native_repo and not (signals.backend_routes or signals.services or signals.legacy_programs):
         nodes.append(
             _node(
                 "operations",
@@ -339,7 +648,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
-    if (signals.data_models or signals.persistence_layers or signals.copybooks) and not (
+    if not package_focused_repo and not monorepo_focused_repo and not app_native_repo and (signals.data_models or signals.persistence_layers or signals.copybooks) and not (
         signals.backend_routes or signals.services or signals.legacy_programs
     ):
         nodes.append(
@@ -412,7 +721,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             "skills/backend/jobs/SKILL.md",
         ),
     ]:
-        if name in backend_children:
+        if not package_focused_repo and not monorepo_focused_repo and not app_native_repo and name in backend_children:
             nodes.append(
                 _node(
                     name,
@@ -456,7 +765,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             "skills/frontend/design-system/SKILL.md",
         ),
     ]:
-        if name in frontend_children:
+        if not package_focused_repo and not monorepo_focused_repo and not app_native_repo and name in frontend_children:
             nodes.append(
                 _node(
                     name,

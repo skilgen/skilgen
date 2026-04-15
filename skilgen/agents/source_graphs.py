@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from functools import lru_cache
 import re
 from pathlib import Path
 
@@ -58,6 +59,24 @@ def _safe_text(path: Path) -> str:
         return ""
 
 
+@lru_cache(maxsize=8192)
+def _safe_text_cached(path_value: str) -> str:
+    return _safe_text(Path(path_value))
+
+
+@lru_cache(maxsize=8192)
+def _parsed_language_evidence(path_value: str):
+    return parse_language_evidence(Path(path_value))
+
+
+def _cached_text(path: Path) -> str:
+    return _safe_text_cached(str(path))
+
+
+def _cached_parse(path: Path):
+    return _parsed_language_evidence(str(path))
+
+
 def _python_call_names(path: Path) -> list[str]:
     try:
         tree = ast.parse(_safe_text(path), filename=str(path))
@@ -87,8 +106,8 @@ def build_symbol_graph(project_root: Path) -> dict[str, list[str]]:
     root = project_root.resolve()
     graph: dict[str, list[str]] = {}
     for path in _iter_code_files(root):
-        parsed = parse_language_evidence(path)
-        text = _safe_text(path)
+        parsed = _cached_parse(path)
+        text = _cached_text(path)
         native_symbols = _language_structure(path, text)
         if parsed.backend == "python-ast" and native_symbols:
             symbols = native_symbols
@@ -105,10 +124,10 @@ def build_call_graph(project_root: Path) -> dict[str, list[str]]:
     root = project_root.resolve()
     graph: dict[str, list[str]] = {}
     for path in _iter_code_files(root):
-        text = _safe_text(path)
+        text = _cached_text(path)
         if not text:
             continue
-        parsed = parse_language_evidence(path)
+        parsed = _cached_parse(path)
         if parsed.calls:
             calls = parsed.calls
         elif path.suffix.lower() == ".py":
@@ -125,7 +144,7 @@ def build_parser_summary(project_root: Path) -> dict[str, dict[str, object]]:
     summary: dict[str, dict[str, object]] = {}
     for path in _iter_code_files(root):
         relative = path.relative_to(root).as_posix()
-        parsed = parse_language_evidence(path)
+        parsed = _cached_parse(path)
         summary[relative] = {
             "language": parsed.language,
             "backend": parsed.backend,
@@ -147,7 +166,7 @@ def build_config_runtime_graph(project_root: Path) -> dict[str, list[str]]:
             continue
         if path.name not in CONFIG_RUNTIME_NAMES and path.suffix.lower() not in {".yaml", ".yml", ".json", ".toml", ".ini", ".cfg", ".tf"}:
             continue
-        text = _safe_text(path)
+        text = _cached_text(path)
         if not text:
             continue
         entries: set[str] = set()
@@ -186,16 +205,22 @@ def build_test_mapping(project_root: Path) -> dict[str, list[str]]:
         path: _tokenize_stem(path.stem) | _tokenize_stem(path.parent.name)
         for path in sources
     }
+    token_index: dict[str, list[str]] = {}
+    source_relatives = {path: path.relative_to(root).as_posix() for path in sources}
+    for source_path, tokens in source_tokens.items():
+        relative = source_relatives[source_path]
+        for token in tokens:
+            token_index.setdefault(token, []).append(relative)
     for test_path in tests:
         test_tokens = _tokenize_stem(test_path.stem) | _tokenize_stem(test_path.parent.name)
-        scored: list[tuple[int, str]] = []
-        for source_path, tokens in source_tokens.items():
-            overlap = len(test_tokens & tokens)
-            if overlap == 0:
-                continue
-            scored.append((overlap, source_path.relative_to(root).as_posix()))
+        scored: dict[str, int] = {}
+        for token in test_tokens:
+            for relative in token_index.get(token, []):
+                scored[relative] = scored.get(relative, 0) + 1
         if scored:
-            mapping[test_path.relative_to(root).as_posix()] = [path for _score, path in sorted(scored, key=lambda item: (-item[0], item[1]))[:6]]
+            mapping[test_path.relative_to(root).as_posix()] = [
+                path for path, _score in sorted(scored.items(), key=lambda item: (-item[1], item[0]))[:6]
+            ]
     return mapping
 
 

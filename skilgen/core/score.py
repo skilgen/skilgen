@@ -694,6 +694,59 @@ def _skill_scorecards(project_root: Path) -> list[dict[str, object]]:
     return scorecards
 
 
+def compute_repo_baseline_score(project_root: str | Path) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    _, coverage = _coverage_score(root)
+    groundedness = {
+        "score": 0.0,
+        "max_score": 25,
+        "valid_references": 0,
+        "valid_check_paths": 0,
+        "evidence_mentions": 0,
+        "generic_advice_markers": 0,
+        "reason": "no_materialized_skill_system",
+    }
+    freshness = {
+        "score": 0.0,
+        "max_score": 25,
+        "reason": "no_skill_freshness_contract",
+        "changed_files": 0,
+        "stale_skill_paths": 0,
+    }
+    structure = {
+        "score": 0.0,
+        "max_score": 25,
+        "required_artifacts_present": 0,
+        "required_artifacts_total": 5,
+        "cross_reference_density": 0.0,
+        "validation_errors": 0,
+        "validation_warnings": 0,
+        "reason": "no_generated_agent_artifacts",
+    }
+    scorecard = _assemble_scorecard(
+        score_scope="repo",
+        score_id="repo-baseline",
+        project_root=root,
+        subscores={
+            "groundedness": groundedness,
+            "coverage": coverage,
+            "freshness": freshness,
+            "structure": structure,
+        },
+        extra={
+            "label": "Before Skilgen",
+            "explanation": "The repo has analyzable code structure, but there is no generated skill system, no freshness contract, and no agent-facing operating artifacts yet.",
+        },
+    )
+    scorecard["badge"] = {
+        "label": "Repo Baseline",
+        "message": f"{int(round(scorecard['score']))}/100",
+        "color": _badge_color(scorecard["score"]),
+        "markdown_example": "![Repo Baseline](https://skilgen.com/badge/your-repo)",
+    }
+    return scorecard
+
+
 def compute_skillgen_score(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root).resolve()
     domain_files = _domain_key_files(root)
@@ -723,6 +776,23 @@ def compute_skillgen_score(project_root: str | Path) -> dict[str, object]:
         "markdown_example": "![Skilgen Score](https://skilgen.com/badge/your-repo)",
     }
     return scorecard
+
+
+def score_comparison_payload(project_root: str | Path, current: dict[str, object] | None = None) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    baseline = compute_repo_baseline_score(root)
+    current_score = current or compute_skillgen_score(root)
+    subscore_delta = {
+        name: round(float(current_score["subscores"][name]["score"]) - float(baseline["subscores"][name]["score"]), 2)
+        for name in current_score["subscores"]
+    }
+    return {
+        "baseline": baseline,
+        "current": current_score,
+        "delta": round(float(current_score["score"]) - float(baseline["score"]), 2),
+        "raw_delta": round(float(current_score["raw_score"]) - float(baseline["raw_score"]), 2),
+        "subscore_delta": subscore_delta,
+    }
 
 
 def record_score_history(project_root: str | Path, *, source: str = "score") -> dict[str, object]:

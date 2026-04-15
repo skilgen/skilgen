@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from functools import lru_cache
 import re
 from pathlib import Path
 
@@ -64,8 +65,10 @@ def _relative_parts(path: Path, project_root: Path) -> set[str]:
     return {part.lower() for part in path.relative_to(project_root).parts}
 
 
-def _iter_code_files(project_root: Path) -> list[Path]:
-    files: list[Path] = []
+@lru_cache(maxsize=64)
+def _iter_code_file_strings(project_root_value: str) -> tuple[str, ...]:
+    project_root = Path(project_root_value)
+    files: list[str] = []
     for path in project_root.rglob("*"):
         if not path.is_file():
             continue
@@ -73,8 +76,12 @@ def _iter_code_files(project_root: Path) -> list[Path]:
             continue
         if _relative_parts(path, project_root) & IGNORED_PARTS:
             continue
-        files.append(path)
-    return sorted(files)
+        files.append(str(path))
+    return tuple(sorted(files))
+
+
+def _iter_code_files(project_root: Path) -> list[Path]:
+    return [Path(path) for path in _iter_code_file_strings(str(project_root.resolve()))]
 
 
 def _is_backend_route(relative_path: str, parts: tuple[str, ...], name: str) -> bool:

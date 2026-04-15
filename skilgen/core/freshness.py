@@ -24,6 +24,8 @@ IGNORED_FILES = {
     "FEATURES.md",
     "REPORT.md",
     "TRACEABILITY.md",
+    "skilgen-dashboard.html",
+    "skilgen.yml",
 }
 
 
