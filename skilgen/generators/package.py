@@ -835,25 +835,32 @@ def render_dashboard_html(
     score_value = float(score["score"])
     score_percent = max(0.0, min(100.0, score_value))
     score_label = escape(str(score["rating"]).replace("-", " ").title())
-    stale_count = len(diff["stale_skill_paths"])
+    stale_skill_paths = [str(path) for path in diff["stale_skill_paths"]]
+    stale_count = len(stale_skill_paths)
     changed_count = int(diff["changed_file_count"])
     parser_backends = sorted({str(payload.get("backend", "unknown")) for payload in evidence_graph["parser_summary"].values()})
     generated_outputs = [
-        ("AGENTS.md", status["agents_exists"]),
-        ("ANALYSIS.md", status["analysis_exists"]),
-        ("ARCHITECTURE.md", status["architecture_exists"]),
-        ("FEATURES.md", status["features_exists"]),
-        ("REPORT.md", status["report_exists"]),
-        ("TRACEABILITY.md", status["traceability_exists"]),
-        ("skills/MANIFEST.md", status["manifest_exists"]),
-        ("skills/GRAPH.md", status["graph_exists"]),
-        ("skilgen-dashboard.html", status.get("dashboard_exists", False)),
+        {"name": "AGENTS.md", "exists": status["agents_exists"], "counts_ready": status["agents_exists"], "note": "project-root artifact"},
+        {"name": "ANALYSIS.md", "exists": status["analysis_exists"], "counts_ready": status["analysis_exists"], "note": "project-root artifact"},
+        {"name": "ARCHITECTURE.md", "exists": status["architecture_exists"], "counts_ready": status["architecture_exists"], "note": "project-root artifact"},
+        {"name": "FEATURES.md", "exists": status["features_exists"], "counts_ready": status["features_exists"], "note": "project-root artifact"},
+        {"name": "REPORT.md", "exists": status["report_exists"], "counts_ready": status["report_exists"], "note": "project-root artifact"},
+        {"name": "TRACEABILITY.md", "exists": status["traceability_exists"], "counts_ready": status["traceability_exists"], "note": "project-root artifact"},
+        {"name": "skills/MANIFEST.md", "exists": status["manifest_exists"], "counts_ready": status["manifest_exists"], "note": "project-root artifact"},
+        {"name": "skills/GRAPH.md", "exists": status["graph_exists"], "counts_ready": status["graph_exists"], "note": "project-root artifact"},
+        {
+            "name": "skilgen-dashboard.html",
+            "exists": True,
+            "counts_ready": status.get("dashboard_exists", False),
+            "note": "preview rendering this surface" if not status.get("dashboard_exists", False) else "project-root artifact",
+        },
     ]
     evidence_count = len(evidence_graph["items"])
     dependency_edges = sum(len(targets) for targets in bundle.import_graph.values())
     call_edges = sum(len(targets) for targets in bundle.evidence_graph.call_graph.values())
     config_edges = sum(len(targets) for targets in bundle.evidence_graph.config_runtime_graph.values())
     test_links = sum(len(targets) for targets in bundle.evidence_graph.test_mapping.values())
+    mapped_test_files = len(bundle.evidence_graph.test_mapping)
     total_symbol_files = len(bundle.evidence_graph.symbol_graph)
     dependency_network = render_dependency_network_data(context, project_root, bundle)
     architecture_sunburst = render_architecture_sunburst_data(context, project_root, bundle)
@@ -869,10 +876,27 @@ def render_dashboard_html(
     baseline_label = escape(str(baseline_scorecard.get("rating", "baseline")).replace("-", " ").title())
     score_delta_value = float(score_compare.get("delta", score_value - baseline_value))
     subscore_delta = score_compare.get("subscore_delta", {})
-    total_skills = len(score.get("skills", []))
+    planned_child_skill_paths = sorted(
+        {
+            str(path)
+            for item in architecture.get("materialization_plan", [])
+            for path in item.get("child_skill_paths", [])
+            if str(path).strip()
+        }
+    )
+    on_disk_skill_files = [str(path) for path in status.get("skill_files", [])]
+    on_disk_child_skill_files = [path for path in on_disk_skill_files if path.count("/") > 2]
+    total_skills = max(len(score.get("skills", [])), len(on_disk_skill_files))
     top_level_domains = len(architecture["domains"])
-    child_skill_count = max(0, total_skills - top_level_domains)
-    outputs_ready = sum(1 for _, exists in generated_outputs if exists)
+    child_skill_count = max(len(planned_child_skill_paths), max(0, total_skills - top_level_domains))
+    on_disk_child_skill_count = len(on_disk_child_skill_files)
+    outputs_ready = sum(1 for item in generated_outputs if item["counts_ready"])
+    output_total = len(generated_outputs)
+    stale_domain_count = sum(1 for item in diff["impacted_domain_details"] if item["stale"])
+    stale_surface_label = "pending skill surfaces" if not on_disk_skill_files else "stale skill surfaces"
+    stale_badge = f"{stale_count} {stale_surface_label}"
+    parser_labels = [backend for backend in parser_backends if backend != "empty"]
+    parser_note = ", ".join(parser_labels[:3]) if parser_labels else "no concrete parser backend detected"
     trend_points = _meaningful_trend_points(score_history, score, limit=8)
     trend_scores = [float(item.get("score", score_value)) for item in trend_points]
     trend_is_flat = len({round(item, 2) for item in trend_scores}) <= 1
@@ -884,14 +908,18 @@ def render_dashboard_html(
         seen_trend_labels[base_label] = duplicate_count + 1
         trend_labels.append(base_label if duplicate_count == 0 else f"{base_label} · {duplicate_count + 1}")
     visible_trend_points = trend_points
-    trend_markup = "\n".join(
-        f"<div class='spark-point' style='height:{max(18, min(100, float(item.get('score', 0))))}%'><span>{int(round(float(item.get('score', 0))))}</span></div>"
-        for item in visible_trend_points
-    ) or "<div class='spark-empty'>Score history will appear after a few runs.</div>"
-    trend_ticks_markup = "\n".join(
-        f"<span>{escape(label)}</span>"
-        for label in trend_labels
-    )
+    if len(trend_points) <= 1:
+        trend_markup = f"<div class='spark-empty'>First run — baseline at {int(round(score_value))}. Trend unlocks after a few distinct runs.</div>"
+        trend_ticks_markup = ""
+    else:
+        trend_markup = "\n".join(
+            f"<div class='spark-point' style='height:{max(18, min(100, float(item.get('score', 0))))}%'><span>{int(round(float(item.get('score', 0))))}</span></div>"
+            for item in visible_trend_points
+        ) or "<div class='spark-empty'>Score history will appear after a few runs.</div>"
+        trend_ticks_markup = "\n".join(
+            f"<span>{escape(label)}</span>"
+            for label in trend_labels
+        )
     if len(trend_points) <= 1:
         trend_summary = "This is the current baseline. Trend history will become more useful after a few distinct runs."
     elif trend_is_flat:
@@ -939,10 +967,15 @@ def render_dashboard_html(
         )
         for gate in score.get("quality_gates", [])
     ) or "<li class='muted'>No active quality gates are lowering the score right now.</li>"
+    changed_files_empty = (
+        "No repo drift detected yet. Skilgen has planned surfaces, but no materialized freshness baseline exists in the project root."
+        if not diff["changed_files"] and not on_disk_skill_files and stale_count
+        else "No source changes detected since the last generation baseline."
+    )
     changed_files_markup = "\n".join(
         f"<li><span class='change-type {escape(item['change_type'])}'>{escape(item['change_type'])}</span><strong>{escape(item['path'])}</strong></li>"
         for item in diff["changed_files"][:8]
-    ) or "<li class='muted'>No source changes detected since the last generation baseline.</li>"
+    ) or f"<li class='muted'>{escape(changed_files_empty)}</li>"
     impacted_markup = "\n".join(
         (
             "<li>"
@@ -953,14 +986,18 @@ def render_dashboard_html(
         for item in diff["impacted_domain_details"][:8]
         if item["domain"] in diff["impacted_domains"]
     ) or "<li class='muted'>All materialized domains are current.</li>"
+    stale_skills_markup = "\n".join(
+        f"<li><div><strong>{escape(Path(path).parts[-2] if len(Path(path).parts) > 2 else path)}</strong><span>{escape(path)}</span></div>{pill('pending' if not on_disk_skill_files else 'stale', 'warning')}</li>"
+        for path in stale_skill_paths[:12]
+    ) or "<li class='muted'>No pending or stale skill surfaces right now.</li>"
     outputs_markup = "\n".join(
         (
             "<li>"
-            f"<span>{escape(name)}</span>"
-            f"{pill('ready' if exists else 'missing', 'good' if exists else 'warning')}"
+            f"<div><strong>{escape(item['name'])}</strong><span>{escape(item['note'])}</span></div>"
+            f"{pill('ready' if item['exists'] else 'missing', 'good' if item['exists'] else 'warning')}"
             "</li>"
         )
-        for name, exists in generated_outputs
+        for item in generated_outputs
     )
     external_markup = "\n".join(
         f"<li>{escape(item.get('slug', 'unknown'))}{pill('active' if item.get('active') else 'installed', 'good' if item.get('active') else 'default')}</li>"
@@ -1050,27 +1087,52 @@ def render_dashboard_html(
         )
         for name, delta in subscore_delta.items()
     ) or "<li class='muted'>Score deltas will appear once comparison data is available.</li>"
+    unmapped_files = [str(path) for path in score["subscores"]["coverage"].get("unmapped_files", [])[:5]]
+    readiness_signal = (
+        "Preview only — materialize outputs into the project root before agents can load a grounded skill system."
+        if outputs_ready == 0 and not on_disk_skill_files
+        else "Agents can load repo-local skills now, but some operating artifacts are still incomplete."
+        if outputs_ready < output_total
+        else "Agents can load the current repo-local outputs now."
+    )
+    compare_headline = (
+        "Skilgen has inferred a repo-specific materialization plan, but groundedness and structure are still at zero because the child skills and operating artifacts have not been written into the project root yet."
+        if not on_disk_skill_files
+        else "Skilgen converts repo analysis into a maintained skill system with grounded references, explicit startup guidance, and freshness tracking that agents can actually use."
+    )
+    action_items = [
+        f"Run `skilgen deliver --project-root .` to materialize {child_skill_count} planned child skills and the repo-local operating artifacts.",
+    ]
+    if unmapped_files:
+        action_items.append(f"Review the {len(unmapped_files)} unmapped implementation files to raise coverage and groundedness: {', '.join(unmapped_files)}.")
+    if stale_count:
+        action_items.append(
+            "This run is showing pending skill surfaces rather than drifted ones because no on-disk materialized baseline exists yet."
+            if not on_disk_skill_files
+            else f"Refresh the {stale_count} stale skill surfaces after source changes land."
+        )
+    action_markup = "".join(f"<li>{escape(item)}</li>" for item in action_items[:3])
     process_cards_markup = "\n".join(
         [
             (
                 "<article class='process-card'>"
                 "<div class='micro-label'>1. Read The Repo</div>"
                 f"<strong>{total_symbol_files} parser-backed files</strong>"
-                f"<p class='nuance-copy'>Skilgen starts from {evidence_count} evidence items, {dependency_edges} dependency edges, {call_edges} call edges, and {_count_phrase(test_links, 'test mapping')} so the skill system is grounded in the actual repo rather than a template.</p>"
+                f"<p class='nuance-copy'>Skilgen starts from {evidence_count} evidence items, {dependency_edges} dependency edges, {call_edges} call edges, and {_count_phrase(test_links, 'test-to-code link')} across {mapped_test_files} mapped test files so the skill system is grounded in the actual repo rather than a template.</p>"
                 "</article>"
             ),
             (
                 "<article class='process-card'>"
                 "<div class='micro-label'>2. Materialize Skills</div>"
-                f"<strong>{top_level_domains} top-level domains, {child_skill_count} child skills</strong>"
-                f"<p class='nuance-copy'>Those repo seams become reusable parent and child skills, plus {outputs_ready} operating artifacts such as AGENTS, MANIFEST, TRACEABILITY, and the dashboard itself.</p>"
+                f"<strong>{top_level_domains} top-level domains, {child_skill_count} planned child skills</strong>"
+                f"<p class='nuance-copy'>Those repo seams have been planned into reusable parent and child skills, but only {on_disk_child_skill_count} child skill files and {outputs_ready}/{output_total} operating artifacts currently exist on disk.</p>"
                 "</article>"
             ),
             (
                 "<article class='process-card'>"
                 "<div class='micro-label'>3. Help Agents Work Better</div>"
                 f"<strong>{score_delta_value:+.2f} score lift</strong>"
-                f"<p class='nuance-copy'>The lift comes from grounded references, freshness tracking, and an explicit operating system that tells agents where to start, what to trust, and how the repo is split.</p>"
+                f"<p class='nuance-copy'>Right now the visible lift is mostly freshness because groundedness and structure have not fired yet. Materializing the planned skill tree is the next step that turns this from a status page into a working agent surface.</p>"
                 "</article>"
             ),
         ]
@@ -1103,27 +1165,78 @@ def render_dashboard_html(
         else "Excellent quality"
     )
     dashboard_styles = """
-:root{--bg:#050608;--bg-soft:#090b0f;--panel:#10141b;--panel-strong:#0d1117;--line:rgba(255,255,255,.08);--line-strong:rgba(239,211,122,.18);--text:#f6f7fb;--muted:#98a1b2;--gold:#efd37a;--gold-strong:#f8df8e;--white:#f3f4f8;--good:#8fd9a8;--warning:#ffb86b;--danger:#ff7a7a;--shadow:0 28px 90px rgba(0,0,0,.42);}
-*{box-sizing:border-box}html,body{min-height:100%}body{margin:0;font-family:'Sora','Inter',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:radial-gradient(circle at left top, rgba(239,211,122,.12), transparent 28%),radial-gradient(circle at right top, rgba(243,244,248,.07), transparent 22%),var(--bg);color:var(--text)}
-body::before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.18;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='156' viewBox='0 0 180 156'%3E%3Cg fill='none' stroke='%23efd37a' stroke-opacity='.17' stroke-width='2.6'%3E%3Cpath d='M45 3l39 19.5v39L45 81 6 61.5v-39z'/%3E%3Cpath d='M135 3l39 19.5v39L135 81 96 61.5v-39z'/%3E%3Cpath d='M90 75l39 19.5v39L90 153 51 133.5v-39z'/%3E%3C/g%3E%3C/svg%3E");background-size:250px 216px;background-position:center top}
-a{color:inherit}.page{max-width:1500px;margin:0 auto;padding:24px 24px 64px}.hero-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(360px,.85fr);gap:24px;align-items:stretch}.panel,.hero-panel{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid var(--line);border-radius:30px;box-shadow:var(--shadow);backdrop-filter:blur(14px)}
-.hero-panel{padding:30px;position:relative;overflow:hidden}.hero-panel::after{content:'';position:absolute;right:-80px;bottom:-80px;width:260px;height:260px;background:radial-gradient(circle, rgba(239,211,122,.16), transparent 68%)}.hero-left{display:grid;gap:22px}.brand-wrap{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap}.brand-lockup{display:grid;gap:10px;min-width:0}
-.skilgen-mark{width:320px;max-width:100%;height:auto;display:block;filter:drop-shadow(0 20px 46px rgba(0,0,0,.42))}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.18em;font-size:.72rem;font-weight:700}.repo-chip{display:inline-flex;align-items:center;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);color:var(--muted);font-size:.88rem;max-width:min(100%,340px);overflow-wrap:anywhere;word-break:break-word;flex:0 1 340px}
-.hero-copy h1{margin:0;font-size:clamp(2.2rem,4vw,4.2rem);line-height:.94;max-width:12ch}.hero-note{margin:14px 0 0;max-width:54ch;color:#d8dde7;font-size:1.02rem;line-height:1.55;font-style:italic}.hero-context{margin:12px 0 0;max-width:64ch;color:var(--muted);font-size:1rem;line-height:1.55;overflow-wrap:anywhere}.hero-context strong{overflow-wrap:anywhere}.hero-actions{display:flex;gap:10px;flex-wrap:wrap}
-.pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);font-size:.84rem}.pill.good{border-color:rgba(143,217,168,.3);color:var(--good)}.pill.warning{border-color:rgba(255,184,107,.32);color:var(--warning)}.hero-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.metric-card{padding:18px;border-radius:22px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.02))}
-.metric-eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.16em;color:var(--gold)}.metric-value{font-size:2rem;font-weight:700;margin-top:10px}.metric-subtitle{margin-top:8px;color:var(--muted);font-size:.92rem;line-height:1.4}.hero-right{display:grid;gap:18px}.score-top{display:grid;gap:18px;justify-items:center}.score-ring{width:220px;height:220px;border-radius:50%;background:conic-gradient(var(--gold) 0% calc(var(--score) * 1%), rgba(255,255,255,.08) 0% 100%);display:grid;place-items:center;position:relative}
-.score-ring::before{content:'';width:164px;height:164px;border-radius:50%;background:var(--bg-soft);border:1px solid rgba(255,255,255,.08)}.score-ring-content{position:absolute;text-align:center}.score-ring-content strong{display:block;font-size:3.2rem;line-height:1}.score-ring-content strong small{font-size:1rem;color:var(--muted);font-weight:600}.score-ring-content span{display:block;color:var(--muted);text-transform:uppercase;letter-spacing:.18em;font-size:.76rem;margin-top:8px}.score-ring-note{margin-top:10px;color:var(--muted);font-size:.86rem;text-align:center;max-width:22ch}.score-rail{display:grid;grid-template-columns:1fr 1fr;gap:14px}.stat-card{padding:16px 18px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.03)}.stat-label{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}.stat-value{font-size:1.8rem;font-weight:700;margin-top:10px}.stat-note{margin-top:6px;color:var(--muted);font-size:.9rem;line-height:1.35}
-.layout{display:grid;gap:24px;margin-top:24px}.panel{padding:24px}.panel h2{margin:0;font-size:1.1rem}.section-copy{margin:8px 0 0;color:var(--muted);line-height:1.5}.compare-grid,.process-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:20px}.compare-card,.process-card{padding:20px;border-radius:24px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.02));display:grid;gap:12px}.compare-card strong,.process-card strong{font-size:1.18rem}.compare-score{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.compare-score-value{font-size:2.6rem;font-weight:700;line-height:1}.compare-score-label{color:var(--muted);text-transform:uppercase;letter-spacing:.16em;font-size:.72rem}.compare-list{list-style:none;padding:0;margin:0;display:grid;gap:10px}.compare-list li{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.score-board{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:24px}.subscore-stack{display:grid;gap:12px;margin-top:20px}.subscore-row{display:grid;grid-template-columns:120px 1fr 70px;gap:12px;align-items:center}.subscore-label{font-size:.92rem;color:#e4e8ef}.subscore-bar{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}.subscore-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--gold),#fff3be)}.subscore-value{text-align:right;color:var(--muted);font-size:.86rem}
-.quality-gates{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:12px}.quality-gates li{padding:14px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.03)}.quality-gates li p{margin:8px 0 0;color:var(--muted)}.quality-gates li span{float:right;color:var(--gold)}.trend-shell{display:grid;gap:16px}.sparkline{display:flex;align-items:flex-end;gap:10px;height:152px;padding:18px;border-radius:22px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.spark-point{flex:1;border-radius:18px 18px 8px 8px;background:linear-gradient(180deg,var(--gold),rgba(239,211,122,.18));position:relative;min-height:18px}.spark-point span{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);font-size:.75rem;color:var(--muted)}.spark-empty{color:var(--muted)}.trend-ticks{display:flex;gap:10px;justify-content:space-between;color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.12em}
-.legend{display:flex;flex-wrap:wrap;gap:10px}.graph-shell{display:grid;gap:18px}.graph-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-end;flex-wrap:wrap}.graph-tabs{display:flex;gap:10px;flex-wrap:wrap}.graph-tab{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600}.graph-tab.active{background:rgba(239,211,122,.14);border-color:rgba(239,211,122,.35);color:var(--gold-strong)}.graph-frame{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(320px,.55fr);gap:18px;align-items:stretch}
-.graph-panel{display:none;height:100%}.graph-panel.active{display:block;height:100%}.graph-stage{height:600px;border-radius:26px;border:1px solid var(--line-strong);background:linear-gradient(180deg,#0a0d13,#06080d);padding:16px;overflow:hidden}.graph-aside{padding:20px;border-radius:26px;border:1px solid rgba(255,255,255,.07);background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.02));display:grid;align-content:start;gap:16px;min-width:0}.graph-copy{display:none;gap:16px;min-width:0}.graph-copy.active{display:grid}.graph-aside h3{margin:0;font-size:1rem}.graph-aside p{margin:0;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}.graph-aside ul{margin:0;padding-left:18px;color:#dce1ea}.graph-detail{padding:16px;border-radius:18px;border:1px solid rgba(239,211,122,.14);background:rgba(255,255,255,.03);display:grid;gap:10px;min-width:0}.graph-detail h4{margin:0;font-size:1rem;color:var(--text);overflow-wrap:anywhere}.graph-detail p{margin:0;color:var(--muted);overflow-wrap:anywhere}.graph-detail-meta{display:grid;gap:8px;list-style:none;padding:0;margin:0;max-height:240px;overflow:auto}.graph-detail-meta li{padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);list-style:none;color:#dce1ea;overflow-wrap:anywhere}
-.sunburst-canvas,.sankey-canvas,.network-canvas,.radial-canvas{width:100%;height:100%;min-height:540px;border-radius:20px;position:relative;overflow:hidden;background:radial-gradient(circle at top, rgba(239,211,122,.08), transparent 38%), rgba(255,255,255,.02)}.network-canvas canvas{width:100%!important;height:100%!important;display:block}.graph-stage svg{width:100%;height:100%;display:block}.graph-legend{list-style:none;padding:0;margin:0;display:grid;gap:10px;max-height:300px;overflow:auto}.graph-legend li{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);min-width:0}.graph-legend li strong,.graph-legend li span{overflow-wrap:anywhere;word-break:break-word}.graph-legend li span{color:var(--muted);font-size:.88rem}.canvas-fallback{display:grid;place-items:center;min-height:280px;padding:24px;border:1px dashed rgba(255,255,255,.12);border-radius:20px;color:var(--muted);text-align:center;line-height:1.6}.network-mobile-note{display:none}
-.dashboard-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}.list{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:10px}.list li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}.list li div{display:grid;gap:4px}.list li span{color:var(--muted)}.change-type{text-transform:uppercase;font-size:.74rem;letter-spacing:.12em;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.08);color:var(--text)}.change-type.added{color:var(--good)}.change-type.modified{color:var(--warning)}.change-type.deleted{color:var(--danger)}.muted{color:var(--muted)!important}.section-stack{display:grid;gap:24px}
-.domain-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:18px}.domain-card{padding:20px;border-radius:22px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02))}.domain-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.domain-card h3{margin:0;font-size:1.02rem}.domain-card p{color:#d6dbe5}.micro-label{margin-top:14px;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}.domain-card ul{padding-left:18px;color:var(--muted)}table{width:100%;border-collapse:collapse;border-spacing:0;margin-top:18px}th,td{padding:14px 12px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;vertical-align:top}th{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.14em}
-.systems-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.mini-panel{padding:18px;border-radius:22px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03)}.mini-panel ul{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:10px}.mini-panel li{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.mini-panel li span{overflow-wrap:anywhere;word-break:break-word}.ops-board{display:grid;gap:18px;margin-top:18px}.ops-tabs,.surface-tabs{display:flex;flex-wrap:wrap;gap:10px}.ops-tab,.surface-tab{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600}.ops-tab.active,.surface-tab.active{background:rgba(239,211,122,.14);border-color:rgba(239,211,122,.35);color:var(--gold-strong)}.ops-copy,.surface-copy{display:none}.ops-copy.active,.surface-copy.active{display:block}.ops-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.ops-tile{padding:16px;border-radius:18px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03)}.ops-tile strong{display:block;font-size:1rem;margin-bottom:6px}
-.analytics-board{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:18px;align-items:stretch}.analytics-side{display:grid;gap:16px}.analytics-side .mini-panel li div{display:grid;gap:3px}.analytics-side .mini-panel li span{font-size:.82rem;color:var(--muted)}.radial-canvas{width:100%;height:100%;min-height:540px;border-radius:20px;position:relative;overflow:hidden;background:radial-gradient(circle at center, rgba(239,211,122,.08), transparent 42%), rgba(255,255,255,.02)}.radial-legend{display:grid;gap:10px}.legend-dot{display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:8px}.nuance-copy,.rationale-note{margin-top:8px;color:var(--muted);font-size:.92rem;line-height:1.5}.footer-note{margin-top:12px;color:var(--muted);font-size:.92rem}.tooltip{position:absolute;pointer-events:none;background:rgba(6,8,11,.98);border:1px solid rgba(239,211,122,.3);border-radius:14px;padding:12px 14px;color:#f6f7fb;font-size:.86rem;line-height:1.45;box-shadow:0 18px 40px rgba(0,0,0,.28);opacity:0;transform:translate(-50%,-100%);transition:opacity .16s ease;max-width:280px}.tooltip strong{display:block;color:var(--gold);margin-bottom:6px}.corner-badge{position:fixed;top:18px;right:22px;z-index:20;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(5,6,8,.76);backdrop-filter:blur(12px);color:var(--muted);font-size:.8rem;letter-spacing:.08em;text-transform:uppercase}
-@media (max-width:1180px){.hero-grid,.score-board,.dashboard-columns,.graph-frame,.analytics-board,.compare-grid,.process-grid{grid-template-columns:1fr}.hero-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.systems-grid,.domain-grid,.ops-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:760px){.page{padding:18px}.hero-panel,.panel{padding:20px}.hero-metrics,.score-rail,.systems-grid,.domain-grid,.ops-grid{grid-template-columns:1fr}.hero-copy h1{font-size:clamp(2.1rem,14vw,3.4rem)}.skilgen-mark{width:240px}.graph-stage{height:auto;min-height:260px}.sunburst-canvas,.sankey-canvas,.radial-canvas{min-height:320px}.network-canvas{display:none}.network-mobile-note{display:grid}.graph-aside{gap:12px}.subscore-row{grid-template-columns:1fr}.subscore-value{text-align:left}.corner-badge{top:12px;right:12px;font-size:.72rem}}
+:root{--background:#131313;--background-soft:#0e0e0e;--surface:#1c1b1b;--surface-2:#201f1f;--surface-3:#2a2a2a;--surface-4:#353534;--line:rgba(151,144,127,.18);--line-strong:rgba(239,211,122,.26);--text:#e5e2e1;--muted:#a7a095;--primary:#efd37a;--primary-soft:#fff0cb;--secondary:#d5c69c;--tertiary:#b4d9ff;--good:#8fd9a8;--warning:#ffb86b;--danger:#ff8f70;--shadow:0 24px 80px rgba(0,0,0,.34)}
+*{box-sizing:border-box}html,body{min-height:100%}html{scroll-behavior:smooth}body{margin:0;font-family:'Manrope',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:radial-gradient(circle at top left, rgba(239,211,122,.12), transparent 26%),linear-gradient(180deg,#131313,#0e0e0e 52%,#131313 100%);color:var(--text)}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.16;background-image:radial-gradient(rgba(76,70,56,.9) .65px, transparent .65px);background-size:34px 34px}
+a{color:inherit;text-decoration:none}
+.topbar{position:fixed;top:0;left:0;right:0;z-index:40;height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(19,19,19,.78);backdrop-filter:blur(22px);border-bottom:1px solid rgba(151,144,127,.12)}
+.topbar-brand{display:flex;align-items:center;gap:18px}.topbar-brand strong,.topbar-nav a,.rail-title,.section-title,.panel h2,.hero-copy h1,.metric-value,.stat-value,.compare-score-value,.score-ring-content strong,.graph-aside h3,.graph-detail h4,.ops-tile strong,.chapter-title,.footer-mark,.score-block-title,.table-kicker,.list-kicker{font-family:'Space Grotesk','Manrope',sans-serif}
+.topbar-brand strong{font-size:1.08rem;letter-spacing:.18em;text-transform:uppercase;color:var(--primary)}
+.topbar-brand span{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.topbar-nav{display:flex;gap:18px;flex-wrap:wrap}.topbar-nav a{font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;padding:10px 14px;border:1px solid transparent;border-radius:999px;color:#8d8779;transition:.18s ease}.topbar-nav a:hover,.topbar-nav a.active{color:var(--primary);border-color:rgba(239,211,122,.22);background:rgba(239,211,122,.08)}
+.topbar-actions{display:flex;align-items:center;gap:12px}.topbar-icon,.corner-badge{display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(151,144,127,.18);background:rgba(28,27,27,.72);color:#cec6b3;border-radius:999px}
+.topbar-icon{width:38px;height:38px;font-size:.75rem;letter-spacing:.08em;text-transform:uppercase}
+.corner-badge{padding:0 14px;height:38px;font-size:.76rem;letter-spacing:.14em;text-transform:uppercase}
+.rail{position:fixed;top:72px;left:0;bottom:0;width:284px;padding:26px 18px 24px;background:rgba(19,19,19,.96);border-right:1px solid rgba(151,144,127,.12);display:grid;align-content:start;gap:18px;overflow:auto}
+.rail-card,.panel,.hero-panel,.mini-panel,.metric-card,.stat-card,.compare-card,.process-card,.ops-tile{border:1px solid var(--line);background:linear-gradient(180deg,rgba(42,42,42,.66),rgba(28,27,27,.9));box-shadow:var(--shadow)}
+.rail-card{padding:18px;border-radius:0}.rail-title{font-size:.78rem;letter-spacing:.18em;text-transform:uppercase;color:var(--primary)}.rail-subtitle,.repo-chip,.footer-note,.section-copy,.metric-subtitle,.stat-note,.nuance-copy,.rationale-note,.graph-aside p,.graph-detail p,.subscore-value,.graph-legend li span,.trend-summary,.hero-context,.compare-score-label,.list li span,.quality-list li p{color:var(--muted)}
+.rail-subtitle{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.rail-nav{display:grid;gap:8px}.rail-nav a{display:flex;align-items:center;gap:10px;padding:14px 16px;font-size:.76rem;letter-spacing:.16em;text-transform:uppercase;color:#8d8779;border:1px solid transparent;background:transparent;transition:.18s ease}.rail-nav a.active,.rail-nav a:hover{color:var(--primary);background:rgba(32,31,31,.96);border-color:rgba(239,211,122,.14)}
+.rail-legend,.quality-list,.compare-list,.graph-legend,.list,.mini-panel ul{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+.rail-legend li,.graph-legend li,.list li,.mini-panel li,.quality-list li{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.legend-dot{display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:8px;flex:0 0 auto}
+.legend-row{display:flex;align-items:center;gap:10px;color:#d9d3ca;font-size:.9rem}
+.metric-pile{display:grid;gap:10px}.metric-chip{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border:1px solid rgba(151,144,127,.16);background:rgba(14,14,14,.56)}.metric-chip strong{font-size:1rem;color:var(--text)}.metric-chip span{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.page{max-width:1500px;margin:0 auto;padding:104px 28px 64px 320px;display:grid;gap:28px}
+.chapter{display:grid;gap:18px;scroll-margin-top:104px}.chapter-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-end;flex-wrap:wrap}.chapter-kicker,.eyebrow,.metric-eyebrow,.micro-label,.table-kicker,.list-kicker{font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;color:var(--primary)}
+.chapter-title{margin:0;font-size:clamp(2.5rem,5vw,4.6rem);line-height:.92;letter-spacing:-.08em}
+.chapter-copy{max-width:72ch;color:#cec6b3;line-height:1.68}
+.chapter-brand{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap}.chapter-brand .skilgen-mark{width:220px;max-width:min(36vw,220px)}
+.hero-grid,.score-rail,.compare-grid,.process-grid,.analytics-board,.dashboard-columns,.systems-grid,.domain-grid,.ops-grid,.score-board,.graph-frame{display:grid;gap:18px}
+.hero-grid{grid-template-columns:minmax(0,1.1fr) minmax(360px,.9fr)}
+.hero-panel,.panel{padding:28px;border-radius:0;overflow:hidden;position:relative}
+.hero-panel::before,.panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,rgba(239,211,122,.35),transparent)}
+.hero-left{display:grid;gap:22px}
+.brand-wrap{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}.brand-lockup{display:grid;gap:8px}.skilgen-mark{width:320px;max-width:100%;height:auto;display:block;filter:drop-shadow(0 20px 46px rgba(0,0,0,.42))}
+.repo-chip,.pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid rgba(151,144,127,.18);border-radius:999px;background:rgba(19,19,19,.5);font-size:.76rem;letter-spacing:.1em;text-transform:uppercase}
+.pill.good{color:var(--good);border-color:rgba(143,217,168,.24);background:rgba(143,217,168,.08)}.pill.warning{color:var(--warning);border-color:rgba(255,184,107,.22);background:rgba(255,184,107,.08)}.pill.default{color:var(--text)}
+.hero-copy{display:grid;gap:14px;max-width:66ch}.hero-note{margin:0;font-size:1.05rem;color:var(--primary-soft)}.hero-context{margin:0}
+.hero-actions{display:flex;flex-wrap:wrap;gap:12px}.hero-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.metric-card,.stat-card,.compare-card,.process-card,.mini-panel,.ops-tile{padding:18px;border-radius:0}
+.metric-value,.stat-value,.compare-score-value{font-size:2rem;font-weight:700;letter-spacing:-.05em}.metric-subtitle,.stat-note{line-height:1.5}
+.score-top{display:grid;gap:16px;justify-items:center;text-align:center}.score-ring{--score:0;width:min(232px,100%);aspect-ratio:1;border-radius:50%;padding:18px;background:conic-gradient(var(--primary) calc(var(--score)*1%), rgba(151,144,127,.18) 0);display:grid;place-items:center;box-shadow:inset 0 0 0 1px rgba(151,144,127,.18)}
+.score-ring-content{width:100%;height:100%;border-radius:50%;display:grid;place-items:center;gap:6px;background:radial-gradient(circle at center, rgba(53,53,52,.96), rgba(14,14,14,.98));text-align:center;padding:22px}.score-ring-content strong{font-size:3rem;letter-spacing:-.09em}.score-ring-content small{font-size:1rem;color:var(--muted);margin-left:4px}.score-ring-note{line-height:1.5;color:#cec6b3}
+.score-rail{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-card{background:linear-gradient(180deg,rgba(32,31,31,.96),rgba(19,19,19,.94))}
+.panel h2{margin:0;font-size:1.8rem;letter-spacing:-.05em}.section-title{font-size:1rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.section-copy{margin-top:10px;max-width:76ch;line-height:1.65}
+.analytics-board{grid-template-columns:minmax(0,1.18fr) minmax(320px,.82fr);align-items:stretch}
+.analytics-side{display:grid;gap:16px}.analytics-side .mini-panel li div{display:grid;gap:3px}.analytics-side .mini-panel li span{font-size:.82rem}
+.compare-grid{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:18px}.compare-card{display:grid;gap:12px}.compare-score{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.compare-list li{padding:10px 0;border-bottom:1px solid rgba(151,144,127,.16)}.compare-list li:last-child{border-bottom:0}
+.process-grid{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:18px}.process-card strong{display:block;font-size:1.12rem;margin-bottom:8px}
+.score-board{grid-template-columns:minmax(0,1fr) minmax(340px,.86fr);margin-top:18px}.subscore-stack{display:grid;gap:14px}.subscore-row{display:grid;grid-template-columns:160px minmax(0,1fr) auto;align-items:center;gap:12px}.subscore-label{text-transform:capitalize}.subscore-bar{height:10px;background:rgba(151,144,127,.18);overflow:hidden}.subscore-bar span{display:block;height:100%;background:linear-gradient(90deg,var(--primary),var(--primary-soft))}
+.quality-list li{padding:14px 16px;background:rgba(14,14,14,.34);border:1px solid rgba(151,144,127,.16)}.quality-list li strong{display:block}.quality-list li span{display:inline-flex;margin-top:8px;color:var(--primary)}
+.trend-panel{display:grid;gap:16px}.trend-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;flex-wrap:wrap}.sparkline{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));align-items:end;gap:8px;min-height:160px}.spark-point{display:grid;align-items:end;min-height:28px;padding-bottom:34px;background:linear-gradient(180deg,rgba(239,211,122,.18),rgba(239,211,122,.92));position:relative}.spark-point span{position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:.82rem;font-weight:700;color:#131313}.spark-empty{grid-column:1/-1;display:grid;place-items:center;min-height:120px;border:1px dashed rgba(151,144,127,.22);color:var(--muted);padding:18px;text-align:center}.trend-ticks{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:8px;color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.12em}.trend-ticks span{text-align:center}.trend-summary{line-height:1.6}
+.graph-shell{position:relative;overflow:hidden;background:linear-gradient(180deg,rgba(14,14,14,.92),rgba(19,19,19,.98))}.graph-shell::before{content:'';position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(rgba(76,70,56,.45) .7px, transparent .7px);background-size:34px 34px;opacity:.22}
+.graph-toolbar{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap;margin-top:18px;margin-bottom:18px;position:relative;z-index:1}
+.graph-tabs,.ops-tabs,.surface-tabs,.legend,.hero-actions{display:flex;flex-wrap:wrap;gap:10px}.graph-tab,.ops-tab,.surface-tab{border:1px solid rgba(151,144,127,.18);background:rgba(28,27,27,.92);color:var(--text);padding:11px 15px;border-radius:999px;cursor:pointer;font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-size:.75rem}
+.graph-tab.active,.ops-tab.active,.surface-tab.active{background:rgba(239,211,122,.12);border-color:rgba(239,211,122,.32);color:var(--primary)}
+.graph-frame{grid-template-columns:minmax(0,1.18fr) minmax(320px,.82fr);position:relative;z-index:1}.graph-panel{display:none;height:100%}.graph-panel.active{display:block;height:100%}
+.graph-stage{height:620px;border:1px solid rgba(239,211,122,.2);background:linear-gradient(180deg,#0f1115,#090a0d);padding:16px;overflow:hidden}.graph-aside{padding:22px;border:1px solid rgba(151,144,127,.18);background:linear-gradient(180deg,rgba(32,31,31,.96),rgba(19,19,19,.96));display:grid;align-content:start;gap:16px;min-width:0}.graph-copy{display:none;gap:16px}.graph-copy.active{display:grid}.graph-aside h3{margin:0;font-size:1.24rem}.graph-aside ul{margin:0;padding-left:18px;color:#ded8d0}
+.graph-detail{padding:16px;border:1px solid rgba(239,211,122,.16);background:rgba(14,14,14,.42);display:grid;gap:10px}.graph-detail h4{margin:0;font-size:1rem}.graph-detail-meta{display:grid;gap:8px;list-style:none;padding:0;margin:0;max-height:240px;overflow:auto}.graph-detail-meta li{padding:10px 12px;background:rgba(32,31,31,.84);border:1px solid rgba(151,144,127,.16);color:#ded8d0;overflow-wrap:anywhere}
+.sunburst-canvas,.sankey-canvas,.network-canvas,.radial-canvas{width:100%;height:100%;min-height:540px;position:relative;overflow:hidden;background:radial-gradient(circle at top, rgba(239,211,122,.08), transparent 38%), rgba(255,255,255,.02)}.network-canvas{min-height:540px;height:540px}.network-canvas,.network-canvas .vis-network,.network-canvas canvas{background:transparent!important}.network-canvas canvas{width:100%!important;height:100%!important;display:block}.graph-stage svg{width:100%;height:100%;display:block}
+.graph-legend{max-height:320px;overflow:auto}.graph-legend li{padding:10px 12px;border:1px solid rgba(151,144,127,.16);background:rgba(14,14,14,.34);min-width:0}.graph-legend li strong,.graph-legend li span{overflow-wrap:anywhere;word-break:break-word}
+.canvas-fallback{display:grid;place-items:center;min-height:280px;padding:24px;border:1px dashed rgba(151,144,127,.22);color:var(--muted);text-align:center;line-height:1.6}.network-mobile-note{display:none}
+.dashboard-columns{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.list{margin:18px 0 0}.list li{padding:12px 14px;border:1px solid rgba(151,144,127,.16);background:rgba(14,14,14,.34)}.list li div{display:grid;gap:4px}.change-type{text-transform:uppercase;font-size:.72rem;letter-spacing:.12em;padding:4px 8px;border-radius:999px;border:1px solid rgba(151,144,127,.18)}.change-type.added{color:var(--good)}.change-type.modified{color:var(--warning)}.change-type.deleted{color:var(--danger)}.muted{color:var(--muted)!important}
+.domain-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:18px}.domain-card{padding:20px;border:1px solid rgba(151,144,127,.16);background:linear-gradient(180deg,rgba(32,31,31,.96),rgba(19,19,19,.94))}.domain-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.domain-card h3{margin:0;font-size:1.02rem}.domain-card p{color:#d8d2ca}.domain-card ul{padding-left:18px;color:var(--muted)}
+table{width:100%;border-collapse:collapse;border-spacing:0;margin-top:18px}th,td{padding:14px 12px;border-bottom:1px solid rgba(151,144,127,.16);text-align:left;vertical-align:top}th{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.16em}
+.systems-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.mini-panel ul{margin:12px 0 0}.mini-panel li span{overflow-wrap:anywhere;word-break:break-word}
+.ops-board{display:grid;gap:18px;margin-top:18px}.ops-copy,.surface-copy{display:none}.ops-copy.active,.surface-copy.active{display:block}.ops-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.radial-legend{display:grid;gap:10px}.footer-note{font-size:.92rem}.tooltip{position:absolute;pointer-events:none;background:rgba(14,14,14,.98);border:1px solid rgba(239,211,122,.28);padding:12px 14px;color:#f6f7fb;font-size:.86rem;line-height:1.45;box-shadow:0 18px 40px rgba(0,0,0,.28);opacity:0;transform:translate(-50%,-100%);transition:opacity .16s ease;max-width:280px}.tooltip strong{display:block;color:var(--primary);margin-bottom:6px}
+.score-callout{display:grid;gap:14px}.score-copy{padding:18px;border:1px solid rgba(151,144,127,.16);background:rgba(14,14,14,.34)}.score-copy strong{display:block;font-size:1.04rem;margin-bottom:6px;color:var(--primary-soft)}
+.health-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:18px}.health-tile{padding:16px;border:1px solid rgba(151,144,127,.16);background:rgba(14,14,14,.34)}.health-tile span{display:block;font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}.health-tile strong{display:block;font-size:1.38rem;margin-top:8px;font-family:'Space Grotesk','Manrope',sans-serif}
+.footer-bar{display:flex;justify-content:space-between;gap:18px;align-items:center;flex-wrap:wrap;padding:22px 28px;border:1px solid rgba(151,144,127,.16);background:linear-gradient(180deg,rgba(32,31,31,.96),rgba(19,19,19,.94))}.footer-mark{font-size:.9rem;letter-spacing:.16em;text-transform:uppercase;color:var(--primary)}
+@media (max-width:1180px){.rail{display:none}.page{padding-left:28px}.hero-grid,.analytics-board,.score-board,.dashboard-columns,.graph-frame,.compare-grid,.process-grid{grid-template-columns:1fr}.hero-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.systems-grid,.domain-grid,.ops-grid,.health-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:760px){.topbar{padding:12px 16px;min-height:72px;height:auto;flex-wrap:wrap;gap:10px}.topbar-nav{width:100%;overflow:auto;padding-bottom:4px}.page{padding:112px 16px 48px}.hero-panel,.panel{padding:20px}.hero-copy h1,.chapter-title{font-size:clamp(2.1rem,14vw,3.4rem)}.hero-metrics,.score-rail,.systems-grid,.domain-grid,.ops-grid,.health-grid{grid-template-columns:1fr}.graph-stage{height:auto;min-height:280px}.sunburst-canvas,.sankey-canvas,.radial-canvas{min-height:320px}.network-canvas{display:none}.network-mobile-note{display:grid}.graph-aside{gap:12px}.subscore-row{grid-template-columns:1fr}.subscore-value{text-align:left}.dashboard-columns{grid-template-columns:1fr}}
 """.strip()
 
     dashboard_script = f"""
@@ -1254,18 +1367,29 @@ const renderNetwork=(target, canvas)=>{{
     return;
   }}
   const graph=window.__SKILGEN_NETWORKS__[target];
+  if(!graph || !graph.nodes || !graph.nodes.length) {{
+    renderFallback(canvas, 'Dependency network unavailable', 'Skilgen did not find enough dependency nodes to render the interactive map for this snapshot.');
+    return;
+  }}
   if(renderedNetworks.has(target)){{
     const existing=renderedNetworks.get(target);
     existing.setData({{nodes:new vis.DataSet(graph.nodes),edges:new vis.DataSet(graph.edges)}});
     existing.setSize('100%','100%');
     existing.redraw();
-    existing.fit({{animation:true}});
+    existing.fit({{animation:false}});
     return;
   }}
+  canvas.innerHTML='';
+  canvas.style.background='transparent';
   const data={{nodes:new vis.DataSet(graph.nodes),edges:new vis.DataSet(graph.edges)}};
   const network=new vis.Network(canvas,data,networkOptions);
   renderedNetworks.set(target,network);
-  network.once('stabilized',()=>{{ network.setSize('100%','100%'); network.redraw(); network.fit({{animation:true}}); }});
+  const clearNetworkBackground=()=>{{
+    canvas.style.background='transparent';
+    canvas.querySelectorAll('canvas,.vis-network').forEach((node)=>{{ node.style.background='transparent'; }});
+  }};
+  clearNetworkBackground();
+  network.once('stabilized',()=>{{ network.setSize('100%','100%'); network.redraw(); clearNetworkBackground(); network.fit({{animation:false}}); network.setOptions({{physics:false}}); }});
   network.on('hoverNode',(params)=>{{
     const node=graph.nodes.find((entry)=>entry.id===params.node);
     if(node) showTooltip(params.event.event,node.label,node.title||'');
@@ -1283,7 +1407,7 @@ const renderNetwork=(target, canvas)=>{{
       node.detail_meta || []
     );
   }});
-  setTimeout(()=>{{ network.setSize('100%','100%'); network.redraw(); network.fit({{animation:true}}); }},120);
+  setTimeout(()=>{{ network.setSize('100%','100%'); network.redraw(); clearNetworkBackground(); network.fit({{animation:false}}); }},120);
 }};
 const renderSunburst=(container)=>{{
   if(container.dataset.loaded) return;
@@ -1544,6 +1668,21 @@ opsTabs.forEach((tab)=>tab.addEventListener('click',()=>activateSet(opsTabs,opsC
 surfaceTabs.forEach((tab)=>tab.addEventListener('click',()=>activateSet(surfaceTabs,surfaceCopies,tab.dataset.target,'target','copy')));
 const analyticsCanvas=document.querySelector('[data-radial="analytics"]');
 if(analyticsCanvas) renderAnalyticsRadial(analyticsCanvas);
+const dependencyNetworkCanvas=document.querySelector('[data-network="dependencies"]');
+if(dependencyNetworkCanvas) renderNetwork('dependencies', dependencyNetworkCanvas);
+const chapterLinks=[...document.querySelectorAll('.topbar-nav a[href^="#"], .rail-nav a[href^="#"]')];
+chapterLinks.forEach((link)=>link.addEventListener('click',(event)=>{{
+  const targetId=link.getAttribute('href');
+  if(!targetId || targetId === '#') return;
+  const target=document.querySelector(targetId);
+  if(!target) return;
+  event.preventDefault();
+  const offset=96;
+  const top=target.getBoundingClientRect().top + window.scrollY - offset;
+  window.scrollTo({{top:Math.max(0, top), behavior:'smooth'}});
+  chapterLinks.forEach((item)=>item.classList.toggle('active', item === link));
+  if(window.history && window.history.replaceState) window.history.replaceState(null,'',targetId);
+}}));
 setPanel('architecture');
 if(opsTabs.length) activateSet(opsTabs,opsCopies,'worker','target','copy');
 if(surfaceTabs.length) activateSet(surfaceTabs,surfaceCopies,'external','target','copy');
@@ -1554,276 +1693,435 @@ window.addEventListener('resize',()=>{{
 }});
 """.strip()
 
-    return "\n".join(
-        [
-            "<!doctype html>",
-            "<html lang='en'>",
-            "<head>",
-            "<meta charset='utf-8'>",
-            "<meta name='viewport' content='width=device-width, initial-scale=1'>",
-            f"<title>Skilgen Dashboard · {escape(repo_name)}</title>",
-            "<link rel='preconnect' href='https://fonts.googleapis.com'>",
-            "<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>",
-            "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap' rel='stylesheet'>",
-            "<script src='https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js' integrity='sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i' crossorigin='anonymous'></script>",
-            "<script src='https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js' integrity='sha384-SM54CE5h+qdDI046d2Y5ym7wq1kq4uxcQ1cqGq5/+5jrE5tPLeDJSq711Q8sIska' crossorigin='anonymous'></script>",
-            "<script src='https://unpkg.com/vis-network/standalone/umd/vis-network.min.js' integrity='sha384-m/pqkSdIs50f1nWlv062s9HmCAygFne+xY7uot2M8ZVijdcC+c/n97dFCfAZnKwO' crossorigin='anonymous'></script>",
-            f"<style>{dashboard_styles}</style>",
-            "</head>",
-            "<body>",
-            "<div class='corner-badge'>&copy; Skilgen</div>",
-            "<div class='page'>",
-            "<section class='hero-grid'>",
-            "<section class='hero-panel hero-left'>",
-            "<div class='brand-wrap'>",
-            "<div class='brand-lockup'>",
-            "<div class='eyebrow'>Agent Intelligence Surface</div>",
-            brand_mark,
-            "</div>",
-            f"<div class='repo-chip' title='{escape(repo_name)}'>Repository · {escape(_compact_label(repo_name, max_length=30))}</div>",
-            "</div>",
-            "<div class='hero-copy'>",
-            "<h1>Skilgen Operating System</h1>",
-            "<p class='hero-note'><em>All your skill intelligence — alive, connected, and visible on a single surface. A living dashboard and repo map.</em></p>",
-            f"<p class='hero-context'><strong>{escape(repo_name)}</strong> is translated into one operating surface for coding agents: architecture, evidence, dependencies, skill flows, score, freshness, analytics, auto-update, and capability context together.</p>",
-            "</div>",
-            "<div class='hero-actions'>",
-            pill(f"{stale_count} stale skills" if stale_count else "All skills current", "warning" if stale_count else "good"),
-            pill(f"Auto-update {'on' if auto_update.get('enabled') else 'off'}", "good" if auto_update.get("enabled") else "warning"),
-            pill("File-state freshness" if str(diff['git']['event_type']) == 'not_git_repo' else f"Git-aware {str(diff['git']['event_type']).replace('_', ' ')}"),
-            "</div>",
-            "<div class='hero-metrics'>",
-            metric("Evidence", str(evidence_count), "Files, snippets, config, docs, and tests feeding the graph."),
-            metric("Dependencies", str(dependency_edges), "Import edges across the active repository graph."),
-            metric("Calls", str(call_edges), "Observed call relationships from parsed source evidence."),
-            metric("Tests", str(test_links), "Tests mapped back to implementation files."),
-            "</div>",
-            "</section>",
-            "<aside class='hero-panel hero-right'>",
-            "<div class='score-top'>",
-            "<div class='eyebrow'>Quality + freshness in one surface</div>",
-            f"<div class='score-ring' style='--score:{score_percent};'><div class='score-ring-content'><strong>{int(round(score_value))}<small>/100</small></strong><span>{score_label}</span></div></div><div class='score-ring-note'>{escape(score_signal)} · {int(round(score_value))} out of 100</div>",
-            "</div>",
-            "<div class='score-rail'>",
-            f"<article class='stat-card'><div class='stat-label'>Freshness</div><div class='stat-value'>{int(round(float(diff['freshness_score'])))}/{int(diff['freshness_max'])}</div><div class='stat-note'>{escape(str(diff['reason']).replace('_', ' '))}</div></article>",
-            f"<article class='stat-card'><div class='stat-label'>Domains</div><div class='stat-value'>{len(architecture['domains'])}</div><div class='stat-note'>Materialized architecture domains in play.</div></article>",
-            f"<article class='stat-card'><div class='stat-label'>Parsers</div><div class='stat-value'>{len(parser_backends) or 1}</div><div class='stat-note'>{escape(', '.join(parser_backends[:3]) or 'unknown')}</div></article>",
-            f"<article class='stat-card'><div class='stat-label'>Outputs</div><div class='stat-value'>{sum(1 for _, exists in generated_outputs if exists)}</div><div class='stat-note'>Repo-local artifacts ready for agents.</div></article>",
-            "</div>",
-            "</aside>",
-            "</section>",
-            "<section class='layout section-stack'>",
-            "<section class='panel'>",
-            "<h2>Before vs After</h2>",
-            "<div class='section-copy'>This makes the lift explicit: how the repo looked before Skilgen materialized any skills, what Skilgen created, and why that changes agent usefulness.</div>",
-            "<div class='compare-grid'>",
-            "<article class='compare-card'>",
-            "<div class='micro-label'>Before Skilgen</div>",
-            f"<div class='compare-score'><div class='compare-score-value'>{int(round(baseline_value))}</div><div class='compare-score-label'>{baseline_label}</div></div>",
-            f"<p class='nuance-copy'>{escape(str(baseline_scorecard.get('explanation', 'The repo is readable as code, but no reusable skill system exists yet.')))}</p>",
-            "<ul class='compare-list'>",
-            f"<li><span>Coverage from repo shape</span><strong>{int(round(float(baseline_scorecard.get('subscores', {}).get('coverage', {}).get('score', 0))))} / 25</strong></li>",
-            "<li><span>Grounded reusable skills</span><strong>0 / 25</strong></li>",
-            "<li><span>Freshness contract</span><strong>0 / 25</strong></li>",
-            "<li><span>Agent operating artifacts</span><strong>0 / 25</strong></li>",
-            "</ul>",
-            "</article>",
-            "<article class='compare-card'>",
-            "<div class='micro-label'>With Skilgen</div>",
-            f"<div class='compare-score'><div class='compare-score-value'>{int(round(score_value))}</div><div class='compare-score-label'>{score_label}</div>{pill(f'{score_delta_value:+.2f}', 'good' if score_delta_value > 0 else 'default')}</div>",
-            "<p class='nuance-copy'>Skilgen converts repo analysis into a maintained skill system with grounded references, explicit startup guidance, and freshness tracking that agents can actually use.</p>",
-            f"<ul class='compare-list'>{score_compare_markup}</ul>",
-            "</article>",
-            "<article class='compare-card'>",
-            "<div class='micro-label'>What Was Created</div>",
-            f"<div class='compare-score'><div class='compare-score-value'>{total_skills}</div><div class='compare-score-label'>Total Skills</div></div>",
-            f"<p class='nuance-copy'>{top_level_domains} top-level domains turned into {child_skill_count} child skills and {outputs_ready} repo-local operating artifacts, so the output is navigable instead of just descriptive.</p>",
-            "<ul class='compare-list'>",
-            f"<li><span>Top-level domains</span><strong>{top_level_domains}</strong></li>",
-            f"<li><span>Child skills</span><strong>{child_skill_count}</strong></li>",
-            f"<li><span>Ready outputs</span><strong>{outputs_ready}</strong></li>",
-            f"<li><span>Skills currently stale</span><strong>{stale_count}</strong></li>",
-            "</ul>",
-            "</article>",
-            "</div>",
-            f"<div class='process-grid'>{process_cards_markup}</div>",
-            "</section>",
-            "<section class='panel'>",
-            "<h2>Usage Analytics</h2>",
-            "<div class='section-copy'>Skilgen tracks every skill separately, then layers in tree depth, content richness, and live runtime traces so you can see where agent attention actually lands.</div>",
-            "<div class='analytics-board'>",
-            "<div class='graph-stage'>",
-            "<div class='radial-canvas' data-radial='analytics'></div>",
-            "</div>",
-            "<div class='analytics-side'>",
-            "<div class='legend'>"
-            + pill(
-                _count_phrase(int(analytics.get("live_event_count", 0)), "live usage event"),
-                "good" if int(analytics.get("live_event_count", 0)) else "default",
-            )
-            + pill(f"{len(analytics.get('skill_usage', []))} mapped skills")
-            + pill("Modeled attention" if usage_mode != "live" else "Live traces", "warning" if usage_mode != "live" else "good")
-            + pill(f"{int(analytics.get('planner_event_count', 0))} planner warmups ignored")
-            + "</div>",
-            f"<div class='mini-panel'><div class='micro-label'>{'Skill Attention Ranking' if usage_mode != 'live' else 'Most Active Skills'}</div>"
-            + f"<ul>{analytics_markup}</ul></div>",
-            f"<div class='mini-panel'><div class='micro-label'>{'Lower Attention' if usage_mode != 'live' else 'Least Used'}</div><ul>"
-            + "\n".join(
-                f"<li><div><strong>{escape(str(item.get('title', item['skill'])))}</strong><span>{escape(item['skill'])}</span></div><span>{int(item['loads'])} {escape('attention' if usage_mode != 'live' else 'loads')}</span></li>"
-                for item in analytics.get("least_used", [])[:6]
-            )
-            + ("</ul></div>" if analytics.get("least_used") else "<li class='muted'>No underused skills yet.</li></ul></div>"),
-            "<div class='mini-panel'><div class='micro-label'>Selected Skill</div>"
-            f"<p class='nuance-copy'><strong>{escape(str(hot_skill.get('title', 'No real skill usage yet')))}</strong><br>{escape(str(hot_skill.get('summary', 'Skilgen will surface the hottest genuinely-used skill here once agent usage events exist.')))}</p>"
-            f"<p class='nuance-copy'>{escape('Modeled attention' if usage_mode != 'live' else 'Live usage')}: {int(hot_skill.get('effective_loads', hot_skill.get('loads', 0)))} · Recorded loads: {int(hot_skill.get('loads', 0))} · Depth: {int(hot_skill.get('depth', 0))} · Richness: {int(hot_skill.get('richness', 0))}</p><div class='graph-detail' data-detail='analytics'><h4>Usage Analytics</h4><p>Skilgen surfaces the currently most meaningful skill here. Click a radial segment to inspect its summary, usage, and content shape.</p><ul class='graph-detail-meta'><li>Usage is live when real skill loads exist.</li><li>Otherwise Skilgen falls back to modeled attention so the surface still teaches something useful.</li></ul></div></div>",
-            "<div class='mini-panel'><div class='micro-label'>Deep nuance</div>"
-            f"<p class='nuance-copy'>Skilgen is not just summarizing the repo. It is walking file by file across {total_symbol_files} parser-backed files, {dependency_edges} dependency edges, {call_edges} call edges, {_count_phrase(test_links, 'test mapping')}, and the internal structure of every SKILL.md file. Planner warmup loads are excluded so this surface reflects real skill pressure instead of bootstrap noise.</p></div>",
-            "</div>",
-            "</div>",
-            "</section>",
-            "<section class='panel graph-shell'>",
-            "<div class='graph-head'>",
-            "<div><h2>Graph Studio</h2><div class='section-copy'>Skilgen walks the repository file by file, extracts symbols, calls, configs, tests, docs, and capability clues, then turns those nuances into a living operating map.</div></div>",
-            "<div class='graph-tabs'>",
-            "<button class='graph-tab active' data-target='architecture' role='tab' aria-selected='true'>Architecture</button>",
-            "<button class='graph-tab' data-target='evidence' role='tab' aria-selected='false'>Evidence</button>",
-            "<button class='graph-tab' data-target='dependencies' role='tab' aria-selected='false'>Dependencies</button>",
-            "<button class='graph-tab' data-target='skills' role='tab' aria-selected='false'>Skills</button>",
-            "</div>",
-            "</div>",
-            "<div class='graph-frame'>",
-            "<div class='graph-stage'>",
-            "<div class='graph-panel active' data-panel='architecture' role='tabpanel' aria-hidden='false'><div class='sunburst-canvas' data-sunburst='architecture'></div></div>",
-            "<div class='graph-panel' data-panel='evidence' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='evidence'></div></div>",
-            "<div class='graph-panel' data-panel='dependencies' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='dependencies'></div></div>",
-            "<div class='graph-panel' data-panel='skills' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='skills'></div></div>",
-            "</div>",
-            "<aside class='graph-aside'>",
-            f"<div class='graph-copy active' data-copy='architecture'><h3 data-copy-title='architecture'>Architecture Sunburst</h3><p data-copy-body='architecture'>{escape(architecture['system_summary'])}</p><ul><li>{escape(_count_phrase(len(architecture['domains']), 'top-level domain'))} are visible in the current architecture slice.</li><li>{escape(_count_phrase(len(architecture['materialization_plan']), 'materialization decision'))} shape how parent and child skills are split.</li><li>Click any arc to inspect the exact capability boundary, evidence count, and recommended skill path.</li></ul><div class='micro-label'>Visible Domain Legend</div><ul class='graph-legend'>"
-            + architecture_legend
-            + "</ul><div class='graph-detail' data-detail='architecture'><h4>Architecture Sunburst</h4><p>Skilgen starts from parser-backed evidence, then lets the architecture view reveal how responsibilities split across the repo. Click an arc to inspect that specific capability boundary.</p><ul class='graph-detail-meta'><li>Color separates architecture families so the high-level shape is easy to scan.</li><li>Clicking a domain replaces this summary with node-specific detail.</li></ul></div></div>",
-            "<div class='graph-copy' data-copy='evidence'><h3 data-copy-title='evidence'>Evidence Flow</h3><p data-copy-body='evidence'>Follow how languages and evidence kinds feed concrete files. This is the visible proof behind the architecture Skilgen is synthesizing.</p><ul><li>Left: dominant languages or repo root.</li><li>Middle: evidence kinds.</li><li>Right: files or source artifacts.</li></ul><div class='graph-detail' data-detail='evidence'><h4>Evidence Flow</h4><p>Skilgen walks file by file and groups the repo into languages, evidence kinds, and concrete artifacts. Click any node to inspect the exact nuance that was extracted.</p><ul class='graph-detail-meta'><li>Evidence is grounded in real files, snippets, configs, docs, and tests.</li><li>This is the proof layer beneath every generated skill.</li></ul></div></div>",
-            "<div class='graph-copy' data-copy='dependencies'><h3 data-copy-title='dependencies'>Dependency Flow</h3><p data-copy-body='dependencies'>Follow how high-fanout source files pull on repo modules, stdlib, test boundaries, and external packages. This makes dependency risk readable in the same visual language as Evidence.</p><ul><li>Left: source files creating dependency pressure.</li><li>Middle: dependency buckets.</li><li>Right: exact imported modules or files.</li></ul><div class='graph-detail' data-detail='dependencies'><h4>Dependency Flow</h4><p>Skilgen turns import relationships into a dependency flow so you can see what will feel expensive, central, or risky before an agent starts editing.</p><ul class='graph-detail-meta'><li>Click any node to inspect the source hotspot, bucket meaning, or concrete dependency endpoint.</li><li>This uses the same reading pattern as Evidence so the dashboard stays visually consistent.</li></ul></div></div>",
-            "<div class='graph-copy' data-copy='skills'><h3 data-copy-title='skills'>Skill Flow</h3><p data-copy-body='skills'>See how domains become parent skills, generated child skills, and external packs that Skilgen has already pulled in because the repo signaled they matter.</p><ul><li>Left: domain families.</li><li>Middle: parent skills.</li><li>Right: generated child skills and external skill packs.</li></ul><div class='micro-label'>External skills in play</div><ul class='graph-legend'>"
-            + (
-                "".join(f"<li><strong>{escape(item)}</strong><span>installed from repo signals</span></li>" for item in external_skill_labels)
-                or "<li class='muted'>No external skills installed yet.</li>"
-            )
-            + "</ul><p class='nuance-copy'>Skilgen folds external skill packs into the same surface so agents can see generated skill boundaries and imported ecosystem capability together.</p><div class='graph-detail' data-detail='skills'><h4>Skill Flow</h4><p>Skilgen does not stop at high-level domains. It goes file by file, then decides where nuance deserves its own child skill, where it should stay merged, and where external packs strengthen the repo-native tree.</p><ul class='graph-detail-meta'><li>Click a skill node to inspect why that skill exists.</li><li>External packs show which ecosystem skills are already active in the map.</li></ul></div></div>",
-            "<div class='legend'>",
-            pill(f"{len(architecture['domains'])} active domains", "good"),
-            pill(f"{evidence_count} evidence items"),
-            pill(f"{dependency_edges} dependency edges"),
-            "</div>",
-            "</aside>",
-            "</div>",
-            "</section>",
-            "<section class='panel'>",
-            "<h2>Skilgen Score</h2>",
-            "<div class='section-copy'>Groundedness, coverage, freshness, and structure are grouped here as one quality bar instead of separate floating metrics.</div>",
-            "<div class='score-board'>",
-            f"<div><div class='subscore-stack'>{subscores_markup}</div><ul class='quality-gates'>{quality_gates_markup}</ul>"
-            + (
-                "<p class='nuance-copy'><strong>Coverage action:</strong> No mapped tests were found yet, so coverage is being dragged down. Add test files or map existing tests into the repo surface, then rerun `skilgen deliver` to raise grounded coverage.</p>"
-                if test_links == 0
-                else ""
-            )
-            + (
-                f"<p class='nuance-copy'><strong>Unmapped files:</strong> {escape(', '.join(score['subscores']['coverage'].get('unmapped_files', [])[:5]))}</p>"
-                if score["subscores"]["coverage"].get("unmapped_files")
-                else ""
-            )
-            + "</div>",
-            "<div class='trend-shell'>",
-            "<div class='micro-label'>Score Trend</div>",
-            f"<div class='sparkline'>{trend_markup}</div>",
-            f"<div class='trend-ticks'>{trend_ticks_markup}</div>",
-            f"<div class='section-copy'>{escape(trend_summary)}</div>",
-            "<div class='legend'>",
-            pill(f"Delta {score_trend['delta_from_previous']:+.2f}", "good" if float(score_trend["delta_from_previous"]) >= 0 else "warning"),
-            pill(f"Regressions {len(score_trend['regressions'])}", "warning" if score_trend["regressions"] else "good"),
-            pill(f"{config_edges} config/runtime edges"),
-            "</div>",
-            "</div>",
-            "</div>",
-            "</section>",
-            "<section class='panel'>",
-            "<h2>Diff + Freshness</h2>",
-            "<div class='section-copy'>See exactly what changed, which domains are stale, and what remains safe to reuse.</div>",
-            "<div class='dashboard-columns'>",
-            f"<div><div class='micro-label'>Changed Files</div><ul class='list'>{changed_files_markup}</ul></div>",
-            f"<div><div class='micro-label'>Impacted Domains</div><ul class='list'>{impacted_markup}</ul></div>",
-            "</div>",
-            "<div class='legend'>",
-            pill(f"Current domains: {', '.join(diff['current_domains'][:4]) or 'none'}"),
-            pill(
-                "No git metadata; freshness is file-state based"
-                if str(diff['git']['event_type']) == 'not_git_repo'
-                else f"Git event {str(diff['git']['event_type']).replace('_', ' ')}"
-            ),
-            pill(f"Freshness {int(round(float(diff['freshness_score'])))} / {int(diff['freshness_max'])}", "good" if float(diff["freshness_score"]) >= 20 else "warning"),
-            "</div>",
-            "</section>",
-            "<section class='panel'>",
-            "<h2>Architecture Materialization</h2>",
-            "<div class='section-copy'>Skilgen uses the architecture plan to decide where skills should split, merge, or stay consolidated.</div>",
-            "<table><thead><tr><th>Domain</th><th>Decision</th><th>Parent Skill</th><th>Child Skills</th><th>Rationale</th></tr></thead><tbody>",
-            plan_rows,
-            "</tbody></table>",
-            f"<div class='domain-grid'>{domain_cards}</div>",
-            "</section>",
-            "<section class='panel'>",
-            "<h2>Auto-Update + Agent Readiness</h2>",
-            "<div class='section-copy'>A live operations board for the worker, the last repo event, the start order, and the repo-local outputs currently ready to load.</div>",
-            "<div class='ops-board'>",
-            "<div class='ops-tabs'>",
-            "<button class='ops-tab active' data-target='worker' role='tab' aria-selected='true'>Worker</button>",
-            "<button class='ops-tab' data-target='event' role='tab' aria-selected='false'>Last Event</button>",
-            "<button class='ops-tab' data-target='order' role='tab' aria-selected='false'>Start Order</button>",
-            "<button class='ops-tab' data-target='outputs' role='tab' aria-selected='false'>Outputs</button>",
-            "</div>",
-            "<div class='ops-copy active' data-copy='worker' role='tabpanel' aria-hidden='false'>"
-            f"<div class='ops-grid'><div class='ops-tile'><strong>Worker state</strong><span>{escape('Running in background' if auto_update.get('running') else 'Idle until the next change')}</span></div><div class='ops-tile'><strong>Refresh policy</strong><span>{escape(str(auto_update.get('enabled') and 'Automatic refresh is enabled' or 'Manual refresh only'))}</span></div><div class='ops-tile'><strong>Current freshness</strong><span>{int(round(float(diff['freshness_score'])))}/{int(diff['freshness_max'])}</span></div><div class='ops-tile'><strong>Readiness signal</strong><span>{escape('Agents can load the current repo-local outputs now')}</span></div></div>"
-            "</div>",
-            "<div class='ops-copy' data-copy='event' role='tabpanel' aria-hidden='true'>"
-            f"<div class='ops-grid'><div class='ops-tile'><strong>Last git-aware event</strong><span>{escape(str(auto_update.get('last_event') or diff['git'].get('event_type') or 'none').replace('_', ' '))}</span></div><div class='ops-tile'><strong>Reason</strong><span>{escape(str(diff['reason']).replace('_', ' '))}</span></div><div class='ops-tile'><strong>Changed files</strong><span>{changed_count}</span></div><div class='ops-tile'><strong>Stale skills</strong><span>{stale_count}</span></div></div>"
-            "</div>",
-            "<div class='ops-copy' data-copy='order' role='tabpanel' aria-hidden='true'>"
-            f"<div class='ops-grid'><div class='ops-tile'><strong>Decision focus</strong><span>{escape(', '.join(_display_domain_name(item) for item in decision.get('prioritized_domains', [])[:4]) or 'No prioritized domains yet')}</span></div><div class='ops-tile'><strong>Memory load</strong><span>{escape(', '.join(decision.get('memory_to_load', [])[:3]) or 'No memory recommended')}</span></div><div class='ops-tile'><strong>Prioritized skills</strong><span>{escape(', '.join(_display_skill_name(item) for item in decision.get('prioritized_skill_paths', [])[:3]) or 'No prioritized skills yet')}</span></div><div class='ops-tile'><strong>Nuance</strong><span>{escape('Skilgen is sequencing agent context from evidence, score, diff, architecture, and live repo state instead of a static startup order.')}</span></div></div>"
-            "</div>",
-            "<div class='ops-copy' data-copy='outputs' role='tabpanel' aria-hidden='true'>"
-            f"<div class='micro-label'>Generated Outputs</div><ul class='list'>{outputs_markup}</ul><div class='micro-label'>Prioritized Skills</div><ul class='list'>{list_items(decision.get('prioritized_skill_paths', [])[:6], empty='No prioritized skills yet')}</ul>"
-            "</div>",
-            "</div>",
-            "</section>",
-            "<section class='panel'>",
-            "<h2>Capability Layer</h2>",
-            "<div class='section-copy'>External skills, enterprise packs, and MCP connectors share the same operating surface.</div>",
-            "<div class='surface-tabs'>",
-            "<button class='surface-tab active' data-target='external' role='tab' aria-selected='true'>External Skills</button>",
-            "<button class='surface-tab' data-target='enterprise' role='tab' aria-selected='false'>Enterprise Skills</button>",
-            "<button class='surface-tab' data-target='connectors' role='tab' aria-selected='false'>MCP Connectors</button>",
-            "</div>",
-            "<div class='surface-copy active' data-copy='external' role='tabpanel' aria-hidden='false'><div class='mini-panel'><div class='micro-label'>External skills present</div><ul>"
-            + external_markup
-            + "</ul><p class='nuance-copy'>These packs were installed because the repository signaled they were relevant, so the skill system includes ecosystem knowledge as well as repo-native guidance.</p></div></div>",
-            "<div class='surface-copy' data-copy='enterprise' role='tabpanel' aria-hidden='true'><div class='mini-panel'><div class='micro-label'>Enterprise skills present</div><ul>"
-            + enterprise_markup
-            + "</ul><p class='nuance-copy'>Enterprise packs let the repo-local skill map inherit organization-specific standards, playbooks, and internal conventions.</p></div></div>",
-            "<div class='surface-copy' data-copy='connectors' role='tabpanel' aria-hidden='true'><div class='mini-panel'><div class='micro-label'>Connected profiles</div><ul>"
-            + connector_markup
-            + "</ul><div class='micro-label'>Recommended profiles</div><ul>"
-            + recommended_connector_markup
-            + "</ul><p class='nuance-copy'>These are capability profiles available to bind into an agent runtime. Recommended profiles are not shown as live authenticated sessions unless the runtime has actually connected them.</p></div></div>",
-            "</section>",
-            "<p class='footer-note'>Generated by Skilgen from live repository evidence, architecture synthesis, score history, diff state, analytics, and enterprise capability context.</p>",
-            "</section>",
-            "</div>",
-            f"<script>{dashboard_script}</script>",
-            "</body>",
-            "</html>",
-        ]
-    )
+    return f"""
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Skilgen Dashboard · {escape(repo_name)}</title>
+<link rel='preconnect' href='https://fonts.googleapis.com'>
+<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>
+<link href='https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&display=swap' rel='stylesheet'>
+<script src='https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js' integrity='sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i' crossorigin='anonymous'></script>
+<script src='https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js' integrity='sha384-SM54CE5h+qdDI046d2Y5ym7wq1kq4uxcQ1cqGq5/+5jrE5tPLeDJSq711Q8sIska' crossorigin='anonymous'></script>
+<script src='https://unpkg.com/vis-network/standalone/umd/vis-network.min.js' integrity='sha384-m/pqkSdIs50f1nWlv062s9HmCAygFne+xY7uot2M8ZVijdcC+c/n97dFCfAZnKwO' crossorigin='anonymous'></script>
+<style>{dashboard_styles}</style>
+</head>
+<body>
+<header class='topbar'>
+  <div class='topbar-brand'>
+    <strong>Skilgen</strong>
+    <span>Agent Intelligence Surface</span>
+  </div>
+  <nav class='topbar-nav'>
+    <a class='active' href='#pulse'>The Pulse</a>
+    <a href='#weaver'>The Weaver</a>
+    <a href='#nexus'>The Nexus</a>
+    <a href='#foundry'>The Foundry</a>
+  </nav>
+  <div class='topbar-actions'>
+    <div class='topbar-icon'>hub</div>
+    <div class='topbar-icon'>ops</div>
+    <div class='corner-badge'>&copy; Skilgen</div>
+  </div>
+</header>
+<aside class='rail'>
+  <section class='rail-card'>
+    <div class='rail-title'>Skilgen OS</div>
+    <div class='rail-subtitle'>Repository · {escape(_compact_label(repo_name, max_length=28))}</div>
+  </section>
+  <nav class='rail-nav'>
+    <a class='active' href='#pulse'>The Pulse</a>
+    <a href='#weaver'>The Weaver</a>
+    <a href='#nexus'>The Nexus</a>
+    <a href='#foundry'>The Foundry</a>
+  </nav>
+  <section class='rail-card'>
+    <div class='rail-title'>Legend</div>
+    <ul class='rail-legend'>
+      <li><div class='legend-row'><span class='legend-dot' style='background:{architecture_palette[0]}'></span>Active domains</div><strong>{top_level_domains}</strong></li>
+      <li><div class='legend-row'><span class='legend-dot' style='background:{architecture_palette[1]}'></span>Evidence items</div><strong>{evidence_count}</strong></li>
+      <li><div class='legend-row'><span class='legend-dot' style='background:{architecture_palette[2]}'></span>Dependency edges</div><strong>{dependency_edges}</strong></li>
+    </ul>
+  </section>
+  <section class='rail-card'>
+    <div class='rail-title'>Live State</div>
+    <div class='metric-pile'>
+      <div class='metric-chip'><span>Score</span><strong>{int(round(score_value))}</strong></div>
+      <div class='metric-chip'><span>Freshness</span><strong>{int(round(float(diff['freshness_score'])))}/{int(diff['freshness_max'])}</strong></div>
+      <div class='metric-chip'><span>Outputs</span><strong>{outputs_ready}</strong></div>
+      <div class='metric-chip'><span>Stale</span><strong>{stale_count}</strong></div>
+    </div>
+  </section>
+</aside>
+<main class='page'>
+  <section id='pulse' class='chapter'>
+    <div class='chapter-head'>
+      <div class='chapter-brand'>
+        <div>
+          <div class='chapter-kicker'>The Pulse</div>
+          <h1 class='chapter-title'>Skilgen Operating System</h1>
+        </div>
+        {brand_mark}
+      </div>
+      <div class='legend'>
+        {pill(f"{stale_count} stale skills" if stale_count else "All skills current", "warning" if stale_count else "good")}
+        {pill(f"Auto-update {'on' if auto_update.get('enabled') else 'off'}", "good" if auto_update.get("enabled") else "warning")}
+        {pill("File-state freshness" if str(diff['git']['event_type']) == 'not_git_repo' else f"Git-aware {str(diff['git']['event_type']).replace('_', ' ')}")}
+      </div>
+    </div>
+    <section class='hero-grid'>
+      <section class='hero-panel hero-left'>
+        <div class='brand-wrap'>
+          <div class='repo-chip' title='{escape(repo_name)}'>Repository · {escape(_compact_label(repo_name, max_length=30))}</div>
+        </div>
+        <div class='hero-metrics'>
+          {metric("Active Domains", str(top_level_domains), "Top-level architecture seams now materialized into the skill tree.")}
+          {metric("Evidence", str(evidence_count), "Files, snippets, config, docs, and tests feeding the graph.")}
+          {metric("Dependency Edges", str(dependency_edges), "Import pressure surfaced from the active repository graph.")}
+        </div>
+      </section>
+      <aside class='hero-panel hero-right'>
+        <div class='score-top'>
+          <div class='eyebrow'>Quality + freshness in one surface</div>
+          <div class='score-ring' style='--score:{score_percent};'><div class='score-ring-content'><strong>{int(round(score_value))}<small>/100</small></strong><span>{score_label}</span></div></div>
+          <div class='score-ring-note'>{escape(score_signal)} · {int(round(score_value))} out of 100</div>
+        </div>
+        <div class='score-rail'>
+          <article class='stat-card'><div class='stat-label'>Freshness</div><div class='stat-value'>{int(round(float(diff['freshness_score'])))}/{int(diff['freshness_max'])}</div><div class='stat-note'>{escape(str(diff['reason']).replace('_', ' '))}</div></article>
+          <article class='stat-card'><div class='stat-label'>Parsers</div><div class='stat-value'>{len(parser_backends) or 1}</div><div class='stat-note'>{escape(', '.join(parser_backends[:3]) or 'unknown')}</div></article>
+          <article class='stat-card'><div class='stat-label'>Calls</div><div class='stat-value'>{call_edges}</div><div class='stat-note'>Observed call relationships from parsed source evidence.</div></article>
+          <article class='stat-card'><div class='stat-label'>Tests</div><div class='stat-value'>{test_links}</div><div class='stat-note'>Tests mapped back to concrete implementation files.</div></article>
+        </div>
+      </aside>
+    </section>
+    <section class='panel'>
+      <h2>Usage Analytics</h2>
+      <div class='section-copy'>Skilgen tracks every skill separately, then layers in tree depth, content richness, and live runtime traces so you can see where agent attention actually lands.</div>
+      <div class='analytics-board'>
+        <div class='graph-stage'>
+          <div class='radial-canvas' data-radial='analytics'></div>
+        </div>
+        <div class='analytics-side'>
+          <div class='legend'>
+            {pill(_count_phrase(int(analytics.get("live_event_count", 0)), "live usage event"), "good" if int(analytics.get("live_event_count", 0)) else "default")}
+            {pill(f"{len(analytics.get('skill_usage', []))} mapped skills")}
+            {pill("Modeled attention" if usage_mode != "live" else "Live traces", "warning" if usage_mode != "live" else "good")}
+            {pill(f"{int(analytics.get('planner_event_count', 0))} planner warmups ignored")}
+          </div>
+          <div class='mini-panel'>
+            <div class='micro-label'>{'Skill Attention Ranking' if usage_mode != 'live' else 'Most Active Skills'}</div>
+            <ul>{analytics_markup}</ul>
+          </div>
+          <div class='mini-panel'>
+            <div class='micro-label'>Selected Skill</div>
+            <p class='nuance-copy'><strong>{escape(str(hot_skill.get('title', 'No real skill usage yet')))}</strong><br>{escape(str(hot_skill.get('summary', 'Skilgen will surface the hottest genuinely-used skill here once agent usage events exist.')))}</p>
+            <p class='nuance-copy'>{escape('Modeled attention' if usage_mode != 'live' else 'Live usage')}: {int(hot_skill.get('effective_loads', hot_skill.get('loads', 0)))} · Recorded loads: {int(hot_skill.get('loads', 0))} · Depth: {int(hot_skill.get('depth', 0))} · Richness: {int(hot_skill.get('richness', 0))}</p>
+            <div class='graph-detail' data-detail='analytics'>
+              <h4>Usage Analytics</h4>
+              <p>Skilgen surfaces the currently most meaningful skill here. Click a radial segment to inspect its summary, usage, and content shape.</p>
+              <ul class='graph-detail-meta'>
+                <li>Usage is live when real skill loads exist.</li>
+                <li>Otherwise Skilgen falls back to modeled attention so the surface still teaches something useful.</li>
+              </ul>
+            </div>
+          </div>
+          <div class='trend-panel mini-panel'>
+            <div class='trend-head'>
+              <div>
+                <div class='micro-label'>Score Trend</div>
+                <div class='section-copy'>This sparkline reflects the most meaningful recent snapshots rather than noisy identical reruns.</div>
+              </div>
+              <div class='legend'>
+                {"<strong>Stable</strong>" if trend_is_flat else ""}
+                {pill(f"Delta {score_trend['delta_from_previous']:+.2f}", "good" if float(score_trend["delta_from_previous"]) >= 0 else "warning")}
+              </div>
+            </div>
+            <div class='sparkline'>{trend_markup}</div>
+            <div class='trend-ticks'>{trend_ticks_markup}</div>
+            <div class='trend-summary'>{escape(trend_summary)}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class='panel'>
+      <h2>Before vs After</h2>
+      <div class='section-copy'>This makes the lift explicit: how the repo looked before Skilgen materialized any skills, what Skilgen created, and why that changes agent usefulness.</div>
+      <div class='compare-grid'>
+        <article class='compare-card'>
+          <div class='micro-label'>Before Skilgen</div>
+          <div class='compare-score'><div class='compare-score-value'>{int(round(baseline_value))}</div><div class='compare-score-label'>{baseline_label}</div></div>
+          <p class='nuance-copy'>{escape(str(baseline_scorecard.get('explanation', 'The repo is readable as code, but no reusable skill system exists yet.')))}</p>
+          <ul class='compare-list'>
+            <li><span>Coverage from repo shape</span><strong>{int(round(float(baseline_scorecard.get('subscores', {}).get('coverage', {}).get('score', 0))))} / 25</strong></li>
+            <li><span>Grounded reusable skills</span><strong>0 / 25</strong></li>
+            <li><span>Freshness contract</span><strong>0 / 25</strong></li>
+            <li><span>Agent operating artifacts</span><strong>0 / 25</strong></li>
+          </ul>
+        </article>
+        <article class='compare-card'>
+          <div class='micro-label'>With Skilgen</div>
+          <div class='compare-score'><div class='compare-score-value'>{int(round(score_value))}</div><div class='compare-score-label'>{score_label}</div>{pill(f'{score_delta_value:+.2f}', 'good' if score_delta_value > 0 else 'default')}</div>
+          <p class='nuance-copy'>Skilgen converts repo analysis into a maintained skill system with grounded references, explicit startup guidance, and freshness tracking that agents can actually use.</p>
+          <ul class='compare-list'>{score_compare_markup}</ul>
+        </article>
+        <article class='compare-card'>
+          <div class='micro-label'>What Was Created</div>
+          <div class='compare-score'><div class='compare-score-value'>{total_skills}</div><div class='compare-score-label'>Total Skills</div></div>
+          <p class='nuance-copy'>{top_level_domains} top-level domains turned into {child_skill_count} child skills and {outputs_ready} repo-local operating artifacts, so the output is navigable instead of just descriptive.</p>
+          <ul class='compare-list'>
+            <li><span>Top-level domains</span><strong>{top_level_domains}</strong></li>
+            <li><span>Child skills</span><strong>{child_skill_count}</strong></li>
+            <li><span>Ready outputs</span><strong>{outputs_ready}</strong></li>
+            <li><span>Skills currently stale</span><strong>{stale_count}</strong></li>
+          </ul>
+        </article>
+      </div>
+      <div class='process-grid'>{process_cards_markup}</div>
+    </section>
+  </section>
+  <section id='weaver' class='chapter'>
+    <div class='chapter-head'>
+      <div>
+        <div class='chapter-kicker'>The Weaver</div>
+        <h2 class='chapter-title'>Graph Studio</h2>
+        <p class='chapter-copy'>Graph Studio keeps the same features and plots, but presents them as a darker operating canvas. Architecture Sunburst, Evidence Flow, dependency flow, skill flow, and a dedicated Dependency Network all stay available.</p>
+      </div>
+      <div class='legend'>
+        {pill(f"{len(architecture['domains'])} active domains", "good")}
+        {pill(f"{evidence_count} evidence items")}
+        {pill(f"{dependency_edges} dependency edges")}
+      </div>
+    </div>
+    <section class='panel graph-shell'>
+      <div class='graph-toolbar'>
+        <div class='section-title'>Graph Studio</div>
+        <div class='graph-tabs'>
+          <button class='graph-tab active' data-target='architecture' role='tab' aria-selected='true'>Architecture</button>
+          <button class='graph-tab' data-target='evidence' role='tab' aria-selected='false'>Evidence</button>
+          <button class='graph-tab' data-target='dependencies' role='tab' aria-selected='false'>Dependencies</button>
+          <button class='graph-tab' data-target='skills' role='tab' aria-selected='false'>Skills</button>
+        </div>
+      </div>
+      <div class='graph-frame'>
+        <div class='graph-stage'>
+          <div class='graph-panel active' data-panel='architecture' role='tabpanel' aria-hidden='false'><div class='sunburst-canvas' data-sunburst='architecture'></div></div>
+          <div class='graph-panel' data-panel='evidence' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='evidence'></div></div>
+          <div class='graph-panel' data-panel='dependencies' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='dependencies'></div></div>
+          <div class='graph-panel' data-panel='skills' role='tabpanel' aria-hidden='true'><div class='sankey-canvas' data-sankey='skills'></div></div>
+        </div>
+        <aside class='graph-aside'>
+          <div class='graph-copy active' data-copy='architecture'>
+            <h3 data-copy-title='architecture'>Architecture Sunburst</h3>
+            <p data-copy-body='architecture'>{escape(architecture['system_summary'])}</p>
+            <ul>
+              <li>{escape(_count_phrase(len(architecture['domains']), 'top-level domain'))} are visible in the current architecture slice.</li>
+              <li>{escape(_count_phrase(len(architecture['materialization_plan']), 'materialization decision'))} shape how parent and child skills are split.</li>
+              <li>Click any arc to inspect the exact capability boundary, evidence count, and recommended skill path.</li>
+            </ul>
+            <div class='micro-label'>Visible Domain Legend</div>
+            <ul class='graph-legend'>{architecture_legend}</ul>
+            <div class='graph-detail' data-detail='architecture'>
+              <h4>Architecture Sunburst</h4>
+              <p>Skilgen starts from parser-backed evidence, then lets the architecture view reveal how responsibilities split across the repo. Click an arc to inspect that specific capability boundary.</p>
+              <ul class='graph-detail-meta'>
+                <li>Color separates architecture families so the high-level shape is easy to scan.</li>
+                <li>Clicking a domain replaces this summary with node-specific detail.</li>
+              </ul>
+            </div>
+          </div>
+          <div class='graph-copy' data-copy='evidence'>
+            <h3 data-copy-title='evidence'>Evidence Flow</h3>
+            <p data-copy-body='evidence'>Follow how languages and evidence kinds feed concrete files. This is the visible proof behind the architecture Skilgen is synthesizing.</p>
+            <ul>
+              <li>Left: dominant languages or repo root.</li>
+              <li>Middle: evidence kinds.</li>
+              <li>Right: files or source artifacts.</li>
+            </ul>
+            <div class='graph-detail' data-detail='evidence'>
+              <h4>Evidence Flow</h4>
+              <p>Skilgen walks file by file and groups the repo into languages, evidence kinds, and concrete artifacts. Click any node to inspect the exact nuance that was extracted.</p>
+              <ul class='graph-detail-meta'>
+                <li>Evidence is grounded in real files, snippets, configs, docs, and tests.</li>
+                <li>This is the proof layer beneath every generated skill.</li>
+              </ul>
+            </div>
+          </div>
+          <div class='graph-copy' data-copy='dependencies'>
+            <h3 data-copy-title='dependencies'>Dependency Flow</h3>
+            <p data-copy-body='dependencies'>Follow how high-fanout source files pull on repo modules, stdlib, test boundaries, and external packages. This makes dependency risk readable in the same visual language as Evidence.</p>
+            <ul>
+              <li>Left: source files creating dependency pressure.</li>
+              <li>Middle: dependency buckets.</li>
+              <li>Right: exact imported modules or files.</li>
+            </ul>
+            <div class='graph-detail' data-detail='dependencies'>
+              <h4>Dependency Flow</h4>
+              <p>Skilgen turns import relationships into a dependency flow so you can see what will feel expensive, central, or risky before an agent starts editing.</p>
+              <ul class='graph-detail-meta'>
+                <li>Click any node to inspect the source hotspot, bucket meaning, or concrete dependency endpoint.</li>
+                <li>This uses the same reading pattern as Evidence so the dashboard stays visually consistent.</li>
+              </ul>
+            </div>
+          </div>
+          <div class='graph-copy' data-copy='skills'>
+            <h3 data-copy-title='skills'>Skill Flow</h3>
+            <p data-copy-body='skills'>See how domains become parent skills, generated child skills, and external packs that Skilgen has already pulled in because the repo signaled they matter.</p>
+            <ul>
+              <li>Left: domain families.</li>
+              <li>Middle: parent skills.</li>
+              <li>Right: generated child skills and external skill packs.</li>
+            </ul>
+            <div class='micro-label'>External skills in play</div>
+            <ul class='graph-legend'>{("".join(f"<li><strong>{escape(item)}</strong><span>installed from repo signals</span></li>" for item in external_skill_labels) or "<li class='muted'>No external skills installed yet.</li>")}</ul>
+            <p class='nuance-copy'>Skilgen folds external skill packs into the same surface so agents can see generated skill boundaries and imported ecosystem capability together.</p>
+            <div class='graph-detail' data-detail='skills'>
+              <h4>Skill Flow</h4>
+              <p>Skilgen does not stop at high-level domains. It goes file by file, then decides where nuance deserves its own child skill, where it should stay merged, and where external packs strengthen the repo-native tree.</p>
+              <ul class='graph-detail-meta'>
+                <li>Click a skill node to inspect why that skill exists.</li>
+                <li>External packs show which ecosystem skills are already active in the map.</li>
+              </ul>
+            </div>
+          </div>
+        </aside>
+      </div>
+      <div class='health-grid'>
+        <div class='health-tile'><span>Dependency Network</span><strong>{dependency_edges}</strong><div class='nuance-copy'>Interactive dependency map lives below the flow view so network hotspots still remain available.</div></div>
+        <div class='health-tile'><span>Parser-backed Files</span><strong>{total_symbol_files}</strong><div class='nuance-copy'>The living map is grounded in parser-backed evidence rather than only filenames.</div></div>
+        <div class='health-tile'><span>Architecture Plan</span><strong>{len(architecture['materialization_plan'])}</strong><div class='nuance-copy'>Split and keep decisions stay tied to evidence and cross-domain pressure.</div></div>
+      </div>
+      <div class='dashboard-columns'>
+        <div class='mini-panel'>
+          <div class='micro-label'>Dependency Network</div>
+          <div class='network-canvas' data-network='dependencies' aria-label='Interactive dependency network showing repo-local import relationships.'></div>
+          <div class='network-mobile-note canvas-fallback'>Dependency network hidden on small screens. Open on a wider screen to inspect the interactive map.</div>
+        </div>
+        <div class='mini-panel'>
+          <div class='micro-label'>Architecture Legend</div>
+          <ul class='graph-legend'>{architecture_legend}</ul>
+        </div>
+      </div>
+    </section>
+  </section>
+  <section id='nexus' class='chapter'>
+    <div class='chapter-head'>
+      <div>
+        <div class='chapter-kicker'>The Nexus</div>
+        <h2 class='chapter-title'>Insight Layer</h2>
+        <p class='chapter-copy'>Quality gates, freshness, and architecture decisions sit together here so the repo’s score and operating shape can be interpreted without guessing.</p>
+      </div>
+    </div>
+    <section class='panel'>
+      <h2>Skilgen Score</h2>
+      <div class='section-copy'>Groundedness, coverage, freshness, and structure are grouped here as one quality bar instead of separate floating metrics.</div>
+      <div class='score-board'>
+        <div>
+          <div class='subscore-stack'>{subscores_markup}</div>
+          <ul class='quality-list'>{quality_gates_markup}</ul>
+          {("<p class='nuance-copy'><strong>Coverage action:</strong> No mapped tests were found yet, so coverage is being dragged down. Add test files or map existing tests into the repo surface, then rerun `skilgen deliver` to raise grounded coverage.</p>" if test_links == 0 else "")}
+          {(f"<p class='nuance-copy'><strong>Unmapped files:</strong> {escape(', '.join(score['subscores']['coverage'].get('unmapped_files', [])[:5]))}</p>" if score["subscores"]["coverage"].get("unmapped_files") else "")}
+        </div>
+        <div class='score-callout'>
+          <div class='score-copy'>
+            <strong>{escape(score_signal)}</strong>
+            <div class='nuance-copy'>This score is not saying Skilgen failed to generate skills. It is reporting how grounded, covered, fresh, and structurally usable the current repo-to-skill surface is right now.</div>
+          </div>
+          <div class='score-copy'>
+            <strong>What the number means</strong>
+            <div class='nuance-copy'>A lower score usually means the repo still has missing evidence, weak test mapping, stale generated outputs, or sparse skill structure. It is an improvement target, not a public confession that the product is broken.</div>
+          </div>
+          <div class='legend'>
+            {pill(f"Regressions {len(score_trend['regressions'])}", "warning" if score_trend["regressions"] else "good")}
+            {pill(f"{config_edges} config/runtime edges")}
+            {pill(f"{call_edges} call edges")}
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class='panel'>
+      <h2>Diff + Freshness</h2>
+      <div class='section-copy'>See exactly what changed, which domains are stale, and what remains safe to reuse.</div>
+      <div class='dashboard-columns'>
+        <div><div class='micro-label'>Changed Files</div><ul class='list'>{changed_files_markup}</ul></div>
+        <div><div class='micro-label'>Impacted Domains</div><ul class='list'>{impacted_markup}</ul></div>
+      </div>
+      <div class='legend'>
+        {pill(f"Current domains: {', '.join(diff['current_domains'][:4]) or 'none'}")}
+        {pill("No git metadata; freshness is file-state based" if str(diff['git']['event_type']) == 'not_git_repo' else f"Git event {str(diff['git']['event_type']).replace('_', ' ')}")}
+        {pill(f"Freshness {int(round(float(diff['freshness_score'])))} / {int(diff['freshness_max'])}", "good" if float(diff["freshness_score"]) >= 20 else "warning")}
+      </div>
+    </section>
+    <section class='panel'>
+      <h2>Architecture Materialization</h2>
+      <div class='section-copy'>Skilgen uses the architecture plan to decide where skills should split, merge, or stay consolidated.</div>
+      <table><thead><tr><th>Domain</th><th>Decision</th><th>Parent Skill</th><th>Child Skills</th><th>Rationale</th></tr></thead><tbody>{plan_rows}</tbody></table>
+      <div class='domain-grid'>{domain_cards}</div>
+    </section>
+  </section>
+  <section id='foundry' class='chapter'>
+    <div class='chapter-head'>
+      <div>
+        <div class='chapter-kicker'>The Foundry</div>
+        <h2 class='chapter-title'>Operations</h2>
+        <p class='chapter-copy'>Worker execution, outputs, capability packs, and startup guidance all stay on the same operating page so the dashboard is not just decorative.</p>
+      </div>
+    </div>
+    <section class='panel'>
+      <h2>Auto-Update + Agent Readiness</h2>
+      <div class='section-copy'>A live operations board for the worker, the last repo event, the start order, and the repo-local outputs currently ready to load.</div>
+      <div class='ops-board'>
+        <div class='ops-tabs'>
+          <button class='ops-tab active' data-target='worker' role='tab' aria-selected='true'>Worker</button>
+          <button class='ops-tab' data-target='event' role='tab' aria-selected='false'>Last Event</button>
+          <button class='ops-tab' data-target='order' role='tab' aria-selected='false'>Start Order</button>
+          <button class='ops-tab' data-target='outputs' role='tab' aria-selected='false'>Outputs</button>
+        </div>
+        <div class='ops-copy active' data-copy='worker' role='tabpanel' aria-hidden='false'>
+          <div class='ops-grid'><div class='ops-tile'><strong>Worker state</strong><span>{escape('Running in background' if auto_update.get('running') else 'Idle until the next change')}</span></div><div class='ops-tile'><strong>Refresh policy</strong><span>{escape(str(auto_update.get('enabled') and 'Automatic refresh is enabled' or 'Manual refresh only'))}</span></div><div class='ops-tile'><strong>Current freshness</strong><span>{int(round(float(diff['freshness_score'])))}/{int(diff['freshness_max'])}</span></div><div class='ops-tile'><strong>Readiness signal</strong><span>{escape('Agents can load the current repo-local outputs now')}</span></div></div>
+        </div>
+        <div class='ops-copy' data-copy='event' role='tabpanel' aria-hidden='true'>
+          <div class='ops-grid'><div class='ops-tile'><strong>Last git-aware event</strong><span>{escape(str(auto_update.get('last_event') or diff['git'].get('event_type') or 'none').replace('_', ' '))}</span></div><div class='ops-tile'><strong>Reason</strong><span>{escape(str(diff['reason']).replace('_', ' '))}</span></div><div class='ops-tile'><strong>Changed files</strong><span>{changed_count}</span></div><div class='ops-tile'><strong>Stale skills</strong><span>{stale_count}</span></div></div>
+        </div>
+        <div class='ops-copy' data-copy='order' role='tabpanel' aria-hidden='true'>
+          <div class='ops-grid'><div class='ops-tile'><strong>Decision focus</strong><span>{escape(', '.join(_display_domain_name(item) for item in decision.get('prioritized_domains', [])[:4]) or 'No prioritized domains yet')}</span></div><div class='ops-tile'><strong>Memory load</strong><span>{escape(', '.join(decision.get('memory_to_load', [])[:3]) or 'No memory recommended')}</span></div><div class='ops-tile'><strong>Prioritized skills</strong><span>{escape(', '.join(_display_skill_name(item) for item in decision.get('prioritized_skill_paths', [])[:3]) or 'No prioritized skills yet')}</span></div><div class='ops-tile'><strong>Nuance</strong><span>{escape('Skilgen is sequencing agent context from evidence, score, diff, architecture, and live repo state instead of a static startup order.')}</span></div></div>
+        </div>
+        <div class='ops-copy' data-copy='outputs' role='tabpanel' aria-hidden='true'>
+          <div class='micro-label'>Generated Outputs</div>
+          <ul class='list'>{outputs_markup}</ul>
+          <div class='micro-label'>Prioritized Skills</div>
+          <ul class='list'>{list_items(decision.get('prioritized_skill_paths', [])[:6], empty='No prioritized skills yet')}</ul>
+        </div>
+      </div>
+    </section>
+    <section class='panel'>
+      <h2>Capability Layer</h2>
+      <div class='section-copy'>External skills, enterprise packs, and MCP connectors share the same operating surface.</div>
+      <div class='surface-tabs'>
+        <button class='surface-tab active' data-target='external' role='tab' aria-selected='true'>External Skills</button>
+        <button class='surface-tab' data-target='enterprise' role='tab' aria-selected='false'>Enterprise Skills</button>
+        <button class='surface-tab' data-target='connectors' role='tab' aria-selected='false'>MCP Connectors</button>
+      </div>
+      <div class='surface-copy active' data-copy='external' role='tabpanel' aria-hidden='false'><div class='mini-panel'><div class='micro-label'>External skills present</div><ul>{external_markup}</ul><p class='nuance-copy'>These packs were installed because the repository signaled they were relevant, so the skill system includes ecosystem knowledge as well as repo-native guidance.</p></div></div>
+      <div class='surface-copy' data-copy='enterprise' role='tabpanel' aria-hidden='true'><div class='mini-panel'><div class='micro-label'>Enterprise skills present</div><ul>{enterprise_markup}</ul><p class='nuance-copy'>Enterprise packs let the repo-local skill map inherit organization-specific standards, playbooks, and internal conventions.</p></div></div>
+      <div class='surface-copy' data-copy='connectors' role='tabpanel' aria-hidden='true'><div class='mini-panel'><div class='micro-label'>Connected profiles</div><ul>{connector_markup}</ul><div class='micro-label'>Recommended profiles</div><ul>{recommended_connector_markup}</ul><p class='nuance-copy'>These are capability profiles available to bind into an agent runtime. Recommended profiles are not shown as live authenticated sessions unless the runtime has actually connected them.</p></div></div>
+    </section>
+    <section class='panel'>
+      <h2>Process Surface</h2>
+      <div class='section-copy'>This is the operating loop beneath the visuals: read the repo, materialize skills, and give agents a better startup surface.</div>
+      <div class='process-grid'>{process_cards_markup}</div>
+    </section>
+  </section>
+  <footer class='footer-bar'>
+    <div class='footer-mark'>Generated by Skilgen</div>
+    <div class='footer-note'>Generated by Skilgen from live repository evidence, architecture synthesis, score history, diff state, analytics, and enterprise capability context.</div>
+  </footer>
+</main>
+<script>{dashboard_script}</script>
+</body>
+</html>
+""".strip()
 
 
 def ensure_file(path: Path, content: str) -> Path:
@@ -2845,9 +3143,28 @@ def write_project_docs(
     report = render_project_report(context, project_root, bundle)
     _emit_progress(progress_callback, "Rendering TRACEABILITY.md so every generated artifact has evidence behind it.")
     traceability = render_traceability_report(context, project_root, bundle)
+    _emit_progress(progress_callback, "Writing AGENTS.md, ANALYSIS.md, ARCHITECTURE.md, FEATURES.md, REPORT.md, and TRACEABILITY.md to disk.")
+    written.append(ensure_file(project_root / "AGENTS.md", agents))
+    written.append(ensure_file(project_root / "ANALYSIS.md", analysis))
+    written.append(ensure_file(project_root / "ARCHITECTURE.md", architecture))
+    written.append(ensure_file(project_root / "FEATURES.md", features))
+    written.append(ensure_file(project_root / "REPORT.md", report))
+    written.append(ensure_file(project_root / "TRACEABILITY.md", traceability))
+    config_path = project_root / "skilgen.yml"
+    if not config_path.exists():
+        written.append(ensure_file(config_path, render_default_config()))
+    return written
+
+
+def write_dashboard_doc(
+    context: RequirementsContext,
+    project_root: Path,
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> Path:
     from skilgen.deep_agents_runtime import native_dashboard_payload_with_progress
 
-    _emit_progress(progress_callback, "Building skilgen-dashboard.html with score, architecture, evidence, dependency, and analytics views.")
+    _emit_progress(progress_callback, "Building skilgen-dashboard.html from the fully materialized repo state.")
     dashboard_html = str(
         native_dashboard_payload_with_progress(
             project_root,
@@ -2855,15 +3172,5 @@ def write_project_docs(
             progress_callback=progress_callback,
         )["html"]
     )
-    _emit_progress(progress_callback, "Writing AGENTS.md, ANALYSIS.md, ARCHITECTURE.md, FEATURES.md, REPORT.md, TRACEABILITY.md, and skilgen-dashboard.html to disk.")
-    written.append(ensure_file(project_root / "AGENTS.md", agents))
-    written.append(ensure_file(project_root / "ANALYSIS.md", analysis))
-    written.append(ensure_file(project_root / "ARCHITECTURE.md", architecture))
-    written.append(ensure_file(project_root / "FEATURES.md", features))
-    written.append(ensure_file(project_root / "REPORT.md", report))
-    written.append(ensure_file(project_root / "TRACEABILITY.md", traceability))
-    written.append(ensure_file(project_root / "skilgen-dashboard.html", dashboard_html))
-    config_path = project_root / "skilgen.yml"
-    if not config_path.exists():
-        written.append(ensure_file(config_path, render_default_config()))
-    return written
+    _emit_progress(progress_callback, "Writing the final skilgen-dashboard.html snapshot to disk.")
+    return ensure_file(project_root / "skilgen-dashboard.html", dashboard_html)

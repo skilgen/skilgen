@@ -21,8 +21,9 @@ from skilgen.core.context import build_codebase_context
 from skilgen.core.corpus_index import ensure_corpus_index
 from skilgen.core.analytics import analytics_summary
 from skilgen.core.diff import compute_diff
+from skilgen.core.freshness import save_freshness_state, snapshot_freshness_state
 from skilgen.core.requirements import load_project_context, load_requirements
-from skilgen.core.score import compute_skillgen_score, score_comparison_payload, score_history_payload
+from skilgen.core.score import compute_skillgen_score, record_score_history, score_comparison_payload, score_history_payload
 from skilgen.core.validation import validate_project
 from skilgen.enterprise_skills import active_enterprise_skills, active_mcp_connectors, list_enterprise_skills, recommend_mcp_connectors
 from skilgen.generators.package import (
@@ -40,6 +41,7 @@ from skilgen.generators.package import (
     render_evidence_graph_mermaid,
     render_skill_graph_mermaid,
     render_traceability_report,
+    write_dashboard_doc,
     write_project_docs,
 )
 from skilgen.generators.skills import planned_skill_paths, write_skills
@@ -521,7 +523,7 @@ def native_run_delivery(
         ensure_corpus_index(root, config)
     context = load_project_context(root, Path(requirements_path).resolve() if requirements_path is not None else None)
     fingerprint_project(root)
-    build_codebase_context(root, context)
+    codebase_context = build_codebase_context(root, context)
     generated: list[Path] = []
     if "docs" in targets:
         if dry_run:
@@ -533,4 +535,10 @@ def native_run_delivery(
             generated.extend(planned_skill_paths(context, root / "skills", set(domains)))
         else:
             generated.extend(write_skills(context, root / "skills", set(domains)))
+    if not dry_run:
+        saved_context = load_project_context(root, Path(requirements_path).resolve() if requirements_path is not None else None)
+        save_freshness_state(root, snapshot_freshness_state(root, saved_context, codebase_context.domain_graph))
+        record_score_history(root, source="delivery")
+        if "docs" in targets:
+            generated.append(write_dashboard_doc(saved_context, root))
     return generated

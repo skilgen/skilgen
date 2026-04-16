@@ -19,7 +19,7 @@ from skilgen.deep_agents_core import current_runtime_mode
 from skilgen.enterprise_skills import ensure_enterprise_skills_for_project
 from skilgen.external_skills import ensure_external_skills_for_project
 from skilgen.core.requirements import load_project_context
-from skilgen.generators.package import project_doc_paths, write_project_docs
+from skilgen.generators.package import project_doc_paths, write_dashboard_doc, write_project_docs
 from skilgen.generators.skills import planned_skill_paths, write_skills
 
 
@@ -183,6 +183,11 @@ def run_delivery(
         saved_context = load_project_context(root, Path(requirements_path).resolve() if requirements_path is not None else None)
         save_freshness_state(root, snapshot_freshness_state(root, saved_context, codebase_context.domain_graph))
         record_score_history(root, source="delivery")
+        if "docs" in targets:
+            message = "Rendering the final dashboard HTML surface with graphs, score, freshness, and capability context."
+            run_memory = append_run_event(root, run_memory, message)
+            _emit(progress_callback, message)
+            generated.append(write_dashboard_doc(saved_context, root, progress_callback=progress_callback))
     run_memory = finalize_run_memory(root, run_memory, generated, "completed")
     message = f"Finished delivery. Generated or refreshed {len(generated)} files."
     run_memory = append_run_event(root, run_memory, message)

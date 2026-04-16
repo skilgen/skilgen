@@ -179,6 +179,21 @@ class DeliveryTests(unittest.TestCase):
             memory_text = (root / ".skilgen" / "memory" / "current_run.json").read_text(encoding="utf-8")
             self.assertIn("Reuse the current skill tree", memory_text)
 
+    def test_run_delivery_dashboard_reflects_post_materialization_state(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "scripts").mkdir(parents=True)
+            (root / "scripts" / "release.py").write_text("print('release')\n", encoding="utf-8")
+            (root / "plugins").mkdir(parents=True)
+            (root / "plugins" / "hookify.py").write_text("def run():\n    return True\n", encoding="utf-8")
+
+            run_delivery(None, root)
+
+            dashboard_html = (root / "skilgen-dashboard.html").read_text(encoding="utf-8")
+            self.assertNotIn("missing freshness state", dashboard_html)
+            self.assertNotIn("<div class='metric-chip'><span>Outputs</span><strong>0</strong></div>", dashboard_html)
+            self.assertIn("<div class='metric-chip'><span>Freshness</span><strong>25/25</strong></div>", dashboard_html)
+
     def test_watch_delivery_ignores_generated_output_churn(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
