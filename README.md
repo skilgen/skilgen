@@ -13,6 +13,7 @@
   <a href="https://pypi.org/project/skilgen/"><img src="https://img.shields.io/pypi/v/skilgen?color=efd37a&labelColor=0d1117&label=skilgen" alt="PyPI" /></a>
   <a href="https://pypi.org/project/skilgen/"><img src="https://img.shields.io/pypi/pyversions/skilgen?color=8fd9a8&labelColor=0d1117" alt="Python" /></a>
   <a href="https://github.com/skilgen/skilgen/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/skilgen/skilgen/ci.yml?branch=main&color=8fd9a8&labelColor=0d1117" alt="CI" /></a>
+  <a href="docs/examples/README.md"><img src="https://img.shields.io/badge/skilgen%20score-74%2F100-8fd9a8?labelColor=0d1117" alt="Skilgen Score" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8fd9a8?labelColor=0d1117" alt="MIT" /></a>
 </p>
 
@@ -54,7 +55,9 @@ Skilgen does not just draw a dashboard. It materializes a repo-local skill syste
 
 Latest generated example: [anthropics/claude-code](https://github.com/anthropics/claude-code) at `5a7bf28`.
 
-| View | Before Skilgen | With Skilgen |
+Before = the repo with no generated skill system yet. After = the same repo after `skilgen deliver`.
+
+| View | Without Skilgen | With Skilgen |
 | --- | ---: | ---: |
 | Repo skill readiness | `19 / 100` | `74 / 100` |
 | Grounded reusable skills | `0 / 25` | `23 / 25` |
@@ -92,6 +95,8 @@ skilgen deliver --project-root .
 skilgen score --project-root .
 ```
 
+Current v0.6.0 breadth: `58` CLI entry points spanning delivery, architecture, dashboard, score, diff, analytics, enterprise skills, external skills, MCP connectors, and server APIs.
+
 That single `deliver` run writes:
 - `AGENTS.md`
 - `ANALYSIS.md`
@@ -105,12 +110,14 @@ That single `deliver` run writes:
 From there:
 
 ```bash
-skilgen architecture --project-root . --requirements docs/requirements.docx
-skilgen dashboard --project-root . --requirements docs/requirements.docx
+skilgen architecture --project-root .
+skilgen dashboard --project-root .
 skilgen diff --project-root .
 skilgen analytics --project-root .
 skilgen doctor --project-root .
 ```
+
+If you already have a PRD or architecture file, add `--requirements docs/requirements.docx` to `deliver`, `architecture`, or `dashboard`.
 
 ---
 
@@ -177,6 +184,8 @@ corpus:
     - "**/*.pb.go"
     - "**/migrations/[0-9]*.py"
 ```
+
+Treat the sub-budgets as a partition of the top-level `budget` so the sampling plan stays easy to reason about.
 
 Run the indexer standalone:
 
@@ -311,7 +320,7 @@ flowchart TD
     E --> F[Codex, Claude Code, Cursor, Copilot read repo-local files]
     F --> G[Code changes]
     G --> H[Skilgen diff and freshness detect drift]
-    H --> D
+    H -->|refresh| D
 ```
 
 1. **Index**: Phase 1 reads every non-excluded file with AST and text extraction. No LLM. Cached.
@@ -358,4 +367,4 @@ python -m pip install -e .
 python -m unittest discover -s tests
 ```
 
-Open a pull request and run the relevant tests before pushing. See [`CHANGELOG.md`](CHANGELOG.md) for release history.
+Open a pull request and run the relevant tests before pushing. This repo does not currently ship a separate linter or formatter target, so at minimum run the unit tests and smoke-test the CLI path you changed before opening the PR. See [`CHANGELOG.md`](CHANGELOG.md) for release history.
