@@ -3,17 +3,26 @@ from __future__ import annotations
 import os
 from datetime import date
 from pathlib import Path
+from typing import Callable
 
+from skilgen.agents.architecture_planner import build_architecture_blueprint
 from skilgen.agents.codebase_signals import analyze_codebase
 from skilgen.agents.requirements_parser import parse_project_intent
 from skilgen.agents.roadmap_planner import build_roadmap_plan
 from skilgen.core.config import load_config
+from skilgen.core.models import ArchitectureBlueprint, ArchitectureDomain, SkillMaterializationPlan
 from skilgen.core.context import build_codebase_context
 from skilgen.core.models import RequirementsContext, SkillSpec
 from skilgen.deep_agents_core import run_deep_text
 
 
 TODAY = date.today().isoformat()
+ProgressCallback = Callable[[str], None]
+
+
+def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> None:
+    if progress_callback is not None:
+        progress_callback(message)
 
 
 def _signal_bullets(items: list[str], fallback: str, limit: int = 5) -> list[str]:
@@ -42,13 +51,43 @@ def _parent_reference_map(context: RequirementsContext, project_root: Path) -> d
     }
 
 
-def _dynamic_parent_specs(context: RequirementsContext, project_root: Path) -> list[SkillSpec]:
+def _architecture_domain_map(context: RequirementsContext, project_root: Path) -> dict[str, ArchitectureDomain]:
+    blueprint = build_architecture_blueprint(project_root, context)
+    domain_map: dict[str, ArchitectureDomain] = {}
+    for domain in blueprint.domains:
+        domain_map[domain.name] = domain
+        if domain.recommended_skill_path:
+            normalized = domain.recommended_skill_path.removeprefix("skills/").removesuffix("/SKILL.md")
+            domain_map.setdefault(normalized, domain)
+    return domain_map
+
+
+def _materialization_plan_map(architecture: ArchitectureBlueprint) -> dict[str, SkillMaterializationPlan]:
+    return {item.domain: item for item in architecture.materialization_plan}
+
+
+def _dynamic_parent_specs(
+    context: RequirementsContext,
+    project_root: Path,
+    architecture: ArchitectureBlueprint,
+) -> list[SkillSpec]:
     codebase_context = build_codebase_context(project_root, context)
+    architecture_domains = _architecture_domain_map(context, project_root)
+    plan_map = _materialization_plan_map(architecture)
     parent_nodes = [node for node in codebase_context.domain_graph.nodes if node.parent_domain is None and node.skill_path]
     specs: list[SkillSpec] = []
     for node in parent_nodes:
+        architecture = architecture_domains.get(node.name)
+        plan = plan_map.get(node.name)
         references = []
-        for related in node.related_domains:
+        related_domains = list(node.related_domains)
+        if plan is not None and plan.cross_links:
+            related_domains.extend(
+                Path(link).parts[1] if len(Path(link).parts) > 1 else Path(link).stem
+                for link in plan.cross_links
+                if link.startswith("skills/")
+            )
+        for related in related_domains:
             related_node = next((item for item in codebase_context.domain_graph.nodes if item.name == related and item.skill_path), None)
             if related_node is not None and related_node.skill_path != node.skill_path:
                 references.append(_relative_skill_ref(node.skill_path, related_node.skill_path))
@@ -57,24 +96,92 @@ def _dynamic_parent_specs(context: RequirementsContext, project_root: Path) -> l
             if child_node is not None:
                 references.append(_relative_skill_ref(node.skill_path, child_node.skill_path))
         references = list(dict.fromkeys(references))
+        overview = architecture.summary if architecture is not None else node.summary
+        checks = (
+            [f"{{{{project_root}}}}/{item}" for item in architecture.evidence_paths[:4]]
+            if architecture is not None and architecture.evidence_paths
+            else [f"{{{{project_root}}}}/{Path(item).parts[0]}/" if "/" in item else f"{{{{project_root}}}}/{item}" for item in node.key_files[:3]]
+        ) or ["{{project_root}}/"]
+        patterns = [
+            ("Inferred domain patterns", node.key_patterns or ["Use the inferred project structure before introducing a new top-level convention."]),
+            ("Dynamic topology", ["This parent skill was inferred from the current repo and may expand or contract as the codebase evolves."]),
+        ]
+        if architecture is not None and architecture.responsibilities:
+            patterns.insert(0, ("Architecture responsibilities", architecture.responsibilities[:4]))
+        if architecture is not None and architecture.evidence_paths:
+            patterns.append(("Architecture evidence", [f"Evidence: `{item}`" for item in architecture.evidence_paths[:5]]))
+        how_to = [
+            "Start from the nearest evidence file in this inferred domain.",
+            "Reuse the current structure before creating a new sibling domain or folder.",
+            "Refresh this parent skill when the planner says the domain topology has changed.",
+        ]
+        if architecture is not None:
+            how_to = [
+                "Start from the architecture evidence paths before broadening the scope of the change.",
+                "Use the listed responsibilities to keep changes inside the right domain boundary.",
+                "Refresh this parent skill whenever the architecture blueprint or top evidence files change materially.",
+            ]
+        if plan is not None:
+            how_to.append(f"Honor the current materialization decision for this domain: `{plan.decision}`.")
         specs.append(
             SkillSpec(
                 path=node.skill_path.removeprefix("skills/"),
                 name=_slug_name(node.name),
                 domain=node.name,
                 sub_domain="platform",
-                overview=node.summary,
-                checks=[f"{{{{project_root}}}}/{Path(item).parts[0]}/" if "/" in item else f"{{{{project_root}}}}/{item}" for item in node.key_files[:3]] or ["{{project_root}}/"],
-                patterns=[
-                    ("Inferred domain patterns", node.key_patterns or ["Use the inferred project structure before introducing a new top-level convention."]),
-                    ("Dynamic topology", ["This parent skill was inferred from the current repo and may expand or contract as the codebase evolves."]),
-                ],
-                how_to=[
-                    "Start from the nearest evidence file in this inferred domain.",
-                    "Reuse the current structure before creating a new sibling domain or folder.",
-                    "Refresh this parent skill when the planner says the domain topology has changed.",
-                ],
+                overview=overview,
+                checks=checks,
+                patterns=patterns,
+                how_to=how_to,
                 references=references,
+            )
+        )
+    return specs
+
+
+def _dynamic_child_specs(
+    context: RequirementsContext,
+    project_root: Path,
+    architecture: ArchitectureBlueprint,
+) -> list[SkillSpec]:
+    codebase_context = build_codebase_context(project_root, context)
+    nodes_by_name = {node.name: node for node in codebase_context.domain_graph.nodes}
+    plan_map = _materialization_plan_map(architecture)
+    specs: list[SkillSpec] = []
+    for node in codebase_context.domain_graph.nodes:
+        if node.parent_domain is None or not node.skill_path:
+            continue
+        parent_plan = plan_map.get(node.parent_domain)
+        if parent_plan is not None and parent_plan.decision == "merge":
+            continue
+        parent_node = nodes_by_name.get(node.parent_domain)
+        references: list[str] = []
+        if parent_node is not None and parent_node.skill_path:
+            references.append(_relative_skill_ref(node.skill_path, parent_node.skill_path))
+        for related_name in node.related_domains:
+            related_node = nodes_by_name.get(related_name)
+            if related_node is not None and related_node.skill_path and related_node.skill_path != node.skill_path:
+                references.append(_relative_skill_ref(node.skill_path, related_node.skill_path))
+        checks = [f"{{{{project_root}}}}/{item}" for item in node.key_files[:4]] or ["{{project_root}}/"]
+        patterns = [
+            ("Inferred child domain patterns", node.key_patterns or ["Use the nearest existing implementation surface before creating a new sub-skill boundary."]),
+        ]
+        how_to = [
+            "Start from the nearest evidence file in this child domain.",
+            "Keep the change aligned with the parent domain contract before widening the boundary.",
+            "Prefer cross-linked sibling skills when the change spans multiple closely related surfaces.",
+        ]
+        specs.append(
+            SkillSpec(
+                path=node.skill_path.removeprefix("skills/"),
+                name=_slug_name(node.name),
+                domain=node.parent_domain or node.name,
+                sub_domain=node.name,
+                overview=node.summary,
+                checks=checks,
+                patterns=patterns,
+                how_to=how_to,
+                references=list(dict.fromkeys(references)),
             )
         )
     return specs
@@ -329,10 +436,22 @@ def _legacy_child_specs(context: RequirementsContext, project_root: Path) -> lis
     return specs
 
 
-def build_skill_specs(context: RequirementsContext, output_dir: Path) -> list[SkillSpec]:
+def build_skill_specs(
+    context: RequirementsContext,
+    output_dir: Path,
+    architecture: ArchitectureBlueprint | None = None,
+) -> list[SkillSpec]:
     project_root = output_dir.parent
-    specs = _dynamic_parent_specs(context, project_root)
-    specs.extend(_legacy_child_specs(context, project_root))
+    architecture = architecture or build_architecture_blueprint(project_root, context)
+    plan_map = _materialization_plan_map(architecture)
+    merged_domains = {domain for domain, plan in plan_map.items() if plan.decision == "merge"}
+    specs = _dynamic_parent_specs(context, project_root, architecture)
+    specs.extend(_dynamic_child_specs(context, project_root, architecture))
+    legacy_children = _legacy_child_specs(context, project_root)
+    for spec in legacy_children:
+        if spec.domain in merged_domains and spec.sub_domain != "platform":
+            continue
+        specs.append(spec)
     seen: set[str] = set()
     unique: list[SkillSpec] = []
     for spec in specs:
@@ -355,7 +474,7 @@ def _render_skill_native(spec: SkillSpec, source_hash: str) -> str:
     sections = [
         "---",
         f"name: {spec.name}",
-        "version: 0.5.0",
+        "version: 0.6.0",
         f"domain: {spec.domain}",
         f"sub_domain: {spec.sub_domain}",
         f"last_updated: {TODAY}",
@@ -393,8 +512,15 @@ def _render_skill_native(spec: SkillSpec, source_hash: str) -> str:
     return "\n".join(sections)
 
 
-def render_skill(spec: SkillSpec, source_hash: str, project_root: Path | str = ".") -> str:
+def _should_render_natively(spec: SkillSpec) -> bool:
     if spec.path.count("/") >= 2:
+        return True
+    curated_top_level_domains = {"requirements", "backend", "frontend", "roadmap", "platform"}
+    return spec.domain not in curated_top_level_domains
+
+
+def render_skill(spec: SkillSpec, source_hash: str, project_root: Path | str = ".") -> str:
+    if _should_render_natively(spec):
         return _render_skill_native(spec, source_hash)
     return run_deep_text(
         "skill guidance synthesis",
@@ -411,6 +537,88 @@ def render_skill(spec: SkillSpec, source_hash: str, project_root: Path | str = "
     )
 
 
+def _frontmatter_value(path: Path, field: str) -> str | None:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return None
+    in_frontmatter = False
+    saw_fence = False
+    prefix = f"{field}:"
+    for line in lines[:40]:
+        stripped = line.strip()
+        if stripped.startswith("```") and not in_frontmatter and not saw_fence:
+            saw_fence = True
+            continue
+        if stripped == "---":
+            if not in_frontmatter:
+                in_frontmatter = True
+                continue
+            break
+        if in_frontmatter and stripped.startswith(prefix):
+            return stripped[len(prefix):].strip().strip("'\"")
+    return None
+
+
+def _looks_generated_skill(path: Path) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    markers = (
+        "triggered_by: requirements_pipeline",
+        "Generated from requirements source hash",
+        "Generated by Skilgen",
+        "This parent skill was inferred from the current repo",
+        "```markdown\n---",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _prune_stale_generated_paths(
+    output_dir: Path,
+    planned_relative_paths: set[str],
+    selected_domains: set[str],
+    *,
+    active_domains: set[str] | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> list[Path]:
+    managed_prefixes = {
+        Path(relative).parts[0]
+        for relative in planned_relative_paths
+        if relative not in {"MANIFEST.md", "GRAPH.md"} and Path(relative).parts
+    }
+    removed: list[Path] = []
+    for pattern in ("SKILL.md", "SUMMARY.md"):
+        for path in output_dir.rglob(pattern):
+            relative = path.relative_to(output_dir).as_posix()
+            if relative in planned_relative_paths:
+                continue
+            if not selected_domains:
+                path.unlink()
+                removed.append(path)
+                continue
+            prefix = Path(relative).parts[0] if Path(relative).parts else ""
+            declared_domain = _frontmatter_value(path, "domain")
+            triggered_by = _frontmatter_value(path, "triggered_by")
+            generated_by_skilgen = triggered_by == "requirements_pipeline" or _looks_generated_skill(path)
+            if prefix in managed_prefixes or (declared_domain in selected_domains if declared_domain else False):
+                path.unlink()
+                removed.append(path)
+                continue
+            if (
+                generated_by_skilgen
+                and active_domains
+                and declared_domain
+                and declared_domain not in active_domains
+            ):
+                path.unlink()
+                removed.append(path)
+    if removed:
+        _emit_progress(progress_callback, f"Removed {len(removed)} stale generated skill files so the skill tree reflects the current repo shape.")
+    return removed
+
+
 def render_manifest(specs: list[SkillSpec], source_hash: str) -> str:
     lines = [
         "# Skill Manifest",
@@ -421,18 +629,48 @@ def render_manifest(specs: list[SkillSpec], source_hash: str) -> str:
         "| --- | --- | --- | --- | --- | --- |",
     ]
     for spec in specs:
-        lines.append(f"| `{spec.path}` | `0.5.0` | `{spec.domain}` | `{TODAY}` | `requirements_pipeline` | `{source_hash}` |")
+        lines.append(f"| `{spec.path}` | `0.6.0` | `{spec.domain}` | `{TODAY}` | `requirements_pipeline` | `{source_hash}` |")
     lines.append("")
     return "\n".join(lines)
 
 
-def render_graph(specs: list[SkillSpec]) -> str:
+def render_graph(specs: list[SkillSpec], architecture: ArchitectureBlueprint | None = None) -> str:
     lines = [
         "# Skill Graph",
         "",
         "This file summarizes the generated skill tree and cross references.",
         "",
     ]
+    if architecture is not None:
+        skill_paths = {spec.path for spec in specs}
+        normalized_skill_paths = {f"skills/{spec.path}" for spec in specs}
+        lines.extend(
+            [
+                "## Architecture Blueprint",
+                f"- Headline: {architecture.headline}",
+                f"- Summary: {architecture.system_summary}",
+            ]
+        )
+        if architecture.hotspots:
+            lines.append("- Hotspots:")
+            lines.extend(f"  - {item}" for item in architecture.hotspots[:5])
+        if architecture.materialization_plan:
+            lines.extend(["", "## Materialization Decisions"])
+            for item in architecture.materialization_plan:
+                lines.append(f"### {item.domain}")
+                lines.append(f"- decision: `{item.decision}`")
+                lines.append(f"- parent: `{item.parent_skill_path}`")
+                if item.child_skill_paths:
+                    lines.append("- child skills:")
+                    for child in item.child_skill_paths[:8]:
+                        marker = "materialized" if child in normalized_skill_paths or child.removeprefix("skills/") in skill_paths else "planned"
+                        lines.append(f"  - `{child}` ({marker})")
+                if item.cross_links:
+                    lines.append("- cross-links:")
+                    for link in item.cross_links[:8]:
+                        lines.append(f"  - `{link}`")
+                lines.append(f"- rationale: {item.rationale}")
+        lines.append("")
     for spec in specs:
         lines.append(f"## {spec.path}")
         lines.append(f"- domain: `{spec.domain}`")
@@ -489,7 +727,8 @@ def _dynamic_summary_paths(context: RequirementsContext, output_dir: Path, selec
 
 def planned_skill_paths(context: RequirementsContext, output_dir: Path, selected_domains: set[str] | None = None) -> list[Path]:
     selected = selected_domains or set()
-    specs = _select_specs(build_skill_specs(context, output_dir), selected)
+    architecture = build_architecture_blueprint(output_dir.parent, context)
+    specs = _select_specs(build_skill_specs(context, output_dir, architecture), selected)
     planned = [output_dir / spec.path for spec in specs]
     planned.append(output_dir / "MANIFEST.md")
     planned.append(output_dir / "GRAPH.md")
@@ -504,23 +743,60 @@ def planned_skill_paths(context: RequirementsContext, output_dir: Path, selected
     return unique_paths
 
 
-def write_skills(context: RequirementsContext, output_dir: Path, selected_domains: set[str] | None = None) -> list[Path]:
+def write_skills(
+    context: RequirementsContext,
+    output_dir: Path,
+    selected_domains: set[str] | None = None,
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> list[Path]:
     selected = selected_domains or set()
-    specs = _select_specs(build_skill_specs(context, output_dir), selected)
+    _emit_progress(progress_callback, "Preparing the skill architecture so parent and child skill boundaries stay grounded in repo evidence.")
     signals = analyze_codebase(output_dir.parent)
+    architecture = build_architecture_blueprint(output_dir.parent, context)
+    specs = _select_specs(build_skill_specs(context, output_dir, architecture), selected)
+    codebase_context = build_codebase_context(output_dir.parent, context)
+    architecture_domains = {domain.name: domain for domain in architecture.domains}
+    planned_relative_paths = {spec.path for spec in specs}
+    planned_relative_paths.update({"MANIFEST.md", "GRAPH.md"})
+    for node in codebase_context.domain_graph.nodes:
+        if node.parent_domain is not None or not node.skill_path:
+            continue
+        if selected and node.name not in selected:
+            continue
+        summary_relative = (Path(node.skill_path.removeprefix("skills/")).parent / "SUMMARY.md").as_posix()
+        planned_relative_paths.add(summary_relative)
+    if "frontend" in {node.name for node in codebase_context.domain_graph.nodes if node.parent_domain is None} and (
+        not selected or "frontend" in selected
+    ):
+        planned_relative_paths.add("frontend/components/SUMMARY.md")
+    if "backend" in {node.name for node in codebase_context.domain_graph.nodes if node.parent_domain is None} and signals.services and (
+        not selected or "backend" in selected
+    ):
+        planned_relative_paths.add("backend/services/SUMMARY.md")
+    active_domains = {node.name for node in codebase_context.domain_graph.nodes}
+    _prune_stale_generated_paths(
+        output_dir,
+        planned_relative_paths,
+        selected,
+        active_domains=active_domains,
+        progress_callback=progress_callback,
+    )
     written: list[Path] = []
+    _emit_progress(progress_callback, f"Writing {len(specs)} skill files into the repo-local skill tree.")
     for spec in specs:
         target = output_dir / spec.path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(render_skill(spec, context.source_hash, output_dir.parent), encoding="utf-8")
         written.append(target)
 
+    _emit_progress(progress_callback, "Writing skills/MANIFEST.md and skills/GRAPH.md so agents can traverse the generated skill tree.")
     manifest = output_dir / "MANIFEST.md"
     manifest.write_text(render_manifest(specs, context.source_hash), encoding="utf-8")
     written.append(manifest)
 
     graph = output_dir / "GRAPH.md"
-    graph.write_text(render_graph(specs), encoding="utf-8")
+    graph.write_text(render_graph(specs, architecture), encoding="utf-8")
     written.append(graph)
 
     summary_map: dict[str, list[tuple[str, list[str]]]] = {
@@ -533,7 +809,7 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
         "data-platform": [("Detected Data Model Files", signals.data_models), ("Detected Persistence Files", signals.persistence_layers)],
         "roadmap": [("Roadmap Context", context.summary)],
     }
-    codebase_context = build_codebase_context(output_dir.parent, context)
+    _emit_progress(progress_callback, "Writing top-level domain summaries so each skill family explains its evidence and responsibilities.")
     for node in codebase_context.domain_graph.nodes:
         if node.parent_domain is not None or not node.skill_path:
             continue
@@ -541,8 +817,16 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
             continue
         summary_path = output_dir / Path(node.skill_path.removeprefix("skills/")).parent / "SUMMARY.md"
         summary_path.parent.mkdir(parents=True, exist_ok=True)
+        architecture_domain = architecture_domains.get(node.name)
+        sections = summary_map.get(node.name, [("Key Files", node.key_files)])
+        if architecture_domain is not None:
+            sections = [
+                ("Architecture responsibilities", architecture_domain.responsibilities),
+                ("Evidence paths", [f"`{item}`" for item in architecture_domain.evidence_paths]),
+                *sections,
+            ]
         summary_path.write_text(
-            render_domain_summary(f"{node.name.replace('-', ' ').title()} Summary", summary_map.get(node.name, [("Key Files", node.key_files)])),
+            render_domain_summary(f"{node.name.replace('-', ' ').title()} Summary", sections),
             encoding="utf-8",
         )
         written.append(summary_path)
@@ -550,6 +834,7 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
     if "frontend" in {node.name for node in codebase_context.domain_graph.nodes if node.parent_domain is None} and (
         not selected or "frontend" in selected
     ):
+        _emit_progress(progress_callback, "Writing frontend component summaries for reusable interface patterns.")
         component_summary = output_dir / "frontend" / "components" / "SUMMARY.md"
         component_summary.parent.mkdir(parents=True, exist_ok=True)
         component_summary.write_text(
@@ -561,6 +846,7 @@ def write_skills(context: RequirementsContext, output_dir: Path, selected_domain
     if "backend" in {node.name for node in codebase_context.domain_graph.nodes if node.parent_domain is None} and signals.services and (
         not selected or "backend" in selected
     ):
+        _emit_progress(progress_callback, "Writing backend service summaries for deeper operational and implementation guidance.")
         service_summary = output_dir / "backend" / "services" / "SUMMARY.md"
         service_summary.parent.mkdir(parents=True, exist_ok=True)
         service_summary.write_text(

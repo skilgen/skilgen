@@ -4,7 +4,7 @@ All notable changes to Skilgen will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
-## [0.5.0] - Unreleased
+## [0.6.0] - Unreleased
 
 ### Added
 - `Skilgen Score`, a repo-level quality standard for skill trees with groundedness, coverage, freshness, and structure subscores
@@ -20,11 +20,34 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   - `/badge.svg`
   - eval scaffold and compare helpers
   - `skilgen-sync` GitHub Action
+- `skilgen diff`, plus `/diff` and SDK diff access for showing stale skills, impacted domains, and freshness reasons
+- Score history, trend, and regression tracking stored under `.skilgen/state/score-history.jsonl`
+- Skill analytics with repo-local usage logging under `.skilgen/analytics/usage.jsonl`
+- Evidence graph and architecture mode with:
+  - `skilgen architecture`
+  - `/architecture`
+  - SDK architecture access
+  - `ARCHITECTURE.md`
+  - graph export in Mermaid and JSON forms
+- Deeper source comprehension signals:
+  - symbol graph
+  - call graph
+  - config/runtime graph
+  - test-to-code mapping
+- Multi-format document ingestion for:
+  - Markdown, text, DOCX, PDF, HTML
+  - JSON, YAML, XML, TOML, INI/CFG
+  - CSV/TSV, XLSX, PPTX
+- Extended repo scanning support for Java, Go, Rust, and COBOL/copybooks
+- Private enterprise skill ingestion from URLs plus MCP policy packs for allow/deny/approval controls
+- New docs and examples for architecture mode, evidence graph, score interpretation, diff workflow, legacy repos, enterprise repos, polyglot repos, and GitHub Actions
 
 ### Changed
 - Refreshed the README to present Skilgen more clearly as a living skill system for coding agents
 - Simplified onboarding and product positioning around self-updating skills, drift detection, enterprise MCP connectors, and external skill governance
 - Made repo-local watcher and auto-update behavior git-aware so Skilgen can classify manual edits, head changes, merges, rebases, and related repository events
+- Architecture synthesis now uses richer code evidence and source-graph signals instead of relying only on path heuristics
+- Commands that reload project context now remember the last requirements file used for delivery, so diff/score/architecture remain consistent after requirements-backed runs
 
 ## [0.4.1] - Released
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import asdict
+from json import JSONDecodeError
 from pathlib import Path
 
 from skilgen.core.models import FreshnessReport, RunMemory
@@ -18,6 +19,40 @@ def _runs_dir(project_root: Path) -> Path:
 
 def _current_run_path(project_root: Path) -> Path:
     return _memory_dir(project_root) / "current_run.json"
+
+
+def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(f"{path.suffix}.tmp")
+    temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def _load_json_recovering(path: Path) -> dict[str, object]:
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+        return payload if isinstance(payload, dict) else {}
+    except JSONDecodeError:
+        decoder = json.JSONDecoder()
+        index = 0
+        last_dict: dict[str, object] | None = None
+        while index < len(raw):
+            while index < len(raw) and raw[index].isspace():
+                index += 1
+            if index >= len(raw):
+                break
+            try:
+                payload, end = decoder.raw_decode(raw, index)
+            except JSONDecodeError:
+                index += 1
+                continue
+            if isinstance(payload, dict):
+                last_dict = payload
+            index = end
+        return last_dict or {}
 
 
 def create_run_memory(
@@ -69,8 +104,8 @@ def save_run_memory(project_root: Path, memory: RunMemory) -> Path:
     runs_dir.mkdir(parents=True, exist_ok=True)
     run_path = runs_dir / f"{memory.run_id}.json"
     payload = asdict(memory)
-    run_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    _current_run_path(project_root).write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    _write_json_atomic(run_path, payload)
+    _write_json_atomic(_current_run_path(project_root), payload)
     return run_path
 
 
@@ -125,7 +160,9 @@ def load_current_run_memory(project_root: Path) -> RunMemory | None:
     path = _current_run_path(project_root)
     if not path.exists():
         return None
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = _load_json_recovering(path)
+    if not payload:
+        return None
     return RunMemory(
         run_id=str(payload.get("run_id", "")),
         status=str(payload.get("status", "unknown")),

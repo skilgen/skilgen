@@ -1,594 +1,370 @@
 <p align="center">
-  <img src="docs/assets/skilgen.svg" alt="Skilgen logo" width="560" />
+  <img src="docs/assets/skilgen.svg" alt="Skilgen" width="480" />
 </p>
 
-<h1 align="center">Skilgen</h1>
+<h2 align="center">The living skill system for AI coding agents</h2>
 
 <p align="center">
-  Install Skilgen once, run it in your repo, and let it keep your agent skills, docs, enterprise context, and approved MCP connectors up to date automatically.
-</p>
-
-<p align="center">
-  <a href="https://pypi.org/project/skilgen/"><img src="https://img.shields.io/pypi/v/skilgen" alt="PyPI version" /></a>
-  <a href="https://pypi.org/project/skilgen/"><img src="https://img.shields.io/pypi/pyversions/skilgen" alt="Python versions" /></a>
-  <a href="https://github.com/skilgen/skilgen/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/skilgen/skilgen/ci.yml?branch=main" alt="CI status" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license" /></a>
+  Every agent session starts from zero. Skilgen ends that.<br/>
+  Generate, govern, and keep your codebase's agent knowledge current automatically.
 </p>
 
 <p align="center">
-  Skilgen is the repo-local skill system for Codex, Claude Code, Cursor, and other coding agents. It generates and refreshes the files agents actually need inside the repository they are working on.
+  <a href="https://pypi.org/project/skilgen/"><img src="https://img.shields.io/pypi/v/skilgen?color=efd37a&labelColor=0d1117&label=skilgen" alt="PyPI" /></a>
+  <a href="https://pypi.org/project/skilgen/"><img src="https://img.shields.io/pypi/pyversions/skilgen?color=8fd9a8&labelColor=0d1117" alt="Python" /></a>
+  <a href="https://github.com/skilgen/skilgen/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/skilgen/skilgen/ci.yml?branch=main&color=8fd9a8&labelColor=0d1117" alt="CI" /></a>
+  <a href="docs/examples/README.md"><img src="https://img.shields.io/badge/skilgen%20score-74%2F100-8fd9a8?labelColor=0d1117" alt="Skilgen Score" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8fd9a8?labelColor=0d1117" alt="MIT" /></a>
 </p>
+
+---
+
+## Why Skilgen
+
+**vs writing a `CLAUDE.md` by hand**
+
+A hand-written `CLAUDE.md` captures what you remember about your codebase on the day you write it. Skilgen generates repo-local agent context from actual code evidence, requirements inputs, architecture domains, and config signals, then refreshes that context as the code changes. A hand-written file drifts silently. Skilgen gives you generated artifacts, freshness tracking, and a score that tells you when the skill system is no longer trustworthy.
+
+**vs just running Claude, Codex, Cursor, or Copilot**
+
+Every agent session starts from zero. It reads files, infers structure, guesses patterns, and then the session ends. The next session repeats the same exploration. Skilgen captures that understanding once, stores it as versioned repo-local skills and docs grounded in real repository evidence, and makes it available to every session, every tool, and every engineer on the team.
+
+---
+
+## Dashboard
+
+Run `skilgen dashboard` and get a branded HTML surface for score health, architecture domains, evidence graph, dependency signals, freshness, analytics, and agent readiness in one place.
+
+```bash
+skilgen dashboard --project-root . --requirements docs/requirements.docx
+```
+
+`skilgen deliver --project-root .` already writes `skilgen-dashboard.html` automatically. Use `skilgen dashboard` when you want to regenerate or inspect the dashboard separately from a full delivery run.
+
+Live example bundles generated with Skilgen:
+- [Anthropic claude-code dashboard](docs/examples/README.md#anthropic-claude-code)
+- [Anthropic claude-agent-sdk-python dashboard](docs/examples/README.md#anthropic-claude-agent-sdk-python)
+- [LangChain dashboard](docs/examples/README.md#langchain)
+- [LibreChat dashboard + generated skills](docs/examples/README.md#librechat)
+
+The dashboard ships as a self-contained HTML file you can open locally, share with your team, or commit to the repo. No server needed.
+
+### Live Generated Skills
+
+Skilgen does not just draw a dashboard. It materializes a repo-local skill system that agents can load before editing code.
+
+Latest generated example: [anthropics/claude-code](https://github.com/anthropics/claude-code) at `5a7bf28`.
+
+Before = the repo with no generated skill system yet. After = the same repo after `skilgen deliver`.
+
+| View | Without Skilgen | With Skilgen |
+| --- | ---: | ---: |
+| Repo skill readiness | `19 / 100` | `74 / 100` |
+| Grounded reusable skills | `0 / 25` | `23 / 25` |
+| Freshness contract | `0 / 25` | `25 / 25` |
+| Agent operating structure | `0 / 25` | `19 / 25` |
+
+What got created:
+- `8` repo-local skills from the real repo shape.
+- `3` materialized top-level domains: `plugins`, `roadmap`, and `scripts`.
+- `5` inferred child or subordinate surfaces such as `plugins/hookify` and roadmap phase skills.
+- `9` operating artifacts including `AGENTS.md`, `skills/MANIFEST.md`, `skills/GRAPH.md`, `TRACEABILITY.md`, and `skilgen-dashboard.html`.
+
+Inspect the committed examples:
+- [Claude Code generated dashboard](docs/examples/claude-code-dashboard.html)
+- [Claude Code generated `AGENTS.md`](docs/examples/claude-code-AGENTS.md)
+- [Claude Code live `skills/` snapshot](docs/examples/claude-code-skill-tree/skills/MANIFEST.md)
+
+---
 
 ## Quick Start
-
-Install Skilgen from PyPI:
 
 ```bash
 python -m pip install skilgen
 ```
 
-Export a provider key if you want the full model-backed runtime:
-
 ```bash
-export OPENAI_API_KEY="your_key_here"
-# or
-export ANTHROPIC_API_KEY="your_key_here"
-# or
-export HUGGINGFACEHUB_API_TOKEN="your_token_here"
+# Export a provider key, or point Skilgen at a private model endpoint below.
+export OPENAI_API_KEY="your_key"
+# or ANTHROPIC_API_KEY / GOOGLE_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY
 ```
-
-Initialize the repo and let Skilgen start its repo-local skill system:
 
 ```bash
 skilgen init --project-root .
 skilgen deliver --project-root .
-skilgen status --project-root .
-```
-
-That’s the whole idea:
-1. install Skilgen
-2. run it once in a repo
-3. let Skilgen keep the repo-local agent context fresh as code changes
-
-## What Skilgen Does
-
-Skilgen turns your repository into an agent-ready operating system that stays current as the code changes.
-
-When you run Skilgen in a repo, it can:
-- generate and refresh `AGENTS.md`, `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md`
-- generate and refresh a project `skills/` tree
-- detect changed code and refresh skills automatically
-- score the quality of the skill tree with a verifiable `Skilgen Score`
-- ingest enterprise-wide skill packs
-- install and rank external skill ecosystems
-- recommend and activate approved official MCP connectors
-- decide what an agent should load first before it starts working
-
-## Why Teams Use It
-
-Most AI coding sessions fail for the same reasons:
-- the agent starts without the real repo context
-- guidance gets stale after code changes
-- enterprise knowledge is scattered across docs, runbooks, and tribal memory
-- tool access is not governed or consistent
-
-Skilgen fixes that by giving the repo a living skill system instead of a one-time prompt.
-
-## Skilgen Score
-
-Skilgen Score is the quality bar for a skill tree.
-
-It is a `0-100` score with four `0-25` subscores:
-
-| Subscore | What It Measures | What A High Score Means |
-| --- | --- | --- |
-| Groundedness | How much the skill system points to real files, paths, and repo evidence | skills are specific to the codebase, not generic advice |
-| Coverage | How much of the real codebase is mapped into skill domains | major repo areas are represented in the skill tree |
-| Freshness | Whether skills are current relative to current code and saved freshness state | the skill system is up to date |
-| Structure | Whether the repo has the right artifacts, cross-links, and traceability | the skill tree is complete, navigable, and valid |
-
-Run it like this:
-
-```bash
 skilgen score --project-root .
 ```
 
-Skilgen Score is intentionally opinionated:
-- stale skills cap the score
-- weak grounding caps the score
-- weak coverage caps the score
-- missing `AGENTS.md`, `TRACEABILITY.md`, `MANIFEST.md`, or `GRAPH.md` caps the score
+Current v0.6.0 breadth: `58` CLI entry points spanning delivery, architecture, dashboard, score, diff, analytics, enterprise skills, external skills, MCP connectors, and server APIs.
 
-That means a high score signals real quality, not just lots of generated files.
-
-## What Agents Get Immediately
-
-Skilgen prepares the files that coding agents actually need inside the repository:
-- `AGENTS.md`
-- `skills/`
-- `FEATURES.md`
-- `REPORT.md`
-- `TRACEABILITY.md`
-- `.skilgen/` state and memory
-
-That gives agents:
-- repo-specific instructions instead of repeated prompting
-- freshness-aware context instead of stale assumptions
-- ranked external and enterprise skills when they matter
-- approved MCP capability context when enterprise tools are available
-
-## How It Works
-
-Skilgen is a Python package you install in your environment.
-
-Codex or Claude Code do **not** need Skilgen inside `~/.codex` to use it.
-
-Instead, Skilgen prepares the **repository itself** so the agent can read:
-- `AGENTS.md`
-- `skills/`
-- `FEATURES.md`
-- `REPORT.md`
-- `TRACEABILITY.md`
-- `.skilgen/` state and memory
-
-Think of the layers like this:
-
-- `~/.codex`
-  - your global Codex home, personal defaults, and Codex-specific setup
-- `your-repo/AGENTS.md` and `your-repo/skills/`
-  - the repo-local operating context that Skilgen creates and keeps fresh
-
-That means the workflow is:
-1. install Skilgen
-2. run it inside a repo
-3. let Skilgen generate and update the repo-local skill system
-4. let Codex, Claude Code, or Cursor use that repo-local context while coding
-
-## Quick Flow
-
-```mermaid
-flowchart TD
-    A["Install Skilgen"] --> B["Run skilgen init in a repo"]
-    B --> C["Skilgen creates repo-local config and starts auto-update"]
-    C --> D["Skilgen analyzes code, requirements, enterprise skills, and MCP signals"]
-    D --> E["Skilgen writes AGENTS.md, skills/, reports, and .skilgen state"]
-    E --> F["Codex / Claude Code / Cursor read the repo-local files"]
-    F --> G["Developer or agent changes code"]
-    G --> H["Skilgen detects changes and refreshes skills automatically"]
-    H --> E
-```
-
-## Feature Highlights
-
-| Capability | What Skilgen Does |
-| --- | --- |
-| Repo-native skill system | Generates `AGENTS.md`, `skills/`, and supporting docs directly inside the repo |
-| Automatic upkeep | Detects code changes and refreshes skills without repeated manual runs |
-| Quality standard | Computes a `Skilgen Score` that grades the health of the skill tree |
-| Project understanding | Builds domain graphs, reports, feature maps, and refresh priorities |
-| Enterprise skills | Ingests and manages organization-wide skill packs |
-| External skills | Installs, ranks, activates, and syncs public skill ecosystems |
-| Official MCP handling | Recommends and activates approved official OAuth-ready MCP connectors |
-| Agent decision support | Tells agents what to load first and what context matters most |
-| Reproducibility | Tracks state, memory, provenance, trust, and lockfile-backed skill setups |
-
-## Why It Matters
-
-Most AI workflows lose time on re-explaining context.
-
-Skilgen makes that context reusable.
-
-It gives agents:
-- project-specific guidance instead of generic prompting
-- stable memory and refresh signals instead of stale assumptions
-- stronger execution patterns instead of ad-hoc improvisation
-- a one-stop shop for both generated repo skills and external skill ecosystems
-
-That means agents do not just work faster. They work with better judgment.
-
-## At A Glance
-
-| You Have | Skilgen Produces | Why It Helps |
-| --- | --- | --- |
-| Existing codebase | domain graph, skills, reports, agent contract | agents understand the actual repo before changing it |
-| Requirements document | feature intent, roadmap, starter skills | agents can plan before implementation exists |
-| Codebase + requirements | highest-fidelity operating context | agents align shipped behavior with planned scope |
-| External skill ecosystems | installable, rankable, managed skill packs | agents can pull in trusted skills from one place |
-
-## What Skilgen Handles Automatically
-
-Once initialized in a repo, Skilgen can automatically:
-- detect repository changes and refresh skills
-- preserve existing `skilgen.yml` config instead of overwriting it
-- keep repo-local agent context current for Codex, Claude Code, and Cursor
-- detect ecosystem signals such as LangChain, Anthropic, Hugging Face, and more
-- ingest configured enterprise skill packs
-- recommend official MCP connectors from repo evidence
-- auto-activate only connectors that pass enterprise policy checks such as official-source and OAuth requirements
-- keep freshness, memory, and status state under `.skilgen/`
-
-## What You Get Fast
-
-- `AGENTS.md` for the top-level agent contract
-- `FEATURES.md` for product behavior
-- `REPORT.md` for project-level understanding
-- `TRACEABILITY.md` for source-to-output reasoning
-- `skills/MANIFEST.md` and `skills/**/SKILL.md` for execution-ready guidance
-- `.skilgen/state/` and `.skilgen/memory/` for freshness and continuity
-
-## Quick Mental Model
-
-- Skilgen reads your project
-- Skilgen materializes the right skills and docs
-- agents load those skills instead of guessing
-- external ecosystems can also be installed and managed through Skilgen
-
-## What A Great Score Looks Like
-
-- `90+`
-  - excellent
-  - skills are grounded, current, complete, and structurally healthy
-- `75-89`
-  - strong
-  - the repo has a solid skill system with a few remaining gaps
-- `60-74`
-  - fair
-  - usable, but one or more quality gates are holding it back
-- `<60`
-  - needs work
-  - the skill system is either stale, weakly grounded, incomplete, or under-mapped
-
-The goal is not just to generate more files.
-The goal is to keep a high-confidence, high-quality skill system that agents can trust.
-
-## What Skilgen Understands
-
-Skilgen can work from:
-- an existing codebase
-- a requirements document such as a PRD
-- both together when you want implementation-aware planning
-
-From those inputs, Skilgen synthesizes:
-- feature intent
-- entities and domain boundaries
-- backend endpoints and service areas
-- frontend flows and component zones
-- roadmap phases
-- dynamic domain graphs inferred from the real repo
-- freshness signals for when skills should refresh
-- in-flight run memory for agent continuity
-- reusable skill guidance for agents
-
-## What You Get
-
-Generated outputs can include:
+That single `deliver` run writes:
 - `AGENTS.md`
 - `ANALYSIS.md`
+- `ARCHITECTURE.md`
 - `FEATURES.md`
 - `REPORT.md`
 - `TRACEABILITY.md`
-- `skills/MANIFEST.md`
-- `skills/GRAPH.md`
-- dynamic top-level and child `skills/**`
-- `.skilgen/state/freshness.json`
-- `.skilgen/memory/current_run.json`
-- `.skilgen/memory/runs/<run_id>.json`
+- `skills/**`
+- `skilgen-dashboard.html`
 
-This gives your agents:
-- a stable memory layer
-- reusable execution guidance
-- project-specific context instead of generic prompting
-- refresh decisions grounded in actual repo change signals
-- a better path toward consistent, high-quality, engineering-standard delivery
-
-## Installation Options
-
-Install Skilgen from source:
+From there:
 
 ```bash
-python -m pip install .
-```
-
-Requirements:
-- Python 3.11+
-- The model-backed runtime requires Python 3.11+
-
-Runtime behavior:
-- If you configure a supported model provider and API key, Skilgen uses the full model-backed runtime.
-- If you do not provide an API key, Skilgen falls back to local deterministic analysis.
-- The fallback mode still works, but it is less intelligent and less complete than the full model-backed runtime.
-
-Initialize config in your repo:
-
-```bash
-skilgen init --project-root .
-```
-
-`skilgen init` now writes a provider-neutral `skilgen.yml` by default, so it does not assume OpenAI unless you explicitly want that.
-
-If you want provider-specific starter values:
-
-```bash
-skilgen init --project-root . --provider openai
-skilgen init --project-root . --provider anthropic
-skilgen init --project-root . --provider gemini
-skilgen init --project-root . --provider huggingface
-```
-
-Analyze a codebase:
-
-```bash
-skilgen fingerprint --project-root .
-```
-
-Diagnose runtime readiness:
-
-```bash
+skilgen architecture --project-root .
+skilgen dashboard --project-root .
+skilgen diff --project-root .
+skilgen analytics --project-root .
 skilgen doctor --project-root .
 ```
 
-Decide whether skills should refresh and what an agent should load first:
+If you already have a PRD or architecture file, add `--requirements docs/requirements.docx` to `deliver`, `architecture`, or `dashboard`.
+
+---
+
+## What Skilgen Does
+
+| Capability | What you get |
+| --- | --- |
+| **Full-corpus indexing** | Every non-excluded file in the repo is indexed with structural or text signals, cached under `.skilgen/corpus/index.json`, and sampled from a 60-file default deep-read budget instead of the old 12-file heuristic. |
+| **Evidence graph** | Source snippets, import relationships, runtime hints, documentation signals, and architecture evidence grounded in real repo files. |
+| **Living skill tree** | `AGENTS.md`, `skills/**`, `MANIFEST.md`, `GRAPH.md`, and supporting docs generated from evidence and refreshed when the repo changes. |
+| **Skilgen Score** | A `0-100` quality bar across Groundedness, Coverage, Freshness, and Structure, with JSON output, history, and SVG badge generation. |
+| **Architecture synthesis** | Evidence-backed domain maps with responsibilities, confidence, hotspots, and Mermaid, JSON, or HTML graph exports. |
+| **Diff + freshness** | A direct answer to what changed, which domains moved, which skills are stale, and why. |
+| **Enterprise BYO model** | Model routing for Azure OpenAI, AWS Bedrock, Ollama, and OpenAI-compatible private gateways, plus public providers. |
+| **Enterprise document ingestion** | Requirements and planning inputs from Word, PDF, PowerPoint, Excel, HTML, JSON, YAML, CSV, XML, TOML, INI, and plain-text docs. |
+| **MCP governance** | Enterprise skill ingestion, MCP connector policy packs, allowlists, denylists, and approved-connector activation flows. |
+| **Analytics** | Usage summaries that show which skills are being loaded, which are hot, and which are ignored. |
+| **CI integration** | Score badges, score history, and GitHub Actions examples for quality gating and automated refresh flows. |
+
+---
+
+## Skilgen Score
+
+The quality bar for a skill tree. Four subscores, each worth 25 points:
+
+| Subscore | What it measures |
+| --- | --- |
+| **Groundedness** | Skills point to real files, check paths, and repo evidence instead of generic advice |
+| **Coverage** | Major repo areas are represented in the skill tree |
+| **Freshness** | Skills are current relative to recent code changes and saved freshness state |
+| **Structure** | `AGENTS.md`, `MANIFEST.md`, `GRAPH.md`, `TRACEABILITY.md`, and cross-links are present and coherent |
 
 ```bash
-skilgen decide --project-root .
+skilgen score --project-root .
+skilgen score --project-root . --history
+skilgen score --project-root . --badge-file .skilgen/score/badge.svg
 ```
 
-Generate docs and skills from just the codebase:
+Example GitHub Actions gating:
+
+```yaml
+env:
+  SKILGEN_SCORE_THRESHOLD: "75"
+```
+
+---
+
+## Corpus Intelligence
+
+Skilgen indexes every non-excluded file in the repo, not just files that happen to match route, service, or model naming patterns. Phase 1 builds a cached structural and text index across the full corpus without using an LLM. Phase 2 uses importance scoring plus cluster-aware sampling to choose the most architecturally significant files for deeper analysis.
+
+```yaml
+corpus:
+  enabled: true
+  budget: 60
+  hub_budget: 40
+  cluster_budget: 10
+  config_budget: 5
+  doc_budget: 5
+  min_cluster_size: 3
+  exclude_generated: true
+  exclude_patterns:
+    - "vendor/**"
+    - "**/*.pb.go"
+    - "**/migrations/[0-9]*.py"
+```
+
+Treat the sub-budgets as a partition of the top-level `budget` so the sampling plan stays easy to reason about.
+
+Run the indexer standalone:
 
 ```bash
-skilgen deliver --project-root .
+skilgen index --project-root .
+skilgen deliver --project-root . --skip-index
+skilgen architecture --project-root . --skip-index
 ```
 
-Interpret a requirements document:
+---
+
+## Language Support
+
+Skilgen scans and reasons over **38 source extensions** across modern web, systems, JVM, scripting, and legacy stacks:
+
+| Family | Languages |
+| --- | --- |
+| **Modern web** | JavaScript, TypeScript, JSX, TSX, Vue, Svelte |
+| **Systems** | Python, Go, Rust, C, C++, Zig |
+| **JVM** | Java, Kotlin, Scala |
+| **Apple / cross-platform** | Swift, Objective-C, Dart |
+| **Scripting** | Ruby, PHP, Lua, Elixir, Julia, Bash, PowerShell |
+| **Legacy / enterprise** | COBOL (`.cbl`, `.cob`), copybooks (`.cpy`), C# |
+
+Extraction uses Python AST for `.py`, tree-sitter when available for other supported languages, and regex fallback when a parser is unavailable.
+
+---
+
+## Document Ingestion
+
+Skilgen accepts requirements and planning inputs in the formats teams actually use:
+
+`.md` · `.markdown` · `.txt` · `.rst` · `.log` · `.docx` · `.pdf` · `.pptx` · `.xlsx` · `.html` · `.htm` · `.json` · `.yaml` · `.yml` · `.xml` · `.csv` · `.tsv` · `.toml` · `.ini` · `.cfg`
 
 ```bash
-skilgen intent --requirements docs/product-requirements.docx
+skilgen deliver --requirements docs/PRD.docx
+skilgen deliver --requirements specs/architecture.pdf
+skilgen deliver --requirements planning/roadmap.xlsx
 ```
 
-Build a feature model from the repo and requirements:
+---
+
+## BYO Model
+
+Phase 1 corpus indexing never touches an LLM. For model-backed synthesis, Skilgen can target private endpoints so the source leaves only the network boundary you choose.
+
+```yaml
+# Azure OpenAI
+model_provider: azure_openai
+model: gpt-4o
+model_endpoint: https://your-org.openai.azure.com/
+model_extra_kwargs:
+  api_version: "2024-05-01-preview"
+api_key_env: AZURE_OPENAI_API_KEY
+```
+
+```yaml
+# AWS Bedrock
+model_provider: bedrock
+model: anthropic.claude-3-5-sonnet-20241022-v2:0
+model_extra_kwargs:
+  region: us-east-1
+```
+
+```yaml
+# Ollama
+model_provider: ollama
+model: llama3.1:70b
+model_endpoint: http://gpu-cluster.internal:11434
+```
+
+```yaml
+# Any OpenAI-compatible private gateway
+model_provider: openai_compatible
+model: your-internal-model
+model_endpoint: https://ai-gateway.your-org.internal/v1
+api_key_env: MODEL_API_KEY
+```
+
+Public providers also supported: `openai`, `anthropic`, `gemini`, `google_genai`, `huggingface`, `groq`, and `openrouter`.
+
+---
+
+## Enterprise Governance
 
 ```bash
-skilgen features --requirements docs/product-requirements.docx --project-root .
+skilgen enterprise ingest --source https://skills.your-org.internal/backend-standards
+skilgen skills policy --project-root .
+skilgen skills rank --project-root .
 ```
 
-Build a roadmap:
+Skilgen combines repo-native context with enterprise controls:
+- private enterprise skill ingestion from paths, Git sources, or URLs
+- approved MCP connector policy packs with allowlists, denylists, and OAuth requirements
+- traceable connector activation and ranked external skill ecosystems
 
-```bash
-skilgen plan --requirements docs/product-requirements.docx --project-root .
-```
+---
 
-Generate the full skills system from codebase + requirements:
-
-```bash
-skilgen deliver --requirements docs/product-requirements.docx --project-root .
-```
-
-## Progress Feedback
-
-Skilgen explains long-running work in plain English while it runs.
-
-CLI example:
+## Generated Outputs
 
 ```text
-[skilgen] Starting delivery with the model_backed runtime. This may take a bit while Skilgen builds project context and generates the final skill tree.
-[skilgen] Reading your codebase and requirements and loading the Skilgen project configuration.
-[skilgen] Building project context so agents can understand the repo structure and delivery scope.
-[skilgen] Inspecting the codebase to identify frameworks, domains, and implementation patterns.
-[skilgen] Generating project docs so coding agents have clear context, traceability, and operating guidance.
-[skilgen] Materializing backend, frontend, requirements, and roadmap skills for coding agents.
-[skilgen] Finished delivery. Generated or refreshed 24 files.
-```
-
-API example:
-
-```json
-{
-  "api_version": "1.0",
-  "runtime": "model_backed",
-  "runtime_diagnostics": {
-    "provider": "openai",
-    "model": "gpt-4.1-mini",
-    "api_key_present": true
-  },
-  "events": [
-    {"message": "Reading your codebase and requirements and loading the Skilgen project configuration."},
-    {"message": "Building project context so agents can understand the repo structure and delivery scope."},
-    {"message": "Generating project docs so coding agents have clear context, traceability, and operating guidance."}
-  ],
-  "generated_files": [
-    "AGENTS.md",
-    "FEATURES.md",
-    "skills/MANIFEST.md"
-  ]
-}
-```
-
-Background jobs expose the same style of progress through job status:
-- `progress` for a simple numeric indicator
-- `message` for the current step
-- `events` for the history of user-facing updates
-
-Feature synthesis example:
-
-```text
-[skilgen] Starting feature synthesis with the model_backed runtime. Skilgen is reading the project context to identify the capabilities that matter.
-[skilgen] Reading the codebase and optional requirements to identify product capabilities.
-[skilgen] Grouping detected backend, frontend, and planning signals into a reusable feature inventory.
-```
-
-Roadmap planning example:
-
-```text
-[skilgen] Starting roadmap planning with the model_backed runtime. Skilgen is turning project context into a staged implementation plan.
-[skilgen] Reading project scope and available inputs for roadmap planning.
-[skilgen] Synthesizing implementation phases and sequencing the next delivery steps.
-```
-
-## Core Commands
-
-- `skilgen init` writes a default `skilgen.yml`
-- `skilgen doctor` explains runtime readiness, provider setup, and missing credentials
-- `skilgen fingerprint` detects the likely stack of the current codebase
-- `skilgen intent` interprets a requirements document into structured intent
-- `skilgen features` builds a feature inventory from a codebase, requirements, or both
-- `skilgen plan` generates a roadmap view from a codebase, requirements, or both
-- `skilgen decide` tells agents whether to refresh skills, which domains to prioritize, and which memory files to load
-- `skilgen scan` generates docs and skills from the codebase and optionally a requirements file
-- `skilgen deliver` runs the main generation flow with or without a requirements file
-
-## Example Output
-
-```text
-.
+your-repo/
 ├── AGENTS.md
-├── ANALYSIS.md
+├── ARCHITECTURE.md
 ├── FEATURES.md
 ├── REPORT.md
 ├── TRACEABILITY.md
-├── .skilgen
-│   ├── state
-│   │   └── freshness.json
-│   └── memory
-│       ├── current_run.json
-│       └── runs
-│           └── <run_id>.json
+├── skilgen-dashboard.html
 ├── skilgen.yml
-└── skills
-    ├── MANIFEST.md
-    ├── GRAPH.md
-    ├── requirements
-    ├── roadmap
-    ├── ...dynamically generated domain families
-    └── ...additional inferred child skills
+├── skills/
+│   ├── MANIFEST.md
+│   ├── GRAPH.md
+│   └── [domain]/
+│       ├── SKILL.md
+│       └── [subdomain]/SKILL.md
+└── .skilgen/
+    ├── corpus/index.json
+    ├── state/
+    └── memory/
 ```
 
-## First-Class Examples
-
-- `examples/codebase-only/README.md`: minimal repo scan without a requirements document
-- `examples/requirements-only/README.md`: requirements-driven generation from a spec alone
-- `examples/codebase-and-requirements/README.md`: combined high-fidelity generation flow
-
-## Model Configuration
-
-Skilgen reads runtime settings from `skilgen.yml`.
-
-```yaml
-include_paths:
-  - .
-exclude_paths:
-  - .git
-  - __pycache__
-  - .venv
-  - node_modules
-domains_override:
-skill_depth: 2
-update_trigger: manual
-langsmith_project:
-# Set these to your preferred provider. For example:
-# openai / gpt-4.1-mini / OPENAI_API_KEY
-# anthropic / claude-sonnet-4-5 / ANTHROPIC_API_KEY
-# gemini / gemini-2.5-pro / GOOGLE_API_KEY
-# huggingface / meta-llama/Llama-3.1-70B-Instruct / HUGGINGFACEHUB_API_TOKEN
-model_provider:
-model:
-api_key_env:
-model_temperature:
-model_max_tokens:
-model_retry_attempts: 3
-model_retry_base_delay_seconds: 1.0
-```
-
-Supported `model_provider` values:
-- `openai`
-- `anthropic`
-- `gemini`
-- `google`
-- `google_genai`
-- `huggingface`
-- `hugging_face`
-- `hf`
-
-Default API key environment mapping:
-- `openai` -> `OPENAI_API_KEY`
-- `anthropic` -> `ANTHROPIC_API_KEY`
-- `gemini` / `google_genai` -> `GOOGLE_API_KEY`
-- `huggingface` -> `HUGGINGFACEHUB_API_TOKEN`
-
-Important:
-- Without a valid provider API key, Skilgen will not use LLMs.
-- In that case, it runs in local fallback mode for analysis and generation.
-- Local fallback mode is faster, but it does not have the same reasoning depth or synthesis quality as the full model-backed path.
-- Skilgen retries transient provider failures such as rate limits, timeouts, and temporary upstream outages.
-- Use `model_retry_attempts` and `model_retry_base_delay_seconds` when you want to tune model-backed resilience.
-
-Example Anthropic config:
-
-```yaml
-model_provider: anthropic
-model: claude-sonnet-4-5
-api_key_env: ANTHROPIC_API_KEY
-model_temperature: 0.1
-model_max_tokens: 4096
-```
-
-Example Gemini config:
-
-```yaml
-model_provider: gemini
-model: gemini-2.5-pro
-api_key_env: GOOGLE_API_KEY
-```
-
-Example Hugging Face config:
-
-```yaml
-model_provider: huggingface
-model: meta-llama/Llama-3.1-70B-Instruct
-api_key_env: HUGGINGFACEHUB_API_TOKEN
-```
+---
 
 ## How It Works
 
-1. Read the codebase, the requirements source, or both.
-2. Interpret product intent and implementation shape.
-3. Infer a dynamic domain graph and choose the right skill topology.
-4. Build feature, roadmap, traceability, and agent guidance.
-5. Persist freshness state and in-flight run memory.
-6. Generate project docs and materialize a reusable `skills/` tree.
+```mermaid
+flowchart TD
+    A[Install Skilgen] --> B[skilgen init]
+    B --> C[skilgen index]
+    C --> D[skilgen deliver]
+    D --> E[AGENTS.md, skills, ARCHITECTURE.md, dashboard]
+    E --> F[Codex, Claude Code, Cursor, Copilot read repo-local files]
+    F --> G[Code changes]
+    G --> H[Skilgen diff and freshness detect drift]
+    H -->|refresh| D
+```
 
-That means the same repo can become:
-- planning context for humans
-- execution guidance for agents
-- a project memory layer that evolves with the codebase
-- a freshness-aware system that knows when skills should be refreshed
-- a quality layer that helps agents choose stronger patterns and produce better code
+1. **Index**: Phase 1 reads every non-excluded file with AST and text extraction. No LLM. Cached.
+2. **Synthesize**: Phase 2 deep-reads the most architecturally significant files and builds evidence-backed architecture.
+3. **Generate**: Skills, docs, reports, and dashboard outputs are materialized from evidence.
+4. **Stay current**: Freshness tracking and diff signals tell you when the skill system has drifted.
+
+---
 
 ## Best For
 
-- AI-first developer tools
-- fast-moving startup repos
-- greenfield products starting from a PRD
-- existing codebases that need better agent context
-- teams that want reusable backend, frontend, and roadmap guidance in one place
+- engineering orgs with multiple teams sharing a codebase
+- polyglot repos mixing modern and legacy languages
+- enterprises with private model endpoints and data residency requirements
+- teams using multiple AI coding tools and wanting one consistent repo-local context layer
+- large codebases where agents keep rediscovering the same architecture every session
+- repos where a wrong architectural assumption is expensive
 
-## Status
+---
 
-- OpenAI has been tested live in this repo
-- Anthropic, Gemini, and Hugging Face are wired through config and dependencies
-- provider-aware error handling is built in for auth failures, rate limits, missing models, and transient upstream issues
-- use `--project-root` to point Skilgen at any codebase
-- `--requirements` is optional for `features`, `plan`, `scan`, and `deliver`
-- `decide` uses freshness, run memory, and the inferred domain graph to guide the next agent step
-- skill families can now expand beyond the original fixed seed taxonomy when the repo structure demands it
-- replace `docs/product-requirements.docx` with your own requirements path when you want requirements-aware generation
-- Skilgen now persists `.skilgen/state/` and `.skilgen/memory/` to support selective refresh and continuity
-- run `skilgen doctor --project-root .` when you want to verify provider setup before a model-backed run
-- for full model-backed quality, set a supported provider API key before running Skilgen
+## Docs
+
+- [`docs/architecture-mode.md`](docs/architecture-mode.md) - architecture synthesis deep dive
+- [`docs/evidence-graph.md`](docs/evidence-graph.md) - how evidence is extracted and selected
+- [`docs/score.md`](docs/score.md) - Skilgen Score methodology
+- [`docs/diff-and-autoupdate.md`](docs/diff-and-autoupdate.md) - freshness and drift detection
+- [`docs/enterprise-governance.md`](docs/enterprise-governance.md) - private endpoints, MCP policy, and enterprise skill controls
+- [`docs/examples/README.md`](docs/examples/README.md) - generated dashboard examples
+- [`RELEASE_NOTES_v0.6.0.md`](RELEASE_NOTES_v0.6.0.md) - what shipped in v0.6.0
+
+## Examples
+
+- [`examples/legacy-cobol/README.md`](examples/legacy-cobol/README.md) - COBOL and copybooks
+- [`examples/polyglot-repo/README.md`](examples/polyglot-repo/README.md) - Java, Python, and Go
+- [`examples/enterprise-repo/README.md`](examples/enterprise-repo/README.md) - private model endpoints and enterprise skills
+- [`examples/github-actions/README.md`](examples/github-actions/README.md) - CI score-gating patterns
+
+---
 
 ## Contributing
 
-- Open a bug report or feature request with the issue templates in `.github/ISSUE_TEMPLATE/`
-- Use pull requests for all changes to `main`
-- Run `python -m unittest discover -s tests` before opening a PR
-- If backend behavior changes, test every affected endpoint on both happy and failure paths
-- See `CHANGELOG.md` for release history and upcoming release notes
+```bash
+python -m pip install -e .
+python -m unittest discover -s tests
+```
+
+Open a pull request and run the relevant tests before pushing. This repo does not currently ship a separate linter or formatter target, so at minimum run the unit tests and smoke-test the CLI path you changed before opening the PR. See [`CHANGELOG.md`](CHANGELOG.md) for release history.

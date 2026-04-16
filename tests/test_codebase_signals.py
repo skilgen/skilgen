@@ -2,7 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from skilgen.agents.codebase_signals import analyze_codebase
+from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence
 
 
 class CodebaseSignalsTests(unittest.TestCase):
@@ -45,6 +45,93 @@ class CodebaseSignalsTests(unittest.TestCase):
             self.assertIn("auth/session.py", signals.auth_files)
             self.assertIn("src/state/appStore.ts", signals.state_files)
             self.assertIn("src/theme/tokens.ts", signals.design_system_files)
+            self.assertEqual(signals.language_inventory["python"], 7)
+            self.assertEqual(signals.language_inventory["typescript-react"], 2)
+            self.assertEqual(signals.language_inventory["typescript"], 2)
+
+    def test_analyze_codebase_detects_cobol_copybooks_and_language_inventory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "cobol" / "transactions").mkdir(parents=True)
+            (root / "cobol" / "transactions" / "customer_lookup.cbl").write_text(
+                "IDENTIFICATION DIVISION.\nPROGRAM-ID. CUSTOMER-LOOKUP.\nPROCEDURE DIVISION.\nDISPLAY 'OK'.\n",
+                encoding="utf-8",
+            )
+            (root / "batch").mkdir(parents=True)
+            (root / "batch" / "nightly_job.cob").write_text(
+                "IDENTIFICATION DIVISION.\nPROGRAM-ID. NIGHTLY-JOB.\nPROCEDURE DIVISION.\nSTOP RUN.\n",
+                encoding="utf-8",
+            )
+            (root / "copybooks").mkdir(parents=True)
+            (root / "copybooks" / "customer_record.cpy").write_text(
+                "01 CUSTOMER-RECORD.\n   05 CUSTOMER-ID PIC X(10).\n",
+                encoding="utf-8",
+            )
+
+            signals = analyze_codebase(root)
+
+            self.assertIn("cobol/transactions/customer_lookup.cbl", signals.backend_routes)
+            self.assertIn("cobol/transactions/customer_lookup.cbl", signals.services)
+            self.assertIn("batch/nightly_job.cob", signals.background_jobs)
+            self.assertIn("copybooks/customer_record.cpy", signals.copybooks)
+            self.assertIn("copybooks/customer_record.cpy", signals.data_models)
+            self.assertIn("cobol/transactions/customer_lookup.cbl", signals.legacy_programs)
+            self.assertEqual(signals.language_inventory["cobol"], 2)
+            self.assertEqual(signals.language_inventory["copybook"], 1)
+
+    def test_collect_code_evidence_reads_real_source_snippets(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "cobol").mkdir(parents=True)
+            (root / "cobol" / "customer_lookup.cbl").write_text(
+                "IDENTIFICATION DIVISION.\nPROGRAM-ID. CUSTOMER-LOOKUP.\nPROCEDURE DIVISION.\nDISPLAY 'OK'.\n",
+                encoding="utf-8",
+            )
+
+            evidence = collect_code_evidence(root, limit=5)
+
+            self.assertTrue(evidence)
+            self.assertEqual(evidence[0]["language"], "cobol")
+            self.assertIn("PROGRAM-ID. CUSTOMER-LOOKUP.", evidence[0]["snippet"])
+
+    def test_collect_structural_evidence_extracts_symbols_and_sections(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "services").mkdir(parents=True)
+            (root / "services" / "users_service.py").write_text(
+                "import os\n\nclass UserService:\n    pass\n\ndef run_sync():\n    return True\n",
+                encoding="utf-8",
+            )
+            (root / "cobol").mkdir(parents=True)
+            (root / "cobol" / "billing.cbl").write_text(
+                "IDENTIFICATION DIVISION.\nPROGRAM-ID. BILLING.\nWORKING-STORAGE SECTION.\nPROCEDURE DIVISION.\nCOPY CUSTOMER-REC.\n",
+                encoding="utf-8",
+            )
+
+            evidence = collect_structural_evidence(root, limit=10)
+
+            evidence_by_path = {item["path"]: item for item in evidence}
+            self.assertIn("services/users_service.py", evidence_by_path)
+            self.assertIn("cobol/billing.cbl", evidence_by_path)
+            self.assertIn("class UserService", evidence_by_path["services/users_service.py"]["snippet"])
+            self.assertIn("function run_sync", evidence_by_path["services/users_service.py"]["snippet"])
+            self.assertIn("program BILLING", evidence_by_path["cobol/billing.cbl"]["snippet"])
+            self.assertIn("copy CUSTOMER-REC", evidence_by_path["cobol/billing.cbl"]["snippet"])
+
+    def test_collect_code_evidence_ignores_external_skill_sources(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "app.py").write_text("def run():\n    return True\n", encoding="utf-8")
+            external = root / ".skilgen" / "external-skills" / "sources" / "anthropic-skills" / "skills" / "docx" / "scripts"
+            external.mkdir(parents=True)
+            (external / "pack.py").write_text("def pack():\n    return True\n", encoding="utf-8")
+
+            evidence = collect_code_evidence(root, limit=10)
+            paths = {item["path"] for item in evidence}
+
+            self.assertIn("src/app.py", paths)
+            self.assertNotIn(".skilgen/external-skills/sources/anthropic-skills/skills/docx/scripts/pack.py", paths)
 
 
 if __name__ == "__main__":

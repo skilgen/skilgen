@@ -39,6 +39,26 @@ def _needs_bidirectional_check(root: Path, source: Path, target: Path) -> bool:
     return True
 
 
+def _skill_paths(root: Path) -> set[str]:
+    skills_root = root / "skills"
+    if not skills_root.exists():
+        return set()
+    return {path.relative_to(root).as_posix() for path in skills_root.rglob("SKILL.md")}
+
+
+def _has_skill_matching(skill_paths: set[str], *suffixes: str) -> bool:
+    return any(path.endswith(suffix) for path in skill_paths for suffix in suffixes)
+
+
+def _repo_native_top_level_skills(skill_paths: set[str]) -> set[str]:
+    top_level: set[str] = set()
+    for path in skill_paths:
+        parts = Path(path).parts
+        if len(parts) >= 3 and parts[0] == "skills":
+            top_level.add(parts[1])
+    return top_level
+
+
 def validate_project(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root).resolve()
     errors: list[str] = []
@@ -46,6 +66,20 @@ def validate_project(project_root: str | Path) -> dict[str, object]:
     recommendations: list[str] = []
     manifest = root / "skills" / "MANIFEST.md"
     agents_contract = root / "AGENTS.md"
+    skill_paths = _skill_paths(root)
+    top_level_skills = _repo_native_top_level_skills(skill_paths)
+    generic_domains = {
+        "backend",
+        "frontend",
+        "roadmap",
+        "requirements",
+        "platform",
+        "security",
+        "design-system",
+        "operations",
+        "data-platform",
+    }
+    repo_native_app = bool(top_level_skills - generic_domains)
     if not manifest.exists():
         errors.append("skills/MANIFEST.md is missing")
     if not (root / "skills" / "GRAPH.md").exists():
@@ -82,34 +116,46 @@ def validate_project(project_root: str | Path) -> dict[str, object]:
     if diagnostics["runtime"] != "model_backed":
         warnings.append(f"Model-backed runtime is not ready: {diagnostics['reason']}")
         recommendations.extend(diagnostics["recommendations"])
-    if signals.backend_routes and not (root / "skills" / "backend" / "routes" / "SKILL.md").exists():
+    if signals.backend_routes and not repo_native_app and not (root / "skills" / "backend" / "routes" / "SKILL.md").exists():
         warnings.append("Backend route files were detected but skills/backend/routes/SKILL.md is missing")
-    if signals.services and not (root / "skills" / "backend" / "services" / "SKILL.md").exists():
+    if signals.services and not repo_native_app and not (root / "skills" / "backend" / "services" / "SKILL.md").exists():
         warnings.append("Service files were detected but skills/backend/services/SKILL.md is missing")
     if signals.backend_routes and not signals.tests:
         warnings.append("Backend route files were detected but no test files were found")
-    if signals.frontend_routes and not (root / "skills" / "frontend" / "routes" / "SKILL.md").exists():
+    if signals.frontend_routes and not repo_native_app and not (root / "skills" / "frontend" / "routes" / "SKILL.md").exists():
         warnings.append("Frontend route files were detected but skills/frontend/routes/SKILL.md is missing")
     if signals.data_models and not (root / "TRACEABILITY.md").exists():
         warnings.append("Data model files were detected but TRACEABILITY.md is missing")
-    if signals.persistence_layers and not (root / "skills" / "backend" / "services" / "SKILL.md").exists():
+    if signals.persistence_layers and not repo_native_app and not (root / "skills" / "backend" / "services" / "SKILL.md").exists():
         warnings.append("Persistence files were detected but backend service guidance is missing")
-    if signals.auth_files and not (root / "skills" / "backend" / "SKILL.md").exists():
+    auth_guidance_present = _has_skill_matching(
+        skill_paths,
+        "skills/backend/SKILL.md",
+        "skills/api/SKILL.md",
+        "skills/client/SKILL.md",
+        "skills/packages/SKILL.md",
+        "/auth/SKILL.md",
+        "/security/SKILL.md",
+    )
+    if signals.auth_files and not auth_guidance_present and not repo_native_app:
         warnings.append("Auth files were detected but backend guidance is missing")
-    if signals.state_files and not (root / "skills" / "frontend" / "SKILL.md").exists():
+    if signals.state_files and not repo_native_app and not _has_skill_matching(skill_paths, "skills/frontend/SKILL.md", "/state/SKILL.md"):
         warnings.append("State files were detected but frontend guidance is missing")
-    if signals.design_system_files and not (root / "skills" / "frontend" / "components" / "SKILL.md").exists():
+    if signals.design_system_files and not repo_native_app and not _has_skill_matching(skill_paths, "skills/frontend/components/SKILL.md", "/design-system/SKILL.md", "/components/SKILL.md"):
         warnings.append("Design system files were detected but frontend component guidance is missing")
     if agents_contract.exists():
         contract_text = agents_contract.read_text(encoding="utf-8")
         required_refs = [
             "skills/MANIFEST.md",
-            "skills/requirements/SKILL.md",
             "skills/roadmap/SKILL.md",
         ]
-        if signals.backend_routes or signals.services or signals.auth_files:
+        if (root / "skills" / "requirements" / "SKILL.md").exists():
+            required_refs.append("skills/requirements/SKILL.md")
+        if (signals.backend_routes or signals.services) and not repo_native_app:
             required_refs.append("skills/backend/SKILL.md")
-        if signals.frontend_routes or signals.components or signals.state_files:
+        elif signals.auth_files and not auth_guidance_present and not repo_native_app:
+            required_refs.append("skills/backend/SKILL.md")
+        if (signals.frontend_routes or signals.components or signals.state_files) and not repo_native_app:
             required_refs.append("skills/frontend/SKILL.md")
         for required_ref in required_refs:
             if required_ref not in contract_text:

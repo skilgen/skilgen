@@ -3,7 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from skilgen.core.repo_state import classify_repo_change
-from skilgen.core.score import compute_skillgen_score
+from skilgen.core.score import compute_skillgen_score, load_score_history, record_score_history, score_history_payload
 
 
 class ScoreTests(unittest.TestCase):
@@ -112,6 +112,112 @@ class ScoreTests(unittest.TestCase):
         }
         payload = classify_repo_change(previous, current)
         self.assertEqual(payload["event_type"], "merge_commit")
+
+    def test_score_history_tracks_trends(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "app.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+            record_score_history(root, source="delivery")
+            (root / "skills").mkdir()
+            (root / "skills" / "backend").mkdir()
+            (root / "skills" / "backend" / "SKILL.md").write_text("# Backend\n", encoding="utf-8")
+            (root / "skills" / "backend" / "SUMMARY.md").write_text("# Summary\n", encoding="utf-8")
+            (root / "skills" / "MANIFEST.md").write_text("# Manifest\n", encoding="utf-8")
+            (root / "skills" / "GRAPH.md").write_text("# Graph\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text("# Agents\n", encoding="utf-8")
+            (root / "FEATURES.md").write_text("# Features\n", encoding="utf-8")
+            (root / "TRACEABILITY.md").write_text("# Traceability\n", encoding="utf-8")
+            record_score_history(root, source="score")
+
+            history = load_score_history(root, limit=5)
+            payload = score_history_payload(root, limit=5)
+
+            self.assertEqual(len(history), 2)
+            self.assertIn("trend", payload)
+            self.assertIn("delta_from_previous", payload["trend"])
+
+    def test_coverage_ignores_non_code_repo_files(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "scan.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            (root / "README.md").write_text("# Project\n", encoding="utf-8")
+            (root / "docs").mkdir()
+            (root / "docs" / "notes.md").write_text("notes\n", encoding="utf-8")
+            (root / ".github").mkdir()
+            (root / ".github" / "workflow.yml").write_text("name: CI\n", encoding="utf-8")
+            (root / "skills" / "backend").mkdir(parents=True)
+            (root / "skills" / "backend" / "SKILL.md").write_text(
+                "\n".join(
+                    [
+                        "# Backend",
+                        "references:",
+                        "- ../MANIFEST.md",
+                        "## Check These Paths First",
+                        "- {{project_root}}/api/routes/scan.py",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "skills" / "backend" / "SUMMARY.md").write_text("Backend summary\n", encoding="utf-8")
+            (root / "skills" / "MANIFEST.md").write_text("# Manifest\n", encoding="utf-8")
+            (root / "skills" / "GRAPH.md").write_text("# Graph\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text("# Agents\n", encoding="utf-8")
+            (root / "FEATURES.md").write_text("# Features\n", encoding="utf-8")
+            (root / "TRACEABILITY.md").write_text("# Traceability\n", encoding="utf-8")
+
+            payload = compute_skillgen_score(root)
+
+            self.assertEqual(payload["subscores"]["coverage"]["source_file_count"], 1)
+            self.assertEqual(payload["subscores"]["coverage"]["mapped_file_count"], 1)
+            self.assertEqual(payload["subscores"]["coverage"]["coverage_ratio"], 1.0)
+
+    def test_coverage_uses_logical_code_areas_for_repo_scale(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "skilgen").mkdir(parents=True, exist_ok=True)
+            (root / "skilgen" / "__init__.py").write_text("", encoding="utf-8")
+            (root / "skilgen" / "api").mkdir(parents=True)
+            (root / "skilgen" / "core").mkdir(parents=True)
+            (root / "tests").mkdir()
+            (root / "scripts").mkdir()
+            (root / "skilgen" / "api" / "server.py").write_text("def serve():\n    return None\n", encoding="utf-8")
+            (root / "skilgen" / "api" / "service.py").write_text("def service():\n    return None\n", encoding="utf-8")
+            (root / "skilgen" / "core" / "config.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (root / "tests" / "test_api.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+            (root / "scripts" / "run_pipeline.py").write_text("print('ok')\n", encoding="utf-8")
+            (root / "setup.py").write_text("from setuptools import setup\n", encoding="utf-8")
+            (root / "skills" / "backend").mkdir(parents=True)
+            (root / "skills" / "backend" / "SKILL.md").write_text(
+                "\n".join(
+                    [
+                        "# Backend",
+                        "references:",
+                        "- ../MANIFEST.md",
+                        "## Check These Paths First",
+                        "- {{project_root}}/skilgen/api/server.py",
+                        "- {{project_root}}/tests/test_api.py",
+                        "- {{project_root}}/scripts/run_pipeline.py",
+                        "- {{project_root}}/setup.py",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "skills" / "backend" / "SUMMARY.md").write_text("Backend summary\n", encoding="utf-8")
+            (root / "skills" / "MANIFEST.md").write_text("# Manifest\n", encoding="utf-8")
+            (root / "skills" / "GRAPH.md").write_text("# Graph\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text("# Agents\n", encoding="utf-8")
+            (root / "FEATURES.md").write_text("# Features\n", encoding="utf-8")
+            (root / "TRACEABILITY.md").write_text("# Traceability\n", encoding="utf-8")
+
+            payload = compute_skillgen_score(root)
+            coverage = payload["subscores"]["coverage"]
+
+            self.assertEqual(coverage["source_file_count"], 7)
+            self.assertEqual(coverage["source_unit_count"], 6)
+            self.assertGreaterEqual(coverage["mapped_unit_count"], 2)
+            self.assertGreater(coverage["coverage_ratio"], 0.2)
 
 
 if __name__ == "__main__":

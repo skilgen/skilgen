@@ -5,17 +5,21 @@ from pathlib import Path
 from typing import Callable
 
 from skilgen.agents import build_agent_decision, fingerprint_project
+from skilgen.core.analytics import log_skill_usage
 from skilgen.core.config import load_config
 from skilgen.core.context import build_codebase_context
+from skilgen.core.corpus_index import ensure_corpus_index
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state, save_freshness_state, snapshot_freshness_state
+from skilgen.core.generated_outputs import is_generated_output_path
 from skilgen.core.models import RunMemory
 from skilgen.core.repo_state import classify_repo_change, git_repo_state
 from skilgen.core.run_memory import append_run_event, create_run_memory, finalize_run_memory
+from skilgen.core.score import record_score_history
 from skilgen.deep_agents_core import current_runtime_mode
 from skilgen.enterprise_skills import ensure_enterprise_skills_for_project
 from skilgen.external_skills import ensure_external_skills_for_project
 from skilgen.core.requirements import load_project_context
-from skilgen.generators.package import project_doc_paths, write_project_docs
+from skilgen.generators.package import project_doc_paths, write_dashboard_doc, write_project_docs
 from skilgen.generators.skills import planned_skill_paths, write_skills
 
 
@@ -34,12 +38,16 @@ def run_delivery(
     targets: tuple[str, ...] = ("docs", "skills"),
     domains: tuple[str, ...] = (),
     dry_run: bool = False,
+    skip_index: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> list[Path]:
     root = Path(project_root).resolve()
     input_mode = "codebase and requirements" if requirements_path is not None else "codebase only"
     _emit(progress_callback, f"Reading your {input_mode} and loading the Skilgen project configuration.")
     config = load_config(root)
+    if not skip_index and config.corpus.enabled:
+        _emit(progress_callback, "Indexing the full repository corpus so evidence selection covers every subsystem, config, and architecture doc.")
+        ensure_corpus_index(root, config)
     if config.auto_install_external_skills:
         _emit(progress_callback, "Scanning the repository for known external skill ecosystems that Skilgen can auto-install.")
         external_skill_summary = ensure_external_skills_for_project(root)
@@ -136,6 +144,7 @@ def run_delivery(
         f"Decision planner selected domains: {', '.join(decision.prioritized_domains) or 'none'}; "
         f"prioritized skills: {', '.join(decision.prioritized_skill_paths[:4]) or 'none'}."
     )
+    log_skill_usage(root, decision.prioritized_skill_paths, context="decision_planner")
     run_memory = append_run_event(root, run_memory, decision_message)
     _emit(progress_callback, decision_message)
     generated = []
@@ -149,7 +158,7 @@ def run_delivery(
             message = "Generating project docs so coding agents have clear context, traceability, and operating guidance."
             run_memory = append_run_event(root, run_memory, message)
             _emit(progress_callback, message)
-            generated.extend(write_project_docs(context, root))
+            generated.extend(write_project_docs(context, root, progress_callback=progress_callback))
     if "skills" in targets:
         if not explicit_domains and not decision.should_refresh:
             message = "Decision planner recommends reusing the current skills. Skipping skill regeneration for this run."
@@ -169,11 +178,16 @@ def run_delivery(
             message = "Materializing backend, frontend, requirements, and roadmap skills for coding agents."
             run_memory = append_run_event(root, run_memory, message)
             _emit(progress_callback, message)
-            generated.extend(write_skills(context, root / "skills", selected_domains))
+            generated.extend(write_skills(context, root / "skills", selected_domains, progress_callback=progress_callback))
     if not dry_run:
         saved_context = load_project_context(root, Path(requirements_path).resolve() if requirements_path is not None else None)
-        saved_codebase_context = build_codebase_context(root, saved_context)
-        save_freshness_state(root, snapshot_freshness_state(root, saved_context, saved_codebase_context.domain_graph))
+        save_freshness_state(root, snapshot_freshness_state(root, saved_context, codebase_context.domain_graph))
+        record_score_history(root, source="delivery")
+        if "docs" in targets:
+            message = "Rendering the final dashboard HTML surface with graphs, score, freshness, and capability context."
+            run_memory = append_run_event(root, run_memory, message)
+            _emit(progress_callback, message)
+            generated.append(write_dashboard_doc(saved_context, root, progress_callback=progress_callback))
     run_memory = finalize_run_memory(root, run_memory, generated, "completed")
     message = f"Finished delivery. Generated or refreshed {len(generated)} files."
     run_memory = append_run_event(root, run_memory, message)
@@ -196,13 +210,15 @@ def watch_delivery(
 
     def snapshot() -> dict[str, object]:
         tracked: dict[str, int] = {}
+        ignored_parts = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build"}
         for path in root.rglob("*"):
             if not path.is_file():
                 continue
             relative = path.relative_to(root).as_posix()
-            if relative.startswith((".git/", "skills/", "__pycache__/")):
+            relative_parts = Path(relative).parts
+            if set(relative_parts) & ignored_parts:
                 continue
-            if path.name in {"ANALYSIS.md", "FEATURES.md", "REPORT.md"}:
+            if is_generated_output_path(relative):
                 continue
             tracked[relative] = path.stat().st_mtime_ns
         return {

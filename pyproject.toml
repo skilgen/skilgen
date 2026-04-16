@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skilgen"
-version = "0.5.0"
+version = "0.6.0"
 description = "Generate agent-readable project skills and starter scaffolds from requirements documents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,16 +23,23 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
+  "beautifulsoup4>=4.14.0",
   "deepagents>=0.4.11",
   "langchain>=1.0.0",
   "langchain-anthropic>=1.0.0",
   "langchain-google-genai>=4.2.0",
   "langchain-huggingface>=0.3.1",
   "langchain-openai>=1.0.0",
+  "openpyxl>=3.1.0",
+  "pypdf>=6.0.0",
+  "python-pptx>=1.0.0",
+  "PyYAML>=6.0.0",
+  "tree-sitter-language-pack>=0.10.0",
 ]
 
 [project.optional-dependencies]
 dev = ["build>=1.2", "twine>=5.1"]
+docs = ["mkdocs>=1.6", "mkdocs-material>=9.6"]
 
 [project.scripts]
 skilgen = "skilgen.cli.main:console_main"

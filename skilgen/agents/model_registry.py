@@ -11,14 +11,19 @@ DEFAULT_KEY_ENV = {
     "gemini": "GOOGLE_API_KEY",
     "google": "GOOGLE_API_KEY",
     "google_genai": "GOOGLE_API_KEY",
+    "azure": "AZURE_OPENAI_API_KEY",
+    "azure_openai": "AZURE_OPENAI_API_KEY",
     "huggingface": "HUGGINGFACEHUB_API_TOKEN",
     "hugging_face": "HUGGINGFACEHUB_API_TOKEN",
     "hf": "HUGGINGFACEHUB_API_TOKEN",
     "groq": "GROQ_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
+    "openai_compatible": "MODEL_API_KEY",
 }
 
-SUPPORTED_PROVIDERS = tuple(sorted({"openai", "anthropic", "google_genai", "huggingface", "groq", "openrouter"}))
+SUPPORTED_PROVIDERS = tuple(
+    sorted({"openai", "anthropic", "google_genai", "huggingface", "groq", "openrouter", "azure_openai", "bedrock", "ollama", "openai_compatible"})
+)
 
 
 def normalize_provider(provider: str | None) -> str:
@@ -26,24 +31,32 @@ def normalize_provider(provider: str | None) -> str:
     aliases = {
         "openai": "openai",
         "anthropic": "anthropic",
+        "azure": "azure_openai",
+        "azure_openai": "azure_openai",
         "gemini": "google_genai",
         "google": "google_genai",
         "google_genai": "google_genai",
         "huggingface": "huggingface",
         "hugging_face": "huggingface",
         "hf": "huggingface",
+        "bedrock": "bedrock",
+        "ollama": "ollama",
+        "openai-compatible": "openai_compatible",
+        "openai_compatible": "openai_compatible",
     }
     return aliases.get(raw, raw)
 
 
 def resolve_model_settings(config: SkilgenConfig) -> ModelSettings:
     provider = normalize_provider(config.model_provider)
-    api_key_env = config.api_key_env or DEFAULT_KEY_ENV.get(provider, "MODEL_API_KEY")
+    api_key_env = config.api_key_env if config.api_key_env is not None else DEFAULT_KEY_ENV.get(provider)
     return ModelSettings(
         provider=provider,
         model=config.model,
         api_key_env=api_key_env,
-        api_key_present=bool(os.getenv(api_key_env)),
+        api_key_present=bool(api_key_env and os.getenv(api_key_env)),
+        endpoint=config.model_endpoint,
+        extra_kwargs=dict(config.model_extra_kwargs),
         temperature=config.model_temperature,
         max_tokens=config.model_max_tokens,
         retry_attempts=config.model_retry_attempts,

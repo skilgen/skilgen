@@ -3,16 +3,21 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+import threading
+import time
 
 from skilgen.api.server import run_server
 from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
-from skilgen.api.service import analyze_payload, decision_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
+from skilgen.api.service import analytics_payload, analyze_payload, architecture_payload, dashboard_payload, decision_payload, diff_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
+from skilgen.core.analytics import log_skill_usage
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
+from skilgen.core.corpus_index import build_corpus_index
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
 from skilgen.enterprise_skills import (
@@ -49,6 +54,103 @@ def emit_progress(message: str) -> None:
     print(f"[skilgen] {message}", file=sys.stderr)
 
 
+@dataclass(frozen=True)
+class ProgressMilestone:
+    prefix: str
+    percent: int
+
+
+class CliProgressReporter:
+    _brand = "⬡⬢⬡"
+    _bar_width = 24
+    _frames = ("◜", "◠", "◝", "◞", "◡", "◟")
+    _milestones = (
+        ProgressMilestone("Starting delivery", 3),
+        ProgressMilestone("Model-backed runtime is not ready", 6),
+        ProgressMilestone("Reading your", 10),
+        ProgressMilestone("Scanning the repository", 18),
+        ProgressMilestone("Installed matching external skill packs", 24),
+        ProgressMilestone("Using already-installed external skill packs", 24),
+        ProgressMilestone("Ingested configured enterprise skill packs", 26),
+        ProgressMilestone("Using configured enterprise skill packs", 26),
+        ProgressMilestone("Activated recommended MCP connectors", 30),
+        ProgressMilestone("Building project context", 42),
+        ProgressMilestone("Inspecting the codebase", 54),
+        ProgressMilestone("Detected changes in", 64),
+        ProgressMilestone("No source changes were detected", 64),
+        ProgressMilestone("Decision planner selected domains", 72),
+        ProgressMilestone("Previewing the generated project docs", 78),
+        ProgressMilestone("Generating project docs", 78),
+        ProgressMilestone("Previewing the skill tree", 88),
+        ProgressMilestone("Materializing backend, frontend, requirements, and roadmap skills", 88),
+        ProgressMilestone("Decision planner recommends reusing", 88),
+        ProgressMilestone("Decision planner did not identify any concrete domains", 88),
+        ProgressMilestone("Finished delivery", 100),
+    )
+
+    def __init__(self) -> None:
+        self._last_percent = 0
+        self._current_message = ""
+        self._start_time = time.monotonic()
+        self._frame_index = 0
+        self._is_tty = sys.stderr.isatty()
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._spinner_thread: threading.Thread | None = None
+        if self._is_tty:
+            self._spinner_thread = threading.Thread(target=self._spin, name="skilgen-progress", daemon=True)
+            self._spinner_thread.start()
+
+    def emit(self, message: str) -> None:
+        with self._lock:
+            percent = self._infer_percent(message)
+            self._last_percent = max(self._last_percent, percent)
+            self._current_message = message
+            self._frame_index = (self._frame_index + 1) % len(self._frames)
+            line = self._render_line(self._last_percent, message, done=percent >= 100)
+        if self._is_tty:
+            print(f"\r{line}", file=sys.stderr, end="", flush=True)
+            if self._last_percent >= 100:
+                print(file=sys.stderr, flush=True)
+        else:
+            print(line, file=sys.stderr)
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._spinner_thread is not None:
+            self._spinner_thread.join(timeout=0.5)
+        if self._is_tty and self._current_message and self._last_percent < 100:
+            with self._lock:
+                print(f"\r{self._render_line(self._last_percent, self._current_message, done=True)}", file=sys.stderr)
+
+    def _infer_percent(self, message: str) -> int:
+        for milestone in self._milestones:
+            if message.startswith(milestone.prefix):
+                return milestone.percent
+        # Keep moving forward a bit for any uncatalogued progress messages.
+        return min(98, self._last_percent + 4)
+
+    def _elapsed(self) -> str:
+        elapsed = int(time.monotonic() - self._start_time)
+        minutes, seconds = divmod(elapsed, 60)
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def _render_line(self, percent: int, message: str, *, done: bool = False) -> str:
+        filled = round((percent / 100) * self._bar_width)
+        bar = "█" * filled + "░" * max(0, self._bar_width - filled)
+        frame = "●" if done else self._frames[self._frame_index]
+        return f"[skilgen {self._brand} {frame} {self._elapsed()}] {percent:>3}% |{bar}| {message}"
+
+    def _spin(self) -> None:
+        while not self._stop_event.wait(0.12):
+            with self._lock:
+                if not self._current_message:
+                    continue
+                self._frame_index = (self._frame_index + 1) % len(self._frames)
+                line = self._render_line(self._last_percent, self._current_message)
+            print(f"\r{line}", file=sys.stderr, end="", flush=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="skilgen", description="Requirements-driven skill and scaffold generator.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -58,9 +160,25 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--project-root", default=".")
     init.add_argument(
         "--provider",
-        choices=["openai", "anthropic", "gemini", "google", "google_genai", "huggingface", "hugging_face", "hf"],
+        choices=[
+            "openai",
+            "anthropic",
+            "gemini",
+            "google",
+            "google_genai",
+            "huggingface",
+            "hugging_face",
+            "hf",
+            "azure_openai",
+            "bedrock",
+            "ollama",
+            "openai_compatible",
+        ],
         help="Optionally scaffold provider-specific model defaults instead of a neutral template.",
     )
+
+    index = subparsers.add_parser("index", help="Build or refresh the full-corpus index used for deep evidence selection.")
+    index.add_argument("--project-root", default=".")
 
     scan = subparsers.add_parser("scan", help="Generate docs and skills from a requirements file.")
     scan.add_argument("--requirements")
@@ -68,6 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--target", choices=["all", "docs", "skills"], default="all")
     scan.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     scan.add_argument("--dry-run", action="store_true")
+    scan.add_argument("--skip-index", action="store_true")
 
     deliver = subparsers.add_parser("deliver", help="Alias for scan for now; intended to grow into full delivery automation.")
     deliver.add_argument("--requirements")
@@ -75,6 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     deliver.add_argument("--target", choices=["all", "docs", "skills"], default="all")
     deliver.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     deliver.add_argument("--dry-run", action="store_true")
+    deliver.add_argument("--skip-index", action="store_true")
 
     update = subparsers.add_parser("update", help="Refresh generated outputs for all or selected domains.")
     update.add_argument("--requirements")
@@ -82,6 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--target", choices=["all", "docs", "skills"], default="all")
     update.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     update.add_argument("--dry-run", action="store_true")
+    update.add_argument("--skip-index", action="store_true")
 
     watch = subparsers.add_parser("watch", help="Watch the project and rerun generation when files change.")
     watch.add_argument("--requirements")
@@ -125,6 +246,25 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = subparsers.add_parser("analyze", help="Assemble framework, signal, and relationship analysis for the project.")
     analyze.add_argument("--project-root", default=".")
     analyze.add_argument("--requirements")
+
+    diff = subparsers.add_parser("diff", help="Show what changed since the last generation and which skills are stale.")
+    diff.add_argument("--project-root", default=".")
+    diff.add_argument("--requirements")
+    diff.add_argument("--json", action="store_true")
+
+    architecture = subparsers.add_parser("architecture", help="Synthesize an evidence-backed architecture blueprint for the project.")
+    architecture.add_argument("--project-root", default=".")
+    architecture.add_argument("--requirements")
+    architecture.add_argument("--json", action="store_true", help="Emit the raw architecture payload as JSON.")
+    architecture.add_argument("--graph-file", help="Write the architecture graph export to a file.")
+    architecture.add_argument("--graph-format", choices=["mermaid", "json", "html"], default="mermaid")
+    architecture.add_argument("--skip-index", action="store_true")
+
+    dashboard = subparsers.add_parser("dashboard", help="Generate a branded HTML dashboard for the current Skilgen project state.")
+    dashboard.add_argument("--project-root", default=".")
+    dashboard.add_argument("--requirements")
+    dashboard.add_argument("--output", help="Write the dashboard HTML to a file. Defaults to <project-root>/skilgen-dashboard.html.")
+    dashboard.add_argument("--json", action="store_true", help="Emit the raw dashboard payload as JSON instead of writing HTML.")
 
     decide = subparsers.add_parser("decide", help="Recommend whether to refresh skills, which skills to prioritize, and which run memory to load.")
     decide.add_argument("--project-root", default=".")
@@ -209,6 +349,7 @@ def build_parser() -> argparse.ArgumentParser:
     enterprise_ingest.add_argument("--name", required=True)
     enterprise_ingest.add_argument("--path")
     enterprise_ingest.add_argument("--git-url")
+    enterprise_ingest.add_argument("--url")
     enterprise_ingest.add_argument("--ref")
     enterprise_ingest.add_argument("--kind", default="enterprise")
     enterprise_ingest.add_argument("--activate", action=argparse.BooleanOptionalAction, default=None)
@@ -253,6 +394,8 @@ def build_parser() -> argparse.ArgumentParser:
     score = subparsers.add_parser("score", help="Compute the Skilgen Score quality metric for the current skill tree.")
     score.add_argument("--project-root", default=".")
     score.add_argument("--badge-file")
+    score.add_argument("--history", action="store_true", help="Show recent score history and score trends instead of only the current score.")
+    score.add_argument("--history-limit", type=int, default=10)
 
     eval_cmd = subparsers.add_parser("eval", help="Scaffold or compare Skilgen evaluation runs.")
     eval_subparsers = eval_cmd.add_subparsers(dest="eval_command", required=True)
@@ -268,6 +411,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     report = subparsers.add_parser("report", help="Show a summary report for a project root.")
     report.add_argument("--project-root", default=".")
+
+    analytics = subparsers.add_parser("analytics", help="Summarize generated skill usage and load history.")
+    analytics.add_argument("--project-root", default=".")
+    analytics.add_argument("--limit", type=int, default=10)
+    analytics.add_argument("--record-skill", action="append", default=[], help="Record a real skill-load event for a repo skill path such as skills/backend/api/SKILL.md.")
+    analytics.add_argument("--event", default="loaded")
+    analytics.add_argument("--agent")
+    analytics.add_argument("--context", default="agent_runtime")
+    analytics.add_argument("--session-id")
+    analytics.add_argument("--task")
 
     validate = subparsers.add_parser("validate", help="Validate generated outputs and skill references.")
     validate.add_argument("--project-root", default=".")
@@ -292,6 +445,26 @@ def main() -> None:
             config_path.write_text(render_default_config(args.provider), encoding="utf-8")
         worker = ensure_auto_update_worker(project_root)
         print(json.dumps({"config_path": str(config_path), "auto_update": worker}, indent=2))
+        return
+    if args.command == "index":
+        root = Path(args.project_root).resolve()
+        emit_progress("Indexing the full repository corpus so Skilgen can sample architectural hubs, configs, docs, and isolated subsystems.")
+        payload = build_corpus_index(root)
+        counts = {"source": 0, "config": 0, "documentation": 0, "enterprise_document": 0, "other": 0}
+        for entry in payload["entries"]:
+            category = str(entry.get("category", "other"))
+            counts[category] = counts.get(category, 0) + 1
+        print(
+            json.dumps(
+                {
+                    "index_path": payload["cache_path"],
+                    "entry_count": len(payload["entries"]),
+                    "cluster_count": len(payload.get("clusters", {})),
+                    "counts": counts,
+                },
+                indent=2,
+            )
+        )
         return
     if args.command == "autoupdate":
         root = Path(args.project_root).resolve()
@@ -331,6 +504,112 @@ def main() -> None:
         return
     if args.command == "analyze":
         print(json.dumps(analyze_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None), indent=2))
+        return
+    if args.command == "diff":
+        payload = diff_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        elif payload["reason"] == "no_source_changes":
+            print(
+                "\n".join(
+                    [
+                        "Skilgen Diff - no source changes detected",
+                        "",
+                        f"  All skills are current. Freshness: {int(round(payload['freshness_score']))}/{payload['freshness_max']}",
+                    ]
+                )
+            )
+        elif payload["reason"] == "missing_freshness_state":
+            print(
+                "\n".join(
+                    [
+                        "Skilgen Diff - no previous generation found",
+                        "",
+                        "  Run `skilgen deliver` first to establish a baseline.",
+                    ]
+                )
+            )
+        else:
+            lines = [f"Skilgen Diff - {payload['changed_file_count']} files changed since last generation", ""]
+            lines.append("  Changed files:")
+            for item in payload["changed_files"]:
+                lines.append(f"    {item['change_type']:<9} {item['path']}")
+            lines.append("")
+            lines.append("  Impacted domains:")
+            for item in payload["impacted_domain_details"]:
+                if item["domain"] not in payload["impacted_domains"]:
+                    continue
+                marker = "STALE" if item["stale"] else "CURRENT"
+                path = item["skill_path"] or "-"
+                lines.append(f"    {item['domain']:<16} -> {path:<36} {marker}")
+            lines.append("")
+            lines.append(f"  Current: {', '.join(payload['current_domains']) or 'none'}")
+            lines.append(f"  Freshness: {int(round(payload['freshness_score']))}/{payload['freshness_max']}")
+            lines.append("")
+            lines.append("  Run `skilgen deliver` to refresh stale skills.")
+            print("\n".join(lines))
+        return
+    if args.command == "architecture":
+        root = Path(args.project_root).resolve()
+        emit_progress(
+            f"Collecting code, config, and requirements evidence with the {current_runtime_mode(root)} runtime before synthesizing the architecture blueprint."
+        )
+        payload = architecture_payload(root, Path(args.requirements).resolve() if args.requirements else None, skip_index=args.skip_index)
+        if args.graph_file:
+            graph_content = payload["graph_export"][args.graph_format]
+            graph_path = Path(args.graph_file).resolve()
+            graph_path.parent.mkdir(parents=True, exist_ok=True)
+            if args.graph_format == "json":
+                graph_path.write_text(json.dumps(graph_content, indent=2), encoding="utf-8")
+            else:
+                graph_path.write_text(str(graph_content), encoding="utf-8")
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(payload["report_markdown"])
+        return
+    if args.command == "dashboard":
+        root = Path(args.project_root).resolve()
+        emit_progress(
+            f"Building the branded Skilgen dashboard with the {current_runtime_mode(root)} runtime so you can inspect score, freshness, graphs, and agent readiness in one place."
+        )
+        payload = dashboard_payload(root, Path(args.requirements).resolve() if args.requirements else None)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+            return
+        output_path = Path(args.output).resolve() if args.output else (root / "skilgen-dashboard.html")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(str(payload["html"]), encoding="utf-8")
+        architecture = payload.get("architecture")
+        headline = f"Dashboard for {root.name}"
+        if isinstance(architecture, dict):
+            headline = str(architecture.get("headline") or headline)
+        score_info = payload.get("score")
+        score_value = 0
+        if isinstance(score_info, dict):
+            score_value = score_info.get("score", 0)
+        elif isinstance(score_info, (int, float)):
+            score_value = score_info
+        diff_info = payload.get("diff")
+        stale_skill_count = 0
+        if isinstance(diff_info, dict):
+            stale_skill_count = len(diff_info.get("stale_skill_paths", []))
+        graph_payload = payload.get("graph_export")
+        if not isinstance(graph_payload, dict):
+            graph_payload = payload.get("graphs")
+        graph_panels = sorted(graph_payload.keys()) if isinstance(graph_payload, dict) else []
+        print(
+            json.dumps(
+                {
+                    "dashboard_file": str(output_path),
+                    "headline": headline,
+                    "score": score_value,
+                    "stale_skill_count": stale_skill_count,
+                    "graph_panels": graph_panels,
+                },
+                indent=2,
+            )
+        )
         return
     if args.command == "decide":
         root = Path(args.project_root).resolve()
@@ -436,6 +715,7 @@ def main() -> None:
                             name=args.name,
                             path=args.path,
                             git_url=args.git_url,
+                            url=args.url,
                             ref=args.ref,
                             activate=args.activate,
                             kind=args.kind,
@@ -535,7 +815,7 @@ def main() -> None:
         return
     if args.command == "score":
         emit_progress("Computing the Skilgen Score from groundedness, coverage, freshness, and structure signals.")
-        print(json.dumps(score_payload(Path(args.project_root).resolve(), args.badge_file), indent=2))
+        print(json.dumps(score_payload(Path(args.project_root).resolve(), args.badge_file, history=args.history, history_limit=args.history_limit), indent=2))
         return
     if args.command == "eval":
         if args.eval_command == "scaffold":
@@ -551,6 +831,35 @@ def main() -> None:
         return
     if args.command == "report":
         print(json.dumps(report_payload(Path(args.project_root).resolve()), indent=2))
+        return
+    if args.command == "analytics":
+        root = Path(args.project_root).resolve()
+        if args.record_skill:
+            log_skill_usage(
+                root,
+                list(args.record_skill),
+                event=args.event,
+                agent=args.agent,
+                context=args.context,
+                session_id=args.session_id,
+                task=args.task,
+            )
+            print(
+                json.dumps(
+                    {
+                        "recorded": len(args.record_skill),
+                        "skills": list(args.record_skill),
+                        "event": args.event,
+                        "agent": args.agent,
+                        "context": args.context,
+                        "session_id": args.session_id,
+                        "task": args.task,
+                    },
+                    indent=2,
+                )
+            )
+            return
+        print(json.dumps(analytics_payload(root, limit=args.limit), indent=2))
         return
     if args.command == "doctor":
         payload = doctor_payload(Path(args.project_root).resolve())
@@ -582,38 +891,47 @@ def main() -> None:
 
     if args.command == "watch":
         root = Path(args.project_root).resolve()
+        watch_progress = CliProgressReporter()
         emit_progress(
             f"Starting watch mode with the {current_runtime_mode(root)} runtime. Skilgen will explain each refresh as changes are detected."
         )
-        runs = watch_delivery(
-            Path(args.requirements).resolve() if args.requirements else None,
-            root,
-            targets=targets,
-            domains=domains,
-            interval_seconds=args.interval,
-            cycles=args.cycles,
-            once=args.once,
-            progress_callback=emit_progress,
-        )
+        try:
+            runs = watch_delivery(
+                Path(args.requirements).resolve() if args.requirements else None,
+                root,
+                targets=targets,
+                domains=domains,
+                interval_seconds=args.interval,
+                cycles=args.cycles,
+                once=args.once,
+                progress_callback=watch_progress.emit,
+            )
+        finally:
+            watch_progress.stop()
         print(json.dumps({"runtime": current_runtime_mode(root), "runs": [[str(path) for path in generated] for generated in runs]}, indent=2))
         return
 
     root = Path(args.project_root).resolve()
     ensure_auto_update_worker(root, requirements_path=Path(args.requirements).resolve() if args.requirements else None)
     diagnostics = runtime_diagnostics(root)
-    emit_progress(
-        f"Starting delivery with the {current_runtime_mode(root)} runtime. This may take a bit while Skilgen builds project context and generates the final skill tree."
-    )
-    if diagnostics["runtime"] != "model_backed":
-        emit_progress(f"Model-backed runtime is not ready: {diagnostics['reason']}")
-    generated = run_delivery(
-        Path(args.requirements).resolve() if args.requirements else None,
-        root,
-        targets=targets,
-        domains=domains,
-        dry_run=args.dry_run,
-        progress_callback=emit_progress,
-    )
+    progress = CliProgressReporter()
+    try:
+        progress.emit(
+            f"Starting delivery with the {current_runtime_mode(root)} runtime. This may take a bit while Skilgen builds project context and generates the final skill tree."
+        )
+        if diagnostics["runtime"] != "model_backed":
+            progress.emit(f"Model-backed runtime is not ready: {diagnostics['reason']}")
+        generated = run_delivery(
+            Path(args.requirements).resolve() if args.requirements else None,
+            root,
+            targets=targets,
+            domains=domains,
+            dry_run=args.dry_run,
+            skip_index=args.skip_index,
+            progress_callback=progress.emit,
+        )
+    finally:
+        progress.stop()
     print(
         json.dumps(
             {

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
+from skilgen.agents.codebase_signals import CODE_EXTENSIONS, IGNORED_PARTS
 from skilgen.core.context import build_codebase_context
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state
 from skilgen.core.requirements import load_project_context
@@ -20,20 +22,44 @@ GENERIC_MARKERS = (
 )
 
 
+def _score_history_path(project_root: Path) -> Path:
+    return project_root / ".skilgen" / "state" / "score-history.jsonl"
+
+
+def _timestamp() -> str:
+    return datetime.now(UTC).isoformat()
+
+
 def _iter_source_files(project_root: Path) -> list[Path]:
-    ignored_roots = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build", ".skilgen", "skills"}
-    ignored_files = {"AGENTS.md", "ANALYSIS.md", "FEATURES.md", "REPORT.md", "TRACEABILITY.md"}
+    ignored_roots = set(IGNORED_PARTS) | {"skills"}
     files: list[Path] = []
     for path in project_root.rglob("*"):
         if not path.is_file():
             continue
+        if path.suffix.lower() not in CODE_EXTENSIONS:
+            continue
         relative = path.relative_to(project_root)
         if set(relative.parts) & ignored_roots:
             continue
-        if path.name in ignored_files:
-            continue
         files.append(path)
     return sorted(files)
+
+
+def _coverage_unit(relative_path: str) -> str:
+    parts = Path(relative_path).parts
+    if not parts:
+        return relative_path
+    if len(parts) == 1:
+        return "project-root"
+    if parts[0] == "scripts":
+        return "scripts"
+    if parts[0] in {"examples", "e2e-tests", "e2e"}:
+        return parts[0]
+    if parts[0] == "skilgen":
+        return parts[0] if len(parts) == 2 else "/".join(parts[:2])
+    if parts[0] in {"tests", "test"}:
+        return parts[0]
+    return "/".join(parts[:2])
 
 
 def _skill_files(project_root: Path) -> list[Path]:
@@ -263,7 +289,11 @@ def _coverage_score(project_root: Path) -> tuple[float, dict[str, object]]:
             "max_score": 25,
             "source_file_count": 0,
             "mapped_file_count": 0,
+            "source_unit_count": 0,
+            "mapped_unit_count": 0,
             "coverage_ratio": 1.0,
+            "unmapped_files": [],
+            "unmapped_units": [],
         }
 
     context = load_project_context(project_root, None)
@@ -275,14 +305,22 @@ def _coverage_score(project_root: Path) -> tuple[float, dict[str, object]]:
         for key_file in node.key_files
         if key_file in source_paths
     }
-    ratio = len(mapped_files) / max(1, len(source_paths))
+    unmapped_files = sorted(source_paths - mapped_files)
+    source_units = {_coverage_unit(path) for path in source_paths}
+    mapped_units = {_coverage_unit(path) for path in mapped_files}
+    unmapped_units = sorted(source_units - mapped_units)
+    ratio = len(mapped_units) / max(1, len(source_units))
     score = round(25 * ratio, 2)
     return score, {
         "score": score,
         "max_score": 25,
         "source_file_count": len(source_paths),
         "mapped_file_count": len(mapped_files),
+        "source_unit_count": len(source_units),
+        "mapped_unit_count": len(mapped_units),
         "coverage_ratio": round(ratio, 4),
+        "unmapped_files": unmapped_files[:12],
+        "unmapped_units": unmapped_units[:12],
     }
 
 
@@ -314,6 +352,10 @@ def _freshness_score(project_root: Path) -> tuple[float, dict[str, object]]:
         "changed_files": len(freshness.changed_files),
         "stale_skill_paths": len(freshness.stale_skill_paths),
     }
+
+
+def freshness_subscore(project_root: str | Path) -> tuple[float, dict[str, object]]:
+    return _freshness_score(Path(project_root).resolve())
 
 
 def _freshness_score_for_skill(
@@ -654,6 +696,59 @@ def _skill_scorecards(project_root: Path) -> list[dict[str, object]]:
     return scorecards
 
 
+def compute_repo_baseline_score(project_root: str | Path) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    _, coverage = _coverage_score(root)
+    groundedness = {
+        "score": 0.0,
+        "max_score": 25,
+        "valid_references": 0,
+        "valid_check_paths": 0,
+        "evidence_mentions": 0,
+        "generic_advice_markers": 0,
+        "reason": "no_materialized_skill_system",
+    }
+    freshness = {
+        "score": 0.0,
+        "max_score": 25,
+        "reason": "no_skill_freshness_contract",
+        "changed_files": 0,
+        "stale_skill_paths": 0,
+    }
+    structure = {
+        "score": 0.0,
+        "max_score": 25,
+        "required_artifacts_present": 0,
+        "required_artifacts_total": 5,
+        "cross_reference_density": 0.0,
+        "validation_errors": 0,
+        "validation_warnings": 0,
+        "reason": "no_generated_agent_artifacts",
+    }
+    scorecard = _assemble_scorecard(
+        score_scope="repo",
+        score_id="repo-baseline",
+        project_root=root,
+        subscores={
+            "groundedness": groundedness,
+            "coverage": coverage,
+            "freshness": freshness,
+            "structure": structure,
+        },
+        extra={
+            "label": "Before Skilgen",
+            "explanation": "The repo has analyzable code structure, but there is no generated skill system, no freshness contract, and no agent-facing operating artifacts yet.",
+        },
+    )
+    scorecard["badge"] = {
+        "label": "Repo Baseline",
+        "message": f"{int(round(scorecard['score']))}/100",
+        "color": _badge_color(scorecard["score"]),
+        "markdown_example": "![Repo Baseline](https://skilgen.com/badge/your-repo)",
+    }
+    return scorecard
+
+
 def compute_skillgen_score(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root).resolve()
     domain_files = _domain_key_files(root)
@@ -683,6 +778,80 @@ def compute_skillgen_score(project_root: str | Path) -> dict[str, object]:
         "markdown_example": "![Skilgen Score](https://skilgen.com/badge/your-repo)",
     }
     return scorecard
+
+
+def score_comparison_payload(project_root: str | Path, current: dict[str, object] | None = None) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    baseline = compute_repo_baseline_score(root)
+    current_score = current or compute_skillgen_score(root)
+    subscore_delta = {
+        name: round(float(current_score["subscores"][name]["score"]) - float(baseline["subscores"][name]["score"]), 2)
+        for name in current_score["subscores"]
+    }
+    return {
+        "baseline": baseline,
+        "current": current_score,
+        "delta": round(float(current_score["score"]) - float(baseline["score"]), 2),
+        "raw_delta": round(float(current_score["raw_score"]) - float(baseline["raw_score"]), 2),
+        "subscore_delta": subscore_delta,
+    }
+
+
+def record_score_history(project_root: str | Path, *, source: str = "score") -> dict[str, object]:
+    root = Path(project_root).resolve()
+    payload = compute_skillgen_score(root)
+    history_path = _score_history_path(root)
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot = {
+        "timestamp": _timestamp(),
+        "source": source,
+        "score": payload["score"],
+        "raw_score": payload["raw_score"],
+        "rating": payload["rating"],
+        "domain_scores": {entry["domain"]: entry["score"] for entry in payload.get("domains", [])},
+    }
+    existing = history_path.read_text(encoding="utf-8").splitlines() if history_path.exists() else []
+    existing.append(json.dumps(snapshot))
+    history_path.write_text("\n".join(existing[-1000:]) + ("\n" if existing else ""), encoding="utf-8")
+    return snapshot
+
+
+def load_score_history(project_root: str | Path, *, limit: int = 10) -> list[dict[str, object]]:
+    path = _score_history_path(Path(project_root).resolve())
+    if not path.exists():
+        return []
+    history: list[dict[str, object]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            history.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return history[-limit:]
+
+
+def score_history_payload(project_root: str | Path, *, limit: int = 10) -> dict[str, object]:
+    root = Path(project_root).resolve()
+    current = compute_skillgen_score(root)
+    history = load_score_history(root, limit=limit)
+    previous = history[-1] if history else None
+    delta = round(current["score"] - float(previous["score"]), 2) if previous is not None else 0.0
+    previous_domain_scores = previous.get("domain_scores", {}) if isinstance(previous, dict) else {}
+    current_domain_scores = {entry["domain"]: entry["score"] for entry in current.get("domains", [])}
+    regressions = []
+    for domain, score in current_domain_scores.items():
+        previous_score = float(previous_domain_scores.get(domain, score))
+        if score < previous_score:
+            regressions.append({"domain": domain, "delta": round(score - previous_score, 2), "score": score})
+    return {
+        "current": current,
+        "history": history,
+        "trend": {
+            "delta_from_previous": delta,
+            "regressions": sorted(regressions, key=lambda item: item["delta"]),
+        },
+    }
 
 
 def render_score_badge_svg(score_payload: dict[str, object]) -> str:

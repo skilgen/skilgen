@@ -7,6 +7,8 @@ from skilgen.sdk import (
     activate_project_mcp_connector,
     activate_skill_source,
     analyze_project,
+    architecture_project,
+    project_dashboard,
     cancel_job,
     deactivate_project_mcp_connector,
     deactivate_skill_source,
@@ -27,6 +29,8 @@ from skilgen.sdk import (
     map_codebase,
     plan_project,
     preview_project,
+    project_diff,
+    project_analytics,
     project_report,
     project_score,
     project_status,
@@ -49,13 +53,15 @@ from skilgen.sdk import (
     compare_evals,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "__version__",
     "activate_project_mcp_connector",
     "activate_skill_source",
     "analyze_project",
+    "architecture_project",
+    "project_dashboard",
     "auto_update_status",
     "cancel_job",
     "deactivate_project_mcp_connector",
@@ -78,6 +84,8 @@ __all__ = [
     "map_codebase",
     "plan_project",
     "preview_project",
+    "project_diff",
+    "project_analytics",
     "project_report",
     "project_score",
     "project_status",

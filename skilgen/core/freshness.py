@@ -5,6 +5,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
+from skilgen.core.generated_outputs import is_generated_output_path
 from skilgen.core.models import DomainGraph, FreshnessReport, FreshnessState, RequirementsContext
 
 
@@ -17,15 +18,6 @@ IGNORED_PARTS = {
     "dist",
     "build",
 }
-IGNORED_FILES = {
-    "AGENTS.md",
-    "ANALYSIS.md",
-    "FEATURES.md",
-    "REPORT.md",
-    "TRACEABILITY.md",
-}
-
-
 def _state_dir(project_root: Path) -> Path:
     return project_root.resolve() / ".skilgen" / "state"
 
@@ -43,11 +35,7 @@ def _iter_source_files(project_root: Path) -> list[Path]:
         relative = path.relative_to(root)
         if set(relative.parts) & IGNORED_PARTS:
             continue
-        if relative.parts and relative.parts[0] == "skills":
-            continue
-        if relative.parts and relative.parts[0] == ".skilgen":
-            continue
-        if path.name in IGNORED_FILES:
+        if is_generated_output_path(relative):
             continue
         files.append(path)
     return sorted(files)

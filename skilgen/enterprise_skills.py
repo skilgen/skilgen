@@ -7,8 +7,11 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import urlopen
 
 from skilgen.core.config import load_config
+from skilgen.core.document_ingestion import extract_document_text
 
 
 @dataclass(frozen=True)
@@ -380,6 +383,42 @@ def _name_from_git_url(git_url: str) -> str:
     return cleaned or "enterprise-skill"
 
 
+def _name_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    candidate = Path(parsed.path).name or parsed.netloc or "enterprise-source"
+    cleaned = candidate[:-4] if candidate.endswith(".git") else candidate
+    return cleaned or "enterprise-source"
+
+
+def _download_url_source(url: str, destination: Path) -> None:
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    with urlopen(url) as response:  # noqa: S310
+        body = response.read().decode("utf-8", errors="ignore")
+    target_name = Path(urlparse(url).path).name or "REMOTE.md"
+    if "." not in target_name:
+        target_name = f"{target_name}.md"
+    (destination / target_name).write_text(body, encoding="utf-8")
+
+
+def _policy_pack_path(project_root: str | Path) -> Path | None:
+    config = load_config(Path(project_root).resolve())
+    if not config.mcp_policy_pack_path:
+        return None
+    return Path(config.mcp_policy_pack_path).resolve()
+
+
+def _load_policy_pack(project_root: str | Path) -> dict[str, object]:
+    path = _policy_pack_path(project_root)
+    if path is None or not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
 def _load_json(path: Path, default: dict[str, object]) -> dict[str, object]:
     if not path.exists():
         return default
@@ -467,6 +506,7 @@ def ingest_enterprise_skill(
     name: str,
     path: str | Path | None = None,
     git_url: str | None = None,
+    url: str | None = None,
     ref: str | None = None,
     activate: bool | None = None,
     kind: str = "enterprise",
@@ -479,10 +519,13 @@ def ingest_enterprise_skill(
     if git_url:
         resolved_revision = _ingest_from_git(git_url, source_dir, ref=ref)
         install_mode = "git"
+    elif url:
+        _download_url_source(url, source_dir)
+        install_mode = "url"
     elif path is not None:
         _copy_source(Path(path).resolve(), source_dir)
     else:
-        raise ValueError("Either `path` or `git_url` is required to ingest an enterprise skill.")
+        raise ValueError("Either `path`, `git_url`, or `url` is required to ingest an enterprise skill.")
     now = datetime.now(UTC).isoformat()
     entry = {
         "slug": slug,
@@ -491,6 +534,7 @@ def ingest_enterprise_skill(
         "install_path": str(source_dir),
         "source_path": str(Path(path).resolve()) if path is not None else None,
         "git_url": git_url,
+        "source_url": url,
         "requested_ref": ref,
         "resolved_revision": resolved_revision,
         "install_mode": install_mode,
@@ -526,7 +570,7 @@ def generate_enterprise_skill(
     sections = []
     for path in existing[:8]:
         if path.is_file():
-            text = path.read_text(encoding="utf-8", errors="ignore")
+            text = extract_document_text(path)
             lines = [line.strip() for line in text.splitlines() if line.strip()]
             snippet = next((line for line in lines if not line.startswith("#")), "")[:220]
             sections.append(f"- `{path.name}`: {snippet or 'Source file included for enterprise context.'}")
@@ -636,8 +680,14 @@ def _connector_keywords() -> dict[str, tuple[str, ...]]:
 def recommend_mcp_connectors(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root).resolve()
     config = load_config(root)
+    policy_pack = _load_policy_pack(root)
     deny = set(config.mcp_connector_denylist)
     allow = set(config.mcp_connector_allowlist)
+    deny |= {str(item) for item in policy_pack.get("deny_connectors", [])}
+    if policy_pack.get("allow_connectors"):
+        allow |= {str(item) for item in policy_pack.get("allow_connectors", [])}
+    approval_required = {str(item) for item in policy_pack.get("manual_approval_connectors", [])}
+    skill_bindings = policy_pack.get("skill_tool_bindings", {}) if isinstance(policy_pack.get("skill_tool_bindings"), dict) else {}
     haystacks: list[str] = []
     for path in list(root.rglob("*"))[:400]:
         if any(part in {".git", ".skilgen", "__pycache__", "node_modules"} for part in path.parts):
@@ -663,6 +713,8 @@ def recommend_mcp_connectors(project_root: str | Path) -> dict[str, object]:
                 {
                     **asdict(connector),
                     "official_source_verified": bool(connector.official_source_url),
+                    "approval_required": connector.slug in approval_required,
+                    "bound_skills": [skill for skill, connectors in skill_bindings.items() if connector.slug in connectors],
                     "reasons": [f"Detected connector keywords: {', '.join(matches[:3])}."],
                 }
             )
@@ -677,10 +729,17 @@ def active_mcp_connectors(project_root: str | Path) -> list[dict[str, object]]:
 def activate_mcp_connector(project_root: str | Path, slug: str) -> dict[str, object]:
     root = Path(project_root).resolve()
     config = load_config(root)
+    policy_pack = _load_policy_pack(root)
     now = datetime.now(UTC).isoformat()
     catalog_connector = _catalog_connector(slug)
     if catalog_connector is None:
         raise ValueError(f"Unknown MCP connector: {slug}")
+    if slug in {str(item) for item in policy_pack.get("deny_connectors", [])}:
+        raise ValueError(f"MCP connector `{slug}` is denied by the configured policy pack.")
+    if slug in {str(item) for item in policy_pack.get("manual_approval_connectors", [])} and slug not in {
+        str(item) for item in policy_pack.get("approved_connectors", [])
+    }:
+        raise ValueError(f"MCP connector `{slug}` requires explicit approval in the configured policy pack.")
     if config.mcp_connectors_require_official_source and not catalog_connector.official_source_url:
         raise ValueError(f"MCP connector `{slug}` does not have a verified official source configured.")
     if config.mcp_connectors_require_oauth and not catalog_connector.oauth_supported:
@@ -698,6 +757,13 @@ def activate_mcp_connector(project_root: str | Path, slug: str) -> dict[str, obj
         "principles": list(catalog_connector.oauth_principles),
     }
     connector["runtime_ready"] = bool(catalog_connector.official_source_url and catalog_connector.oauth_supported)
+    connector["bound_skills"] = [
+        skill
+        for skill, connectors in (
+            policy_pack.get("skill_tool_bindings", {}) if isinstance(policy_pack.get("skill_tool_bindings"), dict) else {}
+        ).items()
+        if slug in connectors
+    ]
     connectors.append(connector)
     manifest["connectors"] = sorted(connectors, key=lambda item: str(item.get("slug", "")))
     _write_connector_manifest(root, manifest)
@@ -734,6 +800,9 @@ def ensure_enterprise_skills_for_project(project_root: str | Path) -> dict[str, 
     }
     existing_by_git = {
         str(entry.get("git_url")): entry for entry in existing_skills if entry.get("git_url")
+    }
+    existing_by_url = {
+        str(entry.get("source_url")): entry for entry in existing_skills if entry.get("source_url")
     }
     installed: list[dict[str, object]] = []
     already_present: list[dict[str, object]] = []
@@ -773,6 +842,23 @@ def ensure_enterprise_skills_for_project(project_root: str | Path) -> dict[str, 
             existing_by_git[git_url] = entry
         except Exception as exc:  # pragma: no cover - defensive error collection
             errors.append(f"{git_url}: {exc}")
+
+    for source_url in config.enterprise_skill_urls:
+        try:
+            if source_url in existing_by_url:
+                already_present.append(existing_by_url[source_url])
+                continue
+            entry = ingest_enterprise_skill(
+                root,
+                name=_name_from_url(source_url),
+                url=source_url,
+                activate=True,
+                kind="enterprise",
+            )
+            installed.append(entry)
+            existing_by_url[source_url] = entry
+        except Exception as exc:  # pragma: no cover - defensive error collection
+            errors.append(f"{source_url}: {exc}")
 
     recommended = recommend_mcp_connectors(root).get("connectors", [])
     active_slugs = {str(entry.get("slug")) for entry in active_mcp_connectors(root)}
