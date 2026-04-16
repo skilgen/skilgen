@@ -4,6 +4,16 @@ These are committed, self-contained HTML dashboard snapshots generated with Skil
 
 GitHub will show the HTML source in the repo view. Download the file or open it locally in a browser to see the full interactive dashboard.
 
+## Anthropic claude-code
+
+- Source repo: [anthropics/claude-code](https://github.com/anthropics/claude-code)
+- Source commit: `5a7bf28`
+- Dashboard file: [`claude-code-dashboard.html`](claude-code-dashboard.html)
+- Generated `AGENTS.md`: [`claude-code-AGENTS.md`](claude-code-AGENTS.md)
+- Live `skills/` snapshot: [`claude-code-skill-tree/skills/MANIFEST.md`](claude-code-skill-tree/skills/MANIFEST.md)
+
+Generated from the upstream repository snapshot with full `skilgen deliver` materialization, not just the dashboard-only baseline path. This example is useful because it shows the real post-delivery state: `74 / 100`, `25 / 25` freshness, `9` operating artifacts, `8` repo-local skills, and `0` stale skills after the final dashboard was regenerated from the completed delivery snapshot.
+
 ## Anthropic claude-agent-sdk-python
 
 - Source repo: [anthropics/claude-agent-sdk-python](https://github.com/anthropics/claude-agent-sdk-python)
