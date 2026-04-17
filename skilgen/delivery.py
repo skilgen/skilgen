@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import time
 from pathlib import Path
 from typing import Callable
 
 from skilgen.agents import build_agent_decision, fingerprint_project
+from skilgen.agents.codebase_signals import clear_codebase_signal_caches
+from skilgen.agents.source_graphs import clear_source_graph_caches
+from skilgen.core.audit import append_audit_event
 from skilgen.core.analytics import log_skill_usage
 from skilgen.core.config import load_config
 from skilgen.core.context import build_codebase_context
@@ -14,6 +18,7 @@ from skilgen.core.generated_outputs import is_generated_output_path
 from skilgen.core.models import RunMemory
 from skilgen.core.repo_state import classify_repo_change, git_repo_state
 from skilgen.core.run_memory import append_run_event, create_run_memory, finalize_run_memory
+from skilgen.core.runtime_data import prune_runtime_data
 from skilgen.core.score import record_score_history
 from skilgen.deep_agents_core import current_runtime_mode
 from skilgen.enterprise_skills import ensure_enterprise_skills_for_project
@@ -42,9 +47,12 @@ def run_delivery(
     progress_callback: ProgressCallback | None = None,
 ) -> list[Path]:
     root = Path(project_root).resolve()
+    clear_codebase_signal_caches()
+    clear_source_graph_caches()
     input_mode = "codebase and requirements" if requirements_path is not None else "codebase only"
     _emit(progress_callback, f"Reading your {input_mode} and loading the Skilgen project configuration.")
     config = load_config(root)
+    prune_runtime_data(root)
     if not skip_index and config.corpus.enabled:
         _emit(progress_callback, "Indexing the full repository corpus so evidence selection covers every subsystem, config, and architecture doc.")
         ensure_corpus_index(root, config)
@@ -89,47 +97,16 @@ def run_delivery(
         selected_skill_paths,
     )
     if not decision.should_refresh and not explicit_domains:
-        run_memory = RunMemory(
-            run_id=run_memory.run_id,
-            status=run_memory.status,
-            project_root=run_memory.project_root,
-            requirements_path=run_memory.requirements_path,
-            objective=run_memory.objective,
-            runtime=run_memory.runtime,
-            impacted_domains=run_memory.impacted_domains,
-            selected_domains=run_memory.selected_domains,
-            selected_skill_paths=run_memory.selected_skill_paths,
-            changed_files=run_memory.changed_files,
-            generated_files=run_memory.generated_files,
-            active_file_focus=run_memory.active_file_focus,
-            unresolved_questions=run_memory.unresolved_questions,
-            pending_validations=run_memory.pending_validations,
+        run_memory = replace(
+            run_memory,
             resumable_steps=[
                 "Reuse the current skill tree and start from the prioritized parent skills.",
                 "Load the current run memory before making implementation changes.",
                 "Only rerun skill refresh if new source changes appear.",
             ],
-            recent_events=run_memory.recent_events,
         )
     elif decision.next_actions:
-        run_memory = RunMemory(
-            run_id=run_memory.run_id,
-            status=run_memory.status,
-            project_root=run_memory.project_root,
-            requirements_path=run_memory.requirements_path,
-            objective=run_memory.objective,
-            runtime=run_memory.runtime,
-            impacted_domains=run_memory.impacted_domains,
-            selected_domains=run_memory.selected_domains,
-            selected_skill_paths=run_memory.selected_skill_paths,
-            changed_files=run_memory.changed_files,
-            generated_files=run_memory.generated_files,
-            active_file_focus=run_memory.active_file_focus,
-            unresolved_questions=run_memory.unresolved_questions,
-            pending_validations=run_memory.pending_validations,
-            resumable_steps=decision.next_actions,
-            recent_events=run_memory.recent_events,
-        )
+        run_memory = replace(run_memory, resumable_steps=decision.next_actions)
     if freshness.reason == "no_source_changes":
         message = "No source changes were detected since the last skill snapshot. Skilgen will keep the existing skill tree stable."
         run_memory = append_run_event(root, run_memory, message)
@@ -189,6 +166,18 @@ def run_delivery(
             _emit(progress_callback, message)
             generated.append(write_dashboard_doc(saved_context, root, progress_callback=progress_callback))
     run_memory = finalize_run_memory(root, run_memory, generated, "completed")
+    append_audit_event(
+        root,
+        action="deliver",
+        outcome="success",
+        source="delivery",
+        details={
+            "requirements_path": str(Path(requirements_path).resolve()) if requirements_path is not None else None,
+            "targets": list(targets),
+            "domains": list(domains),
+            "generated_files": [str(path) for path in generated],
+        },
+    )
     message = f"Finished delivery. Generated or refreshed {len(generated)} files."
     run_memory = append_run_event(root, run_memory, message)
     _emit(progress_callback, message)
@@ -244,6 +233,8 @@ def watch_delivery(
         time.sleep(interval_seconds)
         current = snapshot()
         if current != previous:
+            clear_codebase_signal_caches()
+            clear_source_graph_caches()
             change = classify_repo_change(previous, current)
             _emit(progress_callback, f"Detected {change['event_type'].replace('_', ' ')}. Refreshing the generated docs and skills.")
             results.append(

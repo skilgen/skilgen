@@ -92,6 +92,9 @@ class SkilgenConfig:
     model_max_tokens: int | None = None
     model_retry_attempts: int = 3
     model_retry_base_delay_seconds: float = 1.0
+    model_timeout_seconds: float = 60.0
+    model_redaction_mode: str = "balanced"
+    redact_model_error_secrets: bool = False
     corpus: CorpusSettings = field(default_factory=CorpusSettings)
     auto_install_external_skills: bool = True
     external_skills_allowed_trust_levels: list[str] = field(default_factory=list)
@@ -108,6 +111,7 @@ class SkilgenConfig:
     enterprise_skill_paths: list[str] = field(default_factory=list)
     enterprise_skill_git_urls: list[str] = field(default_factory=list)
     enterprise_skill_urls: list[str] = field(default_factory=list)
+    runtime_retention_days: int = 30
 
 
 @dataclass(frozen=True)
@@ -122,6 +126,9 @@ class ModelSettings:
     max_tokens: int | None
     retry_attempts: int
     retry_base_delay_seconds: float
+    timeout_seconds: float
+    redaction_mode: str
+    redact_error_secrets: bool
 
 
 @dataclass(frozen=True)

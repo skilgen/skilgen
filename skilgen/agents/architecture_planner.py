@@ -5,6 +5,7 @@ from pathlib import Path
 
 from skilgen.agents.domain_graph_planner import build_domain_graph
 from skilgen.agents.evidence_graph import build_evidence_graph
+from skilgen.core.config import load_config
 from skilgen.deep_agents_core import run_deep_json
 from skilgen.core.models import (
     ArchitectureBlueprint,
@@ -15,6 +16,68 @@ from skilgen.core.models import (
     RequirementsContext,
     SkillMaterializationPlan,
 )
+
+
+def _redact_snippet_lines(lines: list[str], *, limit: int) -> list[str]:
+    redacted: list[str] = []
+    for line in lines[:limit]:
+        updated = line
+        updated = updated.replace("api_key", "[redacted]")
+        updated = updated.replace("apikey", "[redacted]")
+        updated = updated.replace("password", "[redacted]")
+        updated = updated.replace("secret", "[redacted]")
+        updated = updated.replace("token", "[redacted]")
+        redacted.append(updated[:180])
+    return redacted
+
+
+def _evidence_graph_payload(project_root: Path, evidence_graph: EvidenceGraph) -> dict[str, object]:
+    config = load_config(project_root)
+    mode = (config.model_redaction_mode or "balanced").strip().lower()
+    if mode == "off":
+        return asdict(evidence_graph)
+
+    items: list[dict[str, object]] = []
+    for item in evidence_graph.items:
+        payload = {
+            "path": item.path,
+            "kind": item.kind,
+            "language": item.language,
+            "tags": item.tags,
+            "related_imports": item.related_imports[:8],
+        }
+        if mode == "strict":
+            payload["snippet"] = []
+        elif item.kind == "config":
+            payload["snippet"] = []
+        else:
+            payload["snippet"] = _redact_snippet_lines(item.snippet, limit=4)
+        items.append(payload)
+
+    parser_summary = {
+        path: {
+            "language": payload.get("language"),
+            "backend": payload.get("backend"),
+            "symbol_count": payload.get("symbol_count"),
+            "call_count": payload.get("call_count"),
+            "import_count": payload.get("import_count"),
+        }
+        for path, payload in evidence_graph.parser_summary.items()
+    }
+    sanitized = {
+        "language_inventory": evidence_graph.language_inventory,
+        "dominant_languages": evidence_graph.dominant_languages,
+        "import_graph": evidence_graph.import_graph,
+        "items": items,
+        "recommendations": evidence_graph.recommendations,
+        "parser_summary": parser_summary,
+        "symbol_graph": evidence_graph.symbol_graph,
+        "call_graph": evidence_graph.call_graph,
+        "config_runtime_graph": evidence_graph.config_runtime_graph,
+        "test_mapping": evidence_graph.test_mapping,
+        "redaction_mode": mode,
+    }
+    return sanitized
 
 
 def _sanitize_architecture_payload(
@@ -231,7 +294,7 @@ def build_architecture_blueprint(project_root: Path, requirements: RequirementsC
             "Prefer domain names and responsibilities that would help a coding agent understand the system quickly.\n\n"
             f"Project root: {root}\n"
             f"Requirements summary: {requirements.summary}\n"
-            f"Evidence graph JSON: {asdict(evidence_graph)}\n"
+            f"Evidence graph JSON: {_evidence_graph_payload(root, evidence_graph)}\n"
             f"Domain graph JSON: {asdict(domain_graph)}\n"
             f"Native architecture JSON: {asdict(native)}\n"
         ),

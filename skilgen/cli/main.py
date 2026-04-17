@@ -18,6 +18,7 @@ from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.core.analytics import log_skill_usage
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
 from skilgen.core.corpus_index import build_corpus_index
+from skilgen.core.runtime_data import purge_runtime_data
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
 from skilgen.enterprise_skills import (
@@ -92,6 +93,7 @@ class CliProgressReporter:
         self._last_percent = 0
         self._current_message = ""
         self._start_time = time.monotonic()
+        self._last_emit_at = 0.0
         self._frame_index = 0
         self._is_tty = sys.stderr.isatty()
         self._lock = threading.Lock()
@@ -107,6 +109,10 @@ class CliProgressReporter:
             self._last_percent = max(self._last_percent, percent)
             self._current_message = message
             self._frame_index = (self._frame_index + 1) % len(self._frames)
+            now = time.monotonic()
+            if not self._is_tty and now - self._last_emit_at < 0.5 and percent < 100:
+                return
+            self._last_emit_at = now
             line = self._render_line(self._last_percent, message, done=percent >= 100)
         if self._is_tty:
             print(f"\r{line}", file=sys.stderr, end="", flush=True)
@@ -411,6 +417,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     report = subparsers.add_parser("report", help="Show a summary report for a project root.")
     report.add_argument("--project-root", default=".")
+
+    purge = subparsers.add_parser("purge", help="Delete Skilgen runtime data stored under .skilgen for a project.")
+    purge.add_argument("--project-root", default=".")
 
     analytics = subparsers.add_parser("analytics", help="Summarize generated skill usage and load history.")
     analytics.add_argument("--project-root", default=".")
@@ -831,6 +840,9 @@ def main() -> None:
         return
     if args.command == "report":
         print(json.dumps(report_payload(Path(args.project_root).resolve()), indent=2))
+        return
+    if args.command == "purge":
+        print(json.dumps(purge_runtime_data(Path(args.project_root).resolve()), indent=2))
         return
     if args.command == "analytics":
         root = Path(args.project_root).resolve()

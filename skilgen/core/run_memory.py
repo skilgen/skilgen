@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from json import JSONDecodeError
 from pathlib import Path
 
@@ -111,46 +111,16 @@ def save_run_memory(project_root: Path, memory: RunMemory) -> Path:
 
 def append_run_event(project_root: Path, memory: RunMemory, message: str) -> RunMemory:
     events = [*memory.recent_events, message][-12:]
-    updated = RunMemory(
-        run_id=memory.run_id,
-        status=memory.status,
-        project_root=memory.project_root,
-        requirements_path=memory.requirements_path,
-        objective=memory.objective,
-        runtime=memory.runtime,
-        impacted_domains=memory.impacted_domains,
-        selected_domains=memory.selected_domains,
-        selected_skill_paths=memory.selected_skill_paths,
-        changed_files=memory.changed_files,
-        generated_files=memory.generated_files,
-        active_file_focus=memory.active_file_focus,
-        unresolved_questions=memory.unresolved_questions,
-        pending_validations=memory.pending_validations,
-        resumable_steps=memory.resumable_steps,
-        recent_events=events,
-    )
+    updated = replace(memory, recent_events=events)
     save_run_memory(Path(memory.project_root), updated)
     return updated
 
 
 def finalize_run_memory(project_root: Path, memory: RunMemory, generated_files: list[Path], status: str = "completed") -> RunMemory:
-    updated = RunMemory(
-        run_id=memory.run_id,
+    updated = replace(
+        memory,
         status=status,
-        project_root=memory.project_root,
-        requirements_path=memory.requirements_path,
-        objective=memory.objective,
-        runtime=memory.runtime,
-        impacted_domains=memory.impacted_domains,
-        selected_domains=memory.selected_domains,
-        selected_skill_paths=memory.selected_skill_paths,
-        changed_files=memory.changed_files,
         generated_files=[str(path.resolve()) for path in generated_files],
-        active_file_focus=memory.active_file_focus,
-        unresolved_questions=memory.unresolved_questions,
-        pending_validations=memory.pending_validations,
-        resumable_steps=memory.resumable_steps,
-        recent_events=memory.recent_events,
     )
     save_run_memory(project_root, updated)
     return updated

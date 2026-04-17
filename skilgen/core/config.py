@@ -21,6 +21,9 @@ DEFAULT_CONFIG = SkilgenConfig(
     model_max_tokens=None,
     model_retry_attempts=3,
     model_retry_base_delay_seconds=1.0,
+    model_timeout_seconds=60.0,
+    model_redaction_mode="balanced",
+    redact_model_error_secrets=False,
     corpus=CorpusSettings(),
     auto_install_external_skills=True,
     external_skills_allowed_trust_levels=["official", "spec", "community", "curated"],
@@ -37,6 +40,7 @@ DEFAULT_CONFIG = SkilgenConfig(
     enterprise_skill_paths=[],
     enterprise_skill_git_urls=[],
     enterprise_skill_urls=[],
+    runtime_retention_days=30,
 )
 
 
@@ -183,6 +187,11 @@ def load_config(project_root: Path) -> SkilgenConfig:
         model_retry_base_delay_seconds=_float_value(
             data.get("model_retry_base_delay_seconds"), DEFAULT_CONFIG.model_retry_base_delay_seconds
         ),
+        model_timeout_seconds=_float_value(data.get("model_timeout_seconds"), DEFAULT_CONFIG.model_timeout_seconds),
+        model_redaction_mode=_string_or_none(data.get("model_redaction_mode")) or DEFAULT_CONFIG.model_redaction_mode,
+        redact_model_error_secrets=_bool_value(
+            data.get("redact_model_error_secrets"), DEFAULT_CONFIG.redact_model_error_secrets
+        ),
         corpus=corpus,
         auto_install_external_skills=_bool_value(data.get("auto_install_external_skills"), DEFAULT_CONFIG.auto_install_external_skills),
         external_skills_allowed_trust_levels=_string_list(
@@ -203,6 +212,7 @@ def load_config(project_root: Path) -> SkilgenConfig:
         enterprise_skill_paths=_string_list(data.get("enterprise_skill_paths"), DEFAULT_CONFIG.enterprise_skill_paths),
         enterprise_skill_git_urls=_string_list(data.get("enterprise_skill_git_urls"), DEFAULT_CONFIG.enterprise_skill_git_urls),
         enterprise_skill_urls=_string_list(data.get("enterprise_skill_urls"), DEFAULT_CONFIG.enterprise_skill_urls),
+        runtime_retention_days=_int_value(data.get("runtime_retention_days"), DEFAULT_CONFIG.runtime_retention_days),
     )
 
 
@@ -248,6 +258,9 @@ model_temperature:
 model_max_tokens:
 model_retry_attempts: 3
 model_retry_base_delay_seconds: 1.0
+model_timeout_seconds: 60
+model_redaction_mode: balanced
+redact_model_error_secrets: false
 corpus:
   enabled: true
   budget: 60
@@ -278,4 +291,5 @@ mcp_policy_pack_path:
 enterprise_skill_paths:
 enterprise_skill_git_urls:
 enterprise_skill_urls:
+runtime_retention_days: 30
 """

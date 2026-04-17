@@ -251,6 +251,35 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual(len(calls), 2)
             self.assertEqual(len(runs), 2)
 
+    def test_watch_delivery_clears_caches_before_rerun(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "src").mkdir()
+            source = root / "src" / "app.py"
+            source.write_text("def run():\n    return True\n", encoding="utf-8")
+            sleep_calls = 0
+
+            def fake_run_delivery(*args, **kwargs):
+                return [root / "skilgen-dashboard.html"]
+
+            def mutate_source_once(_seconds: float) -> None:
+                nonlocal sleep_calls
+                sleep_calls += 1
+                if sleep_calls == 1:
+                    source.write_text("def run():\n    return False\n", encoding="utf-8")
+
+            with patch("skilgen.delivery.run_delivery", side_effect=fake_run_delivery), patch(
+                "skilgen.delivery.time.sleep",
+                side_effect=mutate_source_once,
+            ), patch("skilgen.delivery.clear_codebase_signal_caches") as clear_codebase, patch(
+                "skilgen.delivery.clear_source_graph_caches"
+            ) as clear_source:
+                runs = watch_delivery(None, root, cycles=1)
+
+            self.assertEqual(len(runs), 2)
+            clear_codebase.assert_called_once()
+            clear_source.assert_called_once()
+
     def test_agents_contract_reflects_inferred_domains_and_prioritized_skills(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()

@@ -5,8 +5,15 @@ from tempfile import TemporaryDirectory
 import unittest
 import zipfile
 
-from openpyxl import Workbook
-from pptx import Presentation
+try:
+    from openpyxl import Workbook
+except ImportError:  # pragma: no cover - optional dependency
+    Workbook = None
+
+try:
+    from pptx import Presentation
+except ImportError:  # pragma: no cover - optional dependency
+    Presentation = None
 
 from skilgen.core.document_ingestion import detect_document_type, extract_document_text, normalize_extracted_text
 from skilgen.core.requirements import load_requirements
@@ -75,6 +82,7 @@ def _write_pdf(path: Path, text: str) -> None:
     path.write_bytes((header + body + "".join(xref) + trailer).encode("latin-1"))
 
 
+@unittest.skipUnless(Workbook is not None and Presentation is not None, "document ingestion extras are not installed")
 class DocumentIngestionTests(unittest.TestCase):
     def test_extract_document_text_supports_multiple_formats(self) -> None:
         with TemporaryDirectory() as tmp:

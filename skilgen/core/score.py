@@ -4,6 +4,7 @@ import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 
 from skilgen.agents.codebase_signals import CODE_EXTENSIONS, IGNORED_PARTS
 from skilgen.core.context import build_codebase_context
@@ -20,6 +21,8 @@ GENERIC_MARKERS = (
     "generally",
     "typically",
 )
+
+_SCORE_HISTORY_LOCK = Lock()
 
 
 def _score_history_path(project_root: Path) -> Path:
@@ -121,17 +124,33 @@ def _materialized_domains(project_root: Path) -> list[str]:
     return sorted({domain for skill in _skill_files(project_root) if (domain := _skill_domain(skill, project_root))})
 
 
-def _nodes_by_domain(project_root: Path) -> dict[str, list[object]]:
-    context = load_project_context(project_root, None)
-    codebase_context = build_codebase_context(project_root, context)
+def _build_score_context(project_root: Path) -> dict[str, object]:
+    requirements_context = load_project_context(project_root, None)
+    codebase_context = build_codebase_context(project_root, requirements_context)
+    previous = load_freshness_state(project_root)
+    freshness = compute_freshness_report(project_root, requirements_context, codebase_context.domain_graph, previous)
+    return {
+        "requirements_context": requirements_context,
+        "codebase_context": codebase_context,
+        "previous_freshness": previous,
+        "freshness": freshness,
+        "source_files": _iter_source_files(project_root),
+        "skill_files": _skill_files(project_root),
+        "validation": validate_project(project_root),
+    }
+
+
+def _nodes_by_domain(project_root: Path, score_context: dict[str, object] | None = None) -> dict[str, list[object]]:
+    context = score_context or _build_score_context(project_root)
+    codebase_context = context["codebase_context"]
     grouped: dict[str, list[object]] = {}
     for node in codebase_context.domain_graph.nodes:
         grouped.setdefault(node.name, []).append(node)
     return grouped
 
 
-def _domain_key_files(project_root: Path) -> dict[str, list[str]]:
-    grouped = _nodes_by_domain(project_root)
+def _domain_key_files(project_root: Path, score_context: dict[str, object] | None = None) -> dict[str, list[str]]:
+    grouped = _nodes_by_domain(project_root, score_context)
     return {
         domain: list(dict.fromkeys(file for node in nodes for file in node.key_files))
         for domain, nodes in grouped.items()
@@ -173,8 +192,9 @@ def _evidence_hits_for_skill(skill: Path, project_root: Path, key_files: list[st
     }
 
 
-def _groundedness_score(project_root: Path) -> tuple[float, dict[str, object]]:
-    skill_files = _skill_files(project_root)
+def _groundedness_score(project_root: Path, score_context: dict[str, object] | None = None) -> tuple[float, dict[str, object]]:
+    context = score_context or _build_score_context(project_root)
+    skill_files = context["skill_files"]
     if not skill_files:
         return 0.0, {
             "score": 0.0,
@@ -185,10 +205,8 @@ def _groundedness_score(project_root: Path) -> tuple[float, dict[str, object]]:
             "generic_advice_markers": 0,
         }
 
-    context = load_project_context(project_root, None)
-    codebase_context = build_codebase_context(project_root, context)
     nodes_by_domain: dict[str, list[object]] = {}
-    for node in codebase_context.domain_graph.nodes:
+    for node in context["codebase_context"].domain_graph.nodes:
         nodes_by_domain.setdefault(node.name, []).append(node)
 
     valid_references = 0
@@ -281,8 +299,9 @@ def _groundedness_score_for_skills(project_root: Path, skill_files: list[Path], 
     }
 
 
-def _coverage_score(project_root: Path) -> tuple[float, dict[str, object]]:
-    source_files = _iter_source_files(project_root)
+def _coverage_score(project_root: Path, score_context: dict[str, object] | None = None) -> tuple[float, dict[str, object]]:
+    context = score_context or _build_score_context(project_root)
+    source_files = context["source_files"]
     if not source_files:
         return 25.0, {
             "score": 25.0,
@@ -296,8 +315,7 @@ def _coverage_score(project_root: Path) -> tuple[float, dict[str, object]]:
             "unmapped_units": [],
         }
 
-    context = load_project_context(project_root, None)
-    codebase_context = build_codebase_context(project_root, context)
+    codebase_context = context["codebase_context"]
     source_paths = {path.relative_to(project_root).as_posix() for path in source_files}
     mapped_files = {
         key_file
@@ -324,10 +342,9 @@ def _coverage_score(project_root: Path) -> tuple[float, dict[str, object]]:
     }
 
 
-def _freshness_score(project_root: Path) -> tuple[float, dict[str, object]]:
-    context = load_project_context(project_root, None)
-    codebase_context = build_codebase_context(project_root, context)
-    previous = load_freshness_state(project_root)
+def _freshness_score(project_root: Path, score_context: dict[str, object] | None = None) -> tuple[float, dict[str, object]]:
+    context = score_context or _build_score_context(project_root)
+    previous = context["previous_freshness"]
     if previous is None:
         return 5.0, {
             "score": 5.0,
@@ -336,7 +353,7 @@ def _freshness_score(project_root: Path) -> tuple[float, dict[str, object]]:
             "changed_files": 0,
             "stale_skill_paths": 0,
         }
-    freshness = compute_freshness_report(project_root, context, codebase_context.domain_graph, previous)
+    freshness = context["freshness"]
     if freshness.reason == "no_source_changes":
         score = 25.0
     elif freshness.reason == "initial_generation":
@@ -384,10 +401,10 @@ def _freshness_score_for_skill(
     }
 
 
-def _structure_score(project_root: Path) -> tuple[float, dict[str, object]]:
-    validation = validate_project(project_root)
-    requirements = load_project_context(project_root, None)
-    codebase_context = build_codebase_context(project_root, requirements)
+def _structure_score(project_root: Path, score_context: dict[str, object] | None = None) -> tuple[float, dict[str, object]]:
+    context = score_context or _build_score_context(project_root)
+    validation = context["validation"]
+    codebase_context = context["codebase_context"]
     required = [
         project_root / "AGENTS.md",
         project_root / "FEATURES.md",
@@ -595,19 +612,18 @@ def _assemble_scorecard(
 
 
 def _domain_scorecards(project_root: Path) -> list[dict[str, object]]:
-    domain_files = _domain_key_files(project_root)
-    previous = load_freshness_state(project_root)
-    context = load_project_context(project_root, None)
-    codebase_context = build_codebase_context(project_root, context)
-    freshness = compute_freshness_report(project_root, context, codebase_context.domain_graph, previous)
-    all_skills = _skill_files(project_root)
+    score_context = _build_score_context(project_root)
+    domain_files = _domain_key_files(project_root, score_context)
+    freshness = score_context["freshness"]
+    all_skills = score_context["skill_files"]
     materialized_domains = _materialized_domains(project_root)
+    source_files = score_context["source_files"]
     scorecards: list[dict[str, object]] = []
     for domain in materialized_domains:
         key_files = domain_files.get(domain, [])
         domain_skills = [skill for skill in all_skills if _skill_domain(skill, project_root) == domain]
         groundedness_score, groundedness = _groundedness_score_for_skills(project_root, domain_skills, domain_files)
-        coverage_ratio = min(1.0, len(key_files) / max(1, len(_iter_source_files(project_root))))
+        coverage_ratio = min(1.0, len(key_files) / max(1, len(source_files)))
         coverage = {
             "score": round(25 * coverage_ratio, 2),
             "max_score": 25,
@@ -648,13 +664,11 @@ def _domain_scorecards(project_root: Path) -> list[dict[str, object]]:
 
 
 def _skill_scorecards(project_root: Path) -> list[dict[str, object]]:
-    domain_files = _domain_key_files(project_root)
-    previous = load_freshness_state(project_root)
-    context = load_project_context(project_root, None)
-    codebase_context = build_codebase_context(project_root, context)
-    freshness = compute_freshness_report(project_root, context, codebase_context.domain_graph, previous)
+    score_context = _build_score_context(project_root)
+    domain_files = _domain_key_files(project_root, score_context)
+    freshness = score_context["freshness"]
     scorecards: list[dict[str, object]] = []
-    for skill in _skill_files(project_root):
+    for skill in score_context["skill_files"]:
         domain = _skill_domain(skill, project_root) or "unscoped"
         key_files = domain_files.get(domain, [])
         groundedness_score, groundedness = _groundedness_score_for_skills(project_root, [skill], domain_files)
@@ -698,7 +712,8 @@ def _skill_scorecards(project_root: Path) -> list[dict[str, object]]:
 
 def compute_repo_baseline_score(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root).resolve()
-    _, coverage = _coverage_score(root)
+    score_context = _build_score_context(root)
+    _, coverage = _coverage_score(root, score_context)
     groundedness = {
         "score": 0.0,
         "max_score": 25,
@@ -751,11 +766,12 @@ def compute_repo_baseline_score(project_root: str | Path) -> dict[str, object]:
 
 def compute_skillgen_score(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root).resolve()
-    domain_files = _domain_key_files(root)
-    groundedness_score, groundedness = _groundedness_score(root)
-    coverage_score, coverage = _coverage_score(root)
-    freshness_score, freshness = _freshness_score(root)
-    structure_score, structure = _structure_score(root)
+    score_context = _build_score_context(root)
+    domain_files = _domain_key_files(root, score_context)
+    groundedness_score, groundedness = _groundedness_score(root, score_context)
+    coverage_score, coverage = _coverage_score(root, score_context)
+    freshness_score, freshness = _freshness_score(root, score_context)
+    structure_score, structure = _structure_score(root, score_context)
     scorecard = _assemble_scorecard(
         score_scope="repo",
         score_id="repo",
@@ -810,9 +826,9 @@ def record_score_history(project_root: str | Path, *, source: str = "score") -> 
         "rating": payload["rating"],
         "domain_scores": {entry["domain"]: entry["score"] for entry in payload.get("domains", [])},
     }
-    existing = history_path.read_text(encoding="utf-8").splitlines() if history_path.exists() else []
-    existing.append(json.dumps(snapshot))
-    history_path.write_text("\n".join(existing[-1000:]) + ("\n" if existing else ""), encoding="utf-8")
+    with _SCORE_HISTORY_LOCK:
+        with history_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(snapshot, sort_keys=True) + "\n")
     return snapshot
 
 

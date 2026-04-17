@@ -77,6 +77,11 @@ def _cached_parse(path: Path):
     return _parsed_language_evidence(str(path))
 
 
+def clear_source_graph_caches() -> None:
+    _safe_text_cached.cache_clear()
+    _parsed_language_evidence.cache_clear()
+
+
 def _python_call_names(path: Path) -> list[str]:
     try:
         tree = ast.parse(_safe_text(path), filename=str(path))

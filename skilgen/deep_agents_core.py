@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import queue
+import threading
 import time
 from typing import Callable
 
@@ -39,22 +41,33 @@ def _provider_docs_url(provider: str | None) -> str:
     return mapping.get(provider or "openai", "https://platform.openai.com/docs")
 
 
-def _provider_env_hint(provider: str | None, api_key_env: str | None) -> str:
+def _provider_env_hint(provider: str | None, api_key_env: str | None, *, redact_sensitive: bool = False) -> str:
     label = provider or "model provider"
-    env_name = api_key_env or "MODEL_API_KEY"
+    env_name = _redacted_env_name(api_key_env) if redact_sensitive else (api_key_env or "MODEL_API_KEY")
     return f"Export `{env_name}` with valid {label} credentials before running model-backed commands."
 
 
-def _classify_model_error(exc: Exception, provider: str | None, api_key_env: str | None) -> dict[str, object]:
+def _redacted_env_name(api_key_env: str | None) -> str:
+    return "[redacted credential]" if api_key_env else "credential"
+
+
+def _classify_model_error(
+    exc: Exception,
+    provider: str | None,
+    api_key_env: str | None,
+    *,
+    redact_sensitive: bool = False,
+) -> dict[str, object]:
     text = str(exc).lower()
     retryable = False
     category = "unknown_error"
+    env_name = _redacted_env_name(api_key_env) if redact_sensitive else (api_key_env or "MODEL_API_KEY")
     message = (
         f"Skilgen could not complete the model-backed request with provider `{provider or 'openai'}`. "
         f"See {_provider_docs_url(provider)} for provider setup and troubleshooting."
     )
     recommendations = [
-        _provider_env_hint(provider, api_key_env),
+        _provider_env_hint(provider, api_key_env, redact_sensitive=redact_sensitive),
         f"Confirm the configured model name is available for `{provider or 'openai'}`.",
     ]
 
@@ -62,10 +75,10 @@ def _classify_model_error(exc: Exception, provider: str | None, api_key_env: str
         category = "authentication_error"
         message = (
             f"Skilgen could not authenticate with provider `{provider or 'openai'}`. "
-            f"Check `{api_key_env or 'MODEL_API_KEY'}` and verify that the credential is valid."
+            f"Check `{env_name}` and verify that the credential is valid."
         )
         recommendations = [
-            _provider_env_hint(provider, api_key_env),
+            _provider_env_hint(provider, api_key_env, redact_sensitive=redact_sensitive),
             f"Verify the account or project behind `{provider or 'openai'}` still has access to the configured model.",
         ]
     elif any(marker in text for marker in ["rate limit", "429", "too many requests", "insufficient_quota", "quota"]):
@@ -104,7 +117,7 @@ def _classify_model_error(exc: Exception, provider: str | None, api_key_env: str
         "message": message,
         "recommendations": recommendations,
         "provider": provider or "openai",
-        "api_key_env": api_key_env or "MODEL_API_KEY",
+        "api_key_env": env_name,
     }
 
 
@@ -277,6 +290,29 @@ def _is_transient_error(exc: Exception, provider: str | None = None, api_key_env
     return bool(_classify_model_error(exc, provider, api_key_env)["retryable"])
 
 
+def _invoke_with_timeout(fn: Callable[[], object], timeout_seconds: float) -> object:
+    if timeout_seconds <= 0:
+        return fn()
+
+    result_queue: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
+
+    def runner() -> None:
+        try:
+            result_queue.put((True, fn()))
+        except Exception as exc:  # pragma: no cover - exercised via caller handling
+            result_queue.put((False, exc))
+
+    thread = threading.Thread(target=runner, name="skilgen-model-invoke", daemon=True)
+    thread.start()
+    try:
+        ok, payload = result_queue.get(timeout=timeout_seconds)
+    except queue.Empty as exc:
+        raise TimeoutError(f"Model invocation exceeded {timeout_seconds:.1f}s") from exc
+    if ok:
+        return payload
+    raise payload  # type: ignore[misc]
+
+
 def _invoke_with_retry(
     fn: Callable[[], object],
     *,
@@ -284,11 +320,12 @@ def _invoke_with_retry(
     delay_seconds: float = 1.0,
     provider: str | None = None,
     api_key_env: str | None = None,
+    timeout_seconds: float = 0.0,
 ) -> object:
     last_error: Exception | None = None
     for attempt in range(attempts):
         try:
-            return fn()
+            return _invoke_with_timeout(fn, timeout_seconds)
         except Exception as exc:  # pragma: no cover - exercised in integration paths
             last_error = exc
             if attempt == attempts - 1 or not _is_transient_error(exc, provider, api_key_env):
@@ -330,6 +367,7 @@ def _normalize_json_with_model(task: str, raw_text: str, project_root: str | Pat
             delay_seconds=settings.retry_base_delay_seconds,
             provider=settings.provider,
             api_key_env=settings.api_key_env,
+            timeout_seconds=settings.timeout_seconds,
         )
         return _extract_json(_message_text(response))
     finally:
@@ -389,6 +427,7 @@ def run_deep_json(
             delay_seconds=settings.retry_base_delay_seconds,
             provider=settings.provider,
             api_key_env=settings.api_key_env,
+            timeout_seconds=settings.timeout_seconds,
         )
         messages = result.get("messages", []) if isinstance(result, dict) else []
         if not messages:
@@ -411,7 +450,12 @@ def run_deep_json(
         raise ValueError("No usable agent text found for JSON normalization")
     except Exception as exc:
         if required:
-            error = _classify_model_error(exc, settings.provider, settings.api_key_env)
+            error = _classify_model_error(
+                exc,
+                settings.provider,
+                settings.api_key_env,
+                redact_sensitive=settings.redact_error_secrets,
+            )
             raise RuntimeError(
                 f"{error['message']} Task=`{task}` Provider={_model_name(root)} "
                 f"Category={error['category']} Recommendations={' | '.join(error['recommendations'])}"
@@ -458,6 +502,7 @@ def run_deep_text(
             delay_seconds=settings.retry_base_delay_seconds,
             provider=settings.provider,
             api_key_env=settings.api_key_env,
+            timeout_seconds=settings.timeout_seconds,
         )
         messages = result.get("messages", []) if isinstance(result, dict) else []
         if not messages:
@@ -467,7 +512,12 @@ def run_deep_text(
         return _message_text(messages[-1])
     except Exception as exc:
         if required:
-            error = _classify_model_error(exc, settings.provider, settings.api_key_env)
+            error = _classify_model_error(
+                exc,
+                settings.provider,
+                settings.api_key_env,
+                redact_sensitive=settings.redact_error_secrets,
+            )
             raise RuntimeError(
                 f"{error['message']} Task=`{task}` Provider={_model_name(root)} "
                 f"Category={error['category']} Recommendations={' | '.join(error['recommendations'])}"

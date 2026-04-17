@@ -1,13 +1,19 @@
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from skilgen.deep_agents_core import _build_chat_model, _classify_model_error, runtime_diagnostics
+from skilgen.deep_agents_core import _build_chat_model, _classify_model_error, _invoke_with_timeout, run_deep_json, run_deep_text, runtime_diagnostics
 
 
 class RuntimeHardeningTests(unittest.TestCase):
+    def test_invoke_with_timeout_raises_timeout_error(self) -> None:
+        with self.assertRaises(TimeoutError):
+            _invoke_with_timeout(lambda: time.sleep(0.05), 0.01)
+
     def test_classify_model_error_marks_rate_limit_as_retryable(self) -> None:
         error = _classify_model_error(RuntimeError("429 insufficient_quota"), "openai", "OPENAI_API_KEY")
         self.assertEqual(error["category"], "rate_limit_error")
@@ -19,6 +25,17 @@ class RuntimeHardeningTests(unittest.TestCase):
         self.assertEqual(error["category"], "authentication_error")
         self.assertFalse(error["retryable"])
         self.assertIn("ANTHROPIC_API_KEY", error["message"])
+
+    def test_classify_model_error_redacts_credential_name_when_requested(self) -> None:
+        error = _classify_model_error(
+            RuntimeError("authentication failed: invalid api key"),
+            "anthropic",
+            "ANTHROPIC_API_KEY",
+            redact_sensitive=True,
+        )
+        self.assertEqual(error["category"], "authentication_error")
+        self.assertNotIn("ANTHROPIC_API_KEY", error["message"])
+        self.assertIn("[redacted credential]", error["message"])
 
     def test_classify_model_error_reports_model_configuration_issue(self) -> None:
         error = _classify_model_error(RuntimeError("model not found"), "google_genai", "GOOGLE_API_KEY")
@@ -167,6 +184,110 @@ class RuntimeHardeningTests(unittest.TestCase):
             self.assertEqual(kwargs["model_provider"], "openai")
             self.assertEqual(kwargs["base_url"], "https://ai-gateway.internal/v1")
             self.assertEqual(kwargs["api_key"], "test-key")
+
+    def test_run_deep_json_falls_back_after_timeout(self) -> None:
+        class SlowAgent:
+            def invoke(self, _payload):
+                time.sleep(0.05)
+                return {"messages": [{"content": '{"ok": true}'}]}
+
+        settings = SimpleNamespace(
+            provider="openai",
+            api_key_env="OPENAI_API_KEY",
+            model="gpt-4.1-mini",
+            retry_attempts=1,
+            retry_base_delay_seconds=0.0,
+            timeout_seconds=0.01,
+            redact_error_secrets=True,
+        )
+        with patch.dict(os.environ, {"SKILGEN_DEEPAGENTS_REQUIRED": "0"}, clear=False), patch(
+            "skilgen.deep_agents_core.deep_agents_available",
+            return_value=True,
+        ), patch("skilgen.deep_agents_core._resolved_settings", return_value=settings), patch(
+            "skilgen.deep_agents_core._build_chat_model",
+            return_value=object(),
+        ), patch("skilgen.deep_agents_core.create_deep_agent", return_value=SlowAgent()):
+            payload = run_deep_json("architecture synthesis", "{}", lambda: {"fallback": True})
+        self.assertEqual(payload, {"fallback": True})
+
+    def test_run_deep_json_required_redacts_credential_name_on_timeout(self) -> None:
+        class SlowAgent:
+            def invoke(self, _payload):
+                time.sleep(0.05)
+                return {"messages": [{"content": '{"ok": true}'}]}
+
+        settings = SimpleNamespace(
+            provider="openai",
+            api_key_env="OPENAI_API_KEY",
+            model="gpt-4.1-mini",
+            retry_attempts=1,
+            retry_base_delay_seconds=0.0,
+            timeout_seconds=0.01,
+            redact_error_secrets=True,
+        )
+        with patch.dict(os.environ, {"SKILGEN_DEEPAGENTS_REQUIRED": "1"}, clear=False), patch(
+            "skilgen.deep_agents_core.deep_agents_available",
+            return_value=True,
+        ), patch("skilgen.deep_agents_core._resolved_settings", return_value=settings), patch(
+            "skilgen.deep_agents_core._build_chat_model",
+            return_value=object(),
+        ), patch("skilgen.deep_agents_core.create_deep_agent", return_value=SlowAgent()):
+            with self.assertRaises(RuntimeError) as context:
+                run_deep_json("architecture synthesis", "{}", lambda: {"fallback": True})
+        self.assertIn("[redacted credential]", str(context.exception))
+        self.assertNotIn("OPENAI_API_KEY", str(context.exception))
+
+    def test_run_deep_json_normalizes_malformed_json(self) -> None:
+        class MalformedAgent:
+            def invoke(self, _payload):
+                return {"messages": [{"content": "not valid json"}]}
+
+        settings = SimpleNamespace(
+            provider="openai",
+            api_key_env="OPENAI_API_KEY",
+            model="gpt-4.1-mini",
+            retry_attempts=1,
+            retry_base_delay_seconds=0.0,
+            timeout_seconds=1.0,
+            redact_error_secrets=True,
+        )
+        with patch.dict(os.environ, {"SKILGEN_DEEPAGENTS_REQUIRED": "0"}, clear=False), patch(
+            "skilgen.deep_agents_core.deep_agents_available",
+            return_value=True,
+        ), patch("skilgen.deep_agents_core._resolved_settings", return_value=settings), patch(
+            "skilgen.deep_agents_core._build_chat_model",
+            return_value=object(),
+        ), patch("skilgen.deep_agents_core.create_deep_agent", return_value=MalformedAgent()), patch(
+            "skilgen.deep_agents_core._normalize_json_with_model",
+            return_value={"normalized": True},
+        ) as normalize:
+            payload = run_deep_json("architecture synthesis", "{}", lambda: {"fallback": True})
+        self.assertEqual(payload, {"normalized": True})
+        normalize.assert_called_once()
+
+    def test_run_deep_text_falls_back_on_rate_limit_error(self) -> None:
+        class RateLimitedAgent:
+            def invoke(self, _payload):
+                raise RuntimeError("429 insufficient_quota")
+
+        settings = SimpleNamespace(
+            provider="openai",
+            api_key_env="OPENAI_API_KEY",
+            model="gpt-4.1-mini",
+            retry_attempts=1,
+            retry_base_delay_seconds=0.0,
+            timeout_seconds=1.0,
+            redact_error_secrets=True,
+        )
+        with patch.dict(os.environ, {"SKILGEN_DEEPAGENTS_REQUIRED": "0"}, clear=False), patch(
+            "skilgen.deep_agents_core.deep_agents_available",
+            return_value=True,
+        ), patch("skilgen.deep_agents_core._resolved_settings", return_value=settings), patch(
+            "skilgen.deep_agents_core._build_chat_model",
+            return_value=object(),
+        ), patch("skilgen.deep_agents_core.create_deep_agent", return_value=RateLimitedAgent()):
+            payload = run_deep_text("report", "{}", lambda: "fallback text")
+        self.assertEqual(payload, "fallback text")
 
 
 if __name__ == "__main__":

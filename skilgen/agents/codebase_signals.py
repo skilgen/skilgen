@@ -84,6 +84,10 @@ def _iter_code_files(project_root: Path) -> list[Path]:
     return [Path(path) for path in _iter_code_file_strings(str(project_root.resolve()))]
 
 
+def clear_codebase_signal_caches() -> None:
+    _iter_code_file_strings.cache_clear()
+
+
 def _is_backend_route(relative_path: str, parts: tuple[str, ...], name: str) -> bool:
     lowered_parts = {part.lower() for part in parts}
     route_markers = {"api", "routes", "route", "controllers", "controller", "handlers", "handler", "cics", "transactions", "transaction"}

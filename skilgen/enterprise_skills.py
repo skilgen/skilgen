@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -688,6 +689,8 @@ def recommend_mcp_connectors(project_root: str | Path) -> dict[str, object]:
         allow |= {str(item) for item in policy_pack.get("allow_connectors", [])}
     approval_required = {str(item) for item in policy_pack.get("manual_approval_connectors", [])}
     skill_bindings = policy_pack.get("skill_tool_bindings", {}) if isinstance(policy_pack.get("skill_tool_bindings"), dict) else {}
+    require_official_source = config.mcp_connectors_require_official_source or os.getenv("SKILGEN_ENFORCE_MCP_OFFICIAL_SOURCE", "1") != "0"
+    require_oauth = config.mcp_connectors_require_oauth or os.getenv("SKILGEN_ENFORCE_MCP_OAUTH", "1") != "0"
     haystacks: list[str] = []
     for path in list(root.rglob("*"))[:400]:
         if any(part in {".git", ".skilgen", "__pycache__", "node_modules"} for part in path.parts):
@@ -703,9 +706,9 @@ def recommend_mcp_connectors(project_root: str | Path) -> dict[str, object]:
             continue
         if allow and connector.slug not in allow:
             continue
-        if config.mcp_connectors_require_official_source and not connector.official_source_url:
+        if require_official_source and not connector.official_source_url:
             continue
-        if config.mcp_connectors_require_oauth and not connector.oauth_supported:
+        if require_oauth and not connector.oauth_supported:
             continue
         matches = [keyword for keyword in _connector_keywords().get(connector.slug, ()) if keyword in blob]
         if matches:
@@ -729,6 +732,8 @@ def active_mcp_connectors(project_root: str | Path) -> list[dict[str, object]]:
 def activate_mcp_connector(project_root: str | Path, slug: str) -> dict[str, object]:
     root = Path(project_root).resolve()
     config = load_config(root)
+    require_official_source = config.mcp_connectors_require_official_source or os.getenv("SKILGEN_ENFORCE_MCP_OFFICIAL_SOURCE", "1") != "0"
+    require_oauth = config.mcp_connectors_require_oauth or os.getenv("SKILGEN_ENFORCE_MCP_OAUTH", "1") != "0"
     policy_pack = _load_policy_pack(root)
     now = datetime.now(UTC).isoformat()
     catalog_connector = _catalog_connector(slug)
@@ -740,9 +745,9 @@ def activate_mcp_connector(project_root: str | Path, slug: str) -> dict[str, obj
         str(item) for item in policy_pack.get("approved_connectors", [])
     }:
         raise ValueError(f"MCP connector `{slug}` requires explicit approval in the configured policy pack.")
-    if config.mcp_connectors_require_official_source and not catalog_connector.official_source_url:
+    if require_official_source and not catalog_connector.official_source_url:
         raise ValueError(f"MCP connector `{slug}` does not have a verified official source configured.")
-    if config.mcp_connectors_require_oauth and not catalog_connector.oauth_supported:
+    if require_oauth and not catalog_connector.oauth_supported:
         raise ValueError(f"MCP connector `{slug}` does not meet the project's OAuth requirements.")
     connector = asdict(catalog_connector)
     manifest = _load_connector_manifest(root)

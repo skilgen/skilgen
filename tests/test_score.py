@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import threading
 import unittest
 
 from skilgen.core.repo_state import classify_repo_change
@@ -136,6 +137,25 @@ class ScoreTests(unittest.TestCase):
             self.assertEqual(len(history), 2)
             self.assertIn("trend", payload)
             self.assertIn("delta_from_previous", payload["trend"])
+
+    def test_score_history_append_is_safe_under_concurrent_writes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "app.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+
+            threads = [
+                threading.Thread(target=record_score_history, args=(root,), kwargs={"source": f"worker-{index}"})
+                for index in range(6)
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            history = load_score_history(root, limit=10)
+            self.assertEqual(len(history), 6)
+            self.assertEqual({entry["source"] for entry in history}, {f"worker-{index}" for index in range(6)})
 
     def test_coverage_ignores_non_code_repo_files(self) -> None:
         with TemporaryDirectory() as tmp:

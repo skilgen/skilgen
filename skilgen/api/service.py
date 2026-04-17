@@ -253,7 +253,7 @@ def resume_job_payload(job_id: str, project_root: str | Path | None = None) -> d
     resolved_root = job.payload.get("project_root")
     if job.job_type != "deliver" or not isinstance(requirements, str) or not isinstance(resolved_root, str):
         return _with_api_meta({"error": "unsupported_resume", "job_id": job_id})
-    if job.status not in {"failed", "cancelled"}:
+    if job.status not in {"failed", "cancelled", "interrupted", "queued"}:
         return _with_api_meta({"error": "resume_not_allowed", "job_id": job_id, "status": job.status})
     return create_deliver_job(requirements, resolved_root)
 

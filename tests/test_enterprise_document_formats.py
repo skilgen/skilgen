@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+from skilgen.core.document_ingestion import PdfReader
 from skilgen.enterprise_skills import generate_enterprise_skill
 
 
@@ -38,6 +39,7 @@ def _write_pdf(path: Path, text: str) -> None:
     path.write_bytes((header + body + "".join(xref) + trailer).encode("latin-1"))
 
 
+@unittest.skipUnless(PdfReader is not None, "PDF extraction extras are not installed")
 class EnterpriseDocumentFormatTests(unittest.TestCase):
     def test_generate_enterprise_skill_uses_document_extractors(self) -> None:
         with TemporaryDirectory() as tmp:

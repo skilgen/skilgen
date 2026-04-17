@@ -61,6 +61,9 @@ def resolve_model_settings(config: SkilgenConfig) -> ModelSettings:
         max_tokens=config.model_max_tokens,
         retry_attempts=config.model_retry_attempts,
         retry_base_delay_seconds=config.model_retry_base_delay_seconds,
+        timeout_seconds=config.model_timeout_seconds,
+        redaction_mode=config.model_redaction_mode,
+        redact_error_secrets=config.redact_model_error_secrets or os.getenv("SKILGEN_REDACT_MODEL_ERRORS") == "1",
     )
 
 

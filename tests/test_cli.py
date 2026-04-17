@@ -333,9 +333,10 @@ class CliTests(unittest.TestCase):
             self.assertIn("00:", result.stderr)
             self.assertIn("% |", result.stderr)
             self.assertIn("Starting delivery", result.stderr)
-            self.assertIn("Building project context", result.stderr)
-            self.assertIn("Rendering AGENTS.md", result.stderr)
-            self.assertIn("Rendering the final dashboard HTML surface", result.stderr)
+            self.assertIn("Finished delivery", result.stderr)
+            progress_lines = [line for line in result.stderr.splitlines() if line.strip()]
+            self.assertGreaterEqual(len(progress_lines), 2)
+            self.assertLessEqual(len(progress_lines), 4)
 
     def test_deliver_works_with_requirements_only(self) -> None:
         with TemporaryDirectory() as tmp:
