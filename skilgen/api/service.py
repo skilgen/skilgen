@@ -38,6 +38,12 @@ from skilgen.enterprise_skills import (
 )
 from skilgen.core.freshness import compute_freshness_report, load_freshness_state
 from skilgen.core.context import build_codebase_context
+from skilgen.core.identity_policy_store import (
+    identity_policy_store_path,
+    list_identity_policies,
+    resolve_identity_policy,
+    upsert_identity_policy,
+)
 from skilgen.core.score import compute_skillgen_score, record_score_history, render_score_badge_svg, score_history_payload, write_score_badge
 from skilgen.core.requirements import load_project_context
 from skilgen.core.run_memory import load_current_run_memory
@@ -390,6 +396,31 @@ def skills_rank_payload(project_root: str | Path) -> dict[str, object]:
 
 def skills_policy_payload(project_root: str | Path) -> dict[str, object]:
     return _with_api_meta(external_skill_policy(Path(project_root).resolve()))
+
+
+def identity_policy_payload(provider: str | None = None) -> dict[str, object]:
+    normalized_provider = (provider or "generic").strip().lower() or "generic"
+    return _with_api_meta(
+        {
+            "provider": normalized_provider,
+            "store_path": str(identity_policy_store_path()),
+            "effective_policy": resolve_identity_policy(normalized_provider),
+            "stored_policies": list_identity_policies(),
+        }
+    )
+
+
+def identity_policy_update_payload(data: dict[str, object]) -> dict[str, object]:
+    stored = upsert_identity_policy(data)
+    provider = str(stored["provider"])
+    return _with_api_meta(
+        {
+            "provider": provider,
+            "store_path": str(identity_policy_store_path()),
+            "stored_policy": stored,
+            "effective_policy": resolve_identity_policy(provider),
+        }
+    )
 
 
 def skills_show_payload(slug: str, project_root: str | Path) -> dict[str, object]:

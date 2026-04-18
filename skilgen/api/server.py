@@ -41,6 +41,8 @@ from skilgen.api.service import (
     fingerprint_payload,
     health_payload,
     intent_payload,
+    identity_policy_payload,
+    identity_policy_update_payload,
     jobs_payload,
     job_status_payload,
     map_payload,
@@ -70,6 +72,7 @@ from skilgen.api.service import (
 )
 from skilgen.core.auth_tokens import SignedTokenError, verify_oidc_token, verify_signed_token
 from skilgen.core.audit import append_audit_event, append_central_audit_event
+from skilgen.core.identity_policy_store import resolve_identity_policy
 from skilgen.core.runtime_data import prune_runtime_data
 
 
@@ -305,6 +308,7 @@ def _namespaced_claim(namespace: str | None, claim: str) -> tuple[str, ...]:
 def _provider_claim_mapping() -> OidcClaimMapping:
     provider = _configured_oidc_provider()
     auth0_namespace = _configured_oidc_auth0_namespace()
+    store_policy = resolve_identity_policy(provider)
     presets: dict[str, OidcClaimMapping] = {
         "generic": OidcClaimMapping(
             provider="generic",
@@ -354,11 +358,31 @@ def _provider_claim_mapping() -> OidcClaimMapping:
     base_mapping = presets.get(provider, presets["generic"])
     return OidcClaimMapping(
         provider=base_mapping.provider,
-        principal_claims=_csv_env("SKILGEN_API_OIDC_PRINCIPAL_CLAIMS") or base_mapping.principal_claims,
-        scope_claims=_csv_env("SKILGEN_API_OIDC_SCOPE_CLAIMS") or base_mapping.scope_claims,
-        group_claims=_csv_env("SKILGEN_API_OIDC_GROUP_CLAIMS") or base_mapping.group_claims,
-        root_claims=_csv_env("SKILGEN_API_OIDC_ROOTS_CLAIMS") or base_mapping.root_claims,
-        tenant_claims=_csv_env("SKILGEN_API_OIDC_TENANT_CLAIMS") or base_mapping.tenant_claims,
+        principal_claims=tuple(
+            str(item).strip()
+            for item in (store_policy.get("principal_claims") if isinstance(store_policy.get("principal_claims"), list) else _csv_env("SKILGEN_API_OIDC_PRINCIPAL_CLAIMS") or base_mapping.principal_claims)
+            if str(item).strip()
+        ),
+        scope_claims=tuple(
+            str(item).strip()
+            for item in (store_policy.get("scope_claims") if isinstance(store_policy.get("scope_claims"), list) else _csv_env("SKILGEN_API_OIDC_SCOPE_CLAIMS") or base_mapping.scope_claims)
+            if str(item).strip()
+        ),
+        group_claims=tuple(
+            str(item).strip()
+            for item in (store_policy.get("group_claims") if isinstance(store_policy.get("group_claims"), list) else _csv_env("SKILGEN_API_OIDC_GROUP_CLAIMS") or base_mapping.group_claims)
+            if str(item).strip()
+        ),
+        root_claims=tuple(
+            str(item).strip()
+            for item in (store_policy.get("root_claims") if isinstance(store_policy.get("root_claims"), list) else _csv_env("SKILGEN_API_OIDC_ROOTS_CLAIMS") or base_mapping.root_claims)
+            if str(item).strip()
+        ),
+        tenant_claims=tuple(
+            str(item).strip()
+            for item in (store_policy.get("tenant_claims") if isinstance(store_policy.get("tenant_claims"), list) else _csv_env("SKILGEN_API_OIDC_TENANT_CLAIMS") or base_mapping.tenant_claims)
+            if str(item).strip()
+        ),
     )
 
 
@@ -581,7 +605,10 @@ def _claim_first(claims: dict[str, object], names: tuple[str, ...]) -> str | Non
 
 def _group_scope_map() -> dict[str, str]:
     mapping: dict[str, str] = {}
-    for raw_name, raw_scope in _json_object_env("SKILGEN_API_OIDC_GROUP_SCOPE_MAP").items():
+    provider_policy = resolve_identity_policy(_configured_oidc_provider())
+    raw_mapping = provider_policy.get("group_scope_map")
+    source_mapping = raw_mapping if isinstance(raw_mapping, dict) else _json_object_env("SKILGEN_API_OIDC_GROUP_SCOPE_MAP")
+    for raw_name, raw_scope in source_mapping.items():
         normalized_scope = _normalize_scope_value(str(raw_scope))
         if normalized_scope is None:
             continue
@@ -593,7 +620,10 @@ def _group_scope_map() -> dict[str, str]:
 
 def _group_roots_map() -> dict[str, tuple[Path, ...]]:
     mapping: dict[str, tuple[Path, ...]] = {}
-    for raw_name, raw_roots in _json_object_env("SKILGEN_API_OIDC_GROUP_ROOTS_MAP").items():
+    provider_policy = resolve_identity_policy(_configured_oidc_provider())
+    raw_mapping = provider_policy.get("group_roots_map")
+    source_mapping = raw_mapping if isinstance(raw_mapping, dict) else _json_object_env("SKILGEN_API_OIDC_GROUP_ROOTS_MAP")
+    for raw_name, raw_roots in source_mapping.items():
         group_name = str(raw_name).strip()
         if not group_name:
             continue
@@ -750,7 +780,7 @@ def _scope_satisfies(actual_scope: str, required_scope: str) -> bool:
 
 
 def _required_scope_for_get(path: str, query: dict[str, list[str]]) -> str:
-    if path in {"/doctor", "/metrics"}:
+    if path in {"/doctor", "/metrics", "/auth/identity-policy"}:
         return "admin"
     if path == "/skills/lock/export":
         return "write"
@@ -762,7 +792,7 @@ def _required_scope_for_get(path: str, query: dict[str, list[str]]) -> str:
 def _required_scope_for_post(path: str) -> str:
     if path in {"/deliver", "/jobs/deliver"} or path.endswith("/cancel") or path.endswith("/resume"):
         return "write"
-    if path.startswith("/skills/") or path.startswith("/enterprise/") or path.startswith("/connectors/"):
+    if path.startswith("/skills/") or path.startswith("/enterprise/") or path.startswith("/connectors/") or path.startswith("/auth/"):
         return "admin"
     return "read"
 
@@ -1170,6 +1200,10 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     _text_response(self, 200, _metrics_payload(), content_type="text/plain; version=0.0.4", request_id=request_id)
                     status_code = 200
                     return
+                if parsed.path == "/auth/identity-policy":
+                    _json_response(self, 200, identity_policy_payload(query.get("provider", [None])[0]), request_id=request_id)
+                    status_code = 200
+                    return
                 if parsed.path == "/status":
                     _json_response(self, 200, status_payload(project_root or Path(".")), request_id=request_id)
                     status_code = 200
@@ -1339,6 +1373,10 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     raise ValueError("`source_paths` must contain at least one path")
                 if self.path == "/fingerprint":
                     _json_response(self, 200, fingerprint_payload(project_root or Path(".")), request_id=request_id)
+                    status_code = 200
+                    return
+                if self.path == "/auth/identity-policy":
+                    _json_response(self, 200, identity_policy_update_payload(data), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/map":

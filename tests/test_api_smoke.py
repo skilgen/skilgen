@@ -888,6 +888,89 @@ class ApiSmokeTests(unittest.TestCase):
                         server.shutdown()
                         server.server_close()
 
+    def test_api_identity_policy_store_update(self) -> None:
+        with TemporaryDirectory() as tmp, TemporaryDirectory() as other_tmp, TemporaryDirectory() as db_tmp:
+            root = Path(tmp)
+            other_root = Path(other_tmp)
+            db_path = Path(db_tmp) / "identity.sqlite"
+            private_key, jwks = generate_rsa_signing_material(kid="managed-kid")
+            with LocalOidcServer(jwks=jwks) as oidc:
+                env = {
+                    "SKILGEN_API_IDENTITY_POLICY_DB": str(db_path),
+                    "SKILGEN_API_OIDC_PROVIDER": "okta",
+                    "SKILGEN_API_OIDC_ISSUER": str(oidc.issuer),
+                    "SKILGEN_API_OIDC_AUDIENCE": "skilgen-api",
+                    "SKILGEN_API_TOKEN": "test-token",
+                    "SKILGEN_API_REQUIRE_TLS": "1",
+                    "SKILGEN_API_ALLOW_INSECURE_LOOPBACK": "0",
+                    "SKILGEN_ALLOWED_PROJECT_ROOTS": f"{root.resolve()},{other_root.resolve()}",
+                }
+                with mock.patch.dict(os.environ, env, clear=False):
+                    server = create_server("127.0.0.1", 0)
+                    thread = threading.Thread(target=server.serve_forever, daemon=True)
+                    thread.start()
+                    try:
+                        host, port = server.server_address
+                        base = f"http://{host}:{port}"
+                        secure_headers = {"X-Forwarded-Proto": "https"}
+
+                        managed_token = mint_rs256_token(
+                            private_key,
+                            kid="managed-kid",
+                            principal="okta-managed-subject",
+                            scope="openid profile",
+                            ttl_seconds=300,
+                            issuer=oidc.issuer,
+                            audience="skilgen-api",
+                            extra_claims={"preferred_username": "managed.okta@example.com", "groups": ["PlatformAdmins", "RepoAccess"]},
+                        )
+                        unauthorized, _ = get_json(
+                            f"{base}/doctor?{urlencode({'project_root': str(root)})}",
+                            token=managed_token,
+                            headers=secure_headers,
+                            expect_status=401,
+                        )
+                        self.assertEqual(unauthorized["error"], "unauthorized")
+
+                        updated, _ = post_json(
+                            f"{base}/auth/identity-policy",
+                            {
+                                "provider": "okta",
+                                "group_scope_map": {"PlatformAdmins": "admin"},
+                                "group_roots_map": {"RepoAccess": [str(root.resolve())]},
+                            },
+                            token="test-token",
+                            headers=secure_headers,
+                        )
+                        self.assertEqual(updated["stored_policy"]["provider"], "okta")
+                        self.assertEqual(updated["effective_policy"]["group_scope_map"]["PlatformAdmins"], "admin")
+
+                        policy_view, _ = get_json(
+                            f"{base}/auth/identity-policy?{urlencode({'provider': 'okta'})}",
+                            token="test-token",
+                            headers=secure_headers,
+                        )
+                        self.assertEqual(policy_view["effective_policy"]["provider"], "okta")
+                        self.assertTrue(str(db_path) in policy_view["store_path"])
+
+                        doctor, _ = get_json(
+                            f"{base}/doctor?{urlencode({'project_root': str(root)})}",
+                            token=managed_token,
+                            headers=secure_headers,
+                        )
+                        self.assertIn("runtime", doctor)
+
+                        forbidden, _ = get_json(
+                            f"{base}/doctor?{urlencode({'project_root': str(other_root)})}",
+                            token=managed_token,
+                            headers=secure_headers,
+                            expect_status=403,
+                        )
+                        self.assertEqual(forbidden["error"], "forbidden")
+                    finally:
+                        server.shutdown()
+                        server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()
