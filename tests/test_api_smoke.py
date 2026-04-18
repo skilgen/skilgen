@@ -731,6 +731,163 @@ class ApiSmokeTests(unittest.TestCase):
                         server.shutdown()
                         server.server_close()
 
+    def test_api_okta_group_mapped_oidc_tokens(self) -> None:
+        with TemporaryDirectory() as tmp, TemporaryDirectory() as other_tmp:
+            root = Path(tmp)
+            other_root = Path(other_tmp)
+            private_key, jwks = generate_rsa_signing_material(kid="okta-kid")
+            with LocalOidcServer(jwks=jwks) as oidc:
+                env = {
+                    "SKILGEN_API_OIDC_PROVIDER": "okta",
+                    "SKILGEN_API_OIDC_ISSUER": str(oidc.issuer),
+                    "SKILGEN_API_OIDC_AUDIENCE": "skilgen-api",
+                    "SKILGEN_API_OIDC_GROUP_SCOPE_MAP": json.dumps({"Skilgen-Admins": "admin"}),
+                    "SKILGEN_API_OIDC_GROUP_ROOTS_MAP": json.dumps({"RepoAccess": [str(root.resolve())]}),
+                    "SKILGEN_API_REQUIRE_TLS": "1",
+                    "SKILGEN_API_ALLOW_INSECURE_LOOPBACK": "0",
+                    "SKILGEN_ALLOWED_PROJECT_ROOTS": f"{root.resolve()},{other_root.resolve()}",
+                }
+                with mock.patch.dict(os.environ, env, clear=False):
+                    server = create_server("127.0.0.1", 0)
+                    thread = threading.Thread(target=server.serve_forever, daemon=True)
+                    thread.start()
+                    try:
+                        host, port = server.server_address
+                        base = f"http://{host}:{port}"
+                        secure_headers = {"X-Forwarded-Proto": "https"}
+                        valid_token = mint_rs256_token(
+                            private_key,
+                            kid="okta-kid",
+                            principal="okta-subject",
+                            scope="openid profile",
+                            ttl_seconds=300,
+                            issuer=oidc.issuer,
+                            audience="skilgen-api",
+                            extra_claims={
+                                "preferred_username": "okta.admin@example.com",
+                                "groups": ["Skilgen-Admins", "RepoAccess"],
+                            },
+                        )
+                        doctor, _ = get_json(
+                            f"{base}/doctor?{urlencode({'project_root': str(root)})}",
+                            token=valid_token,
+                            headers=secure_headers,
+                        )
+                        self.assertIn("runtime", doctor)
+                        forbidden, _ = get_json(
+                            f"{base}/doctor?{urlencode({'project_root': str(other_root)})}",
+                            token=valid_token,
+                            headers=secure_headers,
+                            expect_status=403,
+                        )
+                        self.assertEqual(forbidden["error"], "forbidden")
+                    finally:
+                        server.shutdown()
+                        server.server_close()
+
+    def test_api_entra_role_mapped_oidc_tokens(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            private_key, jwks = generate_rsa_signing_material(kid="entra-kid")
+            with LocalOidcServer(jwks=jwks) as oidc:
+                env = {
+                    "SKILGEN_API_OIDC_PROVIDER": "entra",
+                    "SKILGEN_API_OIDC_ISSUER": str(oidc.issuer),
+                    "SKILGEN_API_OIDC_AUDIENCE": "skilgen-api",
+                    "SKILGEN_API_REQUIRE_TLS": "1",
+                    "SKILGEN_API_ALLOW_INSECURE_LOOPBACK": "0",
+                    "SKILGEN_ALLOWED_PROJECT_ROOTS": str(root.resolve()),
+                }
+                with mock.patch.dict(os.environ, env, clear=False):
+                    server = create_server("127.0.0.1", 0)
+                    thread = threading.Thread(target=server.serve_forever, daemon=True)
+                    thread.start()
+                    try:
+                        host, port = server.server_address
+                        base = f"http://{host}:{port}"
+                        secure_headers = {"X-Forwarded-Proto": "https"}
+                        valid_token = mint_rs256_token(
+                            private_key,
+                            kid="entra-kid",
+                            principal="entra-subject",
+                            scope="User.Read",
+                            ttl_seconds=300,
+                            allowed_project_roots=[root],
+                            issuer=oidc.issuer,
+                            audience="skilgen-api",
+                            extra_claims={
+                                "preferred_username": "entra.admin@example.com",
+                                "roles": ["Skilgen.Admin"],
+                                "tid": "tenant-entra",
+                            },
+                        )
+                        doctor, _ = get_json(
+                            f"{base}/doctor?{urlencode({'project_root': str(root)})}",
+                            token=valid_token,
+                            headers=secure_headers,
+                        )
+                        self.assertIn("runtime", doctor)
+                    finally:
+                        server.shutdown()
+                        server.server_close()
+
+    def test_api_auth0_namespaced_oidc_tokens(self) -> None:
+        with TemporaryDirectory() as tmp, TemporaryDirectory() as other_tmp:
+            root = Path(tmp)
+            other_root = Path(other_tmp)
+            private_key, jwks = generate_rsa_signing_material(kid="auth0-kid")
+            namespace = "https://skilgen.example.com"
+            with LocalOidcServer(jwks=jwks) as oidc:
+                env = {
+                    "SKILGEN_API_OIDC_PROVIDER": "auth0",
+                    "SKILGEN_API_OIDC_AUTH0_NAMESPACE": namespace,
+                    "SKILGEN_API_OIDC_ISSUER": str(oidc.issuer),
+                    "SKILGEN_API_OIDC_AUDIENCE": "skilgen-api",
+                    "SKILGEN_API_OIDC_GROUP_SCOPE_MAP": json.dumps({"platform-admin": "admin"}),
+                    "SKILGEN_API_REQUIRE_TLS": "1",
+                    "SKILGEN_API_ALLOW_INSECURE_LOOPBACK": "0",
+                    "SKILGEN_ALLOWED_PROJECT_ROOTS": f"{root.resolve()},{other_root.resolve()}",
+                }
+                with mock.patch.dict(os.environ, env, clear=False):
+                    server = create_server("127.0.0.1", 0)
+                    thread = threading.Thread(target=server.serve_forever, daemon=True)
+                    thread.start()
+                    try:
+                        host, port = server.server_address
+                        base = f"http://{host}:{port}"
+                        secure_headers = {"X-Forwarded-Proto": "https"}
+                        valid_token = mint_rs256_token(
+                            private_key,
+                            kid="auth0-kid",
+                            principal="auth0|admin",
+                            scope="openid profile",
+                            ttl_seconds=300,
+                            issuer=oidc.issuer,
+                            audience="skilgen-api",
+                            extra_claims={
+                                "email": "auth0.admin@example.com",
+                                f"{namespace}/roles": ["platform-admin"],
+                                f"{namespace}/roots": [str(root.resolve())],
+                                f"{namespace}/tenant": "tenant-auth0",
+                            },
+                        )
+                        doctor, _ = get_json(
+                            f"{base}/doctor?{urlencode({'project_root': str(root)})}",
+                            token=valid_token,
+                            headers=secure_headers,
+                        )
+                        self.assertIn("runtime", doctor)
+                        forbidden, _ = get_json(
+                            f"{base}/doctor?{urlencode({'project_root': str(other_root)})}",
+                            token=valid_token,
+                            headers=secure_headers,
+                            expect_status=403,
+                        )
+                        self.assertEqual(forbidden["error"], "forbidden")
+                    finally:
+                        server.shutdown()
+                        server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

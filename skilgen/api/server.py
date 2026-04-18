@@ -97,6 +97,16 @@ class ApiPrincipal:
     auth_method: str = "static"
 
 
+@dataclass(frozen=True)
+class OidcClaimMapping:
+    provider: str
+    principal_claims: tuple[str, ...]
+    scope_claims: tuple[str, ...]
+    group_claims: tuple[str, ...]
+    root_claims: tuple[str, ...]
+    tenant_claims: tuple[str, ...]
+
+
 def _ensure_logging() -> None:
     global _LOGGING_READY
     if _LOGGING_READY:
@@ -256,6 +266,100 @@ def _configured_oidc_cache_ttl_seconds() -> float:
         return max(0.0, float(os.getenv("SKILGEN_API_OIDC_CACHE_TTL_SECONDS", "300")))
     except ValueError:
         return 300.0
+
+
+def _configured_oidc_provider() -> str:
+    value = os.getenv("SKILGEN_API_OIDC_PROVIDER", "generic").strip().lower()
+    return value or "generic"
+
+
+def _configured_oidc_auth0_namespace() -> str | None:
+    value = os.getenv("SKILGEN_API_OIDC_AUTH0_NAMESPACE", "").strip().rstrip("/")
+    return value or None
+
+
+def _csv_env(name: str) -> tuple[str, ...]:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return ()
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def _json_object_env(name: str) -> dict[str, object]:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _namespaced_claim(namespace: str | None, claim: str) -> tuple[str, ...]:
+    if namespace is None:
+        return ()
+    return (f"{namespace}/{claim.lstrip('/')}",)
+
+
+def _provider_claim_mapping() -> OidcClaimMapping:
+    provider = _configured_oidc_provider()
+    auth0_namespace = _configured_oidc_auth0_namespace()
+    presets: dict[str, OidcClaimMapping] = {
+        "generic": OidcClaimMapping(
+            provider="generic",
+            principal_claims=("preferred_username", "email", "sub", "principal"),
+            scope_claims=("scope", "scp", "roles", "role"),
+            group_claims=("groups", "group", "roles", "role"),
+            root_claims=("roots", "allowed_project_roots", "project_roots"),
+            tenant_claims=("tenant", "tid"),
+        ),
+        "okta": OidcClaimMapping(
+            provider="okta",
+            principal_claims=("preferred_username", "email", "sub"),
+            scope_claims=("scope", "scp", "groups", "roles", "role"),
+            group_claims=("groups", "roles", "role"),
+            root_claims=("skilgen_roots", "roots", "allowed_project_roots", "project_roots"),
+            tenant_claims=("tenant", "org_id", "tid"),
+        ),
+        "entra": OidcClaimMapping(
+            provider="entra",
+            principal_claims=("preferred_username", "upn", "email", "oid", "sub"),
+            scope_claims=("scp", "roles", "groups", "scope"),
+            group_claims=("groups", "roles", "wids"),
+            root_claims=("extension_skilgen_roots", "skilgen_roots", "roots", "allowed_project_roots", "project_roots"),
+            tenant_claims=("tid", "tenant"),
+        ),
+        "auth0": OidcClaimMapping(
+            provider="auth0",
+            principal_claims=("email", "nickname", "name", "sub") + _namespaced_claim(auth0_namespace, "principal"),
+            scope_claims=("scope", "permissions", "roles", "groups")
+            + _namespaced_claim(auth0_namespace, "scope")
+            + _namespaced_claim(auth0_namespace, "permissions")
+            + _namespaced_claim(auth0_namespace, "roles")
+            + _namespaced_claim(auth0_namespace, "groups"),
+            group_claims=("permissions", "roles", "groups")
+            + _namespaced_claim(auth0_namespace, "permissions")
+            + _namespaced_claim(auth0_namespace, "roles")
+            + _namespaced_claim(auth0_namespace, "groups"),
+            root_claims=("roots", "allowed_project_roots", "project_roots")
+            + _namespaced_claim(auth0_namespace, "roots")
+            + _namespaced_claim(auth0_namespace, "allowed_project_roots")
+            + _namespaced_claim(auth0_namespace, "project_roots"),
+            tenant_claims=("tenant", "org_id")
+            + _namespaced_claim(auth0_namespace, "tenant")
+            + _namespaced_claim(auth0_namespace, "org_id"),
+        ),
+    }
+    base_mapping = presets.get(provider, presets["generic"])
+    return OidcClaimMapping(
+        provider=base_mapping.provider,
+        principal_claims=_csv_env("SKILGEN_API_OIDC_PRINCIPAL_CLAIMS") or base_mapping.principal_claims,
+        scope_claims=_csv_env("SKILGEN_API_OIDC_SCOPE_CLAIMS") or base_mapping.scope_claims,
+        group_claims=_csv_env("SKILGEN_API_OIDC_GROUP_CLAIMS") or base_mapping.group_claims,
+        root_claims=_csv_env("SKILGEN_API_OIDC_ROOTS_CLAIMS") or base_mapping.root_claims,
+        tenant_claims=_csv_env("SKILGEN_API_OIDC_TENANT_CLAIMS") or base_mapping.tenant_claims,
+    )
 
 
 def _policy_roots(raw_roots: object) -> tuple[Path, ...]:
@@ -467,6 +571,39 @@ def _claim_values(claims: dict[str, object], *names: str) -> list[str]:
     return values
 
 
+def _claim_first(claims: dict[str, object], names: tuple[str, ...]) -> str | None:
+    for name in names:
+        raw_value = claims.get(name)
+        if isinstance(raw_value, str) and raw_value.strip():
+            return raw_value.strip()
+    return None
+
+
+def _group_scope_map() -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for raw_name, raw_scope in _json_object_env("SKILGEN_API_OIDC_GROUP_SCOPE_MAP").items():
+        normalized_scope = _normalize_scope_value(str(raw_scope))
+        if normalized_scope is None:
+            continue
+        group_name = str(raw_name).strip()
+        if group_name:
+            mapping[group_name.lower()] = normalized_scope
+    return mapping
+
+
+def _group_roots_map() -> dict[str, tuple[Path, ...]]:
+    mapping: dict[str, tuple[Path, ...]] = {}
+    for raw_name, raw_roots in _json_object_env("SKILGEN_API_OIDC_GROUP_ROOTS_MAP").items():
+        group_name = str(raw_name).strip()
+        if not group_name:
+            continue
+        try:
+            mapping[group_name.lower()] = _policy_roots(raw_roots)
+        except ValueError:
+            continue
+    return mapping
+
+
 def _normalize_scope_value(candidate: str) -> str | None:
     normalized = candidate.strip().lower()
     if normalized in _SCOPE_LEVELS:
@@ -479,26 +616,58 @@ def _normalize_scope_value(candidate: str) -> str | None:
     return None
 
 
-def _claims_scope(claims: dict[str, object]) -> str | None:
+def _claims_scope(claims: dict[str, object], mapping: OidcClaimMapping) -> str | None:
     best_scope: str | None = None
-    for candidate in _claim_values(claims, "scope", "scp", "roles", "role"):
+    for candidate in _claim_values(claims, *mapping.scope_claims):
         normalized = _normalize_scope_value(candidate)
         if normalized is None:
             continue
         if best_scope is None or _SCOPE_LEVELS[normalized] > _SCOPE_LEVELS[best_scope]:
             best_scope = normalized
+    scoped_groups = _group_scope_map()
+    if scoped_groups:
+        for candidate in _claim_values(claims, *mapping.group_claims):
+            normalized = scoped_groups.get(candidate.strip().lower())
+            if normalized is None:
+                continue
+            if best_scope is None or _SCOPE_LEVELS[normalized] > _SCOPE_LEVELS[best_scope]:
+                best_scope = normalized
     return best_scope
 
 
-def _claims_allowed_roots(claims: dict[str, object]) -> tuple[Path, ...] | None:
-    for name in ("roots", "allowed_project_roots", "project_roots"):
+def _claims_allowed_roots(claims: dict[str, object], mapping: OidcClaimMapping) -> tuple[Path, ...] | None:
+    resolved_roots: list[Path] = []
+    seen_roots: set[Path] = set()
+    for name in mapping.root_claims:
         if name not in claims:
             continue
         try:
-            return _policy_roots(claims.get(name))
+            roots = _policy_roots(claims.get(name))
         except ValueError:
             return None
-    return ()
+        for root in roots:
+            if root not in seen_roots:
+                seen_roots.add(root)
+                resolved_roots.append(root)
+    mapped_roots = _group_roots_map()
+    if mapped_roots:
+        for candidate in _claim_values(claims, *mapping.group_claims):
+            for root in mapped_roots.get(candidate.strip().lower(), ()):
+                if root not in seen_roots:
+                    seen_roots.add(root)
+                    resolved_roots.append(root)
+    return tuple(resolved_roots)
+
+
+def _claims_tenant(claims: dict[str, object], mapping: OidcClaimMapping) -> str | None:
+    return _claim_first(claims, mapping.tenant_claims)
+
+
+def _claims_principal(claims: dict[str, object], mapping: OidcClaimMapping) -> str:
+    principal = _claim_first(claims, mapping.principal_claims)
+    if principal:
+        return principal
+    return str(claims.get("sub", claims.get("principal", ""))).strip() or "oidc-principal"
 
 
 def _oidc_principal(token: str) -> ApiPrincipal | None:
@@ -506,6 +675,7 @@ def _oidc_principal(token: str) -> ApiPrincipal | None:
     jwks_url = _configured_oidc_jwks_url()
     if issuer is None and jwks_url is None:
         return None
+    mapping = _provider_claim_mapping()
     try:
         claims = verify_oidc_token(
             token,
@@ -518,19 +688,19 @@ def _oidc_principal(token: str) -> ApiPrincipal | None:
         )
     except SignedTokenError:
         return None
-    scope = _claims_scope(claims)
+    scope = _claims_scope(claims, mapping)
     if scope is None:
         return None
-    allowed_roots = _claims_allowed_roots(claims)
+    allowed_roots = _claims_allowed_roots(claims, mapping)
     if allowed_roots is None:
         return None
-    tenant = claims.get("tenant", claims.get("tid"))
+    tenant = _claims_tenant(claims, mapping)
     return ApiPrincipal(
-        principal=str(claims.get("sub", claims.get("principal", ""))).strip() or "oidc-principal",
+        principal=_claims_principal(claims, mapping),
         scope=scope,
         token=token,
         allowed_roots=allowed_roots,
-        tenant=str(tenant).strip() if tenant not in {None, ""} else None,
+        tenant=tenant,
         allow_insecure_transport=bool(claims.get("allow_insecure_transport", False)),
         auth_method="oidc",
     )
@@ -555,19 +725,20 @@ def _token_principal(token: str | None) -> ApiPrincipal | None:
         except SignedTokenError:
             claims = None
         if claims is not None:
-            scope = _claims_scope(claims)
+            mapping = _provider_claim_mapping()
+            scope = _claims_scope(claims, mapping)
             if scope is None:
                 return None
-            allowed_roots = _claims_allowed_roots(claims)
+            allowed_roots = _claims_allowed_roots(claims, mapping)
             if allowed_roots is None:
                 return None
-            tenant = claims.get("tenant", claims.get("tid"))
+            tenant = _claims_tenant(claims, mapping)
             return ApiPrincipal(
-                principal=str(claims.get("sub", claims.get("principal", ""))).strip() or "signed-principal",
+                principal=_claims_principal(claims, mapping),
                 scope=scope,
                 token=token,
                 allowed_roots=allowed_roots,
-                tenant=str(tenant).strip() if tenant not in {None, ""} else None,
+                tenant=tenant,
                 allow_insecure_transport=bool(claims.get("allow_insecure_transport", False)),
                 auth_method="signed",
             )
