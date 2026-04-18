@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
 import hmac
 import hashlib
 import ipaddress
@@ -67,7 +68,7 @@ from skilgen.api.service import (
     status_payload,
     validate_payload,
 )
-from skilgen.core.audit import append_audit_event
+from skilgen.core.audit import append_audit_event, append_central_audit_event
 from skilgen.core.runtime_data import prune_runtime_data
 
 
@@ -82,6 +83,16 @@ _METRICS = {
 }
 _RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
 _SCOPE_LEVELS = {"read": 1, "write": 2, "admin": 3}
+
+
+@dataclass(frozen=True)
+class ApiPrincipal:
+    principal: str
+    scope: str
+    token: str
+    allowed_roots: tuple[Path, ...] = ()
+    tenant: str | None = None
+    allow_insecure_transport: bool = False
 
 
 def _ensure_logging() -> None:
@@ -112,6 +123,14 @@ def _ensure_logging() -> None:
                 payload["duration_ms"] = record.duration_ms
             if hasattr(record, "remote_addr"):
                 payload["remote_addr"] = record.remote_addr
+            if hasattr(record, "principal"):
+                payload["principal"] = record.principal
+            if hasattr(record, "scope"):
+                payload["scope"] = record.scope
+            if hasattr(record, "tenant"):
+                payload["tenant"] = record.tenant
+            if hasattr(record, "secure_transport"):
+                payload["secure_transport"] = record.secure_transport
             return json.dumps(payload, sort_keys=True)
 
     handler.setFormatter(JsonFormatter())
@@ -184,10 +203,23 @@ def _configured_api_token() -> str | None:
     return os.getenv("SKILGEN_API_TOKEN")
 
 
-def _configured_api_tokens() -> list[tuple[str, str]]:
-    tokens: list[tuple[str, str]] = []
+def _policy_roots(raw_roots: object) -> tuple[Path, ...]:
+    if raw_roots is None or raw_roots == "":
+        return ()
+    if not isinstance(raw_roots, list):
+        raise ValueError("allowed_project_roots must be a list")
+    roots: list[Path] = []
+    for item in raw_roots:
+        candidate = str(item).strip()
+        if candidate:
+            roots.append(Path(candidate).resolve())
+    return tuple(roots)
+
+
+def _configured_api_principals() -> list[ApiPrincipal]:
+    principals: list[ApiPrincipal] = []
     if _configured_api_token():
-        tokens.append(("admin", str(_configured_api_token())))
+        principals.append(ApiPrincipal(principal="legacy-admin", scope="admin", token=str(_configured_api_token())))
     for env_name, scope in (
         ("SKILGEN_API_READ_TOKEN", "read"),
         ("SKILGEN_API_WRITE_TOKEN", "write"),
@@ -195,7 +227,13 @@ def _configured_api_tokens() -> list[tuple[str, str]]:
     ):
         value = os.getenv(env_name)
         if value:
-            tokens.append((scope, value))
+            principals.append(
+                ApiPrincipal(
+                    principal=env_name.removeprefix("SKILGEN_API_").removesuffix("_TOKEN").lower(),
+                    scope=scope,
+                    token=value,
+                )
+            )
     raw_pairs = os.getenv("SKILGEN_API_TOKENS", "")
     for item in raw_pairs.split(","):
         stripped = item.strip()
@@ -207,8 +245,44 @@ def _configured_api_tokens() -> list[tuple[str, str]]:
         normalized_scope = scope.strip().lower()
         normalized_token = token.strip()
         if normalized_scope in _SCOPE_LEVELS and normalized_token:
-            tokens.append((normalized_scope, normalized_token))
-    return tokens
+            principals.append(
+                ApiPrincipal(
+                    principal=f"{normalized_scope}-token-{len(principals) + 1}",
+                    scope=normalized_scope,
+                    token=normalized_token,
+                )
+            )
+    raw_policies = os.getenv("SKILGEN_API_TOKEN_POLICIES", "").strip()
+    if raw_policies:
+        try:
+            parsed = json.loads(raw_policies)
+        except json.JSONDecodeError:
+            parsed = []
+        if isinstance(parsed, dict):
+            parsed = parsed.get("tokens", [])
+        if isinstance(parsed, list):
+            for index, item in enumerate(parsed, start=1):
+                if not isinstance(item, dict):
+                    continue
+                token = str(item.get("token", "")).strip()
+                scope = str(item.get("scope", "read")).strip().lower()
+                if not token or scope not in _SCOPE_LEVELS:
+                    continue
+                try:
+                    allowed_roots = _policy_roots(item.get("allowed_project_roots", item.get("project_roots", [])))
+                except ValueError:
+                    continue
+                principals.append(
+                    ApiPrincipal(
+                        principal=str(item.get("principal") or item.get("name") or f"principal-{index}"),
+                        scope=scope,
+                        token=token,
+                        allowed_roots=allowed_roots,
+                        tenant=str(item.get("tenant")).strip() if item.get("tenant") not in {None, ""} else None,
+                        allow_insecure_transport=bool(item.get("allow_insecure_transport", False)),
+                    )
+                )
+    return principals
 
 
 def _max_body_bytes() -> int:
@@ -231,10 +305,18 @@ def _allowed_project_roots() -> list[Path]:
     return roots or [Path.cwd().resolve()]
 
 
-def _resolve_project_root(raw_value: str | None) -> Path:
+def _principal_contains_root(principal: ApiPrincipal, candidate: Path) -> bool:
+    if not principal.allowed_roots:
+        return True
+    return any(_contains_path(root, candidate) for root in principal.allowed_roots)
+
+
+def _resolve_project_root(raw_value: str | None, *, principal: ApiPrincipal | None = None) -> Path:
     candidate = Path(raw_value or ".").resolve()
     for allowed_root in _allowed_project_roots():
         if candidate == allowed_root or allowed_root in candidate.parents:
+            if principal is not None and not _principal_contains_root(principal, candidate):
+                raise PermissionError(f"project_root `{candidate}` is outside the allowed scope for principal `{principal.principal}`")
             return candidate
     raise PermissionError(f"project_root `{candidate}` is outside the configured allowlist")
 
@@ -307,12 +389,12 @@ def _enforce_rate_limit(handler: BaseHTTPRequestHandler, *, request_id: str) -> 
     return True, 200
 
 
-def _token_scope(token: str | None) -> str | None:
+def _token_principal(token: str | None) -> ApiPrincipal | None:
     if not token:
         return None
-    for scope, expected_token in _configured_api_tokens():
-        if hmac.compare_digest(token, expected_token):
-            return scope
+    for principal in _configured_api_principals():
+        if hmac.compare_digest(token, principal.token):
+            return principal
     return None
 
 
@@ -407,6 +489,75 @@ def _normalize_remote_source(
     return raw_value
 
 
+def _tls_required() -> bool:
+    return os.getenv("SKILGEN_API_REQUIRE_TLS", "1").strip().lower() not in {"0", "false", "no"}
+
+
+def _allow_insecure_loopback() -> bool:
+    return os.getenv("SKILGEN_API_ALLOW_INSECURE_LOOPBACK", "1").strip().lower() not in {"0", "false", "no"}
+
+
+def _is_loopback_address(raw_address: str) -> bool:
+    try:
+        return ipaddress.ip_address(raw_address.split("%", 1)[0]).is_loopback
+    except ValueError:
+        return raw_address in {"localhost", "::1"}
+
+
+def _forwarded_proto(handler: BaseHTTPRequestHandler) -> str | None:
+    forwarded = handler.headers.get("Forwarded", "")
+    for part in forwarded.split(";"):
+        stripped = part.strip()
+        if stripped.lower().startswith("proto="):
+            return stripped.split("=", 1)[1].strip().strip('"').lower()
+    x_forwarded_proto = handler.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower()
+    if x_forwarded_proto:
+        return x_forwarded_proto
+    if handler.headers.get("X-Forwarded-Ssl", "").strip().lower() == "on":
+        return "https"
+    return None
+
+
+def _request_is_secure(handler: BaseHTTPRequestHandler) -> bool:
+    forwarded_proto = _forwarded_proto(handler)
+    if forwarded_proto == "https":
+        return True
+    connection = getattr(handler, "connection", None)
+    cipher = getattr(connection, "cipher", None)
+    if callable(cipher):
+        try:
+            return cipher() is not None
+        except OSError:
+            return False
+    return False
+
+
+def _enforce_transport_security(
+    handler: BaseHTTPRequestHandler,
+    *,
+    request_id: str,
+    principal: ApiPrincipal | None,
+) -> tuple[bool, int]:
+    if not _tls_required():
+        return True, 200
+    if principal is not None and principal.allow_insecure_transport:
+        return True, 200
+    if _request_is_secure(handler):
+        return True, 200
+    if _allow_insecure_loopback() and _is_loopback_address(handler.client_address[0]):
+        return True, 200
+    _json_response(
+        handler,
+        426,
+        {
+            "error": "tls_required",
+            "message": "HTTPS is required. Terminate TLS upstream and forward `X-Forwarded-Proto: https`.",
+        },
+        request_id=request_id,
+    )
+    return False, 426
+
+
 def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, object]:
     length = int(handler.headers.get("Content-Length", "0"))
     if length > _max_body_bytes():
@@ -420,8 +571,8 @@ def _require_authorization(
     *,
     request_id: str,
     required_scope: str,
-) -> tuple[bool, int, str | None]:
-    if not _configured_api_tokens():
+) -> tuple[bool, int, ApiPrincipal | None]:
+    if not _configured_api_principals():
         _json_response(handler, 503, {"error": "server_auth_not_configured"}, request_id=request_id)
         return False, 503, None
     allowed, status_code = _enforce_rate_limit(handler, request_id=request_id)
@@ -429,19 +580,22 @@ def _require_authorization(
         return False, status_code, None
     header = handler.headers.get("Authorization", "")
     token = header.removeprefix("Bearer ").strip() if header.startswith("Bearer ") else None
-    scope = _token_scope(token)
-    if scope is None:
+    principal = _token_principal(token)
+    if principal is None:
         _json_response(handler, 401, {"error": "unauthorized"}, request_id=request_id)
         return False, 401, None
-    if not _scope_satisfies(scope, required_scope):
+    transport_allowed, transport_status = _enforce_transport_security(handler, request_id=request_id, principal=principal)
+    if not transport_allowed:
+        return False, transport_status, principal
+    if not _scope_satisfies(principal.scope, required_scope):
         _json_response(
             handler,
             403,
-            {"error": "insufficient_scope", "required_scope": required_scope, "granted_scope": scope},
+            {"error": "insufficient_scope", "required_scope": required_scope, "granted_scope": principal.scope},
             request_id=request_id,
         )
-        return False, 403, scope
-    return True, 200, scope
+        return False, 403, principal
+    return True, 200, principal
 
 
 class BoundedThreadPoolHTTPServer(HTTPServer):
@@ -481,7 +635,15 @@ class BoundedThreadPoolHTTPServer(HTTPServer):
 
 def create_handler() -> type[BaseHTTPRequestHandler]:
     class SkilgenHandler(BaseHTTPRequestHandler):
-        def _finish_request(self, *, status_code: int, request_id: str, project_root: Path | None, start_time: float) -> None:
+        def _finish_request(
+            self,
+            *,
+            status_code: int,
+            request_id: str,
+            project_root: Path | None,
+            start_time: float,
+            principal: ApiPrincipal | None,
+        ) -> None:
             duration_ms = round((time.monotonic() - start_time) * 1000, 2)
             _record_metrics(status_code, duration_ms)
             LOGGER.info(
@@ -494,6 +656,10 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     "status": status_code,
                     "duration_ms": duration_ms,
                     "remote_addr": self.client_address[0],
+                    "principal": principal.principal if principal is not None else "anonymous",
+                    "scope": principal.scope if principal is not None else None,
+                    "tenant": principal.tenant if principal is not None else None,
+                    "secure_transport": _request_is_secure(self),
                 },
             )
             if project_root is not None:
@@ -502,9 +668,25 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     action=f"http_{self.command.lower()}",
                     outcome=str(status_code),
                     source="api",
-                    actor=self.client_address[0],
+                    actor=principal.principal if principal is not None else self.client_address[0],
+                    principal=principal.principal if principal is not None else None,
+                    scope=principal.scope if principal is not None else None,
+                    tenant=principal.tenant if principal is not None else None,
                     request_id=request_id,
-                    details={"path": self.path, "status": status_code},
+                    details={"path": self.path, "status": status_code, "remote_addr": self.client_address[0]},
+                )
+            else:
+                append_central_audit_event(
+                    action=f"http_{self.command.lower()}",
+                    outcome=str(status_code),
+                    source="api",
+                    actor=principal.principal if principal is not None else self.client_address[0],
+                    principal=principal.principal if principal is not None else None,
+                    scope=principal.scope if principal is not None else None,
+                    tenant=principal.tenant if principal is not None else None,
+                    project_root=project_root,
+                    request_id=request_id,
+                    details={"path": self.path, "status": status_code, "remote_addr": self.client_address[0]},
                 )
 
         def _handle_exception(self, exc: Exception, *, request_id: str, project_root: Path | None) -> int:
@@ -536,15 +718,19 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
             _json_response(self, 500, {"error": "internal_error"}, request_id=request_id)
             return 500
 
-        def _project_root_from_query(self, query: dict[str, list[str]]) -> Path | None:
+        def _project_root_from_query(self, query: dict[str, list[str]], *, principal: ApiPrincipal | None) -> Path | None:
             if "project_root" not in query:
+                if principal is not None and len(principal.allowed_roots) == 1:
+                    return principal.allowed_roots[0]
                 return None
-            return _resolve_project_root(query.get("project_root", ["."])[0])
+            return _resolve_project_root(query.get("project_root", ["."])[0], principal=principal)
 
-        def _project_root_from_data(self, data: dict[str, object]) -> Path | None:
+        def _project_root_from_data(self, data: dict[str, object], *, principal: ApiPrincipal | None) -> Path | None:
             if "project_root" not in data:
+                if principal is not None and len(principal.allowed_roots) == 1:
+                    return principal.allowed_roots[0]
                 return None
-            return _resolve_project_root(str(data.get("project_root", ".")))
+            return _resolve_project_root(str(data.get("project_root", ".")), principal=principal)
 
         def _query_path(
             self,
@@ -609,20 +795,24 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
             project_root: Path | None = None
+            principal: ApiPrincipal | None = None
             status_code = 500
             try:
                 if parsed.path == "/health":
+                    transport_allowed, status_code = _enforce_transport_security(self, request_id=request_id, principal=None)
+                    if not transport_allowed:
+                        return
                     _json_response(self, 200, health_payload(), request_id=request_id)
                     status_code = 200
                     return
-                authorized, status_code, _scope = _require_authorization(
+                authorized, status_code, principal = _require_authorization(
                     self,
                     request_id=request_id,
                     required_scope=_required_scope_for_get(parsed.path, query),
                 )
                 if not authorized:
                     return
-                project_root = self._project_root_from_query(query)
+                project_root = self._project_root_from_query(query, principal=principal)
                 if project_root is not None:
                     prune_runtime_data(project_root)
                 requirements_path = self._query_path(query, "requirements", project_root=project_root, must_exist=True)
@@ -747,16 +937,23 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
             except Exception as exc:  # noqa: BLE001
                 status_code = self._handle_exception(exc, request_id=request_id, project_root=project_root)
             finally:
-                self._finish_request(status_code=status_code, request_id=request_id, project_root=project_root, start_time=start_time)
+                self._finish_request(
+                    status_code=status_code,
+                    request_id=request_id,
+                    project_root=project_root,
+                    start_time=start_time,
+                    principal=principal,
+                )
 
         def do_POST(self) -> None:  # noqa: N802
             _ensure_logging()
             request_id = uuid.uuid4().hex
             start_time = time.monotonic()
             project_root: Path | None = None
+            principal: ApiPrincipal | None = None
             status_code = 500
             try:
-                authorized, status_code, _scope = _require_authorization(
+                authorized, status_code, principal = _require_authorization(
                     self,
                     request_id=request_id,
                     required_scope=_required_scope_for_post(self.path),
@@ -764,7 +961,7 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                 if not authorized:
                     return
                 data = _read_json(self)
-                project_root = self._project_root_from_data(data)
+                project_root = self._project_root_from_data(data, principal=principal)
                 if project_root is not None:
                     prune_runtime_data(project_root)
                 requirements_path = self._data_path(data, "requirements", project_root=project_root, must_exist=True)
@@ -928,7 +1125,13 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
             except Exception as exc:  # noqa: BLE001
                 status_code = self._handle_exception(exc, request_id=request_id, project_root=project_root)
             finally:
-                self._finish_request(status_code=status_code, request_id=request_id, project_root=project_root, start_time=start_time)
+                self._finish_request(
+                    status_code=status_code,
+                    request_id=request_id,
+                    project_root=project_root,
+                    start_time=start_time,
+                    principal=principal,
+                )
 
         def log_message(self, format: str, *args: object) -> None:  # noqa: A003
             return
