@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
@@ -81,7 +82,7 @@ class ApiSmokeTests(unittest.TestCase):
                 "SKILGEN_API_TOKEN": "test-token",
                 "SKILGEN_ALLOWED_PROJECT_ROOTS": str(root.resolve()),
             }
-            with unittest.mock.patch.dict(os.environ, env, clear=False):
+            with mock.patch.dict(os.environ, env, clear=False):
                 server = create_server("127.0.0.1", 0)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -260,9 +261,11 @@ class ApiSmokeTests(unittest.TestCase):
 
                     imported_root = root / "imported-project"
                     imported_root.mkdir()
+                    imported_lock_file = imported_root / "import.lock.json"
+                    imported_lock_file.write_text(Path(exported_lock["export_path"]).read_text(encoding="utf-8"), encoding="utf-8")
                     imported_lock, _ = post_json(
                         f"{base}/skills/lock/import",
-                        {"project_root": str(imported_root), "input_path": exported_lock["export_path"]},
+                        {"project_root": str(imported_root), "input_path": str(imported_lock_file)},
                     )
                     self.assertGreaterEqual(imported_lock["count"], 1)
 
@@ -349,13 +352,18 @@ class ApiSmokeTests(unittest.TestCase):
             root = Path(tmp)
             disallowed_root = Path(disallowed_tmp)
             requirements = root / "requirements.md"
+            disallowed_file = disallowed_root / "secret.md"
+            disallowed_file.write_text("secret\n", encoding="utf-8")
             requirements.write_text("Backend endpoint\n", encoding="utf-8")
             env = {
-                "SKILGEN_API_TOKEN": "test-token",
+                "SKILGEN_API_ADMIN_TOKEN": "test-token",
+                "SKILGEN_API_READ_TOKEN": "read-token",
+                "SKILGEN_API_WRITE_TOKEN": "write-token",
                 "SKILGEN_ALLOWED_PROJECT_ROOTS": str(root.resolve()),
-                "SKILGEN_API_MAX_BODY_BYTES": "64",
+                "SKILGEN_API_MAX_BODY_BYTES": "1024",
+                "SKILGEN_API_RATE_LIMIT_COUNT": "20",
             }
-            with unittest.mock.patch.dict(os.environ, env, clear=False):
+            with mock.patch.dict(os.environ, env, clear=False):
                 log_buffer = io.StringIO()
                 handler = logging.StreamHandler(log_buffer)
                 handler.setFormatter(logging.Formatter("%(message)s %(request_id)s"))
@@ -383,22 +391,88 @@ class ApiSmokeTests(unittest.TestCase):
                     )
                     self.assertEqual(invalid["error"], "unauthorized")
 
+                    admin_scope, _ = get_json(
+                        f"{base}/doctor?{urlencode({'project_root': str(root)})}",
+                        token="read-token",
+                        expect_status=403,
+                    )
+                    self.assertEqual(admin_scope["error"], "insufficient_scope")
+
                     forbidden, _ = get_json(
                         f"{base}/doctor?{urlencode({'project_root': str(disallowed_root)})}",
                         expect_status=403,
                     )
                     self.assertEqual(forbidden["error"], "forbidden")
 
+                    insufficient_scope, _ = post_json(
+                        f"{base}/deliver",
+                        {"project_root": str(root), "requirements": str(requirements)},
+                        token="read-token",
+                        expect_status=403,
+                    )
+                    self.assertEqual(insufficient_scope["error"], "insufficient_scope")
+
                     oversized, _ = post_json(
                         f"{base}/deliver",
-                        {"project_root": str(root), "requirements": "x" * 2048},
+                        {"project_root": str(root), "requirements": "x" * 4096},
                         expect_status=413,
                     )
                     self.assertEqual(oversized["error"], "payload_too_large")
 
+                    outside_badge, _ = get_json(
+                        f"{base}/score?{urlencode({'project_root': str(root), 'badge_file': str(disallowed_root / 'badge.svg')})}",
+                        expect_status=403,
+                    )
+                    self.assertEqual(outside_badge["error"], "forbidden")
+
+                    outside_lock_import, _ = post_json(
+                        f"{base}/skills/lock/import",
+                        {"project_root": str(root), "input_path": str(disallowed_file)},
+                        expect_status=403,
+                    )
+                    self.assertEqual(outside_lock_import["error"], "forbidden")
+
+                    outside_enterprise_ingest, _ = post_json(
+                        f"{base}/enterprise/ingest",
+                        {"project_root": str(root), "name": "blocked enterprise", "path": str(disallowed_root)},
+                        expect_status=403,
+                    )
+                    self.assertEqual(outside_enterprise_ingest["error"], "forbidden")
+
+                    outside_enterprise_generate, _ = post_json(
+                        f"{base}/enterprise/generate",
+                        {"project_root": str(root), "name": "blocked generated", "source_paths": [str(disallowed_file)]},
+                        expect_status=403,
+                    )
+                    self.assertEqual(outside_enterprise_generate["error"], "forbidden")
+
+                    blocked_remote_url, _ = post_json(
+                        f"{base}/enterprise/ingest",
+                        {"project_root": str(root), "name": "blocked remote", "url": "http://127.0.0.1/internal"},
+                        expect_status=403,
+                    )
+                    self.assertEqual(blocked_remote_url["error"], "forbidden")
+
+                    blocked_remote_git, _ = post_json(
+                        f"{base}/skills/install",
+                        {"project_root": str(root), "git_url": "http://localhost/demo.git", "name": "blocked remote"},
+                        expect_status=403,
+                    )
+                    self.assertEqual(blocked_remote_git["error"], "forbidden")
+
+                    delivered, _ = post_json(
+                        f"{base}/deliver",
+                        {"project_root": str(root), "requirements": str(requirements)},
+                        token="write-token",
+                    )
+                    self.assertTrue(delivered["generated_files"])
+
                     doctor, doctor_headers = get_json(f"{base}/doctor?{urlencode({'project_root': str(root)})}")
                     self.assertIn("runtime", doctor)
                     self.assertIn("X-Request-Id", doctor_headers)
+
+                    metrics_forbidden, _ = get_json(f"{base}/metrics", token="read-token", expect_status=403)
+                    self.assertEqual(metrics_forbidden["error"], "insufficient_scope")
 
                     metrics_request = Request(
                         f"{base}/metrics",

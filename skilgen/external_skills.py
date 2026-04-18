@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -18,6 +19,26 @@ TRUST_SCORES = {
     "directory": 1,
     "custom": 1,
 }
+
+
+def _remote_git_timeout_seconds() -> float:
+    try:
+        return max(1.0, float(os.getenv("SKILGEN_REMOTE_SOURCE_TIMEOUT_SECONDS", "30")))
+    except ValueError:
+        return 30.0
+
+
+def _run_git_command(args: list[str]) -> subprocess.CompletedProcess[str]:
+    command_env = os.environ.copy()
+    command_env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    return subprocess.run(
+        args,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=_remote_git_timeout_seconds(),
+        env=command_env,
+    )
 
 
 @dataclass(frozen=True)
@@ -1347,12 +1368,7 @@ def install_external_skill(
             raise FileExistsError(f"{install_path} already exists. Use force=True to reinstall.")
         shutil.rmtree(install_path)
 
-    subprocess.run(
-        ["git", "clone", "--depth", "1", repository_url, str(install_path)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    _run_git_command(["git", "clone", "--depth", "1", repository_url, str(install_path)])
 
     metadata = _build_install_metadata(
         slug=resolved_slug,
@@ -1372,12 +1388,7 @@ def install_external_skill(
     (install_path / "skilgen-source.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     if ref:
-        subprocess.run(
-            ["git", "-C", str(install_path), "checkout", ref],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        _run_git_command(["git", "-C", str(install_path), "checkout", ref])
 
     resolved_revision = _git_revision(install_path)
     if resolved_revision is not None:
@@ -1509,12 +1520,7 @@ def sync_external_skill(*, project_root: str | Path = ".", slug: str) -> dict[st
     if installed is None:
         raise KeyError(f"External skill source is not installed: {slug}")
     install_path = Path(str(installed["install_path"]))
-    result = subprocess.run(
-        ["git", "-C", str(install_path), "pull", "--ff-only"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    result = _run_git_command(["git", "-C", str(install_path), "pull", "--ff-only"])
     source = _catalog_entry(slug) or ExternalSkillSource(
         slug=slug,
         name=str(installed.get("name", slug)),

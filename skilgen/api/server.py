@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from collections import deque
+import hmac
+import hashlib
+import ipaddress
 import json
 import logging
+import math
 import os
+import socket
 import threading
 import time
 import uuid
@@ -68,11 +74,14 @@ from skilgen.core.runtime_data import prune_runtime_data
 LOGGER = logging.getLogger("skilgen.api")
 _LOGGING_READY = False
 _METRICS_LOCK = threading.Lock()
+_RATE_LIMIT_LOCK = threading.Lock()
 _METRICS = {
     "requests_total": 0,
     "requests_by_status": {},
     "durations_ms": [],
 }
+_RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
+_SCOPE_LEVELS = {"read": 1, "write": 2, "admin": 3}
 
 
 def _ensure_logging() -> None:
@@ -175,6 +184,33 @@ def _configured_api_token() -> str | None:
     return os.getenv("SKILGEN_API_TOKEN")
 
 
+def _configured_api_tokens() -> list[tuple[str, str]]:
+    tokens: list[tuple[str, str]] = []
+    if _configured_api_token():
+        tokens.append(("admin", str(_configured_api_token())))
+    for env_name, scope in (
+        ("SKILGEN_API_READ_TOKEN", "read"),
+        ("SKILGEN_API_WRITE_TOKEN", "write"),
+        ("SKILGEN_API_ADMIN_TOKEN", "admin"),
+    ):
+        value = os.getenv(env_name)
+        if value:
+            tokens.append((scope, value))
+    raw_pairs = os.getenv("SKILGEN_API_TOKENS", "")
+    for item in raw_pairs.split(","):
+        stripped = item.strip()
+        if not stripped:
+            continue
+        if ":" not in stripped:
+            continue
+        scope, token = stripped.split(":", 1)
+        normalized_scope = scope.strip().lower()
+        normalized_token = token.strip()
+        if normalized_scope in _SCOPE_LEVELS and normalized_token:
+            tokens.append((normalized_scope, normalized_token))
+    return tokens
+
+
 def _max_body_bytes() -> int:
     raw = os.getenv("SKILGEN_API_MAX_BODY_BYTES", "10485760")
     try:
@@ -203,6 +239,174 @@ def _resolve_project_root(raw_value: str | None) -> Path:
     raise PermissionError(f"project_root `{candidate}` is outside the configured allowlist")
 
 
+def _contains_path(base: Path, candidate: Path) -> bool:
+    return candidate == base or base in candidate.parents
+
+
+def _resolve_scoped_path(
+    raw_value: str,
+    *,
+    project_root: Path | None,
+    must_exist: bool = False,
+) -> Path:
+    candidate = Path(raw_value)
+    if not candidate.is_absolute():
+        candidate = ((project_root or Path.cwd()) / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+
+    allowed_bases = [project_root] if project_root is not None else _allowed_project_roots()
+    for base in allowed_bases:
+        if _contains_path(base.resolve(), candidate):
+            if must_exist and not candidate.exists():
+                raise FileNotFoundError(f"path `{candidate}` does not exist")
+            return candidate
+    scope_label = str(project_root) if project_root is not None else "configured allowlist"
+    raise PermissionError(f"path `{candidate}` is outside the allowed scope `{scope_label}`")
+
+
+def _rate_limit_config() -> tuple[int, float]:
+    try:
+        count = max(0, int(os.getenv("SKILGEN_API_RATE_LIMIT_COUNT", "240")))
+    except ValueError:
+        count = 240
+    try:
+        window_seconds = max(1.0, float(os.getenv("SKILGEN_API_RATE_LIMIT_WINDOW_SECONDS", "60")))
+    except ValueError:
+        window_seconds = 60.0
+    return count, window_seconds
+
+
+def _bucket_key(remote_addr: str, token: str | None) -> str:
+    digest = hashlib.sha256((token or "anonymous").encode("utf-8")).hexdigest()[:16]
+    return f"{remote_addr}:{digest}"
+
+
+def _enforce_rate_limit(handler: BaseHTTPRequestHandler, *, request_id: str) -> tuple[bool, int]:
+    max_count, window_seconds = _rate_limit_config()
+    if max_count <= 0:
+        return True, 200
+    header = handler.headers.get("Authorization", "")
+    token = header.removeprefix("Bearer ").strip() if header.startswith("Bearer ") else None
+    key = _bucket_key(handler.client_address[0], token)
+    now = time.monotonic()
+    with _RATE_LIMIT_LOCK:
+        bucket = _RATE_LIMIT_BUCKETS.setdefault(key, deque())
+        cutoff = now - window_seconds
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if len(bucket) >= max_count:
+            retry_after = max(1, math.ceil(window_seconds - (now - bucket[0])))
+            _json_response(handler, 429, {"error": "rate_limited", "retry_after_seconds": retry_after}, request_id=request_id)
+            return False, 429
+        bucket.append(now)
+        if len(_RATE_LIMIT_BUCKETS) > 2048:
+            expired = [item for item, timestamps in _RATE_LIMIT_BUCKETS.items() if not timestamps or timestamps[-1] < cutoff]
+            for item in expired[:512]:
+                _RATE_LIMIT_BUCKETS.pop(item, None)
+    return True, 200
+
+
+def _token_scope(token: str | None) -> str | None:
+    if not token:
+        return None
+    for scope, expected_token in _configured_api_tokens():
+        if hmac.compare_digest(token, expected_token):
+            return scope
+    return None
+
+
+def _scope_satisfies(actual_scope: str, required_scope: str) -> bool:
+    return _SCOPE_LEVELS[actual_scope] >= _SCOPE_LEVELS[required_scope]
+
+
+def _required_scope_for_get(path: str, query: dict[str, list[str]]) -> str:
+    if path in {"/doctor", "/metrics"}:
+        return "admin"
+    if path == "/skills/lock/export":
+        return "write"
+    if path == "/score" and query.get("badge_file", [None])[0]:
+        return "write"
+    return "read"
+
+
+def _required_scope_for_post(path: str) -> str:
+    if path in {"/deliver", "/jobs/deliver"} or path.endswith("/cancel") or path.endswith("/resume"):
+        return "write"
+    if path.startswith("/skills/") or path.startswith("/enterprise/") or path.startswith("/connectors/"):
+        return "admin"
+    return "read"
+
+
+def _remote_host_allowed(hostname: str) -> bool:
+    allowed_hosts = [item.strip().lower() for item in os.getenv("SKILGEN_REMOTE_SOURCE_ALLOWED_HOSTS", "").split(",") if item.strip()]
+    normalized = hostname.lower().rstrip(".")
+    if allowed_hosts:
+        return any(normalized == host or normalized.endswith(f".{host}") for host in allowed_hosts)
+    return True
+
+
+def _assert_public_remote_host(hostname: str) -> None:
+    normalized = hostname.lower().rstrip(".")
+    if normalized in {"localhost"} or normalized.endswith(".local"):
+        raise PermissionError(f"remote host `{hostname}` is not allowed")
+    if not _remote_host_allowed(normalized):
+        raise PermissionError(f"remote host `{hostname}` is outside the configured allowlist")
+
+    def classify_address(raw_address: str) -> ipaddress._BaseAddress:
+        return ipaddress.ip_address(raw_address.split("%", 1)[0])
+
+    try:
+        literal = classify_address(normalized)
+        addresses = [literal]
+    except ValueError:
+        try:
+            resolved = socket.getaddrinfo(normalized, None)
+        except socket.gaierror as exc:
+            raise PermissionError(f"remote host `{hostname}` could not be resolved safely") from exc
+        addresses = []
+        for item in resolved:
+            raw_address = item[4][0]
+            try:
+                addresses.append(classify_address(raw_address))
+            except ValueError:
+                continue
+
+    for address in addresses:
+        if (
+            address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_reserved
+            or address.is_multicast
+            or address.is_unspecified
+        ):
+            raise PermissionError(f"remote host `{hostname}` resolved to a non-public address")
+
+
+def _normalize_remote_source(
+    raw_value: str,
+    *,
+    project_root: Path | None,
+    allow_local: bool = True,
+) -> str:
+    parsed = urlparse(raw_value)
+    if parsed.scheme in {"", "file"}:
+        if not allow_local:
+            raise PermissionError("local remote sources are disabled for this endpoint")
+        local_value = parsed.path if parsed.scheme == "file" else raw_value
+        return str(_resolve_scoped_path(local_value, project_root=project_root, must_exist=True))
+    if parsed.scheme not in {"http", "https"}:
+        raise PermissionError("remote sources must use http or https")
+    if parsed.username or parsed.password:
+        raise PermissionError("remote sources must not embed credentials in the URL")
+    hostname = parsed.hostname
+    if not hostname:
+        raise PermissionError("remote source URL must include a hostname")
+    _assert_public_remote_host(hostname)
+    return raw_value
+
+
 def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, object]:
     length = int(handler.headers.get("Content-Length", "0"))
     if length > _max_body_bytes():
@@ -211,16 +415,33 @@ def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, object]:
     return json.loads(body.decode("utf-8") or "{}")
 
 
-def _require_authorization(handler: BaseHTTPRequestHandler, *, request_id: str) -> bool:
-    expected = _configured_api_token()
-    if not expected:
+def _require_authorization(
+    handler: BaseHTTPRequestHandler,
+    *,
+    request_id: str,
+    required_scope: str,
+) -> tuple[bool, int, str | None]:
+    if not _configured_api_tokens():
         _json_response(handler, 503, {"error": "server_auth_not_configured"}, request_id=request_id)
-        return False
+        return False, 503, None
+    allowed, status_code = _enforce_rate_limit(handler, request_id=request_id)
+    if not allowed:
+        return False, status_code, None
     header = handler.headers.get("Authorization", "")
-    if not header.startswith("Bearer ") or header.removeprefix("Bearer ").strip() != expected:
+    token = header.removeprefix("Bearer ").strip() if header.startswith("Bearer ") else None
+    scope = _token_scope(token)
+    if scope is None:
         _json_response(handler, 401, {"error": "unauthorized"}, request_id=request_id)
-        return False
-    return True
+        return False, 401, None
+    if not _scope_satisfies(scope, required_scope):
+        _json_response(
+            handler,
+            403,
+            {"error": "insufficient_scope", "required_scope": required_scope, "granted_scope": scope},
+            request_id=request_id,
+        )
+        return False, 403, scope
+    return True, 200, scope
 
 
 class BoundedThreadPoolHTTPServer(HTTPServer):
@@ -290,11 +511,26 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
             if isinstance(exc, PermissionError):
                 _json_response(self, 403, {"error": "forbidden", "message": str(exc)}, request_id=request_id)
                 return 403
+            if isinstance(exc, FileNotFoundError):
+                _json_response(self, 404, {"error": "not_found", "message": str(exc)}, request_id=request_id)
+                return 404
             if isinstance(exc, ValueError) and str(exc) == "payload_too_large":
                 _json_response(self, 413, {"error": "payload_too_large"}, request_id=request_id)
                 return 413
             if isinstance(exc, json.JSONDecodeError):
                 _json_response(self, 400, {"error": "invalid_json"}, request_id=request_id)
+                return 400
+            if isinstance(exc, KeyError):
+                missing_key = str(exc).strip("'")
+                _json_response(
+                    self,
+                    400,
+                    {"error": "invalid_request", "message": f"Missing required field `{missing_key}`"},
+                    request_id=request_id,
+                )
+                return 400
+            if isinstance(exc, ValueError):
+                _json_response(self, 400, {"error": "invalid_request", "message": str(exc)}, request_id=request_id)
                 return 400
             LOGGER.exception("request_failed", extra={"event": "request_error", "request_id": request_id, "path": self.path})
             _json_response(self, 500, {"error": "internal_error"}, request_id=request_id)
@@ -310,6 +546,62 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                 return None
             return _resolve_project_root(str(data.get("project_root", ".")))
 
+        def _query_path(
+            self,
+            query: dict[str, list[str]],
+            key: str,
+            *,
+            project_root: Path | None,
+            must_exist: bool = False,
+        ) -> Path | None:
+            raw = query.get(key, [None])[0]
+            if raw in {None, ""}:
+                return None
+            return _resolve_scoped_path(str(raw), project_root=project_root, must_exist=must_exist)
+
+        def _data_path(
+            self,
+            data: dict[str, object],
+            key: str,
+            *,
+            project_root: Path | None,
+            must_exist: bool = False,
+        ) -> Path | None:
+            raw = data.get(key)
+            if raw in {None, ""}:
+                return None
+            return _resolve_scoped_path(str(raw), project_root=project_root, must_exist=must_exist)
+
+        def _data_path_list(
+            self,
+            data: dict[str, object],
+            key: str,
+            *,
+            project_root: Path | None,
+            must_exist: bool = False,
+        ) -> list[Path]:
+            raw = data.get(key, [])
+            if not isinstance(raw, list):
+                raise ValueError(f"`{key}` must be a list of paths")
+            return [
+                _resolve_scoped_path(str(item), project_root=project_root, must_exist=must_exist)
+                for item in raw
+                if str(item).strip()
+            ]
+
+        def _data_remote_source(
+            self,
+            data: dict[str, object],
+            key: str,
+            *,
+            project_root: Path | None,
+            allow_local: bool = True,
+        ) -> str | None:
+            raw = data.get(key)
+            if raw in {None, ""}:
+                return None
+            return _normalize_remote_source(str(raw), project_root=project_root, allow_local=allow_local)
+
         def do_GET(self) -> None:  # noqa: N802
             _ensure_logging()
             request_id = uuid.uuid4().hex
@@ -323,16 +615,23 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     _json_response(self, 200, health_payload(), request_id=request_id)
                     status_code = 200
                     return
-                if not _require_authorization(self, request_id=request_id):
-                    status_code = 401
-                    return
-                if parsed.path == "/metrics":
-                    _text_response(self, 200, _metrics_payload(), content_type="text/plain; version=0.0.4", request_id=request_id)
-                    status_code = 200
+                authorized, status_code, _scope = _require_authorization(
+                    self,
+                    request_id=request_id,
+                    required_scope=_required_scope_for_get(parsed.path, query),
+                )
+                if not authorized:
                     return
                 project_root = self._project_root_from_query(query)
                 if project_root is not None:
                     prune_runtime_data(project_root)
+                requirements_path = self._query_path(query, "requirements", project_root=project_root, must_exist=True)
+                badge_file = self._query_path(query, "badge_file", project_root=project_root, must_exist=False)
+                lock_export_path = self._query_path(query, "output_path", project_root=project_root, must_exist=False)
+                if parsed.path == "/metrics":
+                    _text_response(self, 200, _metrics_payload(), content_type="text/plain; version=0.0.4", request_id=request_id)
+                    status_code = 200
+                    return
                 if parsed.path == "/status":
                     _json_response(self, 200, status_payload(project_root or Path(".")), request_id=request_id)
                     status_code = 200
@@ -343,7 +642,7 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                         200,
                         score_payload(
                             project_root or Path("."),
-                            query.get("badge_file", [None])[0],
+                            badge_file,
                             history=query.get("history", ["0"])[0] not in {"0", "false", "False", ""},
                             history_limit=int(query.get("history_limit", ["10"])[0]),
                         ),
@@ -364,7 +663,7 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     status_code = 200
                     return
                 if parsed.path == "/diff":
-                    _json_response(self, 200, diff_payload(project_root or Path("."), query.get("requirements", [None])[0]), request_id=request_id)
+                    _json_response(self, 200, diff_payload(project_root or Path("."), requirements_path), request_id=request_id)
                     status_code = 200
                     return
                 if parsed.path == "/skills":
@@ -384,7 +683,7 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     status_code = 200
                     return
                 if parsed.path == "/skills/lock/export":
-                    _json_response(self, 200, skills_lock_export_payload(project_root or Path("."), query.get("output_path", [None])[0]), request_id=request_id)
+                    _json_response(self, 200, skills_lock_export_payload(project_root or Path("."), lock_export_path), request_id=request_id)
                     status_code = 200
                     return
                 if parsed.path == "/skills/policy":
@@ -416,15 +715,15 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     status_code = 200
                     return
                 if parsed.path == "/decide":
-                    _json_response(self, 200, decision_payload(project_root or Path("."), query.get("requirements", [None])[0]), request_id=request_id)
+                    _json_response(self, 200, decision_payload(project_root or Path("."), requirements_path), request_id=request_id)
                     status_code = 200
                     return
                 if parsed.path == "/architecture":
-                    _json_response(self, 200, architecture_payload(project_root or Path("."), query.get("requirements", [None])[0]), request_id=request_id)
+                    _json_response(self, 200, architecture_payload(project_root or Path("."), requirements_path), request_id=request_id)
                     status_code = 200
                     return
                 if parsed.path == "/dashboard":
-                    _json_response(self, 200, dashboard_payload(project_root or Path("."), query.get("requirements", [None])[0]), request_id=request_id)
+                    _json_response(self, 200, dashboard_payload(project_root or Path("."), requirements_path), request_id=request_id)
                     status_code = 200
                     return
                 if parsed.path == "/jobs":
@@ -457,13 +756,42 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
             project_root: Path | None = None
             status_code = 500
             try:
-                if not _require_authorization(self, request_id=request_id):
-                    status_code = 401
+                authorized, status_code, _scope = _require_authorization(
+                    self,
+                    request_id=request_id,
+                    required_scope=_required_scope_for_post(self.path),
+                )
+                if not authorized:
                     return
                 data = _read_json(self)
                 project_root = self._project_root_from_data(data)
                 if project_root is not None:
                     prune_runtime_data(project_root)
+                requirements_path = self._data_path(data, "requirements", project_root=project_root, must_exist=True)
+                input_path = self._data_path(data, "input_path", project_root=project_root, must_exist=True)
+                local_source_path = self._data_path(data, "path", project_root=project_root, must_exist=True)
+                source_paths = self._data_path_list(data, "source_paths", project_root=project_root, must_exist=True)
+                remote_git_url = self._data_remote_source(data, "git_url", project_root=project_root, allow_local=True)
+                remote_url = self._data_remote_source(data, "url", project_root=project_root, allow_local=False)
+                if self.path in {
+                    "/analyze",
+                    "/architecture",
+                    "/dashboard",
+                    "/decide",
+                    "/intent",
+                    "/plan",
+                    "/features",
+                    "/deliver",
+                    "/preview",
+                    "/jobs/deliver",
+                } and requirements_path is None:
+                    raise ValueError("`requirements` is required for this endpoint")
+                if self.path == "/skills/lock/import" and input_path is None:
+                    raise ValueError("`input_path` is required for this endpoint")
+                if self.path == "/enterprise/ingest" and not any((local_source_path, remote_git_url, remote_url)):
+                    raise ValueError("One of `path`, `git_url`, or `url` is required for this endpoint")
+                if self.path == "/enterprise/generate" and not source_paths:
+                    raise ValueError("`source_paths` must contain at least one path")
                 if self.path == "/fingerprint":
                     _json_response(self, 200, fingerprint_payload(project_root or Path(".")), request_id=request_id)
                     status_code = 200
@@ -473,41 +801,41 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     status_code = 200
                     return
                 if self.path == "/analyze":
-                    _json_response(self, 200, analyze_payload(project_root or Path("."), str(data["requirements"]) if "requirements" in data else None), request_id=request_id)
+                    _json_response(self, 200, analyze_payload(project_root or Path("."), requirements_path), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/architecture":
-                    _json_response(self, 200, architecture_payload(project_root or Path("."), str(data["requirements"]) if "requirements" in data else None), request_id=request_id)
+                    _json_response(self, 200, architecture_payload(project_root or Path("."), requirements_path), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/dashboard":
-                    _json_response(self, 200, dashboard_payload(project_root or Path("."), str(data["requirements"]) if "requirements" in data else None), request_id=request_id)
+                    _json_response(self, 200, dashboard_payload(project_root or Path("."), requirements_path), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/decide":
-                    _json_response(self, 200, decision_payload(project_root or Path("."), str(data["requirements"]) if "requirements" in data else None), request_id=request_id)
+                    _json_response(self, 200, decision_payload(project_root or Path("."), requirements_path), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/intent":
-                    _json_response(self, 200, intent_payload(str(data["requirements"])), request_id=request_id)
+                    _json_response(self, 200, intent_payload(requirements_path), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/plan":
-                    _json_response(self, 200, plan_payload(str(data["requirements"]) if "requirements" in data else None, project_root or Path(".")), request_id=request_id)
+                    _json_response(self, 200, plan_payload(requirements_path, project_root or Path(".")), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/features":
-                    _json_response(self, 200, features_payload(str(data["requirements"]) if "requirements" in data else None, project_root or Path(".")), request_id=request_id)
+                    _json_response(self, 200, features_payload(requirements_path, project_root or Path(".")), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/deliver":
-                    _json_response(self, 200, deliver_payload(str(data["requirements"]) if "requirements" in data else None, project_root or Path(".")), request_id=request_id)
+                    _json_response(self, 200, deliver_payload(requirements_path, project_root or Path(".")), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/preview":
                     targets = tuple(data.get("targets", ("docs", "skills")))
                     domains = tuple(data.get("domains", ()))
-                    _json_response(self, 200, preview_payload(str(data["requirements"]) if "requirements" in data else None, project_root or Path("."), targets=targets, domains=domains), request_id=request_id)
+                    _json_response(self, 200, preview_payload(requirements_path, project_root or Path("."), targets=targets, domains=domains), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/skills/install":
@@ -517,7 +845,7 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                         skills_install_payload(
                             project_root or Path("."),
                             slug=str(data["slug"]) if "slug" in data and data.get("slug") is not None else None,
-                            git_url=str(data["git_url"]) if "git_url" in data and data.get("git_url") is not None else None,
+                            git_url=remote_git_url,
                             name=str(data["name"]) if "name" in data and data.get("name") is not None else None,
                             force=bool(data.get("force", False)),
                             ref=str(data["ref"]) if "ref" in data and data.get("ref") is not None else None,
@@ -532,7 +860,7 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     status_code = 200
                     return
                 if self.path == "/skills/lock/import":
-                    _json_response(self, 200, skills_lock_import_payload(project_root or Path("."), str(data["input_path"]), sync_existing=bool(data.get("sync_existing", False))), request_id=request_id)
+                    _json_response(self, 200, skills_lock_import_payload(project_root or Path("."), input_path, sync_existing=bool(data.get("sync_existing", False))), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/skills/sync":
@@ -558,9 +886,9 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                         enterprise_ingest_payload(
                             project_root or Path("."),
                             name=str(data["name"]),
-                            path=str(data["path"]) if "path" in data and data.get("path") is not None else None,
-                            git_url=str(data["git_url"]) if "git_url" in data and data.get("git_url") is not None else None,
-                            url=str(data["url"]) if "url" in data and data.get("url") is not None else None,
+                            path=local_source_path,
+                            git_url=remote_git_url,
+                            url=remote_url,
                             ref=str(data["ref"]) if "ref" in data and data.get("ref") is not None else None,
                             activate=data.get("activate") if isinstance(data.get("activate"), bool) else None,
                             kind=str(data.get("kind", "enterprise")),
@@ -570,7 +898,7 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     status_code = 200
                     return
                 if self.path == "/enterprise/generate":
-                    _json_response(self, 200, enterprise_generate_payload(project_root or Path("."), name=str(data["name"]), source_paths=[str(item) for item in data.get("source_paths", [])], kind=str(data.get("kind", "domain")), activate=bool(data.get("activate", True))), request_id=request_id)
+                    _json_response(self, 200, enterprise_generate_payload(project_root or Path("."), name=str(data["name"]), source_paths=source_paths, kind=str(data.get("kind", "domain")), activate=bool(data.get("activate", True))), request_id=request_id)
                     status_code = 200
                     return
                 if self.path == "/connectors/activate":
@@ -582,7 +910,7 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     status_code = 200
                     return
                 if self.path == "/jobs/deliver":
-                    _json_response(self, 202, create_deliver_job(str(data["requirements"]) if "requirements" in data else None, project_root or Path(".")), request_id=request_id)
+                    _json_response(self, 202, create_deliver_job(requirements_path, project_root or Path(".")), request_id=request_id)
                     status_code = 202
                     return
                 if self.path.startswith("/jobs/") and self.path.endswith("/cancel"):

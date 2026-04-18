@@ -391,11 +391,31 @@ def _name_from_url(url: str) -> str:
     return cleaned or "enterprise-source"
 
 
+def _remote_source_timeout_seconds() -> float:
+    try:
+        return max(1.0, float(os.getenv("SKILGEN_REMOTE_SOURCE_TIMEOUT_SECONDS", "30")))
+    except ValueError:
+        return 30.0
+
+
+def _run_git_command(args: list[str], *, timeout: float | None = None) -> subprocess.CompletedProcess[str]:
+    command_env = os.environ.copy()
+    command_env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    return subprocess.run(
+        args,
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=timeout or _remote_source_timeout_seconds(),
+        env=command_env,
+    )
+
+
 def _download_url_source(url: str, destination: Path) -> None:
     if destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True)
-    with urlopen(url) as response:  # noqa: S310
+    with urlopen(url, timeout=_remote_source_timeout_seconds()) as response:  # noqa: S310
         body = response.read().decode("utf-8", errors="ignore")
     target_name = Path(urlparse(url).path).name or "REMOTE.md"
     if "." not in target_name:
@@ -485,10 +505,10 @@ def _copy_source(source: Path, destination: Path) -> None:
 def _ingest_from_git(git_url: str, destination: Path, ref: str | None = None) -> str | None:
     if destination.exists():
         shutil.rmtree(destination)
-    subprocess.run(["git", "clone", git_url, str(destination)], text=True, capture_output=True, check=True)
+    _run_git_command(["git", "clone", git_url, str(destination)])
     if ref:
-        subprocess.run(["git", "-C", str(destination), "checkout", ref], text=True, capture_output=True, check=True)
-    result = subprocess.run(["git", "-C", str(destination), "rev-parse", "HEAD"], text=True, capture_output=True, check=True)
+        _run_git_command(["git", "-C", str(destination), "checkout", ref])
+    result = _run_git_command(["git", "-C", str(destination), "rev-parse", "HEAD"])
     return result.stdout.strip()
 
 
