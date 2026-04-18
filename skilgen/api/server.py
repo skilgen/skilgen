@@ -68,7 +68,7 @@ from skilgen.api.service import (
     status_payload,
     validate_payload,
 )
-from skilgen.core.auth_tokens import SignedTokenError, verify_signed_token
+from skilgen.core.auth_tokens import SignedTokenError, verify_oidc_token, verify_signed_token
 from skilgen.core.audit import append_audit_event, append_central_audit_event
 from skilgen.core.runtime_data import prune_runtime_data
 
@@ -229,11 +229,42 @@ def _signed_token_leeway_seconds() -> float:
         return 5.0
 
 
+def _configured_oidc_issuer() -> str | None:
+    value = os.getenv("SKILGEN_API_OIDC_ISSUER", "").strip()
+    return value or None
+
+
+def _configured_oidc_audience() -> str | None:
+    value = os.getenv("SKILGEN_API_OIDC_AUDIENCE", "").strip()
+    return value or None
+
+
+def _configured_oidc_jwks_url() -> str | None:
+    value = os.getenv("SKILGEN_API_JWKS_URL", "").strip()
+    return value or None
+
+
+def _configured_oidc_timeout_seconds() -> float:
+    try:
+        return max(0.5, float(os.getenv("SKILGEN_API_OIDC_TIMEOUT_SECONDS", "5")))
+    except ValueError:
+        return 5.0
+
+
+def _configured_oidc_cache_ttl_seconds() -> float:
+    try:
+        return max(0.0, float(os.getenv("SKILGEN_API_OIDC_CACHE_TTL_SECONDS", "300")))
+    except ValueError:
+        return 300.0
+
+
 def _policy_roots(raw_roots: object) -> tuple[Path, ...]:
     if raw_roots is None or raw_roots == "":
         return ()
+    if isinstance(raw_roots, str):
+        raw_roots = [item.strip() for item in raw_roots.split(",") if item.strip()]
     if not isinstance(raw_roots, list):
-        raise ValueError("allowed_project_roots must be a list")
+        raise ValueError("allowed_project_roots must be a list or comma-separated string")
     roots: list[Path] = []
     for item in raw_roots:
         candidate = str(item).strip()
@@ -313,7 +344,12 @@ def _configured_api_principals() -> list[ApiPrincipal]:
 
 
 def _auth_is_configured() -> bool:
-    return bool(_configured_api_principals() or _configured_api_signing_key())
+    return bool(
+        _configured_api_principals()
+        or _configured_api_signing_key()
+        or _configured_oidc_issuer()
+        or _configured_oidc_jwks_url()
+    )
 
 
 def _max_body_bytes() -> int:
@@ -420,6 +456,86 @@ def _enforce_rate_limit(handler: BaseHTTPRequestHandler, *, request_id: str) -> 
     return True, 200
 
 
+def _claim_values(claims: dict[str, object], *names: str) -> list[str]:
+    values: list[str] = []
+    for name in names:
+        raw_value = claims.get(name)
+        if isinstance(raw_value, str):
+            values.extend(part for part in raw_value.replace(",", " ").split() if part.strip())
+        elif isinstance(raw_value, list):
+            values.extend(str(item).strip() for item in raw_value if str(item).strip())
+    return values
+
+
+def _normalize_scope_value(candidate: str) -> str | None:
+    normalized = candidate.strip().lower()
+    if normalized in _SCOPE_LEVELS:
+        return normalized
+    for separator in (":", ".", "/"):
+        if separator in normalized:
+            suffix = normalized.rsplit(separator, 1)[-1]
+            if suffix in _SCOPE_LEVELS:
+                return suffix
+    return None
+
+
+def _claims_scope(claims: dict[str, object]) -> str | None:
+    best_scope: str | None = None
+    for candidate in _claim_values(claims, "scope", "scp", "roles", "role"):
+        normalized = _normalize_scope_value(candidate)
+        if normalized is None:
+            continue
+        if best_scope is None or _SCOPE_LEVELS[normalized] > _SCOPE_LEVELS[best_scope]:
+            best_scope = normalized
+    return best_scope
+
+
+def _claims_allowed_roots(claims: dict[str, object]) -> tuple[Path, ...] | None:
+    for name in ("roots", "allowed_project_roots", "project_roots"):
+        if name not in claims:
+            continue
+        try:
+            return _policy_roots(claims.get(name))
+        except ValueError:
+            return None
+    return ()
+
+
+def _oidc_principal(token: str) -> ApiPrincipal | None:
+    issuer = _configured_oidc_issuer()
+    jwks_url = _configured_oidc_jwks_url()
+    if issuer is None and jwks_url is None:
+        return None
+    try:
+        claims = verify_oidc_token(
+            token,
+            issuer=issuer,
+            audience=_configured_oidc_audience(),
+            jwks_url=jwks_url,
+            timeout_seconds=_configured_oidc_timeout_seconds(),
+            cache_ttl_seconds=_configured_oidc_cache_ttl_seconds(),
+            leeway_seconds=_signed_token_leeway_seconds(),
+        )
+    except SignedTokenError:
+        return None
+    scope = _claims_scope(claims)
+    if scope is None:
+        return None
+    allowed_roots = _claims_allowed_roots(claims)
+    if allowed_roots is None:
+        return None
+    tenant = claims.get("tenant", claims.get("tid"))
+    return ApiPrincipal(
+        principal=str(claims.get("sub", claims.get("principal", ""))).strip() or "oidc-principal",
+        scope=scope,
+        token=token,
+        allowed_roots=allowed_roots,
+        tenant=str(tenant).strip() if tenant not in {None, ""} else None,
+        allow_insecure_transport=bool(claims.get("allow_insecure_transport", False)),
+        auth_method="oidc",
+    )
+
+
 def _token_principal(token: str | None) -> ApiPrincipal | None:
     if not token:
         return None
@@ -427,37 +543,35 @@ def _token_principal(token: str | None) -> ApiPrincipal | None:
         if hmac.compare_digest(token, principal.token):
             return principal
     signing_key = _configured_api_signing_key()
-    if signing_key is None:
-        return None
-    try:
-        claims = verify_signed_token(
-            token,
-            signing_key,
-            issuer=_signed_token_issuer(),
-            audience=_signed_token_audience(),
-            leeway_seconds=_signed_token_leeway_seconds(),
-        )
-    except SignedTokenError:
-        return None
-    scope = str(claims.get("scope", "")).strip().lower()
-    if scope not in _SCOPE_LEVELS:
-        return None
-    raw_roots = claims.get("roots", claims.get("allowed_project_roots", []))
-    try:
-        allowed_roots = _policy_roots(raw_roots)
-    except ValueError:
-        return None
-    tenant = claims.get("tenant", claims.get("tid"))
-    return ApiPrincipal(
-        principal=str(claims.get("sub", claims.get("principal", ""))).strip() or "signed-principal",
-        scope=scope,
-        token=token,
-        allowed_roots=allowed_roots,
-        tenant=str(tenant).strip() if tenant not in {None, ""} else None,
-        allow_insecure_transport=bool(claims.get("allow_insecure_transport", False)),
-        auth_method="signed",
-    )
-    return None
+    if signing_key is not None:
+        try:
+            claims = verify_signed_token(
+                token,
+                signing_key,
+                issuer=_signed_token_issuer(),
+                audience=_signed_token_audience(),
+                leeway_seconds=_signed_token_leeway_seconds(),
+            )
+        except SignedTokenError:
+            claims = None
+        if claims is not None:
+            scope = _claims_scope(claims)
+            if scope is None:
+                return None
+            allowed_roots = _claims_allowed_roots(claims)
+            if allowed_roots is None:
+                return None
+            tenant = claims.get("tenant", claims.get("tid"))
+            return ApiPrincipal(
+                principal=str(claims.get("sub", claims.get("principal", ""))).strip() or "signed-principal",
+                scope=scope,
+                token=token,
+                allowed_roots=allowed_roots,
+                tenant=str(tenant).strip() if tenant not in {None, ""} else None,
+                allow_insecure_transport=bool(claims.get("allow_insecure_transport", False)),
+                auth_method="signed",
+            )
+    return _oidc_principal(token)
 
 
 def _scope_satisfies(actual_scope: str, required_scope: str) -> bool:

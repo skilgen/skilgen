@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 
 from skilgen.api.server import create_server
 from skilgen.core.auth_tokens import mint_signed_token
+from tests.oidc_test_utils import LocalOidcServer, generate_rsa_signing_material, mint_rs256_token
 
 
 def request_json(
@@ -660,6 +661,75 @@ class ApiSmokeTests(unittest.TestCase):
                 finally:
                     server.shutdown()
                     server.server_close()
+
+    def test_api_oidc_tokens(self) -> None:
+        with TemporaryDirectory() as tmp, TemporaryDirectory() as other_tmp:
+            root = Path(tmp)
+            other_root = Path(other_tmp)
+            private_key, jwks = generate_rsa_signing_material(kid="oidc-kid")
+            with LocalOidcServer(jwks=jwks) as oidc:
+                env = {
+                    "SKILGEN_API_OIDC_ISSUER": str(oidc.issuer),
+                    "SKILGEN_API_OIDC_AUDIENCE": "skilgen-api",
+                    "SKILGEN_API_REQUIRE_TLS": "1",
+                    "SKILGEN_API_ALLOW_INSECURE_LOOPBACK": "0",
+                    "SKILGEN_ALLOWED_PROJECT_ROOTS": f"{root.resolve()},{other_root.resolve()}",
+                }
+                with mock.patch.dict(os.environ, env, clear=False):
+                    server = create_server("127.0.0.1", 0)
+                    thread = threading.Thread(target=server.serve_forever, daemon=True)
+                    thread.start()
+                    try:
+                        host, port = server.server_address
+                        base = f"http://{host}:{port}"
+                        secure_headers = {"X-Forwarded-Proto": "https"}
+
+                        valid_token = mint_rs256_token(
+                            private_key,
+                            kid="oidc-kid",
+                            principal="oidc-admin",
+                            scope="skilgen:admin openid profile",
+                            ttl_seconds=300,
+                            allowed_project_roots=[root],
+                            tenant="tenant-oidc",
+                            issuer=oidc.issuer,
+                            audience="skilgen-api",
+                        )
+                        doctor, _ = get_json(
+                            f"{base}/doctor?{urlencode({'project_root': str(root)})}",
+                            token=valid_token,
+                            headers=secure_headers,
+                        )
+                        self.assertIn("runtime", doctor)
+
+                        wrong_root, _ = get_json(
+                            f"{base}/doctor?{urlencode({'project_root': str(other_root)})}",
+                            token=valid_token,
+                            headers=secure_headers,
+                            expect_status=403,
+                        )
+                        self.assertEqual(wrong_root["error"], "forbidden")
+
+                        wrong_audience = mint_rs256_token(
+                            private_key,
+                            kid="oidc-kid",
+                            principal="oidc-admin",
+                            scope="admin",
+                            ttl_seconds=300,
+                            allowed_project_roots=[root],
+                            issuer=oidc.issuer,
+                            audience="wrong-audience",
+                        )
+                        unauthorized, _ = get_json(
+                            f"{base}/doctor?{urlencode({'project_root': str(root)})}",
+                            token=wrong_audience,
+                            headers=secure_headers,
+                            expect_status=401,
+                        )
+                        self.assertEqual(unauthorized["error"], "unauthorized")
+                    finally:
+                        server.shutdown()
+                        server.server_close()
 
 
 if __name__ == "__main__":

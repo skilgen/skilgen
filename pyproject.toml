@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
   "beautifulsoup4>=4.14.0",
+  "cryptography>=42.0.0",
   "deepagents>=0.4.11",
   "langchain>=1.0.0",
   "langchain-anthropic>=1.0.0",
