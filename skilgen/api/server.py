@@ -68,6 +68,7 @@ from skilgen.api.service import (
     status_payload,
     validate_payload,
 )
+from skilgen.core.auth_tokens import SignedTokenError, verify_signed_token
 from skilgen.core.audit import append_audit_event, append_central_audit_event
 from skilgen.core.runtime_data import prune_runtime_data
 
@@ -93,6 +94,7 @@ class ApiPrincipal:
     allowed_roots: tuple[Path, ...] = ()
     tenant: str | None = None
     allow_insecure_transport: bool = False
+    auth_method: str = "static"
 
 
 def _ensure_logging() -> None:
@@ -131,6 +133,8 @@ def _ensure_logging() -> None:
                 payload["tenant"] = record.tenant
             if hasattr(record, "secure_transport"):
                 payload["secure_transport"] = record.secure_transport
+            if hasattr(record, "auth_method"):
+                payload["auth_method"] = record.auth_method
             return json.dumps(payload, sort_keys=True)
 
     handler.setFormatter(JsonFormatter())
@@ -201,6 +205,28 @@ def _text_response(handler: BaseHTTPRequestHandler, status_code: int, body: str,
 
 def _configured_api_token() -> str | None:
     return os.getenv("SKILGEN_API_TOKEN")
+
+
+def _configured_api_signing_key() -> str | None:
+    value = os.getenv("SKILGEN_API_SIGNING_KEY", "").strip()
+    return value or None
+
+
+def _signed_token_issuer() -> str | None:
+    value = os.getenv("SKILGEN_API_TOKEN_ISSUER", "").strip()
+    return value or None
+
+
+def _signed_token_audience() -> str | None:
+    value = os.getenv("SKILGEN_API_TOKEN_AUDIENCE", "").strip()
+    return value or None
+
+
+def _signed_token_leeway_seconds() -> float:
+    try:
+        return max(0.0, float(os.getenv("SKILGEN_API_TOKEN_LEEWAY_SECONDS", "5")))
+    except ValueError:
+        return 5.0
 
 
 def _policy_roots(raw_roots: object) -> tuple[Path, ...]:
@@ -280,9 +306,14 @@ def _configured_api_principals() -> list[ApiPrincipal]:
                         allowed_roots=allowed_roots,
                         tenant=str(item.get("tenant")).strip() if item.get("tenant") not in {None, ""} else None,
                         allow_insecure_transport=bool(item.get("allow_insecure_transport", False)),
+                        auth_method="static",
                     )
                 )
     return principals
+
+
+def _auth_is_configured() -> bool:
+    return bool(_configured_api_principals() or _configured_api_signing_key())
 
 
 def _max_body_bytes() -> int:
@@ -395,6 +426,37 @@ def _token_principal(token: str | None) -> ApiPrincipal | None:
     for principal in _configured_api_principals():
         if hmac.compare_digest(token, principal.token):
             return principal
+    signing_key = _configured_api_signing_key()
+    if signing_key is None:
+        return None
+    try:
+        claims = verify_signed_token(
+            token,
+            signing_key,
+            issuer=_signed_token_issuer(),
+            audience=_signed_token_audience(),
+            leeway_seconds=_signed_token_leeway_seconds(),
+        )
+    except SignedTokenError:
+        return None
+    scope = str(claims.get("scope", "")).strip().lower()
+    if scope not in _SCOPE_LEVELS:
+        return None
+    raw_roots = claims.get("roots", claims.get("allowed_project_roots", []))
+    try:
+        allowed_roots = _policy_roots(raw_roots)
+    except ValueError:
+        return None
+    tenant = claims.get("tenant", claims.get("tid"))
+    return ApiPrincipal(
+        principal=str(claims.get("sub", claims.get("principal", ""))).strip() or "signed-principal",
+        scope=scope,
+        token=token,
+        allowed_roots=allowed_roots,
+        tenant=str(tenant).strip() if tenant not in {None, ""} else None,
+        allow_insecure_transport=bool(claims.get("allow_insecure_transport", False)),
+        auth_method="signed",
+    )
     return None
 
 
@@ -572,7 +634,7 @@ def _require_authorization(
     request_id: str,
     required_scope: str,
 ) -> tuple[bool, int, ApiPrincipal | None]:
-    if not _configured_api_principals():
+    if not _auth_is_configured():
         _json_response(handler, 503, {"error": "server_auth_not_configured"}, request_id=request_id)
         return False, 503, None
     allowed, status_code = _enforce_rate_limit(handler, request_id=request_id)
@@ -660,6 +722,7 @@ def create_handler() -> type[BaseHTTPRequestHandler]:
                     "scope": principal.scope if principal is not None else None,
                     "tenant": principal.tenant if principal is not None else None,
                     "secure_transport": _request_is_secure(self),
+                    "auth_method": principal.auth_method if principal is not None else None,
                 },
             )
             if project_root is not None:
