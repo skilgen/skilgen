@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 from datetime import UTC, datetime
 import os
@@ -25,7 +27,14 @@ def central_audit_log_path() -> Path | None:
 def _write_audit_payload(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
+        with contextlib.suppress(OSError):
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         handle.write(json.dumps(payload, sort_keys=True) + "\n")
+        handle.flush()
+        with contextlib.suppress(OSError):
+            os.fsync(handle.fileno())
+        with contextlib.suppress(OSError):
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def append_central_audit_event(

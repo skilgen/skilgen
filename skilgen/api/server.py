@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
 import hmac
 import hashlib
 import ipaddress
 import json
 import logging
-import math
 import os
 import socket
 import threading
@@ -73,19 +71,18 @@ from skilgen.api.service import (
 from skilgen.core.auth_tokens import SignedTokenError, verify_oidc_token, verify_signed_token
 from skilgen.core.audit import append_audit_event, append_central_audit_event
 from skilgen.core.identity_policy_store import resolve_identity_policy
+from skilgen.core.rate_limit_store import consume_rate_limit
 from skilgen.core.runtime_data import prune_runtime_data
 
 
 LOGGER = logging.getLogger("skilgen.api")
 _LOGGING_READY = False
 _METRICS_LOCK = threading.Lock()
-_RATE_LIMIT_LOCK = threading.Lock()
 _METRICS = {
     "requests_total": 0,
     "requests_by_status": {},
     "durations_ms": [],
 }
-_RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
 _SCOPE_LEVELS = {"read": 1, "write": 2, "admin": 3}
 
 
@@ -566,21 +563,15 @@ def _enforce_rate_limit(handler: BaseHTTPRequestHandler, *, request_id: str) -> 
     header = handler.headers.get("Authorization", "")
     token = header.removeprefix("Bearer ").strip() if header.startswith("Bearer ") else None
     key = _bucket_key(handler.client_address[0], token)
-    now = time.monotonic()
-    with _RATE_LIMIT_LOCK:
-        bucket = _RATE_LIMIT_BUCKETS.setdefault(key, deque())
-        cutoff = now - window_seconds
-        while bucket and bucket[0] < cutoff:
-            bucket.popleft()
-        if len(bucket) >= max_count:
-            retry_after = max(1, math.ceil(window_seconds - (now - bucket[0])))
-            _json_response(handler, 429, {"error": "rate_limited", "retry_after_seconds": retry_after}, request_id=request_id)
-            return False, 429
-        bucket.append(now)
-        if len(_RATE_LIMIT_BUCKETS) > 2048:
-            expired = [item for item, timestamps in _RATE_LIMIT_BUCKETS.items() if not timestamps or timestamps[-1] < cutoff]
-            for item in expired[:512]:
-                _RATE_LIMIT_BUCKETS.pop(item, None)
+    allowed, retry_after = consume_rate_limit(
+        key,
+        max_count=max_count,
+        window_seconds=window_seconds,
+        now=time.time(),
+    )
+    if not allowed:
+        _json_response(handler, 429, {"error": "rate_limited", "retry_after_seconds": retry_after}, request_id=request_id)
+        return False, 429
     return True, 200
 
 

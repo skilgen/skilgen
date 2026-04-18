@@ -23,7 +23,7 @@ DEFAULT_CONFIG = SkilgenConfig(
     model_retry_base_delay_seconds=1.0,
     model_timeout_seconds=60.0,
     model_redaction_mode="balanced",
-    redact_model_error_secrets=False,
+    redact_model_error_secrets=True,
     corpus=CorpusSettings(),
     auto_install_external_skills=True,
     external_skills_allowed_trust_levels=["official", "spec", "community", "curated"],
@@ -260,7 +260,7 @@ model_retry_attempts: 3
 model_retry_base_delay_seconds: 1.0
 model_timeout_seconds: 60
 model_redaction_mode: balanced
-redact_model_error_secrets: false
+redact_model_error_secrets: true
 corpus:
   enabled: true
   budget: 60

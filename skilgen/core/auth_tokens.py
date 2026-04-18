@@ -238,7 +238,6 @@ def verify_jwks_token(
     except InvalidSignature as exc:
         raise SignedTokenError("invalid token signature") from exc
     _validate_registered_claims(payload, issuer=issuer, audience=audience, leeway_seconds=leeway_seconds)
-    _assert_scope_claim(payload)
     return payload
 
 

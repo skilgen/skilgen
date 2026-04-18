@@ -14,6 +14,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("update_trigger: auto", rendered)
         self.assertIn("model_extra_kwargs: {}", rendered)
         self.assertIn("corpus:", rendered)
+        self.assertIn("redact_model_error_secrets: true", rendered)
 
     def test_render_default_config_can_scaffold_provider_defaults(self) -> None:
         rendered = render_default_config("gemini")
@@ -78,6 +79,11 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.corpus.cluster_budget, 14)
             self.assertEqual(config.corpus.exclude_patterns, ["generated/**"])
             self.assertEqual(config.external_skills_policy_mode, "review_required")
+
+    def test_load_config_defaults_to_redacting_model_error_secrets(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = load_config(Path(tmp))
+        self.assertTrue(config.redact_model_error_secrets)
 
 
 if __name__ == "__main__":

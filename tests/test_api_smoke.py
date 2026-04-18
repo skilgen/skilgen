@@ -810,7 +810,7 @@ class ApiSmokeTests(unittest.TestCase):
                             private_key,
                             kid="entra-kid",
                             principal="entra-subject",
-                            scope="User.Read",
+                            scope="",
                             ttl_seconds=300,
                             allowed_project_roots=[root],
                             issuer=oidc.issuer,
@@ -830,6 +830,43 @@ class ApiSmokeTests(unittest.TestCase):
                     finally:
                         server.shutdown()
                         server.server_close()
+
+    def test_api_rate_limit_store_is_shared_across_server_instances(self) -> None:
+        with TemporaryDirectory() as tmp, TemporaryDirectory() as db_tmp:
+            root = Path(tmp)
+            rate_limit_db = Path(db_tmp) / "rate-limit.sqlite"
+            env = {
+                "SKILGEN_API_TOKEN": "test-token",
+                "SKILGEN_ALLOWED_PROJECT_ROOTS": str(root.resolve()),
+                "SKILGEN_API_RATE_LIMIT_DB": str(rate_limit_db),
+                "SKILGEN_API_RATE_LIMIT_COUNT": "1",
+                "SKILGEN_API_RATE_LIMIT_WINDOW_SECONDS": "60",
+            }
+            with mock.patch.dict(os.environ, env, clear=False):
+                server_one = create_server("127.0.0.1", 0)
+                server_two = create_server("127.0.0.1", 0)
+                thread_one = threading.Thread(target=server_one.serve_forever, daemon=True)
+                thread_two = threading.Thread(target=server_two.serve_forever, daemon=True)
+                thread_one.start()
+                thread_two.start()
+                try:
+                    host_one, port_one = server_one.server_address
+                    base_one = f"http://{host_one}:{port_one}"
+                    host_two, port_two = server_two.server_address
+                    base_two = f"http://{host_two}:{port_two}"
+
+                    doctor, _ = get_json(f"{base_one}/doctor?{urlencode({'project_root': str(root)})}")
+                    self.assertIn("runtime", doctor)
+                    limited, _ = get_json(
+                        f"{base_two}/doctor?{urlencode({'project_root': str(root)})}",
+                        expect_status=429,
+                    )
+                    self.assertEqual(limited["error"], "rate_limited")
+                finally:
+                    server_one.shutdown()
+                    server_one.server_close()
+                    server_two.shutdown()
+                    server_two.server_close()
 
     def test_api_auth0_namespaced_oidc_tokens(self) -> None:
         with TemporaryDirectory() as tmp, TemporaryDirectory() as other_tmp:

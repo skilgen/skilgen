@@ -94,7 +94,7 @@ class SkilgenConfig:
     model_retry_base_delay_seconds: float = 1.0
     model_timeout_seconds: float = 60.0
     model_redaction_mode: str = "balanced"
-    redact_model_error_secrets: bool = False
+    redact_model_error_secrets: bool = True
     corpus: CorpusSettings = field(default_factory=CorpusSettings)
     auto_install_external_skills: bool = True
     external_skills_allowed_trust_levels: list[str] = field(default_factory=list)

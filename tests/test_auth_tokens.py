@@ -94,6 +94,27 @@ class SignedTokenTests(unittest.TestCase):
             self.assertEqual(claims["tenant"], "tenant-oidc")
             self.assertEqual(claims["roots"], [str(root.resolve())])
 
+    def test_verify_jwks_token_allows_role_mapped_tokens_without_raw_scope(self) -> None:
+        private_key, jwks = generate_rsa_signing_material(kid="kid-role-only")
+        token = mint_rs256_token(
+            private_key,
+            kid="kid-role-only",
+            principal="entra-service",
+            scope="",
+            ttl_seconds=300,
+            issuer="https://issuer.example.com",
+            audience="skilgen-api",
+            extra_claims={"roles": ["Skilgen.Admin"]},
+        )
+        claims = verify_jwks_token(
+            token,
+            jwks,
+            issuer="https://issuer.example.com",
+            audience="skilgen-api",
+        )
+        self.assertEqual(claims["sub"], "entra-service")
+        self.assertEqual(claims["roles"], ["Skilgen.Admin"])
+
     def test_round_trip_oidc_token_via_discovery(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
