@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from html import escape
 import json
@@ -175,6 +175,7 @@ def render_architecture_graph_mermaid(context: RequirementsContext, project_root
     bundle = bundle or _analysis_bundle(context, project_root)
     evidence_graph = bundle.evidence_graph
     architecture = bundle.architecture
+    workspace_graph = bundle.codebase_context.workspace_graph
     lines = ["graph TD"]
     for domain in architecture.domains:
         domain_id = _node_id(domain.name)
@@ -201,6 +202,13 @@ def render_architecture_graph_mermaid(context: RequirementsContext, project_root
         for symbol in symbols[:2]:
             symbol_id = _node_id(f"{path}_{symbol}")
             lines.append(f'  {file_id} --> {symbol_id}["{symbol}"]')
+    for package in workspace_graph.packages[:8]:
+        package_id = _node_id(f"workspace_{package.id}")
+        lines.append(f'  {package_id}["{package.root_path}"]')
+    for edge in workspace_graph.dependencies[:10]:
+        source_id = _node_id(f"workspace_{edge.source}")
+        target_id = _node_id(f"workspace_{edge.target}")
+        lines.append(f"  {source_id} -. workspace .-> {target_id}")
     return "\n".join(lines)
 
 
@@ -213,6 +221,8 @@ def render_architecture_graph_json(context: RequirementsContext, project_root: P
         "system_summary": architecture.system_summary,
         "domains": [domain.__dict__ for domain in architecture.domains],
         "materialization_plan": [item.__dict__ for item in architecture.materialization_plan],
+        "repo_archetype": bundle.codebase_context.repo_archetype,
+        "workspace_graph": asdict(bundle.codebase_context.workspace_graph),
         "parser_summary": evidence_graph.parser_summary,
         "symbol_graph": evidence_graph.symbol_graph,
         "call_graph": evidence_graph.call_graph,
@@ -376,9 +386,33 @@ def render_evidence_network_data(context: RequirementsContext, project_root: Pat
 
 def render_dependency_network_data(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> dict[str, object]:
     bundle = bundle or _analysis_bundle(context, project_root)
+    workspace_graph = bundle.codebase_context.workspace_graph
     nodes: dict[str, dict[str, object]] = {}
     edges: list[dict[str, object]] = []
     edge_count = 0
+    for package in workspace_graph.packages[:16]:
+        node_id = f"workspace::{package.id}"
+        nodes.setdefault(
+            node_id,
+            {
+                "id": node_id,
+                "label": package.name.split("/")[-1],
+                "group": "workspace-package",
+                "value": 18,
+                "title": package.root_path,
+                "detail_title": package.name,
+                "detail_body": f"{package.root_path} is a workspace package boundary. Skilgen keeps package-level topology distinct from file-level imports.",
+                "detail_meta": [
+                    f"Workspace path: {package.root_path}",
+                    f"Package type: {package.package_type or 'unknown'}",
+                ],
+            },
+        )
+    for edge in workspace_graph.dependencies[:24]:
+        source = f"workspace::{edge.source}"
+        target = f"workspace::{edge.target}"
+        if source in nodes and target in nodes:
+            edges.append({"from": source, "to": target})
     ordered_sources = sorted(bundle.import_graph.items(), key=lambda item: (-len(item[1]), item[0]))
     for source, targets in ordered_sources:
         if edge_count >= 48:
@@ -434,14 +468,15 @@ def render_dependency_network_data(context: RequirementsContext, project_root: P
 
 def render_dependency_sankey_data(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> dict[str, object]:
     bundle = bundle or _analysis_bundle(context, project_root)
+    workspace_graph = bundle.codebase_context.workspace_graph
     nodes: list[dict[str, object]] = [
         {
             "id": "dependencies",
             "name": "Dependencies",
             "layer": 0,
-            "detail": "Skilgen is tracing import pressure from source files into repo modules, the Python standard library, and external packages.",
+            "detail": "Skilgen is tracing both workspace package edges and file-level import pressure so monorepo boundaries stay distinct from import buckets.",
             "detail_meta": [
-                "This flow surfaces which files create the most dependency pull before an agent starts editing.",
+                "This flow surfaces package-to-package coupling first, then file-level dependency pull before an agent starts editing.",
             ],
         }
     ]
@@ -496,6 +531,33 @@ def render_dependency_sankey_data(context: RequirementsContext, project_root: Pa
             "Third-party package imports that create supply, upgrade, or environment surface area.",
             ["Bucket: external packages", "Use this to spot files that rely on vendor libraries or ecosystem glue."],
         )
+
+    if workspace_graph.packages:
+        ensure_node("bucket::workspace", "workspace packages", 1)
+        for node in nodes:
+            if node["id"] == "bucket::workspace":
+                node["detail"] = "Workspace package edges show inter-package monorepo topology separate from file imports."
+                node["detail_meta"] = [
+                    f"Workspace tool: {workspace_graph.tool or 'python-libs'}",
+                    f"Tracked package edges: {len(workspace_graph.dependencies)}",
+                ]
+        links.append({"source": "dependencies", "target": "bucket::workspace", "value": max(1, min(4, len(workspace_graph.packages)))})
+        for package in workspace_graph.packages[:12]:
+            package_id = f"workspace::{package.id}"
+            ensure_node(package_id, package.root_path, 2)
+            for node in nodes:
+                if node["id"] == package_id:
+                    node["detail"] = f"{package.root_path} is a first-class workspace package boundary."
+                    node["detail_meta"] = [
+                        f"Package: {package.name}",
+                        f"Type: {package.package_type or 'unknown'}",
+                    ]
+            links.append({"source": "bucket::workspace", "target": package_id, "value": 1})
+        for edge in workspace_graph.dependencies[:24]:
+            source_id = f"workspace::{edge.source}"
+            target_id = f"workspace::{edge.target}"
+            ensure_node(target_id, target_id.split('::', 1)[-1], 3)
+            links.append({"source": source_id, "target": target_id, "value": 1})
 
     edge_budget = 0
     ordered_sources = sorted(bundle.import_graph.items(), key=lambda item: (-len(item[1]), item[0]))
@@ -2204,6 +2266,8 @@ def render_analysis_report(
             "build_tool": fingerprint.build_tool.__dict__ if fingerprint.build_tool else None,
         },
         "signals": signals.__dict__,
+        "repo_archetype": codebase_context.repo_archetype,
+        "workspace_graph": asdict(codebase_context.workspace_graph),
         "domain_graph": {
             "nodes": [node.__dict__ for node in codebase_context.domain_graph.nodes],
             "recommendations": codebase_context.domain_graph.recommendations,
@@ -2211,7 +2275,7 @@ def render_analysis_report(
         "detected_domains": [record.__dict__ for record in codebase_context.detected_domains],
         "skill_tree": [node.__dict__ for node in codebase_context.skill_tree],
         "import_graph": import_graph,
-        "evidence_graph": evidence_graph.__dict__ | {"items": [item.__dict__ for item in evidence_graph.items]},
+        "evidence_graph": asdict(evidence_graph) | {"items": [item.__dict__ for item in evidence_graph.items]},
         "architecture": architecture.__dict__
         | {
             "domains": [domain.__dict__ for domain in architecture.domains],
@@ -2241,6 +2305,7 @@ def render_architecture_report(
         backend = str(payload.get("backend", "unknown"))
         backend_counts[backend] = backend_counts.get(backend, 0) + 1
     parser_lines = [f"- `{backend}`: `{count}` files" for backend, count in sorted(backend_counts.items())] or ["- none"]
+    workspace_graph = bundle.codebase_context.workspace_graph
     lines = [
         "# Architecture",
         "",
@@ -2262,8 +2327,29 @@ def render_architecture_report(
         "## Parser Backends",
         *parser_lines,
         "",
-        "### Example Symbol Surfaces",
+        "## Workspace Topology",
+        f"- Repo archetype: `{bundle.codebase_context.repo_archetype}`",
+        f"- Workspace tool: `{workspace_graph.tool or 'none'}`",
+        f"- Workspace packages: `{len(workspace_graph.packages)}`",
+        f"- Package dependency edges: `{len(workspace_graph.dependencies)}`",
+        "",
+        "### Example Workspace Packages",
     ]
+    if workspace_graph.packages:
+        for package in workspace_graph.packages[:8]:
+            lines.append(f"- `{package.root_path}` ({package.package_type or 'workspace'})")
+    else:
+        lines.append("- No first-class workspace graph detected.")
+    lines.extend(["", "### Workspace Package Edges"])
+    if workspace_graph.dependencies:
+        package_names = {package.id: package.root_path for package in workspace_graph.packages}
+        for edge in workspace_graph.dependencies[:8]:
+            lines.append(
+                f"- `{package_names.get(edge.source, edge.source)}` -> `{package_names.get(edge.target, edge.target)}`"
+            )
+    else:
+        lines.append("- No internal package dependency edges were extracted.")
+    lines.extend(["", "### Example Symbol Surfaces"])
     if evidence_graph.symbol_graph:
         for path, symbols in list(evidence_graph.symbol_graph.items())[:8]:
             lines.append(f"- `{path}`: {', '.join(f'`{symbol}`' for symbol in symbols[:4])}")

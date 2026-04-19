@@ -4,8 +4,9 @@ from pathlib import Path
 
 from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence
 from skilgen.agents.requirements_parser import parse_project_intent_native
+from skilgen.agents.workspace_graph import build_workspace_graph
 from skilgen.deep_agents_core import run_deep_json
-from skilgen.core.models import CodebaseSignals, DomainGraph, DomainGraphNode, RequirementsContext
+from skilgen.core.models import CodebaseSignals, DomainGraph, DomainGraphNode, RequirementsContext, WorkspaceGraph, WorkspacePackage
 
 
 def _node(
@@ -85,25 +86,6 @@ def _relative_code_files(project_root: Path, directory: Path, *, limit: int = 24
     return files[:limit]
 
 
-def _python_monorepo_libraries(project_root: Path) -> list[tuple[str, Path, Path | None]]:
-    libs_root = project_root / "libs"
-    if not libs_root.exists():
-        return []
-    libraries: list[tuple[str, Path, Path | None]] = []
-    for lib_dir in sorted(path for path in libs_root.iterdir() if path.is_dir()):
-        package_candidates = [
-            path
-            for path in sorted(lib_dir.rglob("*"))
-            if path.is_dir()
-            and (path / "__init__.py").exists()
-            and ".git" not in path.parts
-            and "tests" not in {part.lower() for part in path.relative_to(lib_dir).parts}
-        ]
-        package_root = min(package_candidates, key=lambda path: len(path.parts)) if package_candidates else None
-        libraries.append((lib_dir.name.replace("_", "-"), lib_dir, package_root))
-    return libraries
-
-
 def _top_level_app_surfaces(project_root: Path) -> list[tuple[str, Path, list[str]]]:
     surfaces: list[tuple[str, Path, list[str]]] = []
     ignored = {
@@ -126,15 +108,19 @@ def _top_level_app_surfaces(project_root: Path) -> list[tuple[str, Path, list[st
     return surfaces
 
 
-def _classify_repo_archetype(
+def detect_repo_archetype(
     project_root: Path,
     signals: CodebaseSignals,
     *,
     package_root: Path | None,
     package_top_level_files: list[str],
-    monorepo_libraries: list[tuple[str, Path, Path | None]],
+    workspace_graph: WorkspaceGraph,
     app_surfaces: list[tuple[str, Path, list[str]]],
 ) -> str:
+    if workspace_graph.packages and workspace_graph.tool is not None:
+        return f"{workspace_graph.tool}-workspace"
+    if workspace_graph.packages and workspace_graph.tool is None:
+        return "python-monorepo"
     if package_root is not None and package_root.name == "skilgen":
         return "skilgen-platform"
     if (
@@ -150,13 +136,43 @@ def _classify_repo_archetype(
         and not signals.copybooks
     ):
         return "python-package"
-    if len(monorepo_libraries) >= 2 and (project_root / "libs").exists():
-        return "python-monorepo"
     if len(app_surfaces) >= 3 and {name for name, _, _ in app_surfaces} & {"api", "client", "packages"}:
         return "repo-native-app"
     if len(app_surfaces) >= 2:
         return "folder-native"
     return "generic"
+
+
+def _workspace_parent_name(root_path: str) -> str | None:
+    parts = [part for part in Path(root_path).parts if part]
+    if len(parts) < 2:
+        return None
+    head = parts[0].replace("_", "-").strip("-")
+    return head or None
+
+
+def _workspace_domain_name(package: WorkspacePackage) -> str:
+    return package.root_path.replace("/", "-").replace("_", "-").strip("-") or package.id
+
+
+def _workspace_summary(package: WorkspacePackage, tool: str | None) -> str:
+    package_kind = package.package_type or "workspace package"
+    package_label = package.name or package.root_path
+    if tool:
+        return (
+            f"{package_label} guidance for the `{package.root_path}` workspace package, keeping edits aligned "
+            f"to the detected {tool} monorepo boundary and its internal dependency edges."
+        )
+    return (
+        f"{package_label} guidance for the `{package.root_path}` package surface inferred from the fallback "
+        "Python libs layout."
+    )
+
+
+def _workspace_group_summary(group_name: str, tool: str | None) -> str:
+    if tool:
+        return f"Workspace group guidance for `{group_name}/`, preserving the top-level {tool} monorepo boundary as a parent domain."
+    return f"Workspace group guidance for `{group_name}/`, preserving the inferred package family boundary as a parent domain."
 
 
 def _confidence_value(raw: object) -> float:
@@ -256,21 +272,21 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
     signals = analyze_codebase(root)
     requirements_path = requirements.requirements_path if requirements.requirements_path.exists() else None
     intent = parse_project_intent_native(root, requirements_path)
+    workspace_graph = build_workspace_graph(root)
     package_root = _python_package_root(root)
     package_runtime_files = _relative_py_files(root, package_root, top_level_only=False, limit=100) if package_root is not None else []
     package_top_level_files = _relative_py_files(root, package_root, top_level_only=True, limit=100) if package_root is not None else []
-    monorepo_libraries = _python_monorepo_libraries(root)
     app_surfaces = _top_level_app_surfaces(root)
-    repo_archetype = _classify_repo_archetype(
+    repo_archetype = detect_repo_archetype(
         root,
         signals,
         package_root=package_root,
         package_top_level_files=package_top_level_files,
-        monorepo_libraries=monorepo_libraries,
+        workspace_graph=workspace_graph,
         app_surfaces=app_surfaces,
     )
     package_focused_repo = repo_archetype == "python-package"
-    monorepo_focused_repo = repo_archetype == "python-monorepo"
+    workspace_focused_repo = repo_archetype.endswith("-workspace") or repo_archetype == "python-monorepo"
     app_native_repo = repo_archetype == "repo-native-app"
     folder_native_repo = repo_archetype == "folder-native"
     generic_repo = repo_archetype == "generic"
@@ -591,58 +607,71 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
                 )
             )
 
-    if monorepo_focused_repo:
-        for library_name, lib_dir, package_dir in monorepo_libraries:
-            relative_root = lib_dir.relative_to(root).as_posix()
-            key_files = _relative_code_files(root, package_dir or lib_dir, limit=24)
-            if not key_files:
+    if workspace_focused_repo and workspace_graph.packages:
+        parent_children: dict[str, list[str]] = {}
+        package_names = {_workspace_domain_name(package): package for package in workspace_graph.packages}
+        dependencies_by_source: dict[str, list[str]] = {}
+        for edge in workspace_graph.dependencies:
+            dependencies_by_source.setdefault(edge.source, []).append(edge.target)
+        for package in workspace_graph.packages:
+            parent_name = _workspace_parent_name(package.root_path)
+            child_name = _workspace_domain_name(package)
+            if parent_name is not None:
+                parent_children.setdefault(parent_name, []).append(child_name)
+
+        for parent_name, child_domains in sorted(parent_children.items()):
+            if len(child_domains) < 2:
                 continue
-            child_domains: list[str] = []
-            parent_domain = library_name
+            parent_files: list[str] = []
+            for child_domain in child_domains:
+                package = package_names[child_domain]
+                parent_files.extend(package.config_evidence[:2] or [package.root_path])
             nodes.append(
                 _node(
-                    parent_domain,
-                    summary=_library_summary(library_name, relative_root),
-                    confidence=0.88,
-                    key_files=key_files,
-                    key_patterns=["library package surface", "monorepo implementation seam", "repo-native module guidance"],
+                    parent_name,
+                    summary=_workspace_group_summary(parent_name, workspace_graph.tool),
+                    confidence=0.84,
+                    key_files=list(dict.fromkeys(parent_files))[:12],
+                    key_patterns=["workspace parent boundary", "package family grouping", "monorepo capability cluster"],
                     child_domains=child_domains,
                     related_domains=["roadmap"],
-                    skill_path=f"skills/{library_name}/SKILL.md",
+                    skill_path=f"skills/{parent_name}/SKILL.md",
                 )
             )
-            if package_dir is None:
-                continue
-            child_items: list[tuple[str, list[str], str]] = []
-            for py_file in sorted(package_dir.glob("*.py"))[:8]:
-                if py_file.name == "__init__.py":
-                    continue
-                slug = py_file.stem.replace("_", "-")
-                child_items.append((slug, [py_file.relative_to(root).as_posix()], py_file.name))
-            for subdir in sorted(path for path in package_dir.iterdir() if path.is_dir() and (path / "__init__.py").exists())[:8]:
-                slug = subdir.name.replace("_", "-")
-                child_files = _relative_code_files(root, subdir, limit=8)
-                if child_files:
-                    child_items.append((slug, child_files, subdir.name))
-            seen_child_slugs: set[str] = set()
-            for slug, child_files, label in child_items:
-                if slug in seen_child_slugs:
-                    continue
-                seen_child_slugs.add(slug)
-                child_name = f"{library_name}-{slug}"
-                child_domains.append(child_name)
-                nodes.append(
-                    _node(
-                        child_name,
-                        summary=_subpackage_summary(library_name, label),
-                        confidence=0.8,
-                        key_files=child_files,
-                        key_patterns=[f"{library_name} subpackage: {label}", "Stay close to the inferred library seam before widening scope."],
-                        parent_domain=parent_domain,
-                        related_domains=["roadmap"],
-                        skill_path=f"skills/{library_name}/{slug}/SKILL.md",
-                    )
+
+        for package in workspace_graph.packages:
+            package_domain = _workspace_domain_name(package)
+            parent_name = _workspace_parent_name(package.root_path)
+            if parent_name is not None and len(parent_children.get(parent_name, [])) < 2:
+                parent_name = None
+            related_domains = [
+                _workspace_domain_name(target)
+                for target in workspace_graph.packages
+                if target.id in dependencies_by_source.get(package.id, [])
+            ]
+            key_files = _relative_code_files(root, root / package.root_path, limit=24)
+            if not key_files:
+                key_files = package.config_evidence or [package.root_path]
+            key_patterns = [
+                f"workspace tool: {workspace_graph.tool or 'python-libs'}",
+                f"package path: {package.root_path}",
+            ]
+            if package.package_type:
+                key_patterns.append(f"package type: {package.package_type}")
+            if related_domains:
+                key_patterns.append(f"internal package deps: {', '.join(related_domains[:4])}")
+            nodes.append(
+                _node(
+                    package_domain,
+                    summary=_workspace_summary(package, workspace_graph.tool),
+                    confidence=0.88 if workspace_graph.tool else 0.74,
+                    key_files=key_files,
+                    key_patterns=key_patterns,
+                    parent_domain=parent_name,
+                    related_domains=related_domains or ["roadmap"],
+                    skill_path=f"skills/{package_domain}/SKILL.md",
                 )
+            )
 
     if app_native_repo:
         for surface_name, surface_dir, key_files in app_surfaces:
@@ -929,6 +958,11 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
         "Use the inferred domain graph to decide which parent and child skills need regeneration.",
         "Refresh AGENTS.md whenever parent skill entry points or core domain relationships change.",
     ]
+    if workspace_graph.packages:
+        tool_label = workspace_graph.tool or "python-libs"
+        recommendations.append(
+            f"Detected `{tool_label}` workspace metadata with {len(workspace_graph.packages)} packages and {len(workspace_graph.dependencies)} internal package edges; keep package domains distinct from file import analysis."
+        )
     if signals.tests:
         recommendations.append("Keep endpoint and flow validation coupled to the inferred domains when code changes.")
     if intent.features:
@@ -944,6 +978,7 @@ def build_domain_graph(project_root: Path, requirements: RequirementsContext) ->
     code_evidence = collect_code_evidence(root)
     structural_evidence = collect_structural_evidence(root)
     intent = parse_project_intent_native(root, requirements_path)
+    workspace_graph = build_workspace_graph(root)
     payload = run_deep_json(
         "dynamic domain graph planning",
         (
@@ -960,6 +995,7 @@ def build_domain_graph(project_root: Path, requirements: RequirementsContext) ->
             f"Requirements domains: {requirements.domains}\n"
             f"Intent JSON: {intent.__dict__}\n"
             f"Signals JSON: {signals.__dict__}\n"
+            f"Workspace graph JSON: {workspace_graph.__dict__ | {'packages': [package.__dict__ for package in workspace_graph.packages], 'dependencies': [edge.__dict__ for edge in workspace_graph.dependencies]}}\n"
             f"Code evidence JSON: {code_evidence}\n"
             f"Structural evidence JSON: {structural_evidence}\n"
             f"Native graph JSON: { {'nodes': [node.__dict__ for node in native_graph.nodes], 'recommendations': native_graph.recommendations} }\n"

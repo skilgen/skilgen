@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from skilgen.agents.domain_graph_planner import build_domain_graph
+from skilgen.agents.domain_graph_planner import _top_level_app_surfaces, build_domain_graph, detect_repo_archetype
 from skilgen.agents.framework_fingerprint import fingerprint_project
+from skilgen.agents.codebase_signals import analyze_codebase
+from skilgen.agents.workspace_graph import build_workspace_graph
 from skilgen.core.models import (
     CodebaseContext,
     DomainGraph,
@@ -81,6 +83,27 @@ def _dependency_map(domain_graph: DomainGraph) -> dict[str, list[str]]:
 
 def build_codebase_context(project_root: Path, requirements: RequirementsContext) -> CodebaseContext:
     root = project_root.resolve()
+    signals = analyze_codebase(root)
+    workspace_graph = build_workspace_graph(root)
+    package_root = None
+    for candidate in sorted(root.iterdir()):
+        if candidate.is_dir() and (candidate / "__init__.py").exists() and candidate.name not in {"tests", "docs", "scripts", "skills"}:
+            package_root = candidate
+            break
+    package_top_level_files = sorted(
+        path.relative_to(root).as_posix()
+        for path in package_root.glob("*.py")
+        if package_root is not None and path.is_file()
+    ) if package_root is not None else []
+    app_surfaces = _top_level_app_surfaces(root)
+    repo_archetype = detect_repo_archetype(
+        root,
+        signals,
+        package_root=package_root,
+        package_top_level_files=package_top_level_files,
+        workspace_graph=workspace_graph,
+        app_surfaces=app_surfaces,
+    )
     domain_graph = build_domain_graph(root, requirements)
     return CodebaseContext(
         project_root=root,
@@ -90,4 +113,6 @@ def build_codebase_context(project_root: Path, requirements: RequirementsContext
         dependency_map=_dependency_map(domain_graph),
         framework_fingerprint=fingerprint_project(root),
         skill_tree=_skill_tree(domain_graph),
+        workspace_graph=workspace_graph,
+        repo_archetype=repo_archetype,
     )

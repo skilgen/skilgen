@@ -98,6 +98,29 @@ class DomainGraphPlannerTests(unittest.TestCase):
             self.assertNotIn("frontend", graph_names)
             self.assertTrue(any("repo-native-app" in item for item in graph.recommendations))
 
+    def test_build_domain_graph_uses_workspace_packages_for_pnpm_monorepos(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pnpm-workspace.yaml").write_text("packages:\n  - apps/*\n  - packages/*\n", encoding="utf-8")
+            (root / "apps" / "web" / "src").mkdir(parents=True)
+            (root / "packages" / "ui" / "src").mkdir(parents=True)
+            (root / "apps" / "web" / "package.json").write_text(
+                '{"name":"@repo/web","dependencies":{"@repo/ui":"workspace:*"}}',
+                encoding="utf-8",
+            )
+            (root / "packages" / "ui" / "package.json").write_text('{"name":"@repo/ui"}', encoding="utf-8")
+            (root / "apps" / "web" / "src" / "index.tsx").write_text("export const App = () => null;\n", encoding="utf-8")
+            (root / "packages" / "ui" / "src" / "button.tsx").write_text("export const Button = () => null;\n", encoding="utf-8")
+
+            graph = build_domain_graph_native(root, synthesize_requirements_context(root))
+
+            graph_names = {node.name for node in graph.nodes}
+            self.assertIn("apps-web", graph_names)
+            self.assertIn("packages-ui", graph_names)
+            self.assertNotIn("backend", graph_names)
+            self.assertNotIn("frontend", graph_names)
+            self.assertTrue(any("pnpm-workspace" in item for item in graph.recommendations))
+
     def test_build_domain_graph_falls_back_to_folder_native_surfaces_for_unknown_repo_shapes(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -122,6 +145,23 @@ class DomainGraphPlannerTests(unittest.TestCase):
             self.assertNotIn("frontend", graph_names)
             self.assertNotIn("security", graph_names)
             self.assertTrue(any("folder-native" in item for item in graph.recommendations))
+
+    def test_build_domain_graph_keeps_python_libs_heuristic_as_fallback(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "libs" / "alpha" / "alpha").mkdir(parents=True)
+            (root / "libs" / "beta" / "beta").mkdir(parents=True)
+            (root / "libs" / "alpha" / "alpha" / "__init__.py").write_text("", encoding="utf-8")
+            (root / "libs" / "alpha" / "alpha" / "service.py").write_text("def run():\n    return True\n", encoding="utf-8")
+            (root / "libs" / "beta" / "beta" / "__init__.py").write_text("", encoding="utf-8")
+            (root / "libs" / "beta" / "beta" / "service.py").write_text("def run():\n    return True\n", encoding="utf-8")
+
+            graph = build_domain_graph_native(root, synthesize_requirements_context(root))
+
+            graph_names = {node.name for node in graph.nodes}
+            self.assertIn("libs-alpha", graph_names)
+            self.assertIn("libs-beta", graph_names)
+            self.assertTrue(any("python-monorepo" in item for item in graph.recommendations))
 
     def test_build_domain_graph_passes_code_evidence_to_llm_prompt(self) -> None:
         with TemporaryDirectory() as tmp:

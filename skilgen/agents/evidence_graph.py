@@ -5,6 +5,7 @@ from pathlib import Path
 from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence
 from skilgen.agents.relationship_mapper import build_import_graph
 from skilgen.agents.source_graphs import build_call_graph, build_config_runtime_graph, build_parser_summary, build_symbol_graph, build_test_mapping
+from skilgen.agents.workspace_graph import build_workspace_graph
 from skilgen.core.models import EvidenceGraph, EvidenceItem, RequirementsContext
 
 
@@ -79,6 +80,7 @@ def _collect_config_items(project_root: Path, *, limit: int = 6) -> list[Evidenc
 def build_evidence_graph(project_root: Path, requirements: RequirementsContext) -> EvidenceGraph:
     root = project_root.resolve()
     signals = analyze_codebase(root)
+    workspace_graph = build_workspace_graph(root)
     import_graph = build_import_graph(root)
     symbol_graph = build_symbol_graph(root)
     call_graph = build_call_graph(root)
@@ -135,6 +137,11 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
         recommendations.append(f"Parser backends in use: {', '.join(parser_backends)}.")
     if test_mapping:
         recommendations.append("Keep skill guidance grounded in both implementation evidence and the nearest mapped tests.")
+    if workspace_graph.packages:
+        tool_label = workspace_graph.tool or "python-libs"
+        recommendations.append(
+            f"Model package boundaries from the `{tool_label}` workspace graph separately from file-level import edges."
+        )
     return EvidenceGraph(
         language_inventory=signals.language_inventory,
         dominant_languages=dominant_languages,
@@ -146,4 +153,5 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
         call_graph=call_graph,
         config_runtime_graph=config_runtime_graph,
         test_mapping=test_mapping,
+        workspace_graph=workspace_graph,
     )

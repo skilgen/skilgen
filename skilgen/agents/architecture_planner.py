@@ -75,6 +75,7 @@ def _evidence_graph_payload(project_root: Path, evidence_graph: EvidenceGraph) -
         "call_graph": evidence_graph.call_graph,
         "config_runtime_graph": evidence_graph.config_runtime_graph,
         "test_mapping": evidence_graph.test_mapping,
+        "workspace_graph": asdict(evidence_graph.workspace_graph),
         "redaction_mode": mode,
     }
     return sanitized
@@ -266,7 +267,8 @@ def _native_architecture(project_root: Path, domain_graph: DomainGraph, evidence
         f"and {len(domain_graph.nodes)} domain graph nodes. "
         f"Parser backends in use: {', '.join(sorted({payload.get('backend', 'unknown') for payload in evidence_graph.parser_summary.values()})) or 'none'}. "
         f"Source comprehension currently tracks {len(evidence_graph.symbol_graph)} symbol-bearing files, "
-        f"{len(evidence_graph.call_graph)} call-bearing files, and {len(evidence_graph.test_mapping)} mapped tests."
+        f"{len(evidence_graph.call_graph)} call-bearing files, {len(evidence_graph.test_mapping)} mapped tests, "
+        f"and {len(evidence_graph.workspace_graph.packages)} workspace packages."
     )
     return ArchitectureBlueprint(
         headline=headline,

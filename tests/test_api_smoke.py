@@ -95,6 +95,16 @@ class ApiSmokeTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            (root / "pnpm-workspace.yaml").write_text("packages:\n  - apps/*\n  - packages/*\n", encoding="utf-8")
+            (root / "apps" / "api" / "src").mkdir(parents=True)
+            (root / "packages" / "shared" / "src").mkdir(parents=True)
+            (root / "apps" / "api" / "package.json").write_text(
+                '{"name":"@repo/api","dependencies":{"@repo/shared":"workspace:*"}}',
+                encoding="utf-8",
+            )
+            (root / "packages" / "shared" / "package.json").write_text('{"name":"@repo/shared"}', encoding="utf-8")
+            (root / "apps" / "api" / "src" / "index.ts").write_text("export const api = true;\n", encoding="utf-8")
+            (root / "packages" / "shared" / "src" / "index.ts").write_text("export const shared = true;\n", encoding="utf-8")
             env = {
                 "SKILGEN_API_TOKEN": "test-token",
                 "SKILGEN_ALLOWED_PROJECT_ROOTS": str(root.resolve()),
@@ -146,18 +156,26 @@ class ApiSmokeTests(unittest.TestCase):
                     self.assertIn("signals", analysis)
                     self.assertIn("evidence_graph", analysis)
                     self.assertIn("domain_graph", analysis)
+                    self.assertIn("workspace_graph", analysis)
+                    self.assertEqual(analysis["workspace_graph"]["tool"], "pnpm")
+                    self.assertEqual(analysis["repo_archetype"]["name"], "pnpm-workspace")
                     self.assertEqual(analysis["api_version"], "1.0")
 
                     architecture, _ = get_json(f"{base}/architecture?{urlencode({'project_root': str(root), 'requirements': str(requirements)})}")
                     self.assertIn("architecture", architecture)
                     self.assertIn("evidence_graph", architecture)
                     self.assertIn("graph_export", architecture)
+                    self.assertIn("workspace_graph", architecture)
+                    self.assertEqual(architecture["workspace_graph"]["tool"], "pnpm")
+                    self.assertIn("workspace_graph", architecture["graph_export"]["json"])
                     self.assertTrue(architecture["architecture"]["domains"])
 
                     dashboard, _ = get_json(f"{base}/dashboard?{urlencode({'project_root': str(root), 'requirements': str(requirements)})}")
                     self.assertIn("html", dashboard)
                     self.assertIn("score", dashboard)
                     self.assertIn("graph_export", dashboard)
+                    self.assertIn("workspace_graph", dashboard)
+                    self.assertEqual(dashboard["repo_archetype"]["name"], "pnpm-workspace")
 
                     intent, _ = post_json(f"{base}/intent", {"requirements": str(requirements)})
                     self.assertTrue(intent["features"])
@@ -186,6 +204,14 @@ class ApiSmokeTests(unittest.TestCase):
 
                     analytics, _ = get_json(f"{base}/analytics?{urlencode({'project_root': str(root)})}")
                     self.assertIn("top_skills", analytics)
+
+                    status, _ = get_json(f"{base}/status?{urlencode({'project_root': str(root)})}")
+                    self.assertIn("workspace_graph", status)
+                    self.assertEqual(status["repo_archetype"]["name"], "pnpm-workspace")
+
+                    report, _ = get_json(f"{base}/report?{urlencode({'project_root': str(root)})}")
+                    self.assertIn("workspace_graph", report)
+                    self.assertEqual(report["repo_archetype"]["workspace_tool"], "pnpm")
 
                     request = Request(
                         f"{base}/badge.svg?{urlencode({'project_root': str(root)})}",

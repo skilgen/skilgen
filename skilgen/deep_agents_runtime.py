@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from skilgen.agents.codebase_signals import analyze_codebase
+from skilgen.agents.domain_graph_planner import _top_level_app_surfaces, detect_repo_archetype
 from skilgen.agents.evidence_graph import build_evidence_graph
 from skilgen.agents.feature_extractor import extract_features, extract_features_native
 from skilgen.agents.framework_fingerprint import fingerprint_project
@@ -14,6 +15,7 @@ from skilgen.agents.model_registry import resolve_model_settings
 from skilgen.agents.relationship_mapper import build_import_graph
 from skilgen.agents.requirements_parser import parse_project_intent, parse_project_intent_native, parse_requirements_file, parse_requirements_file_native
 from skilgen.agents.roadmap_planner import build_roadmap_plan, build_roadmap_plan_native
+from skilgen.agents.workspace_graph import build_workspace_graph
 from skilgen.agents.decision_planner import build_agent_decision
 from skilgen.autoupdate import auto_update_status
 from skilgen.core.config import load_config
@@ -90,6 +92,39 @@ def _message_text(message: object) -> str:
     if isinstance(content, list):
         return "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content).strip()
     return str(content).strip()
+
+
+def _repo_shape_payload(root: Path, *, repo_archetype: str | None = None) -> dict[str, Any]:
+    workspace_graph = build_workspace_graph(root)
+    if repo_archetype is None:
+        signals = analyze_codebase(root)
+        package_root = None
+        for candidate in sorted(root.iterdir()):
+            if candidate.is_dir() and (candidate / "__init__.py").exists() and candidate.name not in {"tests", "docs", "scripts", "skills"}:
+                package_root = candidate
+                break
+        package_top_level_files = sorted(
+            path.relative_to(root).as_posix()
+            for path in package_root.glob("*.py")
+            if package_root is not None and path.is_file()
+        ) if package_root is not None else []
+        app_surfaces = _top_level_app_surfaces(root)
+        repo_archetype = detect_repo_archetype(
+            root,
+            signals,
+            package_root=package_root,
+            package_top_level_files=package_top_level_files,
+            workspace_graph=workspace_graph,
+            app_surfaces=app_surfaces,
+        )
+    return {
+        "name": repo_archetype or "generic",
+        "workspace_tool": workspace_graph.tool,
+        "package_count": len(workspace_graph.packages),
+        "dependency_count": len(workspace_graph.dependencies),
+        "entrypoints": list(workspace_graph.entrypoints),
+        "detection_evidence": list(workspace_graph.detection_evidence),
+    }
 
 
 class DeepAgentsRuntime:
@@ -287,11 +322,14 @@ def native_analyze_payload(project_root: str | Path, requirements: str | Path | 
     fingerprint = fingerprint_project(root)
     signals = analyze_codebase(root)
     mapping = build_import_graph(root)
+    workspace_graph = build_workspace_graph(root)
     payload: dict[str, Any] = {
         "project_root": str(root),
         "framework_fingerprint": _serialize(fingerprint),
         "signals": _serialize(signals),
         "import_graph": mapping,
+        "workspace_graph": _serialize(workspace_graph),
+        "repo_archetype": _repo_shape_payload(root),
     }
     if requirements is not None:
         context = load_requirements(Path(requirements).resolve())
@@ -300,6 +338,7 @@ def native_analyze_payload(project_root: str | Path, requirements: str | Path | 
         payload["domain_graph"] = _serialize(codebase_context.domain_graph)
         payload["detected_domains"] = _serialize(codebase_context.detected_domains)
         payload["skill_tree"] = _serialize(codebase_context.skill_tree)
+        payload["repo_archetype"] = _repo_shape_payload(root, repo_archetype=codebase_context.repo_archetype)
     return payload
 
 
@@ -319,6 +358,8 @@ def native_architecture_payload(
         "requirements_context": _serialize(context),
         "evidence_graph": _serialize(bundle.evidence_graph),
         "architecture": _serialize(bundle.architecture),
+        "workspace_graph": _serialize(bundle.codebase_context.workspace_graph),
+        "repo_archetype": _repo_shape_payload(root, repo_archetype=bundle.codebase_context.repo_archetype),
         "graph_export": {
             "mermaid": render_architecture_graph_mermaid(context, root, bundle),
             "json": render_architecture_graph_json(context, root, bundle),
@@ -359,6 +400,8 @@ def native_dashboard_payload_with_progress(
         "auto_update": auto_update_status(root),
         "architecture": _serialize(bundle.architecture),
         "evidence_graph": _serialize(bundle.evidence_graph),
+        "workspace_graph": _serialize(bundle.codebase_context.workspace_graph),
+        "repo_archetype": _repo_shape_payload(root, repo_archetype=bundle.codebase_context.repo_archetype),
         "agent_decision": _serialize(decision),
         "external_skills": {
             "detected": detect_external_skill_sources(root),
@@ -451,6 +494,7 @@ def native_status_payload(project_root: str | Path) -> dict[str, Any]:
     skills_root = root / "skills"
     skill_files = sorted(str(path.relative_to(root)) for path in skills_root.rglob("SKILL.md")) if skills_root.exists() else []
     summary_files = sorted(str(path.relative_to(root)) for path in skills_root.rglob("SUMMARY.md")) if skills_root.exists() else []
+    repo_shape = _repo_shape_payload(root)
     return {
         "project_root": str(root),
         "config_exists": (root / "skilgen.yml").exists(),
@@ -467,6 +511,8 @@ def native_status_payload(project_root: str | Path) -> dict[str, Any]:
         "skill_files": skill_files,
         "summary_count": len(summary_files),
         "summary_files": summary_files,
+        "workspace_graph": _serialize(build_workspace_graph(root)),
+        "repo_archetype": repo_shape,
         "runtime_diagnostics": runtime_diagnostics(root),
     }
 
@@ -480,6 +526,8 @@ def native_report_payload(project_root: str | Path) -> dict[str, Any]:
         "status": status,
         "skilgen_score": compute_skillgen_score(root),
         "domains": skill_domains,
+        "workspace_graph": status["workspace_graph"],
+        "repo_archetype": status["repo_archetype"],
         "signal_counts": {
             "backend_routes": len(signals.backend_routes),
             "frontend_routes": len(signals.frontend_routes),
@@ -493,7 +541,11 @@ def native_report_payload(project_root: str | Path) -> dict[str, Any]:
             "state_files": len(signals.state_files),
             "design_system_files": len(signals.design_system_files),
         },
-        "summary": f"Detected {status['skill_count']} skill files and {status['summary_count']} summary files across {len(skill_domains)} domains.",
+        "summary": (
+            f"Detected {status['skill_count']} skill files and {status['summary_count']} summary files across "
+            f"{len(skill_domains)} domains. Repo archetype: {status['repo_archetype']['name']} with "
+            f"{status['repo_archetype']['package_count']} workspace packages."
+        ),
     }
 
 

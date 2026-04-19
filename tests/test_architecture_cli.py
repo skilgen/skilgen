@@ -12,6 +12,14 @@ class ArchitectureCliTests(unittest.TestCase):
             root = Path(tmp)
             requirements = root / "requirements.md"
             requirements.write_text("Support COBOL transaction flows and backend services.\n", encoding="utf-8")
+            (root / "pnpm-workspace.yaml").write_text("packages:\n  - apps/*\n  - packages/*\n", encoding="utf-8")
+            (root / "apps" / "api").mkdir(parents=True)
+            (root / "packages" / "shared").mkdir(parents=True)
+            (root / "apps" / "api" / "package.json").write_text(
+                '{"name":"@repo/api","dependencies":{"@repo/shared":"workspace:*"}}',
+                encoding="utf-8",
+            )
+            (root / "packages" / "shared" / "package.json").write_text('{"name":"@repo/shared"}', encoding="utf-8")
             (root / "cobol" / "transactions").mkdir(parents=True)
             (root / "cobol" / "transactions" / "customer_lookup.cbl").write_text(
                 "IDENTIFICATION DIVISION.\nPROGRAM-ID. CUSTOMER-LOOKUP.\nPROCEDURE DIVISION.\nDISPLAY 'OK'.\n",
@@ -59,6 +67,10 @@ class ArchitectureCliTests(unittest.TestCase):
             self.assertTrue(payload["architecture"]["domains"])
             self.assertIn("materialization_plan", payload["architecture"])
             self.assertIn("parser_summary", payload["evidence_graph"])
+            self.assertIn("workspace_graph", payload)
+            self.assertEqual(payload["workspace_graph"]["tool"], "pnpm")
+            self.assertIn("workspace_graph", payload["evidence_graph"])
+            self.assertIn("workspace_graph", payload["graph_export"]["json"])
             self.assertIn("html", payload["graph_export"])
 
     def test_architecture_command_writes_html_graph_export(self) -> None:

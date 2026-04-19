@@ -174,6 +174,33 @@ class DomainGraph:
 
 
 @dataclass(frozen=True)
+class WorkspacePackage:
+    id: str
+    name: str
+    root_path: str
+    package_type: str | None
+    manifest_paths: list[str]
+    config_evidence: list[str]
+
+
+@dataclass(frozen=True)
+class WorkspaceDependency:
+    source: str
+    target: str
+    evidence: list[str]
+
+
+@dataclass(frozen=True)
+class WorkspaceGraph:
+    tool: str | None
+    packages: list[WorkspacePackage]
+    dependencies: list[WorkspaceDependency]
+    entrypoints: list[str]
+    confidence: float
+    detection_evidence: list[str]
+
+
+@dataclass(frozen=True)
 class SkillTreeNode:
     path: str
     domain: str
@@ -191,6 +218,8 @@ class CodebaseContext:
     dependency_map: dict[str, list[str]]
     framework_fingerprint: FrameworkFingerprint
     skill_tree: list[SkillTreeNode]
+    workspace_graph: WorkspaceGraph = field(default_factory=lambda: WorkspaceGraph(None, [], [], [], 0.0, []))
+    repo_archetype: str = "generic"
 
 
 @dataclass(frozen=True)
@@ -233,6 +262,7 @@ class EvidenceGraph:
     call_graph: dict[str, list[str]] = field(default_factory=dict)
     config_runtime_graph: dict[str, list[str]] = field(default_factory=dict)
     test_mapping: dict[str, list[str]] = field(default_factory=dict)
+    workspace_graph: WorkspaceGraph = field(default_factory=lambda: WorkspaceGraph(None, [], [], [], 0.0, []))
 
 
 @dataclass(frozen=True)
