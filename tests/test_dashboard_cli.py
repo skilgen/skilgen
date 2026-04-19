@@ -11,6 +11,8 @@ from unittest.mock import patch
 
 from skilgen.autoupdate import stop_auto_update_worker
 from skilgen.cli.main import main
+from skilgen.generators.package import _analysis_bundle, render_dependency_network_data
+from skilgen.core.requirements import load_project_context
 
 
 class DashboardCliTests(unittest.TestCase):
@@ -109,13 +111,18 @@ class DashboardCliTests(unittest.TestCase):
                     )
                 )
                 self.assertIn("Architecture ·", html)
-                self.assertIn("Dependency Network", html)
+                self.assertIn("Dependency Explorer", html)
+                self.assertIn("Bubble — who's the chokepoint?", html)
+                self.assertIn("Cycle — where's the risk?", html)
+                self.assertIn("Matrix — domain coupling", html)
                 self.assertIn("Usage ·", html)
                 self.assertIn("Recommended profiles", html)
                 self.assertIn("No git metadata; freshness is file-state based", html)
                 self.assertIn("viewportWidth", html)
                 self.assertIn("integrity='sha384-", html)
-                self.assertIn("aria-label='Interactive dependency network showing repo-local import relationships.'", html)
+                self.assertIn("aria-label='Interactive dependency explorer showing chokepoints, cycles, and domain coupling.'", html)
+                self.assertNotIn("vis-network.min.js", html)
+                self.assertNotIn("Architecture Legend", html)
                 self.assertNotIn("Outer rings represent planned or generated child skills.", html)
                 self.assertTrue(any(marker in html for marker in ("Live Usage", "Modeled Usage")))
                 self.assertNotIn(">No diff since baseline<", html)
@@ -149,6 +156,35 @@ class DashboardCliTests(unittest.TestCase):
             self.assertIn("html", payload)
             self.assertIn("graph_export", payload)
             self.assertIn("dependencies", payload["graph_export"])
+
+    def test_dependency_network_payload_uses_explorer_shape(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requirements = root / "requirements.md"
+            requirements.write_text("Track dependency coupling and chokepoints.\n", encoding="utf-8")
+            (root / "core").mkdir()
+            (root / "agents").mkdir()
+            (root / "api").mkdir()
+            (root / "core" / "models.py").write_text("class Model:\n    pass\n", encoding="utf-8")
+            (root / "core" / "helpers.py").write_text("from core.models import Model\n", encoding="utf-8")
+            (root / "agents" / "runner.py").write_text("from core.models import Model\nfrom api.server import run\n", encoding="utf-8")
+            (root / "api" / "server.py").write_text("from core.helpers import Model\nfrom agents.runner import run\n", encoding="utf-8")
+
+            context = load_project_context(root, requirements)
+            bundle = _analysis_bundle(context, root)
+            payload = render_dependency_network_data(context, root, bundle)
+
+            self.assertEqual(sorted(payload.keys()), ["domainCoupling", "edges", "nodes"])
+            self.assertTrue(payload["nodes"])
+            self.assertTrue(payload["edges"])
+            self.assertTrue(payload["domainCoupling"])
+            first_node = payload["nodes"][0]
+            self.assertTrue({"id", "fanIn", "fanOut", "risk", "domain", "inCycle"} <= set(first_node))
+            self.assertIn(first_node["risk"], {"high", "med", "low"})
+            first_edge = payload["edges"][0]
+            self.assertTrue({"source", "target", "isCycle"} <= set(first_edge))
+            first_coupling = payload["domainCoupling"][0]
+            self.assertTrue({"from", "to", "count"} <= set(first_coupling))
 
     def test_dashboard_trend_collapses_repeated_delivery_snapshots(self) -> None:
         with TemporaryDirectory() as tmp:

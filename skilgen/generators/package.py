@@ -387,86 +387,107 @@ def render_evidence_network_data(context: RequirementsContext, project_root: Pat
     return {"nodes": nodes, "edges": edges}
 
 
+def _dependency_domain_for_path(path: str) -> str:
+    normalized = path.replace("\\", "/").strip("/")
+    if not normalized:
+        return "root"
+    parts = [part for part in normalized.split("/") if part]
+    if not parts:
+        return "root"
+    if parts[0] == "tests":
+        return "tests"
+    if parts[0] in {"src", "app", "lib", "packages", "services", "skilgen"} and len(parts) > 1:
+        candidate = parts[1]
+    else:
+        candidate = parts[0]
+    if "." in candidate:
+        candidate = Path(candidate).stem
+    return candidate.replace("-", "_") or "root"
+
+
+def _dependency_risk_level(signals: list[str], risk_score: float) -> str:
+    if any(signal.startswith("cycle:") for signal in signals) or risk_score >= 0.3:
+        return "high"
+    if signals or risk_score >= 0.15:
+        return "med"
+    return "low"
+
+
 def render_dependency_network_data(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> dict[str, object]:
     bundle = bundle or _analysis_bundle(context, project_root)
-    workspace_graph = bundle.codebase_context.workspace_graph
-    nodes: dict[str, dict[str, object]] = {}
-    edges: list[dict[str, object]] = []
-    edge_count = 0
-    for package in workspace_graph.packages[:16]:
-        node_id = f"workspace::{package.id}"
-        nodes.setdefault(
-            node_id,
-            {
-                "id": node_id,
-                "label": package.name.split("/")[-1],
-                "group": "workspace-package",
-                "value": 18,
-                "title": package.root_path,
-                "detail_title": package.name,
-                "detail_body": f"{package.root_path} is a workspace package boundary. Skilgen keeps package-level topology distinct from file-level imports.",
-                "detail_meta": [
-                    f"Workspace path: {package.root_path}",
-                    f"Package type: {package.package_type or 'unknown'}",
-                ],
-            },
-        )
-    for edge in workspace_graph.dependencies[:24]:
-        source = f"workspace::{edge.source}"
-        target = f"workspace::{edge.target}"
-        if source in nodes and target in nodes:
-            edges.append({"from": source, "to": target})
-    ordered_sources = sorted(bundle.import_graph.items(), key=lambda item: (-len(item[1]), item[0]))
-    for source, targets in ordered_sources:
-        if edge_count >= 48:
-            break
-        nodes.setdefault(
-            source,
-            {
-                "id": source,
-                "label": source.split("/")[-1],
-                "group": "source",
-                "value": 14,
-                "title": source,
-                "detail_title": source.split("/")[-1],
-                "detail_body": f"{source} is a connected source node in the dependency graph. Skilgen uses these relationships to reason about coupling, fan-out, and likely blast radius.",
-                "detail_meta": ["Dependency role: source", f"Path: {source}"],
-            },
-        )
-        prioritized_targets = sorted(
-            targets,
-            key=lambda item: (0 if "/" in item or item.endswith((".py", ".ts", ".tsx", ".js", ".jsx", ".java", ".go", ".rs", ".cbl", ".cob", ".cpy")) else 1, item),
-        )
-        for target in prioritized_targets[:5]:
-            nodes.setdefault(
-                target,
-                {
-                    "id": target,
-                    "label": target.split("/")[-1],
-                    "group": "target",
-                    "value": 12,
-                    "title": target,
-                    "detail_title": target.split("/")[-1],
-                    "detail_body": f"{target} is pulled into the live dependency map because it is imported or referenced by other implementation files.",
-                    "detail_meta": ["Dependency role: target", f"Path: {target}"],
-                },
-            )
-            edges.append({"from": source, "to": target})
-            edge_count += 1
-            if edge_count >= 48:
-                break
-    if not nodes:
-        nodes["empty"] = {
-            "id": "empty",
-            "label": "No dependencies",
-            "group": "repo",
-            "value": 18,
-            "title": "No import dependencies detected yet",
-            "detail_title": "No dependencies",
-            "detail_body": "Skilgen did not detect enough import or module-link evidence to draw a dependency network yet.",
-            "detail_meta": ["This usually happens in very small repos or non-import-heavy codebases."],
+    import_graph = bundle.import_graph
+    dependency_risk_graph = bundle.evidence_graph.dependency_risk_graph
+    inbound_counts: dict[str, int] = {}
+    candidate_edges: list[tuple[str, str]] = []
+    cycle_members = {item for cycle in dependency_risk_graph.cycles for item in cycle}
+    cycle_edge_pairs: set[tuple[str, str]] = set()
+    for cycle in dependency_risk_graph.cycles:
+        if len(cycle) < 2:
+            continue
+        for index, source in enumerate(cycle):
+            target = cycle[(index + 1) % len(cycle)]
+            cycle_edge_pairs.add((source, target))
+    for source, targets in import_graph.items():
+        for target in targets:
+            if target in import_graph or ("/" in target and "." in Path(target).name):
+                candidate_edges.append((source, target))
+                inbound_counts[target] = inbound_counts.get(target, 0) + 1
+
+    risk_lookup = {
+        node.id: _dependency_risk_level(node.signals, node.risk_score)
+        for node in dependency_risk_graph.nodes
+        if node.kind == "source-file"
+    }
+    ordered_node_ids = sorted(
+        {
+            *import_graph.keys(),
+            *inbound_counts.keys(),
+        },
+        key=lambda item: (
+            -inbound_counts.get(item, 0),
+            -len(import_graph.get(item, [])),
+            item,
+        ),
+    )
+    node_limit = 40
+    selected_node_ids = set(ordered_node_ids[:node_limit])
+    selected_edges = [(source, target) for source, target in candidate_edges if source in selected_node_ids and target in selected_node_ids]
+    if not selected_edges and candidate_edges:
+        selected_edges = candidate_edges[:24]
+        selected_node_ids.update(item for edge in selected_edges for item in edge)
+
+    nodes = [
+        {
+            "id": node_id,
+            "fanIn": inbound_counts.get(node_id, 0),
+            "fanOut": len(import_graph.get(node_id, [])),
+            "risk": risk_lookup.get(node_id, "low"),
+            "domain": _dependency_domain_for_path(node_id),
+            "inCycle": node_id in cycle_members,
         }
-    return {"nodes": list(nodes.values()), "edges": edges}
+        for node_id in sorted(selected_node_ids)
+    ]
+    edges = [
+        {
+            "source": source,
+            "target": target,
+            "isCycle": (source, target) in cycle_edge_pairs or (target, source) in cycle_edge_pairs,
+        }
+        for source, target in selected_edges
+    ]
+    domain_pair_counts: dict[tuple[str, str], int] = {}
+    for source, target in candidate_edges:
+        source_domain = _dependency_domain_for_path(source)
+        target_domain = _dependency_domain_for_path(target)
+        if source_domain == target_domain:
+            continue
+        key = (source_domain, target_domain)
+        domain_pair_counts[key] = domain_pair_counts.get(key, 0) + 1
+    domain_coupling = [
+        {"from": source, "to": target, "count": count}
+        for (source, target), count in sorted(domain_pair_counts.items(), key=lambda item: (-item[1], item[0][0], item[0][1]))
+    ]
+    return {"nodes": nodes, "edges": edges, "domainCoupling": domain_coupling}
 
 
 def render_dependency_sankey_data(context: RequirementsContext, project_root: Path, bundle: ProjectAnalysisBundle | None = None) -> dict[str, object]:
@@ -1288,10 +1309,11 @@ a{color:inherit;text-decoration:none}
 .graph-frame{grid-template-columns:minmax(0,1.18fr) minmax(320px,.82fr);position:relative;z-index:1}.graph-panel{display:none;height:100%}.graph-panel.active{display:block;height:100%}
 .graph-stage{height:620px;border:1px solid rgba(239,211,122,.2);background:linear-gradient(180deg,#0f1115,#090a0d);padding:16px;overflow:hidden}.graph-aside{padding:22px;border:1px solid rgba(151,144,127,.18);background:linear-gradient(180deg,rgba(32,31,31,.96),rgba(19,19,19,.96));display:grid;align-content:start;gap:16px;min-width:0}.graph-copy{display:none;gap:16px}.graph-copy.active{display:grid}.graph-aside h3{margin:0;font-size:1.24rem}.graph-aside ul{margin:0;padding-left:18px;color:#ded8d0}
 .graph-detail{padding:16px;border:1px solid rgba(239,211,122,.16);background:rgba(14,14,14,.42);display:grid;gap:10px}.graph-detail h4{margin:0;font-size:1rem}.graph-detail-meta{display:grid;gap:8px;list-style:none;padding:0;margin:0;max-height:240px;overflow:auto}.graph-detail-meta li{padding:10px 12px;background:rgba(32,31,31,.84);border:1px solid rgba(151,144,127,.16);color:#ded8d0;overflow-wrap:anywhere}
-.sunburst-canvas,.sankey-canvas,.network-canvas,.radial-canvas{width:100%;height:100%;min-height:540px;position:relative;overflow:hidden;background:radial-gradient(circle at top, rgba(239,211,122,.08), transparent 38%), rgba(255,255,255,.02)}.network-canvas{min-height:540px;height:540px}.network-canvas,.network-canvas .vis-network,.network-canvas canvas{background:transparent!important}.network-canvas canvas{width:100%!important;height:100%!important;display:block}.graph-stage svg{width:100%;height:100%;display:block}
+.sunburst-canvas,.sankey-canvas,.network-canvas,.radial-canvas{width:100%;height:100%;min-height:540px;position:relative;overflow:hidden;background:radial-gradient(circle at top, rgba(239,211,122,.08), transparent 38%), rgba(255,255,255,.02)}.network-canvas{min-height:540px;height:auto}.graph-stage svg{width:100%;height:100%;display:block}
 .graph-legend{max-height:320px;overflow:auto}.graph-legend li{padding:10px 12px;border:1px solid rgba(151,144,127,.16);background:rgba(14,14,14,.34);min-width:0}.graph-legend li strong,.graph-legend li span{overflow-wrap:anywhere;word-break:break-word}
 .canvas-fallback{display:grid;place-items:center;min-height:280px;padding:24px;border:1px dashed rgba(151,144,127,.22);color:var(--muted);text-align:center;line-height:1.6}.network-mobile-note{display:none}
-.dashboard-columns{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.list{margin:18px 0 0}.list li{padding:12px 14px;border:1px solid rgba(151,144,127,.16);background:rgba(14,14,14,.34)}.list li div{display:grid;gap:4px}.change-type{text-transform:uppercase;font-size:.72rem;letter-spacing:.12em;padding:4px 8px;border-radius:999px;border:1px solid rgba(151,144,127,.18)}.change-type.added{color:var(--good)}.change-type.modified{color:var(--warning)}.change-type.deleted{color:var(--danger)}.muted{color:var(--muted)!important}
+.dependency-explorer{display:grid;gap:16px;position:relative}.dependency-view-tabs{display:flex;flex-wrap:wrap;gap:8px}.dependency-view-tab{padding:7px 16px;font-size:13px;border-radius:12px;border:0.5px solid rgba(151,144,127,.22);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}.dependency-view-tab.active{background:#e8f0ff;color:#1d4ed8;border-color:transparent;font-weight:500}.dependency-insight{font-size:13px;color:var(--muted);padding:10px 14px;background:rgba(28,27,27,.92);border-radius:12px;border-left:3px solid rgba(103,213,255,.65);line-height:1.55}.dependency-insight strong{color:#F6F7FB;font-weight:500}.dependency-stage{position:relative;border:1px solid rgba(151,144,127,.16);background:linear-gradient(180deg,rgba(17,17,17,.94),rgba(9,10,13,.98));padding:12px}.dependency-stage svg{display:block;width:100%;height:auto;overflow:visible}.dependency-stage-footer{font-size:.82rem;color:var(--muted);line-height:1.5}.dependency-legend{display:flex;flex-wrap:wrap;gap:14px;align-items:center;color:var(--muted);font-size:.82rem}.dependency-legend-item{display:inline-flex;align-items:center;gap:8px}.dependency-legend-dot{width:10px;height:10px;border-radius:999px;display:inline-block}.dependency-tooltip{position:absolute;pointer-events:none;background:rgba(14,14,14,.98);border:0.5px solid rgba(151,144,127,.28);border-radius:12px;padding:8px 12px;color:#f6f7fb;font-size:12px;line-height:1.45;box-shadow:0 18px 40px rgba(0,0,0,.28);opacity:0;transform:translate(14px,14px);transition:opacity .12s ease;max-width:260px;z-index:3}.dependency-tooltip strong{display:block;color:#F6F7FB;margin-bottom:6px}.dependency-badge{position:absolute;top:14px;left:14px;padding:6px 10px;border-radius:999px;background:rgba(226,75,74,.14);border:1px solid rgba(226,75,74,.4);color:#ffb1b0;font-size:.76rem;font-weight:700;letter-spacing:.04em}
+.dashboard-columns{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.dashboard-columns>.mini-panel:only-child{grid-column:1/-1}.list{margin:18px 0 0}.list li{padding:12px 14px;border:1px solid rgba(151,144,127,.16);background:rgba(14,14,14,.34)}.list li div{display:grid;gap:4px}.change-type{text-transform:uppercase;font-size:.72rem;letter-spacing:.12em;padding:4px 8px;border-radius:999px;border:1px solid rgba(151,144,127,.18)}.change-type.added{color:var(--good)}.change-type.modified{color:var(--warning)}.change-type.deleted{color:var(--danger)}.muted{color:var(--muted)!important}
 .domain-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:18px}.domain-card{padding:20px;border:1px solid rgba(151,144,127,.16);background:linear-gradient(180deg,rgba(32,31,31,.96),rgba(19,19,19,.94))}.domain-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.domain-card h3{margin:0;font-size:1.02rem}.domain-card p{color:#d8d2ca}.domain-card ul{padding-left:18px;color:var(--muted)}
 table{width:100%;border-collapse:collapse;border-spacing:0;margin-top:18px}th,td{padding:14px 12px;border-bottom:1px solid rgba(151,144,127,.16);text-align:left;vertical-align:top}th{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.16em}
 .systems-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.mini-panel ul{margin:12px 0 0}.mini-panel li span{overflow-wrap:anywhere;word-break:break-word}
@@ -1301,7 +1323,7 @@ table{width:100%;border-collapse:collapse;border-spacing:0;margin-top:18px}th,td
 .health-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:18px}.health-tile{padding:16px;border:1px solid rgba(151,144,127,.16);background:rgba(14,14,14,.34)}.health-tile span{display:block;font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}.health-tile strong{display:block;font-size:1.38rem;margin-top:8px;font-family:'Space Grotesk','Manrope',sans-serif}
 .footer-bar{display:flex;justify-content:space-between;gap:18px;align-items:center;flex-wrap:wrap;padding:22px 28px;border:1px solid rgba(151,144,127,.16);background:linear-gradient(180deg,rgba(32,31,31,.96),rgba(19,19,19,.94))}.footer-mark{font-size:.9rem;letter-spacing:.16em;text-transform:uppercase;color:var(--primary)}
 @media (max-width:1180px){.rail{display:none}.page{padding-left:28px}.hero-grid,.analytics-board,.score-board,.dashboard-columns,.graph-frame,.compare-grid,.process-grid{grid-template-columns:1fr}.hero-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.systems-grid,.domain-grid,.ops-grid,.health-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:760px){.topbar{padding:12px 16px;min-height:72px;height:auto;flex-wrap:wrap;gap:10px}.topbar-nav{width:100%;overflow:auto;padding-bottom:4px}.page{padding:112px 16px 48px}.hero-panel,.panel{padding:20px}.hero-copy h1,.chapter-title{font-size:clamp(2.1rem,14vw,3.4rem)}.hero-metrics,.score-rail,.systems-grid,.domain-grid,.ops-grid,.health-grid{grid-template-columns:1fr}.graph-stage{height:auto;min-height:280px}.sunburst-canvas,.sankey-canvas,.radial-canvas{min-height:320px}.network-canvas{display:none}.network-mobile-note{display:grid}.graph-aside{gap:12px}.subscore-row{grid-template-columns:1fr}.subscore-value{text-align:left}.dashboard-columns{grid-template-columns:1fr}}
+@media (max-width:760px){.topbar{padding:12px 16px;min-height:72px;height:auto;flex-wrap:wrap;gap:10px}.topbar-nav{width:100%;overflow:auto;padding-bottom:4px}.page{padding:112px 16px 48px}.hero-panel,.panel{padding:20px}.hero-copy h1,.chapter-title{font-size:clamp(2.1rem,14vw,3.4rem)}.hero-metrics,.score-rail,.systems-grid,.domain-grid,.ops-grid,.health-grid{grid-template-columns:1fr}.graph-stage{height:auto;min-height:280px}.sunburst-canvas,.sankey-canvas,.radial-canvas{min-height:320px}.network-mobile-note{display:none}.graph-aside{gap:12px}.subscore-row{grid-template-columns:1fr}.subscore-value{text-align:left}.dashboard-columns{grid-template-columns:1fr}.dependency-stage{padding:8px}}
 """.strip()
 
     dashboard_script = f"""
@@ -1413,66 +1435,435 @@ const setDetail=(target,title,body,meta=[])=>{{
   box.innerHTML=`<h4>${{title}}</h4><p>${{body}}</p><ul class="graph-detail-meta">${{safeMeta.map((item)=>`<li>${{item}}</li>`).join('')}}</ul>`;
 }};
 Object.entries(detailDefaults).forEach(([key,value])=>setDetail(key,value.title,value.body,value.meta));
-const networkOptions={{
-  autoResize:true,
-  physics:{{stabilization:true,barnesHut:{{gravitationalConstant:-3200,centralGravity:0.18,springLength:132,springConstant:0.03}}}},
-  interaction:{{hover:true,navigationButtons:true,keyboard:true}},
-  nodes:{{shape:'dot',borderWidth:2,font:{{color:'#F6F7FB',face:'Inter'}},color:{{border:'#EFD37A',background:'#11161E',highlight:{{border:'#F8DF8E',background:'#1B2430'}}}}}},
-  edges:{{color:{{color:'rgba(255,255,255,0.26)',highlight:'#EFD37A'}},smooth:true,width:1.2}},
-  groups:{{repo:{{size:38,color:{{border:'#F8DF8E',background:'#1B1A12'}}}},source:{{size:15,color:{{border:'#7DD8FF',background:'#131D29'}}}},target:{{size:13,color:{{border:'#8FD9A8',background:'#101A17'}}}},language:{{size:18,color:{{border:'#F6F7FB',background:'#171A21'}}}},reference:{{size:11,color:{{border:'#C99BFF',background:'#151125'}}}}}},
+const truncateLabel=(value,max=12)=>String(value).length<=max ? String(value) : `${{String(value).slice(0,Math.max(1,max-1))}}…`;
+const friendlyNodeLabel=(id)=>{{
+  const normalized=String(id||'').replace(/\\\\/g,'/');
+  const parts=normalized.split('/').filter(Boolean);
+  return parts.length ? parts[parts.length-1] : normalized || 'unknown';
 }};
-const renderedNetworks=new Map();
+const dependencyRiskColors={{high:'#E24B4A',med:'#BA7517',low:'#1D9E75'}};
+const dependencyDomainPalette={{core:'#378ADD',agents:'#1D9E75',api:'#534AB7',generators:'#D85A30',cli:'#BA7517',tests:'#888780',delivery:'#D4537E',config:'#0F6E56'}};
+const dependencyFallbackPalette=['#378ADD','#1D9E75','#534AB7','#D85A30','#BA7517','#D4537E','#0F6E56','#8D6E63','#7C83FD','#3AAFA9'];
+const createSvgEl=(tag, attrs={{}})=>{{
+  const el=document.createElementNS('http://www.w3.org/2000/svg', tag);
+  Object.entries(attrs).forEach(([key,value])=>el.setAttribute(key,String(value)));
+  return el;
+}};
+const hexToRgba=(hex,alpha)=>{{
+  const cleaned=String(hex||'#000000').replace('#','');
+  const normalized=cleaned.length===3 ? cleaned.split('').map((item)=>item+item).join('') : cleaned.padEnd(6,'0');
+  const r=parseInt(normalized.slice(0,2),16);
+  const g=parseInt(normalized.slice(2,4),16);
+  const b=parseInt(normalized.slice(4,6),16);
+  return `rgba(${{r}}, ${{g}}, ${{b}}, ${{alpha}})`;
+}};
+const domainColor=(domain, domains)=>{{
+  if(dependencyDomainPalette[domain]) return dependencyDomainPalette[domain];
+  const index=Math.max(0, domains.indexOf(domain));
+  return dependencyFallbackPalette[index % dependencyFallbackPalette.length];
+}};
+const buildCycleGroups=(graph)=>{{
+  const adjacency=new Map();
+  (graph.edges||[]).filter((edge)=>edge.isCycle).forEach((edge)=>{{
+    if(!adjacency.has(edge.source)) adjacency.set(edge.source, new Set());
+    if(!adjacency.has(edge.target)) adjacency.set(edge.target, new Set());
+    adjacency.get(edge.source).add(edge.target);
+    adjacency.get(edge.target).add(edge.source);
+  }});
+  const groups=new Map();
+  const visited=new Set();
+  adjacency.forEach((neighbors,node)=>{{
+    if(visited.has(node)) return;
+    const stack=[node];
+    const members=[];
+    visited.add(node);
+    while(stack.length){{
+      const current=stack.pop();
+      members.push(current);
+      (adjacency.get(current)||[]).forEach((next)=>{{
+        if(visited.has(next)) return;
+        visited.add(next);
+        stack.push(next);
+      }});
+    }}
+    if(members.length > 1){{
+      members.forEach((member)=>groups.set(member, members.slice().sort()));
+    }}
+  }});
+  return groups;
+}};
 const renderNetwork=(target, canvas)=>{{
-  if(window.innerWidth <= 760 && target === 'dependencies') {{
-    renderFallback(canvas, 'Dependency network hidden on small screens', 'Open this dashboard on a wider screen to inspect the interactive network, or use the detail panel to understand hotspot guidance.');
-    return;
-  }}
-  if(!window.vis) {{
-    renderFallback(canvas, 'Dependency network unavailable', 'The network library did not load, so Skilgen cannot render the interactive dependency map in this browser session.');
-    return;
-  }}
   const graph=window.__SKILGEN_NETWORKS__[target];
-  if(!graph || !graph.nodes || !graph.nodes.length) {{
-    renderFallback(canvas, 'Dependency network unavailable', 'Skilgen did not find enough dependency nodes to render the interactive map for this snapshot.');
+  if(!graph || !Array.isArray(graph.nodes) || !graph.nodes.length) {{
+    renderFallback(canvas, 'Dependency explorer unavailable', 'Skilgen did not find enough repo-local dependencies to render chokepoints, cycles, or domain coupling for this snapshot.');
     return;
   }}
-  if(renderedNetworks.has(target)){{
-    const existing=renderedNetworks.get(target);
-    existing.setData({{nodes:new vis.DataSet(graph.nodes),edges:new vis.DataSet(graph.edges)}});
-    existing.setSize('100%','100%');
-    existing.redraw();
-    existing.fit({{animation:false}});
-    return;
-  }}
-  canvas.innerHTML='';
-  canvas.style.background='transparent';
-  const data={{nodes:new vis.DataSet(graph.nodes),edges:new vis.DataSet(graph.edges)}};
-  const network=new vis.Network(canvas,data,networkOptions);
-  renderedNetworks.set(target,network);
-  const clearNetworkBackground=()=>{{
-    canvas.style.background='transparent';
-    canvas.querySelectorAll('canvas,.vis-network').forEach((node)=>{{ node.style.background='transparent'; }});
+  const activeView = canvas.dataset.activeView || 'matrix';
+  const cycleGroups=buildCycleGroups(graph);
+  const uniqueDomains=[...new Set([
+    ...(graph.nodes||[]).map((node)=>node.domain).filter(Boolean),
+    ...(graph.domainCoupling||[]).flatMap((entry)=>[entry.from, entry.to]).filter(Boolean),
+  ])].sort((a,b)=>a.localeCompare(b));
+  const highFanInNodes=(graph.nodes||[]).filter((node)=>Number(node.fanIn||0) >= 7);
+  const topChokepoint=(graph.nodes||[]).slice().sort((a,b)=>(Number(b.fanIn||0)-Number(a.fanIn||0)) || (Number(b.fanOut||0)-Number(a.fanOut||0)) || String(a.id).localeCompare(String(b.id)))[0];
+  const cycleNodeCount=(graph.nodes||[]).filter((node)=>node.inCycle).length;
+  const cycleSet=new Set();
+  cycleGroups.forEach((members)=>cycleSet.add(members.join('|')));
+  const strongestCoupling=(()=>{{
+    const pairTotals=new Map();
+    (graph.domainCoupling||[]).forEach((entry)=>{{
+      const key=[entry.from, entry.to].sort().join('::');
+      pairTotals.set(key, (pairTotals.get(key)||0) + Number(entry.count||0));
+    }});
+    const [key,count]=[...pairTotals.entries()].sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0]))[0] || ['',0];
+    if(!key) return null;
+    const [left,right]=key.split('::');
+    return {{left, right, count}};
+  }})();
+  const insightForView=(view)=>{{
+    if(view === 'bubbles'){{
+      if(!topChokepoint) return '<strong>What this answers:</strong> no dependency hotspots detected yet.';
+      return `<strong>What this answers:</strong> which files are most depended on. ${{highFanInNodes.length}} files have high fan-in — top chokepoint: ${{friendlyNodeLabel(topChokepoint.id)}} imported by ${{topChokepoint.fanIn}} files.`;
+    }}
+    if(view === 'cycles'){{
+      return `<strong>What this answers:</strong> where the circular dependencies are. ${{cycleSet.size}} circular dependencies detected across ${{cycleNodeCount}} files.`;
+    }}
+    if(!strongestCoupling) return '<strong>What this answers:</strong> how domains couple to each other — no strong cross-domain imports surfaced in this snapshot.';
+    return `<strong>What this answers:</strong> how domains couple to each other. Strongest coupling: ${{strongestCoupling.left}} ↔ ${{strongestCoupling.right}} with ${{strongestCoupling.count}} cross-imports.`;
   }};
-  clearNetworkBackground();
-  network.once('stabilized',()=>{{ network.setSize('100%','100%'); network.redraw(); clearNetworkBackground(); network.fit({{animation:false}}); network.setOptions({{physics:false}}); }});
-  network.on('hoverNode',(params)=>{{
-    const node=graph.nodes.find((entry)=>entry.id===params.node);
-    if(node) showTooltip(params.event.event,node.label,node.title||'');
-  }});
-  network.on('blurNode',hideTooltip);
-  network.on('click',(params)=>{{
-    if(!params.nodes.length) return;
-    const node=graph.nodes.find((entry)=>entry.id===params.nodes[0]);
-    if(!node) return;
-    const prefix = target === 'dependencies' ? 'Dependency' : target === 'evidence' ? 'Evidence' : target === 'skills' ? 'Skill' : 'Graph';
-    setDetail(
-      target,
-      `${{prefix}} · ${{node.detail_title || node.label}}`,
-      node.detail_body || node.title || node.label,
-      node.detail_meta || []
-    );
-  }});
-  setTimeout(()=>{{ network.setSize('100%','100%'); network.redraw(); clearNetworkBackground(); network.fit({{animation:false}}); }},120);
+  canvas.innerHTML=`
+    <div class="dependency-explorer" data-dependency-explorer="${{target}}">
+      <div class="dependency-view-tabs">
+        <button class="dependency-view-tab" data-view="bubbles">Bubble — who's the chokepoint?</button>
+        <button class="dependency-view-tab" data-view="cycles">Cycle — where's the risk?</button>
+        <button class="dependency-view-tab" data-view="matrix">Matrix — domain coupling</button>
+      </div>
+      <div class="dependency-insight"></div>
+      <div class="dependency-legend"></div>
+      <div class="dependency-stage">
+        <div class="dependency-badge" hidden></div>
+        <div class="dependency-tooltip" hidden></div>
+      </div>
+      <div class="dependency-stage-footer"></div>
+    </div>
+  `;
+  const root=canvas.querySelector('[data-dependency-explorer]');
+  const buttons=[...root.querySelectorAll('.dependency-view-tab')];
+  const insight=root.querySelector('.dependency-insight');
+  const legend=root.querySelector('.dependency-legend');
+  const stage=root.querySelector('.dependency-stage');
+  const footer=root.querySelector('.dependency-stage-footer');
+  const badge=root.querySelector('.dependency-badge');
+  const tooltipNode=root.querySelector('.dependency-tooltip');
+  const showLocalTooltip=(event,title,body='')=>{{
+    const rect=stage.getBoundingClientRect();
+    tooltipNode.hidden=false;
+    tooltipNode.innerHTML=`<strong>${{String(title).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}}</strong>${{String(body).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>')}}`;
+    tooltipNode.style.opacity='1';
+    const x=Math.min(rect.width - 18, Math.max(12, event.clientX - rect.left + 14));
+    const y=Math.min(rect.height - 18, Math.max(12, event.clientY - rect.top + 14));
+    tooltipNode.style.left=`${{x}}px`;
+    tooltipNode.style.top=`${{y}}px`;
+  }};
+  const hideLocalTooltip=()=>{{
+    tooltipNode.hidden=true;
+    tooltipNode.style.opacity='0';
+  }};
+  const buildLegend=(view)=>{{
+    if(view === 'bubbles'){{
+      legend.innerHTML=`
+        <span class="dependency-legend-item"><span class="dependency-legend-dot" style="background:#E24B4A"></span>high risk</span>
+        <span class="dependency-legend-item"><span class="dependency-legend-dot" style="background:#BA7517"></span>med risk</span>
+        <span class="dependency-legend-item"><span class="dependency-legend-dot" style="background:#1D9E75"></span>low risk</span>
+        <span class="dependency-legend-item">size = fan-in</span>
+      `;
+      footer.textContent='';
+      return;
+    }}
+    if(view === 'cycles'){{
+      legend.innerHTML=`
+        <span class="dependency-legend-item"><span class="dependency-legend-dot" style="background:#E24B4A"></span>cycle node</span>
+        <span class="dependency-legend-item"><span class="dependency-legend-dot" style="background:#888780"></span>non-cycle node</span>
+        <span class="dependency-legend-item">red arrows = cycle edges</span>
+      `;
+      footer.textContent='';
+      return;
+    }}
+    legend.innerHTML=`
+      <span class="dependency-legend-item"><span class="dependency-legend-dot" style="background:#378ADD"></span>row color = source domain</span>
+      <span class="dependency-legend-item">diagonal = same-domain imports</span>
+    `;
+    footer.textContent='Cell value = cross-domain import count. Darker = stronger coupling.';
+  }};
+  const computeBubbleLayout=(items)=>{{
+    const width=660;
+    const height=340;
+    const outerPad=18;
+    const bubbleGap=12;
+    const fanValues=items.map((item)=>Number(item.fanIn||0));
+    const minFan=Math.min(...fanValues, 0);
+    const maxFan=Math.max(...fanValues, 1);
+    const radiusFor=(value)=>{{
+      if(maxFan === minFan) return 20;
+      return 12 + ((Number(value||0)-minFan)/(maxFan-minFan)) * 32;
+    }};
+    const nodes=items.slice().sort((a,b)=>(Number(b.fanIn||0)-Number(a.fanIn||0)) || (Number(b.fanOut||0)-Number(a.fanOut||0))).map((item,index)=>{{
+      const angle=index * 0.85;
+      const spread=40 + index * 12;
+      return {{...item, r:radiusFor(item.fanIn), x:330 + Math.cos(angle) * spread, y:170 + Math.sin(angle) * spread}};
+    }});
+    for(let iteration=0; iteration<220; iteration+=1){{
+      for(let i=0; i<nodes.length; i+=1){{
+        for(let j=i+1; j<nodes.length; j+=1){{
+          const a=nodes[i];
+          const b=nodes[j];
+          let dx=b.x-a.x;
+          let dy=b.y-a.y;
+          let distance=Math.sqrt(dx*dx + dy*dy) || 0.001;
+          const minDistance=a.r + b.r + bubbleGap;
+          if(distance >= minDistance) continue;
+          const push=(minDistance-distance)/2;
+          dx/=distance;
+          dy/=distance;
+          a.x -= dx * push;
+          a.y -= dy * push;
+          b.x += dx * push;
+          b.y += dy * push;
+        }}
+      }}
+      nodes.forEach((node)=>{{
+        node.x += (330 - node.x) * 0.008;
+        node.y += (170 - node.y) * 0.008;
+        node.x = Math.max(node.r + outerPad, Math.min(660 - node.r - outerPad, node.x));
+        node.y = Math.max(node.r + outerPad, Math.min(340 - node.r - outerPad, node.y));
+      }});
+    }}
+    return nodes;
+  }};
+  const renderBubbles=()=>{{
+    badge.hidden=true;
+    const svg=createSvgEl('svg', {{viewBox:'0 0 660 340', role:'img', 'aria-label':'Dependency chokepoints bubble chart showing file fan-in and risk.'}});
+    const layout=computeBubbleLayout(graph.nodes || []);
+    layout.forEach((node)=>{{
+      const color=dependencyRiskColors[node.risk] || dependencyRiskColors.low;
+      const group=createSvgEl('g', {{style:'cursor:default'}});
+      const circle=createSvgEl('circle', {{
+        cx:node.x,
+        cy:node.y,
+        r:node.r,
+        fill:hexToRgba(color, 0.13),
+        stroke:color,
+        'stroke-width':node.risk === 'high' ? 2 : 1,
+      }});
+      circle.addEventListener('mousemove', (event)=>showLocalTooltip(event, node.id, `fan-in ${{node.fanIn}}\\nfan-out ${{node.fanOut}}\\nrisk ${{node.risk}}`));
+      circle.addEventListener('mouseleave', hideLocalTooltip);
+      group.appendChild(circle);
+      if(node.r > 18){{
+        const label=createSvgEl('text', {{
+          x:node.x,
+          y:node.y + 4,
+          'text-anchor':'middle',
+          fill:'#F6F7FB',
+          'font-size':'10',
+          'font-family':'Manrope, sans-serif',
+          'font-weight':'600',
+        }});
+        label.textContent=truncateLabel(friendlyNodeLabel(node.id), 12);
+        label.addEventListener('mousemove', (event)=>showLocalTooltip(event, node.id, `fan-in ${{node.fanIn}}\\nfan-out ${{node.fanOut}}\\nrisk ${{node.risk}}`));
+        label.addEventListener('mouseleave', hideLocalTooltip);
+        group.appendChild(label);
+      }}
+      svg.appendChild(group);
+    }});
+    stage.querySelector('svg')?.remove();
+    stage.appendChild(svg);
+  }};
+  const renderCycles=()=>{{
+    const svg=createSvgEl('svg', {{viewBox:'0 0 660 340', role:'img', 'aria-label':'Dependency cycle highlighter showing circular dependencies across repo files.'}});
+    const defs=createSvgEl('defs');
+    const marker=createSvgEl('marker', {{id:'dependencyCycleArrow', viewBox:'0 0 10 10', refX:'8', refY:'5', markerWidth:'6', markerHeight:'6', orient:'auto-start-reverse'}});
+    marker.appendChild(createSvgEl('path', {{d:'M 0 0 L 10 5 L 0 10 z', fill:'#E24B4A'}}));
+    defs.appendChild(marker);
+    svg.appendChild(defs);
+    const nodes=(graph.nodes||[]).slice().sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+    const positioned=new Map();
+    const radius=Math.min(250, 110 + nodes.length * 3.2);
+    nodes.forEach((node,index)=>{{
+      const angle=(Math.PI * 2 * index) / Math.max(nodes.length, 1) - Math.PI / 2;
+      positioned.set(node.id, {{
+        ...node,
+        x:330 + Math.cos(angle) * radius,
+        y:170 + Math.sin(angle) * Math.min(118, radius * 0.54),
+      }});
+    }});
+    (graph.edges||[]).forEach((edge)=>{{
+      const source=positioned.get(edge.source);
+      const targetNode=positioned.get(edge.target);
+      if(!source || !targetNode) return;
+      const line=createSvgEl('line', {{
+        x1:source.x,
+        y1:source.y,
+        x2:targetNode.x,
+        y2:targetNode.y,
+        stroke:edge.isCycle ? '#E24B4A' : 'rgba(136,135,128,0.2)',
+        'stroke-width':edge.isCycle ? 2 : 1,
+        'marker-end':edge.isCycle ? 'url(#dependencyCycleArrow)' : '',
+      }});
+      svg.appendChild(line);
+    }});
+    positioned.forEach((node)=>{{
+      const isCycle=Boolean(node.inCycle);
+      const circle=createSvgEl('circle', {{
+        cx:node.x,
+        cy:node.y,
+        r:isCycle ? 10 : 6,
+        fill:isCycle ? hexToRgba('#E24B4A', 0.13) : 'rgba(136,135,128,0.35)',
+        stroke:isCycle ? '#E24B4A' : 'rgba(136,135,128,0.45)',
+        'stroke-width':isCycle ? 2 : 1,
+      }});
+      if(isCycle){{
+        const members=(cycleGroups.get(node.id) || []).filter((item)=>item !== node.id).map((item)=>friendlyNodeLabel(item));
+        circle.addEventListener('mousemove', (event)=>showLocalTooltip(event, node.id, members.length ? members.join(', ') : 'No sibling cycle nodes'));
+        circle.addEventListener('mouseleave', hideLocalTooltip);
+      }}
+      svg.appendChild(circle);
+      if(isCycle){{
+        const label=createSvgEl('text', {{
+          x:node.x,
+          y:node.y - 16,
+          'text-anchor':'middle',
+          fill:'#E24B4A',
+          'font-size':'10',
+          'font-family':'Manrope, sans-serif',
+        }});
+        label.textContent=truncateLabel(friendlyNodeLabel(node.id), 18);
+        label.addEventListener('mousemove', (event)=>{{
+          const members=(cycleGroups.get(node.id) || []).filter((item)=>item !== node.id).map((item)=>friendlyNodeLabel(item));
+          showLocalTooltip(event, node.id, members.length ? members.join(', ') : 'No sibling cycle nodes');
+        }});
+        label.addEventListener('mouseleave', hideLocalTooltip);
+        svg.appendChild(label);
+      }}
+    }});
+    badge.hidden=false;
+    badge.textContent=`${{cycleNodeCount}} of ${{graph.nodes.length}} files in a cycle`;
+    stage.querySelector('svg')?.remove();
+    stage.appendChild(svg);
+  }};
+  const renderMatrix=()=>{{
+    badge.hidden=true;
+    const svg=createSvgEl('svg', {{viewBox:'0 0 660 340', role:'img', 'aria-label':'Domain coupling matrix showing cross-domain dependency intensity.'}});
+    const domains=uniqueDomains.slice();
+    if(!domains.length){{
+      stage.querySelector('svg')?.remove();
+      stage.appendChild(svg);
+      return;
+    }}
+    const denseMatrix=domains.length >= 9;
+    const margins={{left:denseMatrix ? 112 : 140, top:denseMatrix ? 96 : 78, right:22, bottom:26}};
+    const cellSize=Math.max(16, Math.min((660 - margins.left - margins.right) / domains.length, (340 - margins.top - margins.bottom) / domains.length));
+    const rowFontSize=cellSize < 28 ? 9 : 11;
+    const colFontSize=cellSize < 28 ? 8 : 11;
+    const labelMax=denseMatrix ? 8 : 12;
+    const showCellValues=cellSize >= 26;
+    const maxCount=Math.max(1, ...((graph.domainCoupling||[]).map((entry)=>Number(entry.count||0))));
+    const lookup=new Map((graph.domainCoupling||[]).map((entry)=>[`::${{entry.from}}::${{entry.to}}`, Number(entry.count||0)]));
+    domains.forEach((rowDomain,rowIndex)=>{{
+      const rowLabel=createSvgEl('text', {{
+        x:margins.left - 12,
+        y:margins.top + rowIndex * cellSize + cellSize * 0.68,
+        'text-anchor':'end',
+        fill:'#D7D2CC',
+        'font-size':String(rowFontSize),
+        'font-family':'Manrope, sans-serif',
+      }});
+      rowLabel.textContent=truncateLabel(rowDomain, labelMax);
+      rowLabel.addEventListener('mousemove', (event)=>showLocalTooltip(event, rowDomain, 'source domain'));
+      rowLabel.addEventListener('mouseleave', hideLocalTooltip);
+      svg.appendChild(rowLabel);
+      domains.forEach((colDomain,colIndex)=>{{
+        const x=margins.left + colIndex * cellSize;
+        const y=margins.top + rowIndex * cellSize;
+        const diagonal=rowDomain === colDomain;
+        const count=diagonal ? 0 : (lookup.get(`::${{rowDomain}}::${{colDomain}}`) || 0);
+        const base=domainColor(rowDomain, domains);
+        const rect=createSvgEl('rect', {{
+          x,
+          y,
+          width:cellSize - 4,
+          height:cellSize - 4,
+          rx:4,
+          fill:diagonal ? 'rgba(200,200,200,0.18)' : hexToRgba(base, Math.min(0.85, maxCount ? count / maxCount : 0)),
+          stroke:diagonal ? 'rgba(200,200,200,0.22)' : hexToRgba(base, 0.9),
+          'stroke-width':diagonal ? 1 : 0.6,
+        }});
+        rect.addEventListener('mousemove', (event)=>showLocalTooltip(event, `${{rowDomain}} → ${{colDomain}}`, `${{count}} imports`));
+        rect.addEventListener('mouseleave', hideLocalTooltip);
+        svg.appendChild(rect);
+        if(showCellValues && !diagonal && count > 0){{
+          const label=createSvgEl('text', {{
+            x:x + (cellSize - 4) / 2,
+            y:y + cellSize * 0.58,
+            'text-anchor':'middle',
+            fill:'#F6F7FB',
+            'font-size':String(cellSize < 30 ? 9 : 11),
+            'font-family':'Manrope, sans-serif',
+            'font-weight':count > 5 ? '500' : '400',
+          }});
+          label.textContent=String(count);
+          label.addEventListener('mousemove', (event)=>showLocalTooltip(event, `${{rowDomain}} → ${{colDomain}}`, `${{count}} imports`));
+          label.addEventListener('mouseleave', hideLocalTooltip);
+          svg.appendChild(label);
+        }}
+      }});
+    }});
+    domains.forEach((domain,index)=>{{
+      const label=createSvgEl('text', {{
+        x:margins.left + index * cellSize + (cellSize - 4) / 2,
+        y:margins.top - 12,
+        transform:`rotate(${{denseMatrix ? -45 : -30}} ${{margins.left + index * cellSize + (cellSize - 4) / 2}} ${{margins.top - 12}})`,
+        'text-anchor':'start',
+        fill:'#D7D2CC',
+        'font-size':String(colFontSize),
+        'font-family':'Manrope, sans-serif',
+      }});
+      label.textContent=truncateLabel(domain, labelMax);
+      label.addEventListener('mousemove', (event)=>showLocalTooltip(event, domain, 'target domain'));
+      label.addEventListener('mouseleave', hideLocalTooltip);
+      svg.appendChild(label);
+    }});
+    stage.querySelector('svg')?.remove();
+    stage.appendChild(svg);
+  }};
+  const renderView=(view)=>{{
+    canvas.dataset.activeView=view;
+    buttons.forEach((button)=>button.classList.toggle('active', button.dataset.view === view));
+    insight.innerHTML=insightForView(view);
+    buildLegend(view);
+    if(view === 'bubbles') {{
+      setDetail('dependencies', 'Dependency Explorer · Chokepoints', insightForView(view), [
+        'Bubble radius tracks fan-in from repo-local imports.',
+        'Stroke color and weight reflect dependency risk level.',
+      ]);
+      renderBubbles();
+      return;
+    }}
+    if(view === 'cycles') {{
+      setDetail('dependencies', 'Dependency Explorer · Cycles', insightForView(view), [
+        'Cycle nodes are called out in red with labels.',
+        'Hover a red node to inspect the other files in the same cycle group.',
+      ]);
+      renderCycles();
+      return;
+    }}
+    setDetail('dependencies', 'Dependency Explorer · Domain coupling', insightForView(view), [
+      'Rows are source domains and columns are target domains.',
+      'Darker cells indicate stronger cross-domain import pressure.',
+    ]);
+    renderMatrix();
+  }};
+  buttons.forEach((button)=>button.addEventListener('click',()=>renderView(button.dataset.view)));
+  renderView(activeView);
 }};
 const renderSunburst=(container)=>{{
   if(container.dataset.loaded) return;
@@ -1770,7 +2161,6 @@ window.addEventListener('resize',()=>{{
 <link href='https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&display=swap' rel='stylesheet'>
 <script src='https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js' integrity='sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i' crossorigin='anonymous'></script>
 <script src='https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js' integrity='sha384-SM54CE5h+qdDI046d2Y5ym7wq1kq4uxcQ1cqGq5/+5jrE5tPLeDJSq711Q8sIska' crossorigin='anonymous'></script>
-<script src='https://unpkg.com/vis-network/standalone/umd/vis-network.min.js' integrity='sha384-m/pqkSdIs50f1nWlv062s9HmCAygFne+xY7uot2M8ZVijdcC+c/n97dFCfAZnKwO' crossorigin='anonymous'></script>
 <style>{dashboard_styles}</style>
 </head>
 <body>
@@ -2053,19 +2443,14 @@ window.addEventListener('resize',()=>{{
         </aside>
       </div>
       <div class='health-grid'>
-        <div class='health-tile'><span>Dependency Network</span><strong>{dependency_edges}</strong><div class='nuance-copy'>Interactive dependency map lives below the flow view so network hotspots still remain available.</div></div>
+        <div class='health-tile'><span>Dependency Explorer</span><strong>{dependency_edges}</strong><div class='nuance-copy'>Chokepoints, cycles, and domain coupling now share one SVG explorer below the flow view.</div></div>
         <div class='health-tile'><span>Parser-backed Files</span><strong>{total_symbol_files}</strong><div class='nuance-copy'>The living map is grounded in parser-backed evidence rather than only filenames.</div></div>
         <div class='health-tile'><span>Architecture Plan</span><strong>{len(architecture['materialization_plan'])}</strong><div class='nuance-copy'>Split and keep decisions stay tied to evidence and cross-domain pressure.</div></div>
       </div>
       <div class='dashboard-columns'>
         <div class='mini-panel'>
-          <div class='micro-label'>Dependency Network</div>
-          <div class='network-canvas' data-network='dependencies' aria-label='Interactive dependency network showing repo-local import relationships.'></div>
-          <div class='network-mobile-note canvas-fallback'>Dependency network hidden on small screens. Open on a wider screen to inspect the interactive map.</div>
-        </div>
-        <div class='mini-panel'>
-          <div class='micro-label'>Architecture Legend</div>
-          <ul class='graph-legend'>{architecture_legend}</ul>
+          <div class='micro-label'>Dependency Explorer</div>
+          <div class='network-canvas' data-network='dependencies' aria-label='Interactive dependency explorer showing chokepoints, cycles, and domain coupling.'></div>
         </div>
       </div>
     </section>
