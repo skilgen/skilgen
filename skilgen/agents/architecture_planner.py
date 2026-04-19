@@ -76,6 +76,9 @@ def _evidence_graph_payload(project_root: Path, evidence_graph: EvidenceGraph) -
         "config_runtime_graph": evidence_graph.config_runtime_graph,
         "test_mapping": evidence_graph.test_mapping,
         "workspace_graph": asdict(evidence_graph.workspace_graph),
+        "symbol_relationships": [asdict(item) for item in evidence_graph.symbol_relationships],
+        "runtime_signals": asdict(evidence_graph.runtime_signals),
+        "dependency_risk_graph": asdict(evidence_graph.dependency_risk_graph),
         "redaction_mode": mode,
     }
     return sanitized

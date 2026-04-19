@@ -7,6 +7,8 @@ from pathlib import Path
 
 from skilgen.agents.codebase_signals import _iter_code_files, _is_test, _language_for_path, _language_structure
 from skilgen.agents.language_parsers import parse_language_evidence
+from skilgen.agents.relationship_mapper import build_import_graph
+from skilgen.core.models import SymbolRelationship
 
 
 CONFIG_RUNTIME_NAMES = {
@@ -156,8 +158,69 @@ def build_parser_summary(project_root: Path) -> dict[str, dict[str, object]]:
             "symbol_count": len(parsed.symbols),
             "call_count": len(parsed.calls),
             "import_count": len(parsed.imports),
+            "relationship_count": len(parsed.relationships),
         }
     return summary
+
+
+def _import_candidates(import_graph: dict[str, list[str]], source: str) -> set[str]:
+    candidates: set[str] = set()
+    for entry in import_graph.get(source, []):
+        if "/" in entry and "." in Path(entry).name:
+            candidates.add(entry)
+            continue
+        module_path = entry.replace(".", "/")
+        candidates.update(
+            {
+                f"{module_path}.py",
+                f"{module_path}.ts",
+                f"{module_path}.tsx",
+                f"{module_path}.js",
+                f"{module_path}.jsx",
+            }
+        )
+    return candidates
+
+
+def build_symbol_relationships(project_root: Path) -> list[SymbolRelationship]:
+    root = project_root.resolve()
+    import_graph = build_import_graph(root)
+    symbol_index: dict[str, list[str]] = {}
+    parsed_by_path: dict[str, object] = {}
+    for path in _iter_code_files(root):
+        relative = path.relative_to(root).as_posix()
+        parsed = _cached_parse(path)
+        parsed_by_path[relative] = parsed
+        for symbol in parsed.symbols:
+            symbol_index.setdefault(symbol, []).append(relative)
+
+    relationships: list[SymbolRelationship] = []
+    for relative, parsed in parsed_by_path.items():
+        candidates = _import_candidates(import_graph, relative)
+        for relation in parsed.relationships:
+            for target in relation.targets:
+                candidate_paths = symbol_index.get(target, [])
+                resolved_path = None
+                confidence = 0.35
+                for candidate in candidate_paths:
+                    if candidate in candidates:
+                        resolved_path = candidate
+                        confidence = 0.95
+                        break
+                if resolved_path is None and len(candidate_paths) == 1:
+                    resolved_path = candidate_paths[0]
+                    confidence = 0.7
+                relationships.append(
+                    SymbolRelationship(
+                        source_path=relative,
+                        source_symbol=relation.symbol,
+                        relationship=relation.relationship,
+                        target_symbol=target,
+                        target_path=resolved_path,
+                        confidence=round(confidence, 2),
+                    )
+                )
+    return relationships
 
 
 def build_config_runtime_graph(project_root: Path) -> dict[str, list[str]]:
@@ -232,17 +295,20 @@ def build_test_mapping(project_root: Path) -> dict[str, list[str]]:
 def summarize_source_graphs(project_root: Path) -> dict[str, object]:
     root = project_root.resolve()
     symbol_graph = build_symbol_graph(root)
+    symbol_relationships = build_symbol_relationships(root)
     call_graph = build_call_graph(root)
     config_runtime_graph = build_config_runtime_graph(root)
     test_mapping = build_test_mapping(root)
     parser_summary = build_parser_summary(root)
     return {
         "symbol_graph": symbol_graph,
+        "symbol_relationships": [relationship.__dict__ for relationship in symbol_relationships],
         "call_graph": call_graph,
         "config_runtime_graph": config_runtime_graph,
         "test_mapping": test_mapping,
         "parser_summary": parser_summary,
         "symbol_file_count": len(symbol_graph),
+        "symbol_relationship_count": len(symbol_relationships),
         "call_file_count": len(call_graph),
         "config_file_count": len(config_runtime_graph),
         "mapped_test_count": len(test_mapping),

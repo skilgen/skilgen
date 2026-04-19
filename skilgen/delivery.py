@@ -211,6 +211,7 @@ def watch_delivery(
                 continue
             tracked[relative] = path.stat().st_mtime_ns
         return {
+            "project_root": str(root),
             "files": tracked,
             "git": git_repo_state(root),
         }

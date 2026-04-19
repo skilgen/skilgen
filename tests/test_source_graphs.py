@@ -7,8 +7,10 @@ from skilgen.agents.source_graphs import (
     build_config_runtime_graph,
     build_parser_summary,
     build_symbol_graph,
+    build_symbol_relationships,
     build_test_mapping,
 )
+from skilgen.agents.language_parsers import parse_language_evidence
 
 
 class SourceGraphTests(unittest.TestCase):
@@ -49,6 +51,40 @@ class SourceGraphTests(unittest.TestCase):
             self.assertIn("runtime:postgres", runtime["pyproject.toml"])
             self.assertIn("tests/test_billing_service.py", mapping)
             self.assertIn("src/billing_service.py", mapping["tests/test_billing_service.py"])
+
+    def test_symbol_relationships_resolve_cross_file_inheritance(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "base.py").write_text("class BaseService:\n    pass\n", encoding="utf-8")
+            (root / "src" / "billing.py").write_text(
+                "from .base import BaseService\n\nclass BillingService(BaseService):\n    pass\n",
+                encoding="utf-8",
+            )
+
+            relationships = build_symbol_relationships(root)
+
+            self.assertTrue(relationships)
+            extends = relationships[0]
+            self.assertEqual(extends.source_symbol, "BillingService")
+            self.assertEqual(extends.relationship, "extends")
+            self.assertEqual(extends.target_symbol, "BaseService")
+            self.assertEqual(extends.target_path, "src/base.py")
+
+    def test_parser_supports_long_tail_languages(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = {
+                "analysis.r": "score <- function(x) { x + 1 }\n",
+                "Pipeline.hs": "module Pipeline where\nrun value = value\n",
+                "core.ml": "type model = { id: int }\nlet run value = value\n",
+                "App.fs": "type BillingService() = class end\n",
+            }
+            for name, content in files.items():
+                path = root / name
+                path.write_text(content, encoding="utf-8")
+                parsed = parse_language_evidence(path)
+                self.assertNotEqual(parsed.language, "unknown")
 
 
 if __name__ == "__main__":

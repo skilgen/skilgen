@@ -54,6 +54,19 @@ class RelationshipMapperTests(unittest.TestCase):
             self.assertIn("app.py", graph)
             self.assertIn("json", graph["app.py"])
 
+    def test_build_import_graph_resolves_python_relative_imports(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "app").mkdir()
+            (root / "app" / "__init__.py").write_text("", encoding="utf-8")
+            (root / "app" / "base.py").write_text("class BaseService:\n    pass\n", encoding="utf-8")
+            (root / "app" / "billing.py").write_text("from .base import BaseService\n", encoding="utf-8")
+
+            graph = build_import_graph(root)
+
+            self.assertIn("app/billing.py", graph)
+            self.assertIn("app/base.py", graph["app/billing.py"])
+
 
 if __name__ == "__main__":
     unittest.main()

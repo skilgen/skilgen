@@ -59,6 +59,61 @@ def _resolve_repo_local_import(project_root: Path, source_path: Path, raw_import
     return raw_import
 
 
+def _resolve_python_import(project_root: Path, source_path: Path, module: str | None, level: int) -> str:
+    if level > 0:
+        current = source_path.parent
+        for _ in range(max(0, level - 1)):
+            current = current.parent
+        base = current / (module.replace(".", "/") if module else "")
+        candidates = [base]
+        if not base.suffix:
+            candidates.extend(base.with_suffix(ext) for ext in _RESOLUTION_EXTENSIONS[1:])
+        if base.is_dir() or (not base.suffix and (base / "__init__.py").exists()):
+            candidates.append(base / "__init__.py")
+        for candidate in candidates:
+            try:
+                if candidate.exists() and candidate.is_file():
+                    return candidate.relative_to(project_root).as_posix()
+            except ValueError:
+                continue
+        return f"{current.relative_to(project_root).as_posix()}/{module.replace('.', '/')}".strip("/")
+    raw_import = module or ""
+    if raw_import:
+        absolute_base = project_root / raw_import.replace(".", "/")
+        candidates = [absolute_base]
+        if not absolute_base.suffix:
+            candidates.extend(absolute_base.with_suffix(ext) for ext in _RESOLUTION_EXTENSIONS[1:])
+            candidates.append(absolute_base / "__init__.py")
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate.relative_to(project_root).as_posix()
+    return _resolve_repo_local_import(project_root, source_path, raw_import)
+
+
+def _resolve_python_from_import(project_root: Path, source_path: Path, module: str | None, level: int, alias_name: str) -> str:
+    base = _resolve_python_import(project_root, source_path, module, level)
+    base_path = project_root / base if base and "/" in base else None
+    if base_path is not None:
+        if base_path.is_file() and base_path.name == "__init__.py":
+            package_dir = base_path.parent
+        elif base_path.is_dir():
+            package_dir = base_path
+        else:
+            package_dir = base_path.parent
+        candidates = [
+            package_dir / f"{alias_name}.py",
+            package_dir / alias_name / "__init__.py",
+        ]
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate.relative_to(project_root).as_posix()
+    if base and base not in {module or "", ""}:
+        return base
+    if module:
+        return module
+    return alias_name
+
+
 def build_import_graph(project_root: Path) -> dict[str, list[str]]:
     root = project_root.resolve()
     graph: dict[str, list[str]] = {}
@@ -77,7 +132,15 @@ def build_import_graph(project_root: Path) -> dict[str, list[str]]:
                 if isinstance(node, ast.Import):
                     imports.extend(alias.name for alias in node.names)
                 elif isinstance(node, ast.ImportFrom) and node.module:
-                    imports.append(node.module)
+                    imports.extend(
+                        _resolve_python_from_import(root, path, node.module, node.level, alias.name)
+                        for alias in node.names
+                    )
+                elif isinstance(node, ast.ImportFrom):
+                    imports.extend(
+                        _resolve_python_from_import(root, path, None, node.level, alias.name)
+                        for alias in node.names
+                    )
         else:
             imports.extend(_relative_text_imports(path))
         normalized_imports = [_resolve_repo_local_import(root, path, entry) for entry in imports]

@@ -225,9 +225,12 @@ def render_architecture_graph_json(context: RequirementsContext, project_root: P
         "workspace_graph": asdict(bundle.codebase_context.workspace_graph),
         "parser_summary": evidence_graph.parser_summary,
         "symbol_graph": evidence_graph.symbol_graph,
+        "symbol_relationships": [item.__dict__ for item in evidence_graph.symbol_relationships],
         "call_graph": evidence_graph.call_graph,
         "config_runtime_graph": evidence_graph.config_runtime_graph,
         "test_mapping": evidence_graph.test_mapping,
+        "runtime_signals": asdict(evidence_graph.runtime_signals),
+        "dependency_risk_graph": asdict(evidence_graph.dependency_risk_graph),
     }
 
 
@@ -2296,9 +2299,12 @@ def render_architecture_report(
     dominant_languages = [f"- `{language}`" for language in evidence_graph.dominant_languages] or ["- none"]
     source_summary = [
         f"- Symbol graph files: `{len(evidence_graph.symbol_graph)}`",
+        f"- Cross-file symbol relationships: `{len(evidence_graph.symbol_relationships)}`",
         f"- Call graph files: `{len(evidence_graph.call_graph)}`",
         f"- Config/runtime files: `{len(evidence_graph.config_runtime_graph)}`",
         f"- Tests mapped to code: `{len(evidence_graph.test_mapping)}`",
+        f"- Runtime artifacts ingested: `{len(evidence_graph.runtime_signals.artifacts)}`",
+        f"- Dependency risk nodes: `{len(evidence_graph.dependency_risk_graph.nodes)}`",
     ]
     backend_counts: dict[str, int] = {}
     for payload in evidence_graph.parser_summary.values():
@@ -2355,6 +2361,15 @@ def render_architecture_report(
             lines.append(f"- `{path}`: {', '.join(f'`{symbol}`' for symbol in symbols[:4])}")
     else:
         lines.append("- No symbol graph entries were extracted.")
+    lines.extend(["", "### Cross-File Symbol Relationships"])
+    if evidence_graph.symbol_relationships:
+        for item in evidence_graph.symbol_relationships[:10]:
+            target = f"{item.target_symbol} @ {item.target_path}" if item.target_path else item.target_symbol
+            lines.append(
+                f"- `{item.source_path}`: `{item.source_symbol}` `{item.relationship}` `{target}` (confidence {item.confidence:.2f})"
+            )
+    else:
+        lines.append("- No cross-file inheritance or symbol-resolution relationships were extracted.")
     lines.extend(
         [
             "",
@@ -2366,6 +2381,12 @@ def render_architecture_report(
             lines.append(f"- `{path}`: {', '.join(f'`{entry}`' for entry in entries[:5])}")
     else:
         lines.append("- No config/runtime graph entries were extracted.")
+    lines.extend(["", "### Runtime Artifact Ingestion"])
+    if evidence_graph.runtime_signals.artifacts:
+        for artifact in evidence_graph.runtime_signals.artifacts[:8]:
+            lines.append(f"- `{artifact.path}` ({artifact.kind}/{artifact.format}): {artifact.summary}")
+    else:
+        lines.append("- No coverage reports, test result artifacts, SARIF outputs, or trace payloads were detected.")
     lines.extend(
         [
             "",
@@ -2377,6 +2398,13 @@ def render_architecture_report(
             lines.append(f"- `{path}` -> {', '.join(f'`{target}`' for target in targets[:4])}")
     else:
         lines.append("- No test-to-code mappings were extracted.")
+    lines.extend(["", "### Dependency Risk Signals"])
+    if evidence_graph.dependency_risk_graph.nodes:
+        for node in evidence_graph.dependency_risk_graph.nodes[:8]:
+            if node.signals:
+                lines.append(f"- `{node.id}`: {', '.join(f'`{signal}`' for signal in node.signals[:4])}")
+    else:
+        lines.append("- No dependency risk signals were extracted.")
     lines.extend(
         [
             "",

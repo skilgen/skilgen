@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 from tempfile import TemporaryDirectory
 import threading
 import unittest
@@ -8,6 +9,15 @@ from skilgen.core.score import compute_skillgen_score, load_score_history, recor
 
 
 class ScoreTests(unittest.TestCase):
+    def _git(self, root: Path, *args: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(root), *args],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return result.stdout.strip()
+
     def test_score_includes_quality_gates(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -113,6 +123,59 @@ class ScoreTests(unittest.TestCase):
         }
         payload = classify_repo_change(previous, current)
         self.assertEqual(payload["event_type"], "merge_commit")
+
+    def test_classify_repo_change_infers_semantic_commit_intent(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._git(root, "init")
+            self._git(root, "config", "user.name", "Skilgen Test")
+            self._git(root, "config", "user.email", "test@example.com")
+            (root / "src").mkdir()
+            (root / "src" / "app.py").write_text("def existing():\n    return True\n", encoding="utf-8")
+            self._git(root, "add", ".")
+            self._git(root, "commit", "-m", "initial")
+            branch = self._git(root, "rev-parse", "--abbrev-ref", "HEAD")
+            previous = {
+                "project_root": str(root),
+                "files": {"src/app.py": 1},
+                "git": {
+                    "head": self._git(root, "rev-parse", "HEAD"),
+                    "branch": branch,
+                    "merge_in_progress": False,
+                    "rebase_in_progress": False,
+                    "staged_changes": 0,
+                    "unstaged_changes": 0,
+                    "untracked_files": 0,
+                    "head_parent_count": 1,
+                },
+            }
+            (root / "src" / "app.py").write_text(
+                "def existing():\n    return True\n\nclass BillingService:\n    pass\n",
+                encoding="utf-8",
+            )
+            self._git(root, "add", ".")
+            self._git(root, "commit", "-m", "add billing service")
+            current_head = self._git(root, "rev-parse", "HEAD")
+            current = {
+                "project_root": str(root),
+                "files": {"src/app.py": 2},
+                "git": {
+                    "head": current_head,
+                    "branch": branch,
+                    "merge_in_progress": False,
+                    "rebase_in_progress": False,
+                    "staged_changes": 0,
+                    "unstaged_changes": 0,
+                    "untracked_files": 0,
+                    "head_parent_count": 1,
+                },
+            }
+
+            payload = classify_repo_change(previous, current)
+
+            self.assertEqual(payload["event_type"], "git_head_changed")
+            self.assertEqual(payload["semantic_intent"], "new_feature")
+            self.assertGreaterEqual(payload["semantic_confidence"], 0.7)
 
     def test_score_history_tracks_trends(self) -> None:
         with TemporaryDirectory() as tmp:

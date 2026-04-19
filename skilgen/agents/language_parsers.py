@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 try:  # pragma: no cover - optional dependency
@@ -50,12 +50,36 @@ EXTENSION_LANGUAGE = {
     ".jl": "julia",
     ".sh": "bash",
     ".bash": "bash",
+    ".r": "r",
+    ".hs": "haskell",
+    ".ml": "ocaml",
+    ".fs": "f_sharp",
 }
 IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_:-]*")
 CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 IMPORT_RE = re.compile(r"\b(?:import|from|use|COPY|copy)\s+([A-Za-z0-9_./:-]+)")
 COBOL_DIVISION_RE = re.compile(r"^\s*([A-Z-]+\s+DIVISION)\.\s*$", re.MULTILINE)
 COBOL_SECTION_RE = re.compile(r"^\s*([A-Z0-9-]+\s+SECTION)\.\s*$", re.MULTILINE)
+EXTENDS_PATTERNS = [
+    re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s+extends\s+([A-Za-z_][A-Za-z0-9_.:]*)"),
+    re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*public\s+([A-Za-z_][A-Za-z0-9_:]*)"),
+    re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_:]*)"),
+    re.compile(r"\binterface\s+([A-Za-z_][A-Za-z0-9_]*)\s+extends\s+([A-Za-z_][A-Za-z0-9_.:]*)"),
+    re.compile(r"\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_.:]*)"),
+]
+IMPLEMENTS_PATTERN = re.compile(
+    r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:extends\s+[A-Za-z_][A-Za-z0-9_.:<>]*\s+)?implements\s+([A-Za-z0-9_.,:\s<>]+)"
+)
+IMPORTS_FROM_PATTERN = re.compile(
+    r"\bimport\s+(?:type\s+)?(?:\{?\s*([A-Za-z0-9_,\s]+)\s*\}?\s+from\s+)?[\"']([^\"']+)[\"']"
+)
+
+
+@dataclass(frozen=True)
+class ParsedSymbolRelationship:
+    symbol: str
+    relationship: str
+    targets: list[str]
 
 
 @dataclass(frozen=True)
@@ -65,6 +89,7 @@ class ParsedLanguageEvidence:
     symbols: list[str]
     calls: list[str]
     imports: list[str]
+    relationships: list[ParsedSymbolRelationship] = field(default_factory=list)
 
 
 def _safe_text(path: Path) -> str:
@@ -125,18 +150,41 @@ def _tree_sitter_parse(language: str, text: str) -> ParsedLanguageEvidence | Non
     )
 
 
+def _node_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parts: list[str] = []
+        current: ast.expr | None = node
+        while isinstance(current, ast.Attribute):
+            parts.append(current.attr)
+            current = current.value
+        if isinstance(current, ast.Name):
+            parts.append(current.id)
+            return ".".join(reversed(parts))
+    if isinstance(node, ast.Subscript):
+        return _node_name(node.value)
+    if isinstance(node, ast.Call):
+        return _node_name(node.func)
+    return None
+
+
 def _python_ast_parse(text: str) -> ParsedLanguageEvidence:
     try:
         tree = ast.parse(text)
     except SyntaxError:
-        return ParsedLanguageEvidence(language="python", backend="python-ast", symbols=[], calls=[], imports=[])
+        return ParsedLanguageEvidence(language="python", backend="python-ast", symbols=[], calls=[], imports=[], relationships=[])
 
     symbols: list[str] = []
     calls: list[str] = []
     imports: list[str] = []
+    relationships: list[ParsedSymbolRelationship] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             symbols.append(node.name)
+            bases = [value for value in (_node_name(base) for base in node.bases) if value]
+            if bases:
+                relationships.append(ParsedSymbolRelationship(symbol=node.name, relationship="extends", targets=bases))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             symbols.append(node.name)
         elif isinstance(node, ast.Call):
@@ -156,7 +204,61 @@ def _python_ast_parse(text: str) -> ParsedLanguageEvidence:
         symbols=sorted(dict.fromkeys(symbols))[:30],
         calls=sorted(dict.fromkeys(calls))[:30],
         imports=sorted(dict.fromkeys(imports))[:20],
+        relationships=relationships[:20],
     )
+
+
+def _regex_relationships(text: str) -> list[ParsedSymbolRelationship]:
+    relationships: list[ParsedSymbolRelationship] = []
+    for pattern in EXTENDS_PATTERNS:
+        for symbol, target in pattern.findall(text):
+            cleaned_target = target.split("<", 1)[0].split(".", 1)[0].strip()
+            if symbol and cleaned_target:
+                relationships.append(
+                    ParsedSymbolRelationship(symbol=symbol, relationship="extends", targets=[cleaned_target])
+                )
+    for symbol, targets in IMPLEMENTS_PATTERN.findall(text):
+        cleaned_targets = [
+            candidate.split("<", 1)[0].split(".", 1)[0].strip()
+            for candidate in re.split(r"[, ]+", targets)
+            if candidate.strip()
+        ]
+        if cleaned_targets:
+            relationships.append(
+                ParsedSymbolRelationship(symbol=symbol, relationship="implements", targets=cleaned_targets[:6])
+            )
+    for imported_symbols, raw_import in IMPORTS_FROM_PATTERN.findall(text):
+        if not imported_symbols.strip():
+            continue
+        names = [item.strip() for item in imported_symbols.split(",") if item.strip()]
+        for name in names[:8]:
+            relationships.append(
+                ParsedSymbolRelationship(symbol=name, relationship="imports", targets=[raw_import.strip()])
+            )
+    return relationships[:24]
+
+
+def parse_language_text(path: Path, text: str) -> ParsedLanguageEvidence:
+    language = EXTENSION_LANGUAGE.get(path.suffix.lower(), "unknown")
+    if not text:
+        return ParsedLanguageEvidence(language=language, backend="empty", symbols=[], calls=[], imports=[], relationships=[])
+    if language == "python":
+        parsed = _python_ast_parse(text)
+        if parsed.symbols or parsed.calls or parsed.imports or parsed.relationships:
+            return parsed
+    tree_sitter = _tree_sitter_parse(language, text)
+    if tree_sitter is not None and (tree_sitter.symbols or tree_sitter.calls or tree_sitter.imports):
+        if not tree_sitter.relationships:
+            return ParsedLanguageEvidence(
+                language=tree_sitter.language,
+                backend=tree_sitter.backend,
+                symbols=tree_sitter.symbols,
+                calls=tree_sitter.calls,
+                imports=tree_sitter.imports,
+                relationships=_regex_relationships(text),
+            )
+        return tree_sitter
+    return _regex_parse(language, text)
 
 
 def _regex_parse(language: str, text: str) -> ParsedLanguageEvidence:
@@ -185,19 +287,9 @@ def _regex_parse(language: str, text: str) -> ParsedLanguageEvidence:
         symbols=sorted(dict.fromkeys(symbols))[:30],
         calls=sorted(dict.fromkeys(calls))[:30],
         imports=sorted(dict.fromkeys(imports))[:20],
+        relationships=_regex_relationships(text),
     )
 
 
 def parse_language_evidence(path: Path) -> ParsedLanguageEvidence:
-    text = _safe_text(path)
-    language = EXTENSION_LANGUAGE.get(path.suffix.lower(), "unknown")
-    if not text:
-        return ParsedLanguageEvidence(language=language, backend="empty", symbols=[], calls=[], imports=[])
-    if language == "python":
-        parsed = _python_ast_parse(text)
-        if parsed.symbols or parsed.calls or parsed.imports:
-            return parsed
-    tree_sitter = _tree_sitter_parse(language, text)
-    if tree_sitter is not None and (tree_sitter.symbols or tree_sitter.calls or tree_sitter.imports):
-        return tree_sitter
-    return _regex_parse(language, text)
+    return parse_language_text(path, _safe_text(path))

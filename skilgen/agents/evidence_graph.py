@@ -4,9 +4,18 @@ from pathlib import Path
 
 from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence
 from skilgen.agents.relationship_mapper import build_import_graph
-from skilgen.agents.source_graphs import build_call_graph, build_config_runtime_graph, build_parser_summary, build_symbol_graph, build_test_mapping
+from skilgen.agents.source_graphs import (
+    build_call_graph,
+    build_config_runtime_graph,
+    build_parser_summary,
+    build_symbol_graph,
+    build_symbol_relationships,
+    build_test_mapping,
+)
 from skilgen.agents.workspace_graph import build_workspace_graph
-from skilgen.core.models import EvidenceGraph, EvidenceItem, RequirementsContext
+from skilgen.core.dependency_risk import build_dependency_risk_graph
+from skilgen.core.models import EvidenceGraph, EvidenceItem, RequirementsContext, RuntimeSignals
+from skilgen.core.runtime_signals import collect_runtime_signals
 
 
 _DOC_NAMES = {"README.md", "AGENTS.md", "FEATURES.md", "REPORT.md", "TRACEABILITY.md"}
@@ -77,6 +86,26 @@ def _collect_config_items(project_root: Path, *, limit: int = 6) -> list[Evidenc
     return items
 
 
+def _collect_runtime_items(runtime_signals: RuntimeSignals, *, limit: int = 8) -> list[EvidenceItem]:
+    items: list[EvidenceItem] = []
+    for artifact in runtime_signals.artifacts[:limit]:
+        tags = ["runtime", artifact.kind, artifact.format]
+        snippet = [artifact.summary]
+        if artifact.related_paths:
+            snippet.append(f"Related paths: {', '.join(artifact.related_paths[:4])}")
+        items.append(
+            EvidenceItem(
+                path=artifact.path,
+                kind="runtime",
+                language=None,
+                tags=tags,
+                snippet=snippet,
+                related_imports=artifact.related_paths[:6],
+            )
+        )
+    return items
+
+
 def build_evidence_graph(project_root: Path, requirements: RequirementsContext) -> EvidenceGraph:
     root = project_root.resolve()
     signals = analyze_codebase(root)
@@ -87,6 +116,9 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
     config_runtime_graph = build_config_runtime_graph(root)
     test_mapping = build_test_mapping(root)
     parser_summary = build_parser_summary(root)
+    symbol_relationships = build_symbol_relationships(root)
+    runtime_signals = collect_runtime_signals(root)
+    dependency_risk_graph = build_dependency_risk_graph(root)
     source_items = [
         EvidenceItem(
             path=str(item["path"]),
@@ -111,6 +143,7 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
     ]
     doc_items = _collect_document_items(root)
     config_items = _collect_config_items(root)
+    runtime_items = _collect_runtime_items(runtime_signals)
     requirements_item = EvidenceItem(
         path=requirements.requirements_path.name,
         kind="requirements",
@@ -118,7 +151,7 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
         tags=["requirements"],
         snippet=requirements.summary[:8],
     )
-    items = [requirements_item, *source_items, *structural_items, *doc_items, *config_items]
+    items = [requirements_item, *source_items, *structural_items, *doc_items, *config_items, *runtime_items]
     dominant_languages = [name for name, _count in sorted(signals.language_inventory.items(), key=lambda item: (-item[1], item[0]))[:3]]
     recommendations = [
         "Use high-signal source evidence to define domain boundaries before generating skills.",
@@ -142,6 +175,12 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
         recommendations.append(
             f"Model package boundaries from the `{tool_label}` workspace graph separately from file-level import edges."
         )
+    if symbol_relationships:
+        recommendations.append("Use cross-file symbol relationships to keep inheritance and interface seams aligned with the skill tree.")
+    if runtime_signals.artifacts:
+        recommendations.append("Thread runtime artifacts such as coverage, test results, SARIF, and traces into skill guidance when they exist.")
+    if dependency_risk_graph.nodes:
+        recommendations.extend(dependency_risk_graph.recommendations[:2])
     return EvidenceGraph(
         language_inventory=signals.language_inventory,
         dominant_languages=dominant_languages,
@@ -154,4 +193,7 @@ def build_evidence_graph(project_root: Path, requirements: RequirementsContext) 
         config_runtime_graph=config_runtime_graph,
         test_mapping=test_mapping,
         workspace_graph=workspace_graph,
+        symbol_relationships=symbol_relationships,
+        runtime_signals=runtime_signals,
+        dependency_risk_graph=dependency_risk_graph,
     )

@@ -6,11 +6,16 @@ from skilgen.agents.architecture_planner import _evidence_graph_payload, _saniti
 from skilgen.core.models import (
     ArchitectureBlueprint,
     ArchitectureDomain,
+    DependencyRiskGraph,
+    DependencyRiskNode,
     DomainGraph,
     DomainGraphNode,
     EvidenceGraph,
     EvidenceItem,
+    RuntimeSignalArtifact,
+    RuntimeSignals,
     SkillMaterializationPlan,
+    SymbolRelationship,
 )
 
 
@@ -205,6 +210,40 @@ class ArchitecturePlannerTests(unittest.TestCase):
                     ),
                 ],
                 recommendations=["Review config boundaries."],
+                symbol_relationships=[
+                    SymbolRelationship(
+                        source_path="src/app.py",
+                        source_symbol="BillingService",
+                        relationship="extends",
+                        target_symbol="BaseService",
+                        target_path="src/base.py",
+                        confidence=0.95,
+                    )
+                ],
+                runtime_signals=RuntimeSignals(
+                    artifacts=[
+                        RuntimeSignalArtifact(
+                            path="reports/coverage.xml",
+                            kind="coverage",
+                            format="coverage-xml",
+                            signal_count=1,
+                            related_paths=["src/app.py"],
+                            summary="Coverage data for 1 files",
+                        )
+                    ],
+                    coverage_by_path={"src/app.py": 0.5},
+                ),
+                dependency_risk_graph=DependencyRiskGraph(
+                    nodes=[
+                        DependencyRiskNode(
+                            id="src/app.py",
+                            kind="source-file",
+                            risk_score=0.3,
+                            signals=["fanout:high"],
+                            dependencies=["src/base.py"],
+                        )
+                    ]
+                ),
             )
 
             payload = _evidence_graph_payload(root, evidence_graph)
@@ -212,6 +251,9 @@ class ArchitecturePlannerTests(unittest.TestCase):
             self.assertEqual(payload["items"][0]["snippet"], [])
             self.assertTrue(payload["items"][1]["snippet"])
             self.assertIn("[redacted]", " ".join(payload["items"][1]["snippet"]))
+            self.assertEqual(payload["symbol_relationships"][0]["relationship"], "extends")
+            self.assertEqual(payload["runtime_signals"]["artifacts"][0]["kind"], "coverage")
+            self.assertEqual(payload["dependency_risk_graph"]["nodes"][0]["id"], "src/app.py")
 
 
 if __name__ == "__main__":

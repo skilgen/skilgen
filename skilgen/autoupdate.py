@@ -102,6 +102,7 @@ def _file_snapshot(project_root: Path) -> dict[str, int]:
 
 def _snapshot(project_root: Path) -> dict[str, object]:
     return {
+        "project_root": str(project_root.resolve()),
         "files": _file_snapshot(project_root),
         "git": git_repo_state(project_root),
     }

@@ -10,7 +10,15 @@ from skilgen.agents.model_registry import resolve_model_settings
 from skilgen.agents.relationship_mapper import build_import_graph
 from skilgen.agents.requirements_parser import parse_requirements_file
 from skilgen.agents.roadmap_planner import build_roadmap_plan
-from skilgen.agents.source_graphs import build_call_graph, build_config_runtime_graph, build_parser_summary, build_symbol_graph, build_test_mapping, summarize_source_graphs
+from skilgen.agents.source_graphs import (
+    build_call_graph,
+    build_config_runtime_graph,
+    build_parser_summary,
+    build_symbol_graph,
+    build_symbol_relationships,
+    build_test_mapping,
+    summarize_source_graphs,
+)
 from skilgen.agents.workspace_graph import build_workspace_graph
 
 __all__ = [
@@ -24,6 +32,7 @@ __all__ = [
     "build_import_graph",
     "build_parser_summary",
     "build_symbol_graph",
+    "build_symbol_relationships",
     "build_test_mapping",
     "build_workspace_graph",
     "collect_code_evidence",

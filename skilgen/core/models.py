@@ -251,6 +251,61 @@ class EvidenceItem:
 
 
 @dataclass(frozen=True)
+class SymbolRelationship:
+    source_path: str
+    source_symbol: str
+    relationship: str
+    target_symbol: str
+    target_path: str | None
+    confidence: float
+
+
+@dataclass(frozen=True)
+class RuntimeSignalArtifact:
+    path: str
+    kind: str
+    format: str
+    signal_count: int
+    related_paths: list[str]
+    summary: str
+
+
+@dataclass(frozen=True)
+class RuntimeSignals:
+    artifacts: list[RuntimeSignalArtifact] = field(default_factory=list)
+    coverage_by_path: dict[str, float] = field(default_factory=dict)
+    test_results: dict[str, dict[str, object]] = field(default_factory=dict)
+    sast_findings: dict[str, list[str]] = field(default_factory=dict)
+    trace_services: list[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DependencyRiskNode:
+    id: str
+    kind: str
+    risk_score: float
+    signals: list[str]
+    dependencies: list[str]
+
+
+@dataclass(frozen=True)
+class DependencyRiskEdge:
+    source: str
+    target: str
+    kind: str
+    risk_signals: list[str]
+
+
+@dataclass(frozen=True)
+class DependencyRiskGraph:
+    nodes: list[DependencyRiskNode] = field(default_factory=list)
+    edges: list[DependencyRiskEdge] = field(default_factory=list)
+    cycles: list[list[str]] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class EvidenceGraph:
     language_inventory: dict[str, int]
     dominant_languages: list[str]
@@ -263,6 +318,9 @@ class EvidenceGraph:
     config_runtime_graph: dict[str, list[str]] = field(default_factory=dict)
     test_mapping: dict[str, list[str]] = field(default_factory=dict)
     workspace_graph: WorkspaceGraph = field(default_factory=lambda: WorkspaceGraph(None, [], [], [], 0.0, []))
+    symbol_relationships: list[SymbolRelationship] = field(default_factory=list)
+    runtime_signals: RuntimeSignals = field(default_factory=RuntimeSignals)
+    dependency_risk_graph: DependencyRiskGraph = field(default_factory=DependencyRiskGraph)
 
 
 @dataclass(frozen=True)
