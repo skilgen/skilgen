@@ -1,0 +1,16 @@
+{
+  "projects": [
+    {
+      "name": "skillayer-web",
+      "rootDirectory": "apps/web"
+    },
+    {
+      "name": "skillayer-dashboard",
+      "rootDirectory": "apps/dashboard"
+    },
+    {
+      "name": "skillayer-api",
+      "rootDirectory": "apps/api"
+    }
+  ]
+}

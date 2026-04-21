@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "skillayer.fullname" . }}-worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      app: {{ include "skillayer.fullname" . }}-worker
+  template:
+    metadata:
+      labels:
+        app: {{ include "skillayer.fullname" . }}-worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          envFrom:
+            - configMapRef:
+                name: {{ include "skillayer.fullname" . }}-config
+            - secretRef:
+                name: {{ include "skillayer.fullname" . }}-secret
+          resources:
+{{ toYaml .Values.worker.resources | indent 12 }}

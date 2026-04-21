@@ -1,0 +1,23 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "skillayer.fullname" . }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+{{- range .Values.ingress.hosts }}
+    - host: {{ .host }}
+      http:
+        paths:
+{{- range .paths }}
+          - path: {{ .path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "skillayer.fullname" $ }}-{{ .service }}
+                port:
+                  number: {{ ternary $.Values.api.service.port $.Values.dashboard.service.port (eq .service "api") }}
+{{- end }}
+{{- end }}
+{{- end }}

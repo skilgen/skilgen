@@ -1,0 +1,67 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+api:
+  image:
+    repository: skillayer/api
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+worker:
+  image:
+    repository: skillayer/worker
+    tag: latest
+  replicas: 2
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+
+dashboard:
+  image:
+    repository: skillayer/dashboard
+    tag: latest
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 3000
+
+postgresql:
+  enabled: true
+  auth:
+    username: skillayer
+    password: ""
+    database: skillayer
+
+redis:
+  enabled: true
+  auth:
+    enabled: false
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: skillayer.yourcompany.com
+      paths:
+        - path: /
+          service: dashboard
+        - path: /api
+          service: api
+
+config:
+  deploymentMode: selfhosted
+  githubAppId: ""
+  workosApiKey: ""

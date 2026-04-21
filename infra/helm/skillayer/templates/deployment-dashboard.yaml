@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "skillayer.fullname" . }}-dashboard
+spec:
+  replicas: {{ .Values.dashboard.replicas }}
+  selector:
+    matchLabels:
+      app: {{ include "skillayer.fullname" . }}-dashboard
+  template:
+    metadata:
+      labels:
+        app: {{ include "skillayer.fullname" . }}-dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: "{{ .Values.dashboard.image.repository }}:{{ .Values.dashboard.image.tag }}"
+          ports:
+            - containerPort: {{ .Values.dashboard.service.port }}

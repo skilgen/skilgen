@@ -5,3 +5,15 @@ build/
 dist/
 docs/~$*.docx
 .skilgen/
+node_modules/
+.turbo/
+.next/
+.vercel/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tsbuildinfo
+.vercel
+.env*.local

@@ -1,0 +1,16 @@
+{
+  "name": "skillayer",
+  "private": true,
+  "packageManager": "npm@10.9.4",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "type-check": "turbo type-check"
+  },
+  "devDependencies": {
+    "turbo": "latest",
+    "typescript": "^5"
+  }
+}
