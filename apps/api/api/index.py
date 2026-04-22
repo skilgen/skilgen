@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from packages.db.config import settings
-from apps.api.api.routes import health, me, orgs, repos, skills, webhook, worker
+from apps.api.api.routes import health, me, orgs, repos, skills, stripe, webhook, worker
 
 
 LOGGER = logging.getLogger("skillayer.api")
@@ -120,3 +120,4 @@ app.include_router(me.router)
 app.include_router(orgs.router)
 app.include_router(repos.router)
 app.include_router(skills.router)
+app.include_router(stripe.router)
