@@ -40,6 +40,8 @@ export type Repo = {
 
 export type Skill = {
   id: string;
+  repo_id: string;
+  repo_name: string;
   domain: string;
   skill_path: string;
   score: Score;

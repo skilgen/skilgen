@@ -78,6 +78,8 @@ async def get_repo_skills(
         score = _score_response(skill)  # type: ignore[arg-type]
         responses.append({
             "id": skill.id,
+            "repo_id": repo.id,
+            "repo_name": repo.name,
             "domain": skill.domain,
             "skill_path": skill.skill_path,
             "score": score.model_dump() if score else None,
