@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 try:
     import stripe
 except ModuleNotFoundError:  # pragma: no cover - production installs stripe from requirements.txt.
+
     class _MissingStripeCustomer:
         @staticmethod
         def create(**kwargs: object) -> object:
@@ -19,6 +20,12 @@ except ModuleNotFoundError:  # pragma: no cover - production installs stripe fro
             raise RuntimeError("Stripe SDK is not installed")
 
     class _MissingStripeCheckoutSession:
+        @staticmethod
+        def create(**kwargs: object) -> object:
+            """Raise when the Stripe SDK is unavailable."""
+            raise RuntimeError("Stripe SDK is not installed")
+
+    class _MissingStripePortalSession:
         @staticmethod
         def create(**kwargs: object) -> object:
             """Raise when the Stripe SDK is unavailable."""
@@ -35,6 +42,7 @@ except ModuleNotFoundError:  # pragma: no cover - production installs stripe fro
         Webhook = _MissingStripeWebhook
         Customer = _MissingStripeCustomer
         checkout = type("checkout", (), {"Session": _MissingStripeCheckoutSession})
+        billing_portal = type("billing_portal", (), {"Session": _MissingStripePortalSession})
 
     stripe = _MissingStripe()  # type: ignore[assignment]
 
@@ -66,6 +74,12 @@ class CheckoutSessionRequest(BaseModel):
     seat_count: int = Field(gt=0)
     success_url: str
     cancel_url: str
+
+
+class PortalSessionRequest(BaseModel):
+    """Request body for creating a Stripe Customer Portal session."""
+
+    return_url: str
 
 
 def _price_ids() -> dict[str, str]:
@@ -103,6 +117,15 @@ def _subscription_quantity(subscription: dict[str, Any]) -> int:
     if not data:
         return 1
     return int(data[0].get("quantity") or 1)
+
+
+def _session_url(session: Any) -> str | None:
+    """Read a Stripe session URL from Stripe's object or a test double."""
+    if isinstance(session, dict):
+        value = session.get("url")
+    else:
+        value = getattr(session, "url", None)
+    return str(value) if value else None
 
 
 async def _find_org_by_customer_id(db: AsyncSession, customer_id: str | None) -> Org | None:
@@ -231,7 +254,33 @@ async def create_checkout_session(
             }
         },
     )
-    return {"checkout_url": str(session.url)}
+    checkout_url = _session_url(session)
+    if not checkout_url:
+        raise HTTPException(status_code=502, detail="Stripe checkout session missing URL")
+    return {"checkout_url": checkout_url}
+
+
+@router.post("/create-portal-session")
+async def create_portal_session(
+    payload: PortalSessionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, str]:
+    """Create a Stripe Customer Portal session for the current organization."""
+    org = await db.get(Org, current_org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    if not org.stripe_customer_id:
+        raise HTTPException(status_code=400, detail="No billing account")
+
+    session = stripe.billing_portal.Session.create(
+        customer=org.stripe_customer_id,
+        return_url=payload.return_url,
+    )
+    portal_url = _session_url(session)
+    if not portal_url:
+        raise HTTPException(status_code=502, detail="Stripe portal session missing URL")
+    return {"portal_url": portal_url}
 
 
 @router.get("/subscription")
