@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 import re
+import shutil
 
 from skilgen.agents.language_parsers import parse_language_text
 
@@ -84,12 +85,15 @@ def _semantic_path_kind(path_value: str) -> str:
 
 
 def _git_dir(project_root: Path) -> Path | None:
-    result = subprocess.run(
-        ["git", "-C", str(project_root), "rev-parse", "--git-dir"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse", "--git-dir"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
     if result.returncode != 0:
         return None
     git_dir = Path(result.stdout.strip())
@@ -99,36 +103,45 @@ def _git_dir(project_root: Path) -> Path | None:
 
 
 def _git_output(project_root: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(project_root), *args],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_root), *args],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return ""
     if result.returncode != 0:
         return ""
     return result.stdout.strip()
 
 
 def _git_lines(project_root: Path, *args: str) -> list[str]:
-    result = subprocess.run(
-        ["git", "-C", str(project_root), *args],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_root), *args],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return []
     if result.returncode != 0:
         return []
     return result.stdout.splitlines()
 
 
 def _git_show(project_root: Path, revision: str, path: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(project_root), "show", f"{revision}:{path}"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_root), "show", f"{revision}:{path}"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return ""
     if result.returncode != 0:
         return ""
     return result.stdout
@@ -145,6 +158,8 @@ def _structural_signal_summary(path: Path, text: str) -> dict[str, int]:
 
 
 def classify_commit_intent(project_root: Path, before_ref: str | None, after_ref: str | None) -> dict[str, object]:
+    if shutil.which("git") is None:
+        return {"intent": "unknown", "confidence": 0.0, "signals": []}
     if not before_ref or not after_ref:
         return {"intent": "unknown", "confidence": 0.0, "signals": ["missing_git_refs"]}
     changed_paths = _git_lines(project_root, "diff", "--name-only", before_ref, after_ref)

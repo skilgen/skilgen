@@ -40,9 +40,31 @@ class SkillResponse(BaseModel):
     domain: str
     skill_path: str
     score: ScoreResponse
+    content: str | None = None
+    content_hash: str | None = None
     is_stale: bool
     load_count_30d: int
     last_loaded_at: datetime | None
+    version_count: int = 0
+    latest_version_number: int | None = None
+
+
+class SkillVersionSummaryResponse(BaseModel):
+    id: str
+    version_number: int
+    is_latest: bool
+    content_hash: str
+    created_at: datetime
+    run_id: str
+
+
+class SkillVersionResponse(BaseModel):
+    id: str
+    version_number: int
+    content: str
+    content_hash: str
+    created_at: datetime
+    is_latest: bool
 
 
 class AnalysisRunResponse(BaseModel):

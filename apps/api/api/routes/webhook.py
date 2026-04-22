@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from datetime import datetime, timezone
+import logging
+import os
+import traceback
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -17,6 +20,7 @@ from packages.db.models import AnalysisRun, Org, Repo
 
 
 router = APIRouter(tags=["webhook"])
+logger = logging.getLogger(__name__)
 
 
 def _verify_github_signature(body: bytes, signature: str | None) -> None:
@@ -79,17 +83,27 @@ async def _upsert_repo(db: AsyncSession, org: Org, repo_payload: dict[str, Any],
     return repo
 
 
-async def _queue_qstash(request: Request, payload: dict[str, Any]) -> None:
-    if not settings.QSTASH_TOKEN:
-        raise HTTPException(status_code=503, detail="QSTASH_TOKEN is not configured")
-    worker_url = str(request.url_for("worker_analyse"))
-    async with httpx.AsyncClient(timeout=10) as client:
+async def publish_to_qstash(body: dict[str, Any]) -> bool:
+    token = os.getenv("QSTASH_TOKEN", "")
+    if not token:
+        print("QSTASH_TOKEN not set")
+        return False
+
+    base_url = os.getenv("QSTASH_BASE_URL", "https://qstash-us-east-1.upstash.io")
+    url = f"{base_url}/v2/publish/https://api.skillayer.com/worker/analyse"
+
+    async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"https://qstash.upstash.io/v2/publish/{worker_url}",
-            headers={"Authorization": f"Bearer {settings.QSTASH_TOKEN}", "Content-Type": "application/json"},
-            json=payload,
+            url,
+            json=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            timeout=10.0,
         )
-    response.raise_for_status()
+        print(f"QStash response: {response.status_code} {response.text}")
+        return 200 <= response.status_code < 300
 
 
 async def _run_development_job(payload: dict[str, Any]) -> None:
@@ -103,15 +117,17 @@ async def _run_development_job(payload: dict[str, Any]) -> None:
         )
 
 
-async def _queue_analysis(request: Request, background_tasks: BackgroundTasks, payload: dict[str, Any]) -> None:
+async def _queue_analysis(request: Request, background_tasks: BackgroundTasks, payload: dict[str, Any]) -> bool:
     if settings.DEPLOYMENT_MODE == "saas":
-        await _queue_qstash(request, payload)
+        return await publish_to_qstash(payload)
     elif settings.DEPLOYMENT_MODE == "selfhosted":
         from apps.worker.worker import run_analysis_task
 
         run_analysis_task.delay(payload["run_id"], payload["repo_id"], payload["installation_id"], payload["full_name"])
+        return True
     elif settings.DEPLOYMENT_MODE == "development":
         background_tasks.add_task(_run_development_job, payload)
+        return True
     else:
         raise HTTPException(status_code=500, detail=f"Unsupported DEPLOYMENT_MODE: {settings.DEPLOYMENT_MODE}")
 
@@ -152,34 +168,52 @@ async def github_webhook(
         return {"ok": True}
 
     if x_github_event == "push":
-        repo_payload = payload.get("repository") or {}
-        full_name = str(repo_payload.get("full_name") or "")
-        result = await db.execute(select(Repo).where(Repo.full_name == full_name))
-        repo = result.scalar_one_or_none()
-        if repo is None or not repo.is_active:
-            return {"ignored": True}
-        run = AnalysisRun(
-            repo_id=repo.id,
-            trigger="push",
-            status="queued",
-            commit_sha=payload.get("after"),
-            branch=str(payload.get("ref") or "").replace("refs/heads/", ""),
-            created_at=datetime.now(timezone.utc),
-        )
-        db.add(run)
-        await db.flush()
-        installation_id = int((payload.get("installation") or {}).get("id") or 0)
-        repo.github_installation_id = installation_id or repo.github_installation_id
-        await _queue_analysis(
-            request,
-            background_tasks,
-            {
-                "run_id": run.id,
-                "repo_id": repo.id,
-                "installation_id": installation_id,
-                "full_name": repo.full_name,
-            },
-        )
-        return {"queued": run.id}
+        try:
+            repo_payload = payload.get("repository") or {}
+            print(f"Push event received for: {repo_payload.get('full_name')}")
+            print("Looking up repo in DB...")
+            token = os.getenv("QSTASH_TOKEN", "NOT_SET")
+            print(f"QSTASH_TOKEN present: {token != 'NOT_SET'}")
+            print(f"QSTASH_TOKEN prefix: {token[:8] if token != 'NOT_SET' else 'MISSING'}")
+            full_name = str(repo_payload.get("full_name") or "")
+            result = await db.execute(select(Repo).where(Repo.full_name == full_name))
+            repo = result.scalar_one_or_none()
+            if repo is None or not repo.is_active:
+                return {"ignored": True}
+            run = AnalysisRun(
+                repo_id=repo.id,
+                trigger="push",
+                status="queued",
+                commit_sha=payload.get("after"),
+                branch=str(payload.get("ref") or "").replace("refs/heads/", ""),
+                created_at=datetime.utcnow(),
+            )
+            db.add(run)
+            await db.flush()
+            installation_id = int((payload.get("installation") or {}).get("id") or 0)
+            repo.github_installation_id = installation_id or repo.github_installation_id
+            await db.commit()
+            try:
+                success = await _queue_analysis(
+                    request,
+                    background_tasks,
+                    {
+                        "run_id": run.id,
+                        "repo_id": repo.id,
+                        "installation_id": installation_id,
+                        "full_name": repo.full_name,
+                    },
+                )
+                if not success:
+                    print("QStash publish failed - run stays queued")
+            except Exception as exc:
+                print(f"QStash error: {exc}")
+            return {"queued": run.id}
+        except Exception as exc:
+            logger.error(f"Webhook push handler error: {exc}")
+            logger.error(traceback.format_exc())
+            print(f"WEBHOOK ERROR: {exc}")
+            print(traceback.format_exc())
+            raise
 
     return {"ignored": True}

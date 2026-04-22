@@ -1,55 +1,97 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.api.auth import get_current_user
+from apps.api.api.auth import get_current_org_id, get_current_user
 from apps.api.api.routes.orgs import _repo_response, _score_response
 from packages.db.database import get_db
-from packages.db.models import AnalysisRun, Repo, ScoreHistory, Skill
+from packages.db.models import AnalysisRun, Repo, ScoreHistory, Skill, SkillVersion
 from packages.db.schemas import AnalysisRunResponse, RepoResponse, SkillResponse
 
 
-router = APIRouter(prefix="/repos", tags=["repos"], dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/repos", tags=["repos"])
 
 
 class ManualAnalysisRequest(BaseModel):
     installation_id: int | None = None
 
 
-@router.get("/{repo_id}", response_model=RepoResponse)
-async def get_repo(repo_id: str, db: AsyncSession = Depends(get_db)) -> RepoResponse:
+async def _repo_in_scope(db: AsyncSession, repo_id: str, org_id: str) -> Repo:
     repo = await db.get(Repo, repo_id)
     if repo is None:
         raise HTTPException(status_code=404, detail="Repo not found")
+    if repo.org_id != org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return repo
+
+
+@router.get("/{repo_id}", response_model=RepoResponse)
+async def get_repo(
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> RepoResponse:
+    repo = await _repo_in_scope(db, repo_id, current_org_id)
     return await _repo_response(db, repo)
 
 
 @router.get("/{repo_id}/skills", response_model=list[SkillResponse])
-async def get_repo_skills(repo_id: str, db: AsyncSession = Depends(get_db)) -> list[SkillResponse]:
-    skills = (
-        await db.execute(select(Skill).where(Skill.repo_id == repo_id).order_by(desc(Skill.score_total)))
+async def get_repo_skills(
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[SkillResponse]:
+    await _repo_in_scope(db, repo_id, current_org_id)
+    rows = (
+        await db.execute(select(Skill).where(Skill.repo_id == repo_id).order_by(desc(Skill.created_at)))
     ).scalars().all()
-    return [
-        SkillResponse(
+    latest_by_domain: dict[str, Skill] = {}
+    for skill in rows:
+        latest_by_domain.setdefault(skill.domain, skill)
+    skills = sorted(latest_by_domain.values(), key=lambda item: (-int(item.score_total or 0), item.domain))
+    responses: list[SkillResponse] = []
+    for skill in skills:
+        version_count = (
+            await db.execute(select(func.count(SkillVersion.id)).where(SkillVersion.skill_id == skill.id))
+        ).scalar_one()
+        latest_version = (
+            await db.execute(
+                select(SkillVersion)
+                .where(SkillVersion.skill_id == skill.id, SkillVersion.is_latest.is_(True))
+                .order_by(desc(SkillVersion.version_number))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        responses.append(
+            SkillResponse(
             id=skill.id,
             domain=skill.domain,
             skill_path=skill.skill_path,
             score=_score_response(skill),  # type: ignore[arg-type]
+            content=(skill.content[:500] if skill.content else None),
+            content_hash=skill.content_hash,
             is_stale=skill.is_stale,
             load_count_30d=skill.load_count_30d,
             last_loaded_at=skill.last_loaded_at,
+            version_count=int(version_count or 0),
+            latest_version_number=(latest_version.version_number if latest_version else None),
         )
-        for skill in skills
-    ]
+        )
+    return responses
 
 
 @router.get("/{repo_id}/score-history")
-async def get_score_history(repo_id: str, db: AsyncSession = Depends(get_db)) -> list[dict[str, object]]:
+async def get_score_history(
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[dict[str, object]]:
+    await _repo_in_scope(db, repo_id, current_org_id)
     rows = (
         await db.execute(
             select(ScoreHistory)
@@ -72,7 +114,12 @@ async def get_score_history(repo_id: str, db: AsyncSession = Depends(get_db)) ->
 
 
 @router.get("/{repo_id}/runs", response_model=list[AnalysisRunResponse])
-async def get_runs(repo_id: str, db: AsyncSession = Depends(get_db)) -> list[AnalysisRunResponse]:
+async def get_runs(
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[AnalysisRunResponse]:
+    await _repo_in_scope(db, repo_id, current_org_id)
     runs = (
         await db.execute(
             select(AnalysisRun)
@@ -104,16 +151,16 @@ async def trigger_analysis(
     background_tasks: BackgroundTasks,
     payload: ManualAnalysisRequest | None = None,
     db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+    _current_user: dict[str, object] = Depends(get_current_user),
 ) -> dict[str, str]:
-    repo = await db.get(Repo, repo_id)
-    if repo is None:
-        raise HTTPException(status_code=404, detail="Repo not found")
+    repo = await _repo_in_scope(db, repo_id, current_org_id)
     run = AnalysisRun(
         repo_id=repo_id,
         trigger="manual",
         status="queued",
         branch=repo.default_branch,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.utcnow(),
     )
     db.add(run)
     await db.flush()

@@ -1,5 +1,7 @@
 import os
 from logging.config import fileConfig
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 from dotenv import load_dotenv
@@ -13,8 +15,17 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
-if DATABASE_URL.startswith("postgresql+asyncpg://"):
+if "postgresql+asyncpg://" in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+if DATABASE_URL:
+    parsed = urlsplit(DATABASE_URL)
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key not in {"ssl", "sslmode"}
+    ]
+    query.append(("sslmode", "require"))
+    DATABASE_URL = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
 
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
@@ -28,6 +39,7 @@ from packages.db.models.org import Org
 from packages.db.models.repo import Repo
 from packages.db.models.analysis_run import AnalysisRun
 from packages.db.models.skill import Skill
+from packages.db.models.skill_version import SkillVersion
 from packages.db.models.score_history import ScoreHistory
 
 target_metadata = Base.metadata

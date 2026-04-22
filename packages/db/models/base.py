@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 import uuid
 
 from sqlalchemy.orm import DeclarativeBase
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.utcnow()
 
 
 def new_uuid() -> str:

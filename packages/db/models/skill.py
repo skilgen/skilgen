@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from packages.db.models.base import Base, new_uuid, utcnow
 
 if TYPE_CHECKING:
     from packages.db.models.repo import Repo
+    from packages.db.models.skill_version import SkillVersion
 
 
 class Skill(Base):
@@ -20,6 +21,8 @@ class Skill(Base):
     run_id: Mapped[str] = mapped_column(ForeignKey("analysis_runs.id"))
     domain: Mapped[str] = mapped_column(String(255))
     skill_path: Mapped[str] = mapped_column(String(512))
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     score_total: Mapped[int] = mapped_column(default=0)
     score_groundedness: Mapped[int] = mapped_column(default=0)
     score_coverage: Mapped[int] = mapped_column(default=0)
@@ -31,3 +34,7 @@ class Skill(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     repo: Mapped["Repo"] = relationship(back_populates="skills")
+    versions: Mapped[list["SkillVersion"]] = relationship(
+        back_populates="skill",
+        order_by="SkillVersion.version_number",
+    )

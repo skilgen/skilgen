@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from packages.db.config import settings
-from apps.api.api.routes import health, orgs, repos, skills, webhook, worker
+from apps.api.api.routes import health, me, orgs, repos, skills, webhook, worker
 
 
 LOGGER = logging.getLogger("skillayer.api")
@@ -107,12 +107,16 @@ async def request_logging(request: Request, call_next):
 @app.on_event("startup")
 async def startup() -> None:
     _configure_logging()
-    _run_migrations()
+    try:
+        _run_migrations()
+    except Exception as exc:
+        print(f"Migration warning: {exc}")
 
 
 app.include_router(health.router)
 app.include_router(webhook.router)
 app.include_router(worker.router)
+app.include_router(me.router)
 app.include_router(orgs.router)
 app.include_router(repos.router)
 app.include_router(skills.router)

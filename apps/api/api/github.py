@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import io
 from pathlib import Path
-import subprocess
 import time
+import zipfile
 
 import httpx
 from jose import jwt
@@ -50,11 +51,39 @@ def get_installation_token(installation_id: int) -> str:
 
 async def clone_repo(full_name: str, installation_id: int, target_dir: Path) -> None:
     token = get_installation_token(installation_id)
-    url = f"https://x-access-token:{token}@github.com/{full_name}.git"
-    subprocess.run(
-        ["git", "clone", "--depth", "1", url, str(target_dir)],
-        check=True,
-        timeout=120,
-        capture_output=True,
-        text=True,
-    )
+
+    # Vercel's Python runtime does not provide a git binary, so download the
+    # repository archive directly from the GitHub API.
+    url = f"https://api.github.com/repos/{full_name}/zipball"
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client:
+        response = await client.get(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        response.raise_for_status()
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        members = zf.namelist()
+        if members:
+            prefix = members[0].split("/")[0] + "/"
+            for member in members:
+                if member == prefix:
+                    continue
+                relative_name = member[len(prefix) :]
+                if not relative_name:
+                    continue
+                target_path = target_dir / relative_name
+                if member.endswith("/"):
+                    target_path.mkdir(parents=True, exist_ok=True)
+                else:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    target_path.write_bytes(zf.read(member))
+
+    print(f"Downloaded and extracted {full_name} to {target_dir}")

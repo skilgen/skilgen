@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.api.auth import get_current_user
+from apps.api.api.auth import get_current_org_id
 from packages.db.database import get_db
-from packages.db.models import Org, Repo, ScoreHistory, Skill
+from packages.db.models import AnalysisRun, Org, Repo, ScoreHistory, Skill
 from packages.db.schemas import OrgResponse, RepoResponse, ScoreResponse
 
 
-router = APIRouter(prefix="/orgs", tags=["orgs"], dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/orgs", tags=["orgs"])
 
 
 def _score_response(row: object) -> ScoreResponse | None:
@@ -31,6 +31,14 @@ def _score_response(row: object) -> ScoreResponse | None:
 
 
 async def _repo_response(db: AsyncSession, repo: Repo) -> RepoResponse:
+    latest_run = (
+        await db.execute(
+            select(AnalysisRun)
+            .where(AnalysisRun.repo_id == repo.id, AnalysisRun.status == "complete")
+            .order_by(desc(AnalysisRun.created_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     latest_history = (
         await db.execute(
             select(ScoreHistory)
@@ -52,18 +60,26 @@ async def _repo_response(db: AsyncSession, repo: Repo) -> RepoResponse:
         language=repo.language,
         is_monorepo=repo.is_monorepo,
         last_analysed_at=repo.last_analysed_at,
-        score=_score_response(latest_history[0] if latest_history else None),
+        score=_score_response(latest_run or (latest_history[0] if latest_history else None)),
         score_delta=delta,
-        skill_count=int(skill_count or 0),
+        skill_count=int(latest_run.skill_count or 0) if latest_run else int(skill_count or 0),
     )
 
 
+def _assert_org_scope(requested_org_id: str, current_org_id: str) -> None:
+    if requested_org_id != current_org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 @router.get("/{org_id}", response_model=OrgResponse)
-async def get_org(org_id: str, db: AsyncSession = Depends(get_db)) -> OrgResponse:
+async def get_org(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgResponse:
+    _assert_org_scope(org_id, current_org_id)
     org = await db.get(Org, org_id)
     if org is None:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Org not found")
     repo_count = (await db.execute(select(func.count(Repo.id)).where(Repo.org_id == org_id))).scalar_one()
     avg_score = (
@@ -90,54 +106,90 @@ async def list_org_repos(
     offset: int = Query(default=0, ge=0),
     search: str = "",
     db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
 ) -> list[RepoResponse]:
+    _assert_org_scope(org_id, current_org_id)
     query = select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True))
     if search:
         query = query.where(Repo.full_name.ilike(f"%{search}%"))
     repos = (await db.execute(query.order_by(Repo.full_name).offset(offset).limit(limit))).scalars().all()
-    responses = [await _repo_response(db, repo) for repo in repos]
-    return sorted(responses, key=lambda repo: repo.score.total if repo.score else -1, reverse=True)
+    repo_list: list[RepoResponse] = []
+    for repo in repos:
+        run_result = await db.execute(
+            select(AnalysisRun)
+            .where(AnalysisRun.repo_id == repo.id, AnalysisRun.status == "complete")
+            .order_by(desc(AnalysisRun.created_at))
+            .limit(1)
+        )
+        latest_run = run_result.scalar_one_or_none()
+        repo_list.append(
+            RepoResponse(
+                id=repo.id,
+                full_name=repo.full_name,
+                name=repo.name,
+                language=repo.language,
+                is_monorepo=repo.is_monorepo,
+                last_analysed_at=repo.last_analysed_at,
+                score=_score_response(latest_run),
+                score_delta=0,
+                skill_count=int(latest_run.skill_count or 0) if latest_run else 0,
+            )
+        )
+    return sorted(repo_list, key=lambda repo: repo.score.total if repo.score else -1, reverse=True)
 
 
 @router.get("/{org_id}/stats")
-async def get_org_stats(org_id: str, db: AsyncSession = Depends(get_db)) -> dict[str, object]:
-    repo_count = (await db.execute(select(func.count(Repo.id)).where(Repo.org_id == org_id))).scalar_one()
-    skill_count = (
-        await db.execute(select(func.count(Skill.id)).join(Repo, Repo.id == Skill.repo_id).where(Repo.org_id == org_id))
-    ).scalar_one()
-    avg_score = (
-        await db.execute(
-            select(func.avg(ScoreHistory.score_total))
-            .join(Repo, Repo.id == ScoreHistory.repo_id)
-            .where(Repo.org_id == org_id)
-        )
-    ).scalar_one()
-    since = datetime.now(timezone.utc) - timedelta(days=30)
-    history_rows = (
-        await db.execute(
-            select(ScoreHistory.recorded_at, ScoreHistory.score_total)
-            .join(Repo, Repo.id == ScoreHistory.repo_id)
-            .where(Repo.org_id == org_id, ScoreHistory.recorded_at >= since)
-            .order_by(ScoreHistory.recorded_at)
-        )
-    ).all()
-    buckets: dict[str, list[int]] = {}
-    for recorded_at, score in history_rows:
-        buckets.setdefault(recorded_at.date().isoformat(), []).append(int(score))
-    score_trend = [
-        {"date": date, "avg_score": round(sum(scores) / len(scores), 2)}
-        for date, scores in sorted(buckets.items())
+async def get_org_stats(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    repo_count_result = await db.execute(
+        select(func.count(Repo.id)).where(Repo.org_id == org_id, Repo.is_active.is_(True))
+    )
+    repo_count = repo_count_result.scalar() or 0
+
+    avg_score_result = await db.execute(
+        select(func.avg(AnalysisRun.score_total))
+        .join(Repo, AnalysisRun.repo_id == Repo.id)
+        .where(Repo.org_id == org_id, AnalysisRun.status == "complete")
+    )
+    avg_score = avg_score_result.scalar()
+
+    active_repos = (
+        await db.execute(select(Repo.id).where(Repo.org_id == org_id, Repo.is_active.is_(True)))
+    ).scalars().all()
+    skill_count = 0
+    for repo_id in active_repos:
+        latest_run = (
+            await db.execute(
+                select(AnalysisRun)
+                .where(AnalysisRun.repo_id == repo_id, AnalysisRun.status == "complete")
+                .order_by(desc(AnalysisRun.created_at))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if latest_run is not None:
+            skill_count += int(latest_run.skill_count or 0)
+
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    trend_result = await db.execute(
+        select(func.date(ScoreHistory.recorded_at).label("date"), func.avg(ScoreHistory.score_total).label("avg_score"))
+        .join(Repo, ScoreHistory.repo_id == Repo.id)
+        .where(Repo.org_id == org_id, ScoreHistory.recorded_at >= thirty_days_ago)
+        .group_by(func.date(ScoreHistory.recorded_at))
+        .order_by("date")
+    )
+    trend = [
+        {"date": str(row.date), "score": round(row.avg_score or 0)}
+        for row in trend_result.fetchall()
     ]
-    repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)))).scalars().all()
-    repo_responses = [await _repo_response(db, repo) for repo in repos]
-    scored = [repo for repo in repo_responses if repo.score is not None]
-    top_repo = max(scored, key=lambda repo: repo.score.total) if scored else None
-    worst_repo = min(scored, key=lambda repo: repo.score.total) if scored else None
+
     return {
         "repo_count": int(repo_count or 0),
-        "avg_score": float(avg_score) if avg_score is not None else None,
+        "avg_score": round(avg_score or 0),
         "skill_count": int(skill_count or 0),
-        "score_trend": score_trend,
-        "top_repo": top_repo.model_dump(mode="json") if top_repo else None,
-        "worst_repo": worst_repo.model_dump(mode="json") if worst_repo else None,
+        "active_agents": 0,
+        "score_trend": trend,
     }

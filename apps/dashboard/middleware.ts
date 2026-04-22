@@ -1,7 +1,7 @@
 import { authkitMiddleware } from "@workos-inc/authkit-nextjs";
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 
-const workOSRedirectUri = process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI ?? process.env.WORKOS_REDIRECT_URI ?? "";
+const workOSRedirectUri = process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI || process.env.WORKOS_REDIRECT_URI || "";
 
 const isWorkOSConfigured = Boolean(
   process.env.WORKOS_API_KEY &&
@@ -37,5 +37,5 @@ export default async function middleware(request: NextRequest, event: NextFetchE
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard", "/dashboard/:path*"],
 };

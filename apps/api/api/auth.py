@@ -8,8 +8,12 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwk, jwt
 from jose.utils import base64url_decode
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from packages.db.database import get_db
 from packages.db.config import settings
+from packages.db.models import Org
 
 
 bearer_scheme = HTTPBearer(auto_error=True)
@@ -117,3 +121,25 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(b
         raise
     except (JWTError, ValueError, httpx.HTTPError) as exc:
         raise HTTPException(status_code=401, detail="Invalid token") from exc
+
+
+async def get_current_org_id(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    user = await get_current_user(credentials)
+    workos_org_id = user.get("org_id") or user.get("organization_id")
+
+    if workos_org_id:
+        result = await db.execute(select(Org).where(Org.workos_org_id == str(workos_org_id)))
+        org = result.scalar_one_or_none()
+        if org is not None:
+            return org.id
+
+    # Temporary bootstrap fallback until WorkOS organization membership is fully mapped.
+    email = str(user.get("email", ""))
+    result = await db.execute(select(Org).limit(1))
+    org = result.scalar_one_or_none()
+    if org is None:
+        raise HTTPException(status_code=403, detail="No org found")
+    return org.id
