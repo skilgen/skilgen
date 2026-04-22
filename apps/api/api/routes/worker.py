@@ -20,6 +20,9 @@ class AnalysisJobPayload(BaseModel):
     repo_id: str
     installation_id: int
     full_name: str
+    ref: str | None = None
+    pr_number: int | None = None
+    base_score: dict[str, int] | None = None
 
 
 def _verify_qstash_signature(signature: str | None) -> None:
@@ -47,5 +50,13 @@ async def worker_analyse(
     upstash_signature: str | None = Header(default=None, alias="Upstash-Signature"),
 ) -> dict[str, Any]:
     _verify_qstash_signature(upstash_signature or request.headers.get("upstash-signature"))
-    await run_analysis(payload.run_id, payload.repo_id, payload.installation_id, payload.full_name, db)
+    await run_analysis(
+        payload.run_id,
+        payload.repo_id,
+        payload.installation_id,
+        payload.full_name,
+        db,
+        pr_number=payload.pr_number,
+        base_score=payload.base_score,
+    )
     return {"ok": True, "run_id": payload.run_id}

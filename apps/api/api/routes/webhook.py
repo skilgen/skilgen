@@ -106,6 +106,37 @@ async def publish_to_qstash(body: dict[str, Any]) -> bool:
         return 200 <= response.status_code < 300
 
 
+async def _latest_push_score(db: AsyncSession, repo: Repo) -> dict[str, int] | None:
+    """Return the latest complete push score for a repo default branch."""
+    result = await db.execute(
+        select(
+            AnalysisRun.score_total,
+            AnalysisRun.score_groundedness,
+            AnalysisRun.score_coverage,
+            AnalysisRun.score_freshness,
+            AnalysisRun.score_structure,
+        )
+        .where(
+            AnalysisRun.repo_id == repo.id,
+            AnalysisRun.trigger == "push",
+            AnalysisRun.status == "complete",
+            AnalysisRun.branch == repo.default_branch,
+        )
+        .order_by(AnalysisRun.created_at.desc())
+        .limit(1)
+    )
+    row = result.first()
+    if row is None:
+        return None
+    return {
+        "total": int(row.score_total or 0),
+        "groundedness": int(row.score_groundedness or 0),
+        "coverage": int(row.score_coverage or 0),
+        "freshness": int(row.score_freshness or 0),
+        "structure": int(row.score_structure or 0),
+    }
+
+
 async def _run_development_job(payload: dict[str, Any]) -> None:
     async with AsyncSessionLocal() as db:
         await run_analysis(
@@ -114,6 +145,8 @@ async def _run_development_job(payload: dict[str, Any]) -> None:
             int(payload["installation_id"]),
             str(payload["full_name"]),
             db,
+            pr_number=payload.get("pr_number"),
+            base_score=payload.get("base_score"),
         )
 
 
@@ -211,6 +244,63 @@ async def github_webhook(
             return {"queued": run.id}
         except Exception as exc:
             logger.error(f"Webhook push handler error: {exc}")
+            logger.error(traceback.format_exc())
+            print(f"WEBHOOK ERROR: {exc}")
+            print(traceback.format_exc())
+            raise
+
+    if x_github_event == "pull_request":
+        if action not in {"opened", "synchronize", "reopened"}:
+            return {"ignored": True}
+        try:
+            repo_payload = payload.get("repository") or {}
+            pull_request = payload.get("pull_request") or {}
+            head = pull_request.get("head") or {}
+            full_name = str(repo_payload.get("full_name") or "")
+            result = await db.execute(select(Repo).where(Repo.full_name == full_name))
+            repo = result.scalar_one_or_none()
+            if repo is None or not repo.is_active:
+                return {"ignored": True}
+
+            pr_number = int(payload.get("number") or pull_request.get("number") or 0)
+            installation_id = int((payload.get("installation") or {}).get("id") or 0)
+            base_score = await _latest_push_score(db, repo)
+            repo.github_installation_id = installation_id or repo.github_installation_id
+
+            run = AnalysisRun(
+                repo_id=repo.id,
+                trigger="pull_request",
+                status="queued",
+                commit_sha=head.get("sha"),
+                branch=str(head.get("ref") or ""),
+                pr_number=pr_number,
+                created_at=datetime.utcnow(),
+            )
+            db.add(run)
+            await db.flush()
+            await db.commit()
+
+            try:
+                success = await _queue_analysis(
+                    request,
+                    background_tasks,
+                    {
+                        "run_id": run.id,
+                        "repo_id": repo.id,
+                        "installation_id": installation_id,
+                        "full_name": repo.full_name,
+                        "ref": str(head.get("ref") or ""),
+                        "pr_number": pr_number,
+                        "base_score": base_score,
+                    },
+                )
+                if not success:
+                    print("QStash publish failed - run stays queued")
+            except Exception as exc:
+                print(f"QStash error: {exc}")
+            return {"queued": run.id}
+        except Exception as exc:
+            logger.error(f"Webhook pull_request handler error: {exc}")
             logger.error(traceback.format_exc())
             print(f"WEBHOOK ERROR: {exc}")
             print(traceback.format_exc())
