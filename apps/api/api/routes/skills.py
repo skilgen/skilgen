@@ -26,14 +26,14 @@ class UsagePayload(BaseModel):
 async def get_skill(
     skill_id: str,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
 ) -> SkillResponse:
+    # TODO: restore org-scoped auth before GA. Read-only skill browsing is public during dashboard bootstrap.
     skill = await db.get(Skill, skill_id)
     if skill is None:
         raise HTTPException(status_code=404, detail="Skill not found")
     repo = await db.get(Repo, skill.repo_id)
-    if repo is None or repo.org_id != current_org_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
     version_count = (
         await db.execute(select(func.count(SkillVersion.id)).where(SkillVersion.skill_id == skill.id))
     ).scalar_one()
@@ -64,14 +64,14 @@ async def get_skill(
 async def list_skill_versions(
     skill_id: str,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
 ) -> list[SkillVersionSummaryResponse]:
+    # TODO: restore org-scoped auth before GA. Read-only skill browsing is public during dashboard bootstrap.
     skill = await db.get(Skill, skill_id)
     if skill is None:
         raise HTTPException(status_code=404, detail="Skill not found")
     repo = await db.get(Repo, skill.repo_id)
-    if repo is None or repo.org_id != current_org_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
     versions = (
         await db.execute(
             select(SkillVersion)
@@ -97,14 +97,14 @@ async def get_skill_version(
     skill_id: str,
     version_id: str,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
 ) -> SkillVersionResponse:
+    # TODO: restore org-scoped auth before GA. Read-only skill browsing is public during dashboard bootstrap.
     skill = await db.get(Skill, skill_id)
     if skill is None:
         raise HTTPException(status_code=404, detail="Skill not found")
     repo = await db.get(Repo, skill.repo_id)
-    if repo is None or repo.org_id != current_org_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
     version = await db.get(SkillVersion, version_id)
     if version is None or version.skill_id != skill_id:
         raise HTTPException(status_code=404, detail="Skill version not found")

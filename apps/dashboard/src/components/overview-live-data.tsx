@@ -9,6 +9,8 @@ import { ReposTable } from "./repos-table";
 
 type OverviewLiveDataProps = {
   apiUrl: string;
+  initialStats?: OrgStats | null;
+  initialRepos?: Repo[];
 };
 
 function OnboardingCard() {
@@ -35,10 +37,10 @@ function OnboardingCard() {
   );
 }
 
-export function OverviewLiveData({ apiUrl }: OverviewLiveDataProps) {
-  const [stats, setStats] = useState<OrgStats | null>(null);
-  const [repos, setRepos] = useState<Repo[]>([]);
-  const [loaded, setLoaded] = useState(false);
+export function OverviewLiveData({ apiUrl, initialStats = null, initialRepos = [] }: OverviewLiveDataProps) {
+  const [stats, setStats] = useState<OrgStats | null>(initialStats);
+  const [repos, setRepos] = useState<Repo[]>(initialRepos);
+  const [loaded, setLoaded] = useState(Boolean(initialStats || initialRepos.length));
 
   useEffect(() => {
     let cancelled = false;

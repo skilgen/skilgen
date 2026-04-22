@@ -34,9 +34,11 @@ async def _repo_in_scope(db: AsyncSession, repo_id: str, org_id: str) -> Repo:
 async def get_repo(
     repo_id: str,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
 ) -> RepoResponse:
-    repo = await _repo_in_scope(db, repo_id, current_org_id)
+    # TODO: restore org-scoped auth before GA. Read-only repo browsing is public during dashboard bootstrap.
+    repo = await db.get(Repo, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
     return await _repo_response(db, repo)
 
 
@@ -44,9 +46,11 @@ async def get_repo(
 async def get_repo_skills(
     repo_id: str,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
 ) -> list[SkillResponse]:
-    await _repo_in_scope(db, repo_id, current_org_id)
+    # TODO: restore org-scoped auth before GA. Read-only repo browsing is public during dashboard bootstrap.
+    repo = await db.get(Repo, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
     rows = (
         await db.execute(select(Skill).where(Skill.repo_id == repo_id).order_by(desc(Skill.created_at)))
     ).scalars().all()
@@ -89,9 +93,11 @@ async def get_repo_skills(
 async def get_score_history(
     repo_id: str,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
 ) -> list[dict[str, object]]:
-    await _repo_in_scope(db, repo_id, current_org_id)
+    # TODO: restore org-scoped auth before GA. Read-only repo browsing is public during dashboard bootstrap.
+    repo = await db.get(Repo, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
     rows = (
         await db.execute(
             select(ScoreHistory)
@@ -117,9 +123,11 @@ async def get_score_history(
 async def get_runs(
     repo_id: str,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
 ) -> list[AnalysisRunResponse]:
-    await _repo_in_scope(db, repo_id, current_org_id)
+    # TODO: restore org-scoped auth before GA. Read-only repo browsing is public during dashboard bootstrap.
+    repo = await db.get(Repo, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
     runs = (
         await db.execute(
             select(AnalysisRun)

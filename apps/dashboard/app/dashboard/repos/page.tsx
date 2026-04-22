@@ -1,19 +1,23 @@
-import { withAuth } from "@workos-inc/authkit-nextjs";
-
 import { ReposTable } from "@/components/repos-table";
-import { getMyOrg, getOrgRepos, type Repo } from "../../../lib/data";
+import { API_URL, type Org, type Repo } from "../../../lib/data";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReposPage() {
-  const session = await withAuth({ ensureSignedIn: true });
-  const accessToken = session.accessToken || "";
   let repos: Repo[] = [];
 
   try {
-    const org = await getMyOrg(accessToken);
-    if (org?.id) {
-      repos = (await getOrgRepos(accessToken, org.id)) ?? [];
+    const bootstrapRes = await fetch(`${API_URL}/orgs/bootstrap`, {
+      next: { revalidate: 60 },
+    });
+    if (bootstrapRes.ok) {
+      const org = (await bootstrapRes.json()) as Org;
+      const reposRes = await fetch(`${API_URL}/orgs/${org.id}/repos`, {
+        next: { revalidate: 60 },
+      });
+      if (reposRes.ok) {
+        repos = ((await reposRes.json()) as Repo[]) ?? [];
+      }
     }
   } catch (error) {
     console.error("Failed to fetch repos:", error);
