@@ -1,6 +1,6 @@
 import "server-only";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
+export const API_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
 
 export type Score = {
   total: number;

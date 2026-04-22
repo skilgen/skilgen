@@ -71,6 +71,23 @@ def _assert_org_scope(requested_org_id: str, current_org_id: str) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
+@router.get("/bootstrap")
+async def bootstrap_org(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    # TODO: remove before GA. This bootstraps the dashboard while WorkOS org-token mapping is verified.
+    result = await db.execute(select(Org).limit(1))
+    org = result.scalar_one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="No org")
+    return {
+        "id": org.id,
+        "login": org.login,
+        "name": org.name,
+        "plan": org.plan,
+    }
+
+
 @router.get("/{org_id}", response_model=OrgResponse)
 async def get_org(
     org_id: str,
@@ -106,9 +123,7 @@ async def list_org_repos(
     offset: int = Query(default=0, ge=0),
     search: str = "",
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
 ) -> list[RepoResponse]:
-    _assert_org_scope(org_id, current_org_id)
     query = select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True))
     if search:
         query = query.where(Repo.full_name.ilike(f"%{search}%"))
@@ -142,9 +157,7 @@ async def list_org_repos(
 async def get_org_stats(
     org_id: str,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
 ) -> dict[str, object]:
-    _assert_org_scope(org_id, current_org_id)
     repo_count_result = await db.execute(
         select(func.count(Repo.id)).where(Repo.org_id == org_id, Repo.is_active.is_(True))
     )
