@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,6 +55,7 @@ async def _repo_response(db: AsyncSession, repo: Repo) -> RepoResponse:
         id=repo.id,
         full_name=repo.full_name,
         name=repo.name,
+        installation_id=repo.github_installation_id,
         language=repo.language,
         is_monorepo=repo.is_monorepo,
         last_analysed_at=repo.last_analysed_at,
@@ -128,28 +127,7 @@ async def list_org_repos(
     if search:
         query = query.where(Repo.full_name.ilike(f"%{search}%"))
     repos = (await db.execute(query.order_by(Repo.full_name).offset(offset).limit(limit))).scalars().all()
-    repo_list: list[RepoResponse] = []
-    for repo in repos:
-        run_result = await db.execute(
-            select(AnalysisRun)
-            .where(AnalysisRun.repo_id == repo.id, AnalysisRun.status == "complete")
-            .order_by(desc(AnalysisRun.created_at))
-            .limit(1)
-        )
-        latest_run = run_result.scalar_one_or_none()
-        repo_list.append(
-            RepoResponse(
-                id=repo.id,
-                full_name=repo.full_name,
-                name=repo.name,
-                language=repo.language,
-                is_monorepo=repo.is_monorepo,
-                last_analysed_at=repo.last_analysed_at,
-                score=_score_response(latest_run),
-                score_delta=0,
-                skill_count=int(latest_run.skill_count or 0) if latest_run else 0,
-            )
-        )
+    repo_list = [await _repo_response(db, repo) for repo in repos]
     return sorted(repo_list, key=lambda repo: repo.score.total if repo.score else -1, reverse=True)
 
 
@@ -186,17 +164,18 @@ async def get_org_stats(
         if latest_run is not None:
             skill_count += int(latest_run.skill_count or 0)
 
-    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    trend_date = func.date(ScoreHistory.recorded_at).label("date")
     trend_result = await db.execute(
-        select(func.date(ScoreHistory.recorded_at).label("date"), func.avg(ScoreHistory.score_total).label("avg_score"))
+        select(trend_date, func.avg(ScoreHistory.score_total).label("avg_score"))
         .join(Repo, ScoreHistory.repo_id == Repo.id)
-        .where(Repo.org_id == org_id, ScoreHistory.recorded_at >= thirty_days_ago)
-        .group_by(func.date(ScoreHistory.recorded_at))
-        .order_by("date")
+        .where(Repo.org_id == org_id)
+        .group_by(trend_date)
+        .order_by(desc(trend_date))
+        .limit(7)
     )
     trend = [
         {"date": str(row.date), "score": round(row.avg_score or 0)}
-        for row in trend_result.fetchall()
+        for row in reversed(trend_result.fetchall())
     ]
 
     return {

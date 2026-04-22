@@ -27,6 +27,7 @@ class RepoResponse(BaseModel):
     id: str
     full_name: str
     name: str
+    installation_id: int | None = None
     language: str | None
     is_monorepo: bool
     last_analysed_at: datetime | None
