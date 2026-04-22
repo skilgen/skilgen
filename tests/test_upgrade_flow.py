@@ -45,9 +45,10 @@ class UpgradeFlowTests(unittest.TestCase):
 
     def test_billing_settings_fetches_subscription_and_shows_success(self) -> None:
         source = read("apps/dashboard/app/dashboard/settings/billing/page.tsx")
+        button_source = read("apps/dashboard/app/dashboard/settings/billing/manage-billing-button.tsx")
 
         self.assertIn("/stripe/subscription", source)
         self.assertIn("Your plan has been upgraded.", source)
         self.assertIn("Current plan", source)
-        self.assertIn("Manage billing", source)
+        self.assertIn("Manage billing", button_source)
         self.assertIn("Upgrade plan", source)
