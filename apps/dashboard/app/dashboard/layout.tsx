@@ -4,6 +4,7 @@ import {
   BookOpen,
   Building2,
   ChevronDown,
+  CreditCard,
   GitBranch,
   LayoutDashboard,
   LogOut,
@@ -11,11 +12,12 @@ import {
   Plus,
   Settings,
 } from "lucide-react";
-import { signOut } from "@workos-inc/authkit-nextjs";
+import { signOut, withAuth } from "@workos-inc/authkit-nextjs";
 import { redirect } from "next/navigation";
 
 import { dashboardNavItems, mockOrg, mockUser } from "@/lib/mock-data";
 import { DashboardNavLink } from "@/components/dashboard-nav-link";
+import { API_URL, getMyOrg, type Org } from "../../lib/data";
 
 async function handleSignOut() {
   "use server";
@@ -35,7 +37,37 @@ async function handleSignOut() {
   await signOut();
 }
 
-export default function DashboardLayout({
+/**
+ * Loads the org used by the dashboard shell and falls back to preview data.
+ */
+async function loadShellOrg(): Promise<Pick<Org, "name" | "plan">> {
+  let accessToken = "";
+
+  try {
+    const session = await withAuth({ ensureSignedIn: false });
+    accessToken = session?.accessToken || "";
+  } catch (error) {
+    console.error("Dashboard shell auth unavailable:", error);
+  }
+
+  if (accessToken) {
+    const org = await getMyOrg(accessToken);
+    if (org) return org;
+  }
+
+  try {
+    const res = await fetch(`${API_URL}/orgs/bootstrap`, { next: { revalidate: 60 } });
+    if (res.ok) {
+      return ((await res.json()) as Org) || mockOrg;
+    }
+  } catch (error) {
+    console.error("Dashboard shell org bootstrap failed:", error);
+  }
+
+  return mockOrg;
+}
+
+export default async function DashboardLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -46,9 +78,30 @@ export default function DashboardLayout({
     BookOpen,
     Package,
     Settings,
+    CreditCard,
   };
-  const workspaceItems = dashboardNavItems.filter((item) => item.href !== "/dashboard/settings");
-  const accountItems = dashboardNavItems.filter((item) => item.href === "/dashboard/settings");
+  type IconName = keyof typeof icons;
+  type NavItem = {
+    href: string;
+    label: string;
+    icon: IconName;
+    badge?: string;
+  };
+  const shellOrg = await loadShellOrg();
+  const workspaceItems: NavItem[] = dashboardNavItems
+    .filter((item) => item.href !== "/dashboard/settings" && item.href !== "/dashboard/upgrade")
+    .map((item) => ({ ...item, icon: item.icon as IconName }));
+  if (shellOrg.plan === "free") {
+    workspaceItems.push({
+      href: "/dashboard/upgrade",
+      label: "Upgrade",
+      icon: "CreditCard",
+      badge: "Free",
+    });
+  }
+  const accountItems: NavItem[] = dashboardNavItems
+    .filter((item) => item.href === "/dashboard/settings")
+    .map((item) => ({ ...item, icon: item.icon as IconName }));
   const initials = `${mockUser.firstName[0]}${mockUser.lastName[0]}`;
 
   return (
@@ -67,7 +120,7 @@ export default function DashboardLayout({
             {workspaceItems.map((item) => {
               const Icon = icons[item.icon];
 
-              return <DashboardNavLink key={item.href} href={item.href} icon={<Icon className="h-4 w-4" />} label={item.label} />;
+              return <DashboardNavLink badge={item.badge} key={item.href} href={item.href} icon={<Icon className="h-4 w-4" />} label={item.label} />;
             })}
           </div>
 
@@ -76,7 +129,7 @@ export default function DashboardLayout({
             {accountItems.map((item) => {
               const Icon = icons[item.icon];
 
-              return <DashboardNavLink key={item.href} href={item.href} icon={<Icon className="h-4 w-4" />} label={item.label} />;
+              return <DashboardNavLink badge={item.badge} key={item.href} href={item.href} icon={<Icon className="h-4 w-4" />} label={item.label} />;
             })}
           </div>
         </nav>
@@ -110,7 +163,7 @@ export default function DashboardLayout({
         <header className="sticky top-0 z-40 flex h-[52px] items-center justify-between border-b border-[color:var(--bg-surface)] bg-[color:var(--bg-base)] px-6">
           <button className="flex cursor-pointer items-center gap-2 text-[color:var(--text-primary)] transition-colors hover:text-[color:var(--text-secondary)]" type="button">
             <Building2 className="h-4 w-4 text-[color:var(--text-secondary)]" />
-            <span className="text-[14px] font-medium">{mockOrg.name}</span>
+            <span className="text-[14px] font-medium">{shellOrg.name}</span>
             <ChevronDown className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]" />
           </button>
 

@@ -9,11 +9,12 @@ type DashboardNavLinkProps = {
   href: string;
   icon: React.ReactNode;
   label: string;
+  badge?: string;
 };
 
-export function DashboardNavLink({ href, icon, label }: DashboardNavLinkProps) {
+export function DashboardNavLink({ href, icon, label, badge }: DashboardNavLinkProps) {
   const pathname = usePathname();
-  const isActive = pathname === href;
+  const isActive = href === "/dashboard" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
 
   return (
     <Link
@@ -25,7 +26,12 @@ export function DashboardNavLink({ href, icon, label }: DashboardNavLinkProps) {
       href={href}
     >
       {icon}
-      <span>{label}</span>
+      <span className="min-w-0 flex-1">{label}</span>
+      {badge ? (
+        <span className="rounded-full bg-[#C9973A]/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#e8b84b]">
+          {badge}
+        </span>
+      ) : null}
     </Link>
   );
 }
