@@ -279,6 +279,8 @@ async def run_analysis(
     installation_id: int,
     full_name: str,
     db: AsyncSession,
+    pr_number: int | None = None,
+    base_score: dict[str, Any] | None = None,
 ) -> None:
     tmpdir = Path(tempfile.mkdtemp(prefix=f"skillayer_{run_id[:8]}_"))
     try:
@@ -317,6 +319,24 @@ async def run_analysis(
         )
         await update_repo_analysed(db, repo_id)
         await db.commit()
+
+        if pr_number is not None:
+            from apps.api.api.pr_comment import post_pr_comment
+
+            await post_pr_comment(
+                full_name=full_name,
+                pr_number=pr_number,
+                installation_id=installation_id,
+                run_id=run_id,
+                current_score={
+                    "total": _score_value(score, "total"),
+                    "groundedness": _score_value(score, "groundedness"),
+                    "coverage": _score_value(score, "coverage"),
+                    "freshness": _score_value(score, "freshness"),
+                    "structure": _score_value(score, "structure"),
+                },
+                base_score=base_score,
+            )
     except Exception as exc:
         await update_run_failed(db, run_id, str(exc))
         await db.commit()
