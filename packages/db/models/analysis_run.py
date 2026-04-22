@@ -21,6 +21,7 @@ class AnalysisRun(Base):
     status: Mapped[str] = mapped_column(String(50), default="queued")
     commit_sha: Mapped[str | None] = mapped_column(String(255), nullable=True)
     branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pr_number: Mapped[int | None] = mapped_column(nullable=True, default=None)
     score_total: Mapped[int | None] = mapped_column(nullable=True)
     score_groundedness: Mapped[int | None] = mapped_column(nullable=True)
     score_coverage: Mapped[int | None] = mapped_column(nullable=True)
