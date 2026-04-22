@@ -29,6 +29,7 @@ export type Repo = {
   id: string;
   name: string;
   full_name: string;
+  installation_id: number | null;
   language: string | null;
   is_monorepo?: boolean;
   last_analysed_at: string | null;

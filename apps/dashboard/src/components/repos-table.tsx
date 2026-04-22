@@ -1,11 +1,15 @@
-import Link from "next/link";
+"use client";
+
+import { useRouter } from "next/navigation";
+import type { KeyboardEvent, MouseEvent } from "react";
 
 import type { Repo } from "../../lib/data";
 
-function scoreBadgeClass(score: number) {
-  if (score <= 40) return "bg-red-900/50 text-red-400";
-  if (score <= 70) return "bg-amber-900/50 text-amber-400";
-  return "bg-green-900/50 text-green-400";
+export function scoreBadgeClass(score: number | null | undefined) {
+  if (typeof score !== "number") return "text-gray-600";
+  if (score <= 40) return "bg-red-900/30 text-red-400";
+  if (score <= 70) return "bg-amber-900/30 text-amber-400";
+  return "bg-green-900/30 text-green-400";
 }
 
 export function relativeTime(value: string | null) {
@@ -27,10 +31,17 @@ export function relativeTime(value: string | null) {
     return `${hours} hour${hours === 1 ? "" : "s"} ago`;
   }
   const days = Math.floor(diff / day);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(value));
 }
 
 export function ReposTable({ repos }: { repos: Repo[] }) {
+  const router = useRouter();
+
   return (
     <section className="overflow-hidden rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
       <div className="border-b border-[color:var(--bg-border)] px-5 py-4">
@@ -46,29 +57,54 @@ export function ReposTable({ repos }: { repos: Repo[] }) {
               <th className="px-5 py-3 font-semibold">Score</th>
               <th className="px-5 py-3 font-semibold">Skills</th>
               <th className="px-5 py-3 font-semibold">Last analysed</th>
+              <th className="px-5 py-3 font-semibold">Action</th>
             </tr>
           </thead>
           <tbody>
             {repos.map((repo) => {
               const score = repo.score?.total;
+              const neverAnalysed = typeof score !== "number" && !repo.last_analysed_at;
+              const detailPath = `/dashboard/repos/${repo.id}`;
               return (
-                <tr key={repo.id} className="cursor-pointer border-b border-[color:var(--bg-elevated)] transition-colors last:border-b-0 hover:bg-white/5">
+                <tr
+                  key={repo.id}
+                  className="cursor-pointer border-b border-[color:var(--bg-elevated)] transition-colors last:border-b-0 hover:bg-white/5"
+                  onClick={() => router.push(detailPath)}
+                  tabIndex={0}
+                  onKeyDown={(event: KeyboardEvent<HTMLTableRowElement>) => {
+                    if (event.key === "Enter" || event.key === " ") router.push(detailPath);
+                  }}
+                >
                   <td className="px-5 py-4">
-                    <Link className="block" href={`/dashboard/repos/${repo.id}`}>
-                      <span className="font-medium text-[color:var(--text-primary)]">{repo.name}</span>
-                      <span className="mt-0.5 block text-[12px] text-[color:var(--text-tertiary)]">{repo.full_name}</span>
-                    </Link>
+                    <span className="font-medium text-[color:var(--text-primary)]">{repo.name}</span>
+                    <span className="mt-0.5 block text-[12px] text-[color:var(--text-tertiary)]">{repo.full_name}</span>
                   </td>
                   <td className="px-5 py-4 text-[color:var(--text-secondary)]">{repo.language || "—"}</td>
                   <td className="px-5 py-4">
                     {typeof score === "number" ? (
                       <span className={`inline-flex rounded-full px-2 py-0.5 text-[12px] font-semibold ${scoreBadgeClass(score)}`}>{score}/100</span>
                     ) : (
-                      <span className="text-[color:var(--text-tertiary)]">—</span>
+                      <span className={scoreBadgeClass(null)}>Not analysed</span>
                     )}
                   </td>
                   <td className="px-5 py-4 text-[color:var(--text-secondary)]">{repo.skill_count ?? "—"}</td>
                   <td className="px-5 py-4 text-[color:var(--text-secondary)]">{relativeTime(repo.last_analysed_at)}</td>
+                  <td className="px-5 py-4">
+                    {neverAnalysed ? (
+                      <button
+                        className="rounded-md border border-[rgb(var(--accent-primary-rgb)/0.35)] px-3 py-1.5 text-[12px] font-semibold text-[color:var(--accent-primary)] transition-colors hover:bg-[rgb(var(--accent-primary-rgb)/0.08)]"
+                        onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                          event.stopPropagation();
+                          router.push(detailPath);
+                        }}
+                        type="button"
+                      >
+                        Analyse
+                      </button>
+                    ) : (
+                      <span className="text-[color:var(--text-tertiary)]">—</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}

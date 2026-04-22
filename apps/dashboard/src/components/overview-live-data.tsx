@@ -37,6 +37,44 @@ function OnboardingCard() {
   );
 }
 
+function MetricSkeleton() {
+  return (
+    <article className="animate-pulse rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
+      <div className="mb-3 h-3 w-28 rounded bg-white/10" />
+      <div className="h-8 w-20 rounded bg-white/10" />
+      <div className="mt-4 border-t border-[color:var(--bg-elevated)] pt-3">
+        <div className="h-3 w-24 rounded bg-white/10" />
+      </div>
+    </article>
+  );
+}
+
+function ScoreSparkline({ points }: { points: OrgStats["score_trend"] }) {
+  if (points.length === 0) return null;
+  const width = 240;
+  const height = 56;
+  const coordinates = points.map((point, index) => {
+    const x = points.length === 1 ? width : (index / (points.length - 1)) * width;
+    const y = height - (Math.max(0, Math.min(100, point.score)) / 100) * height;
+    return `${x},${y}`;
+  });
+
+  return (
+    <section className="mb-8 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-5 py-4">
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-[14px] font-semibold text-[color:var(--text-primary)]">Score trend</h2>
+          <p className="text-[12px] text-[color:var(--text-tertiary)]">Latest {points.length} data point{points.length === 1 ? "" : "s"}</p>
+        </div>
+        <span className="text-[18px] font-bold text-white">{points[points.length - 1]?.score ?? 0}/100</span>
+      </div>
+      <svg aria-label="Score trend" className="h-14 w-full" preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`}>
+        <polyline fill="none" points={coordinates.join(" ")} stroke="#C9973A" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />
+      </svg>
+    </section>
+  );
+}
+
 export function OverviewLiveData({ apiUrl, initialStats = null, initialRepos = [] }: OverviewLiveDataProps) {
   const [stats, setStats] = useState<OrgStats | null>(initialStats);
   const [repos, setRepos] = useState<Repo[]>(initialRepos);
@@ -46,21 +84,15 @@ export function OverviewLiveData({ apiUrl, initialStats = null, initialRepos = [
     let cancelled = false;
 
     async function loadOverviewData() {
-      console.log("Overview API URL:", apiUrl);
       try {
         const bootstrapRes = await fetch(`${apiUrl}/orgs/bootstrap`);
-        console.log("orgs/bootstrap browser status:", bootstrapRes.status);
-        const bootstrapText = await bootstrapRes.text();
-        console.log("orgs/bootstrap browser response:", bootstrapText);
         if (!bootstrapRes.ok) return;
 
-        const org = JSON.parse(bootstrapText) as Org;
+        const org = (await bootstrapRes.json()) as Org;
         const [statsRes, reposRes] = await Promise.all([
           fetch(`${apiUrl}/orgs/${org.id}/stats`),
           fetch(`${apiUrl}/orgs/${org.id}/repos`),
         ]);
-        console.log("org stats browser status:", statsRes.status);
-        console.log("org repos browser status:", reposRes.status);
 
         if (!cancelled && statsRes.ok) {
           setStats((await statsRes.json()) as OrgStats);
@@ -84,16 +116,31 @@ export function OverviewLiveData({ apiUrl, initialStats = null, initialRepos = [
     };
   }, [apiUrl]);
 
+  const showMetricSkeletons = stats === null;
+
   return (
     <>
       <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Repos monitored" value={loaded ? stats?.repo_count : null} sub="Connected repos" />
-        <MetricCard label="Avg Skilgen Score" value={loaded && stats?.avg_score ? `${stats.avg_score}/100` : null} sub="Org readiness" />
-        <MetricCard label="Skills generated" value={loaded ? stats?.skill_count : null} sub="Published skills" />
-        <MetricCard label="Active agents" value={loaded ? stats?.active_agents : null} sub="Live sessions" />
+        {showMetricSkeletons ? (
+          <>
+            <MetricSkeleton />
+            <MetricSkeleton />
+            <MetricSkeleton />
+            <MetricSkeleton />
+          </>
+        ) : (
+          <>
+            <MetricCard label="Repos monitored" value={stats.repo_count} sub="Connected repos" />
+            <MetricCard label="Avg Skilgen Score" value={`${stats.avg_score}/100`} sub="Org readiness" />
+            <MetricCard label="Skills generated" value={stats.skill_count} sub="Published skills" />
+            <MetricCard label="Active agents" value={stats.active_agents} sub="Live sessions" />
+          </>
+        )}
       </div>
 
-      {repos.length > 0 ? <ReposTable repos={repos} /> : <OnboardingCard />}
+      {stats ? <ScoreSparkline points={stats.score_trend} /> : null}
+
+      {loaded && repos.length > 0 ? <ReposTable repos={repos} /> : <OnboardingCard />}
     </>
   );
 }
