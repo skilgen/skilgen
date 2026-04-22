@@ -73,18 +73,20 @@ async def get_repo_skills(
         ).scalar_one_or_none()
         responses.append(
             SkillResponse(
-            id=skill.id,
-            domain=skill.domain,
-            skill_path=skill.skill_path,
-            score=_score_response(skill),  # type: ignore[arg-type]
-            content=(skill.content[:500] if skill.content else None),
-            content_hash=skill.content_hash,
-            is_stale=skill.is_stale,
-            load_count_30d=skill.load_count_30d,
-            last_loaded_at=skill.last_loaded_at,
-            version_count=int(version_count or 0),
-            latest_version_number=(latest_version.version_number if latest_version else None),
-        )
+                id=skill.id,
+                repo_id=repo.id,
+                repo_name=repo.name,
+                domain=skill.domain,
+                skill_path=skill.skill_path,
+                score=_score_response(skill),  # type: ignore[arg-type]
+                content=(skill.content[:500] if skill.content else None),
+                content_hash=skill.content_hash,
+                is_stale=skill.is_stale,
+                load_count_30d=skill.load_count_30d,
+                last_loaded_at=skill.last_loaded_at,
+                version_count=int(version_count or 0),
+                latest_version_number=(latest_version.version_number if latest_version else None),
+            )
         )
     return responses
 

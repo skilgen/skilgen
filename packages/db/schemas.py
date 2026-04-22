@@ -37,6 +37,8 @@ class RepoResponse(BaseModel):
 
 class SkillResponse(BaseModel):
     id: str
+    repo_id: str
+    repo_name: str
     domain: str
     skill_path: str
     score: ScoreResponse

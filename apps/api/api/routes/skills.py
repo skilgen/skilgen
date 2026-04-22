@@ -22,18 +22,8 @@ class UsagePayload(BaseModel):
     session_id: str
 
 
-@router.get("/{skill_id}", response_model=SkillResponse)
-async def get_skill(
-    skill_id: str,
-    db: AsyncSession = Depends(get_db),
-) -> SkillResponse:
-    # TODO: restore org-scoped auth before GA. Read-only skill browsing is public during dashboard bootstrap.
-    skill = await db.get(Skill, skill_id)
-    if skill is None:
-        raise HTTPException(status_code=404, detail="Skill not found")
-    repo = await db.get(Repo, skill.repo_id)
-    if repo is None:
-        raise HTTPException(status_code=404, detail="Repo not found")
+async def _build_skill_response(db: AsyncSession, skill: Skill, repo: Repo) -> SkillResponse:
+    """Build the dashboard-facing skill payload with version and repo metadata."""
     version_count = (
         await db.execute(select(func.count(SkillVersion.id)).where(SkillVersion.skill_id == skill.id))
     ).scalar_one()
@@ -47,6 +37,8 @@ async def get_skill(
     ).scalar_one_or_none()
     return SkillResponse(
         id=skill.id,
+        repo_id=repo.id,
+        repo_name=repo.name,
         domain=skill.domain,
         skill_path=skill.skill_path,
         score=_score_response(skill),  # type: ignore[arg-type]
@@ -58,6 +50,21 @@ async def get_skill(
         version_count=int(version_count or 0),
         latest_version_number=(latest_version.version_number if latest_version else None),
     )
+
+
+@router.get("/{skill_id}", response_model=SkillResponse)
+async def get_skill(
+    skill_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> SkillResponse:
+    # TODO: restore org-scoped auth before GA. Read-only skill browsing is public during dashboard bootstrap.
+    skill = await db.get(Skill, skill_id)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    repo = await db.get(Repo, skill.repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
+    return await _build_skill_response(db, skill, repo)
 
 
 @router.get("/{skill_id}/versions", response_model=list[SkillVersionSummaryResponse])
