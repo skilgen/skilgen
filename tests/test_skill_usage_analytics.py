@@ -222,11 +222,14 @@ def test_admin_rollup_resets_stale_usage(monkeypatch) -> None:
 def test_dashboard_analytics_page_and_nav_are_wired() -> None:
     """Dashboard should expose the analytics route, nav item, and graceful error copy."""
     page = (ROOT / "apps/dashboard/app/dashboard/analytics/page.tsx").read_text(encoding="utf-8")
+    fallback = (ROOT / "apps/dashboard/src/components/section-fallback.tsx").read_text(encoding="utf-8")
     data = (ROOT / "apps/dashboard/lib/data.ts").read_text(encoding="utf-8")
     nav = (ROOT / "apps/dashboard/src/lib/mock-data.ts").read_text(encoding="utf-8")
     layout = (ROOT / "apps/dashboard/app/dashboard/layout.tsx").read_text(encoding="utf-8")
 
-    assert "Unable to load {section}. Refresh the page or contact support." in page
+    assert "SectionFallback" in page
+    assert "Unable to load {section}." in fallback
+    assert "Refresh the page or contact support." in fallback
     assert "TopSkillsChart" in page
     assert "NeverLoadedList" in page
     assert "30-day skill usage sparkline" in page

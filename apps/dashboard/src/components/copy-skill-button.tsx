@@ -3,13 +3,16 @@
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 
+import { captureDashboardEvent } from "@/lib/posthog";
+
 /** Copy the raw SKILL.md content and briefly confirm the action. */
-export function CopySkillButton({ content }: { content: string }) {
+export function CopySkillButton({ content, domain }: { content: string; domain: string }) {
   const [copied, setCopied] = useState(false);
 
   /** Write the skill content to the clipboard and reset the success state. */
   async function handleCopy() {
     await navigator.clipboard.writeText(content);
+    captureDashboardEvent({ name: "skill_content_copied", properties: { domain } });
     setCopied(true);
     window.setTimeout(() => setCopied(false), 2000);
   }

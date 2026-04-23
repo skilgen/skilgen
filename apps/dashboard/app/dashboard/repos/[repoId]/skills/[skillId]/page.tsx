@@ -2,7 +2,9 @@ import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { ArrowLeft, FileText } from "lucide-react";
 
+import { SectionFallback } from "@/components/section-fallback";
 import { SkillDetailViewer } from "@/components/skill-detail-viewer";
+import { SkillViewTracker } from "@/components/skill-view-tracker";
 import { getRepo, getSkill, getSkillVersions, type Repo, type Score, type Skill, type SkillVersionSummary } from "../../../../../../lib/data";
 
 export const dynamic = "force-dynamic";
@@ -65,6 +67,7 @@ export default async function SkillDetailPage({ params }: PageProps) {
   let skill: Skill | null = null;
   let repo: Repo | null = null;
   let versions: SkillVersionSummary[] = [];
+  let skillLoadFailed = false;
 
   try {
     const [repoPayload, skillPayload, versionsPayload] = await Promise.all([
@@ -76,6 +79,7 @@ export default async function SkillDetailPage({ params }: PageProps) {
     skill = skillPayload;
     versions = versionsPayload ?? [];
   } catch (error) {
+    skillLoadFailed = true;
     console.error("Failed to fetch skill detail:", error);
   }
 
@@ -86,15 +90,18 @@ export default async function SkillDetailPage({ params }: PageProps) {
           <ArrowLeft className="h-4 w-4" />
           Back to repository
         </Link>
-        <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center text-[color:var(--text-secondary)]">
-          Skill not found.
-        </section>
+        {skillLoadFailed ? <SectionFallback section="skill" /> : (
+          <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center text-[color:var(--text-secondary)]">
+            Skill not found.
+          </section>
+        )}
       </div>
     );
   }
 
   return (
     <div>
+      <SkillViewTracker domain={skill.domain} repo={repo?.full_name ?? skill.repo_name} />
       <nav className="mb-6 flex flex-wrap items-center gap-2 text-[13px] text-[color:var(--text-tertiary)]">
         <Link className="hover:text-[color:var(--accent-primary)]" href="/dashboard">
           Overview

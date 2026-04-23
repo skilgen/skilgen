@@ -88,10 +88,11 @@ def test_overview_sections_have_error_fallbacks() -> None:
     """Fetch failures should render visible error sections instead of blank panels."""
     source = read_repo_file("apps/dashboard/src/components/overview-live-data.tsx")
     repos_source = read_repo_file("apps/dashboard/src/components/repos-table.tsx")
+    fallback_source = read_repo_file("apps/dashboard/src/components/section-fallback.tsx")
 
-    assert "SectionError" in source
-    assert "Unable to load {section}." in source
-    assert "Refresh the page or contact support." in source
+    assert "SectionFallback" in source
+    assert "Unable to load {section}." in fallback_source
+    assert "Refresh the page or contact support." in fallback_source
     assert "reposErrorDetail" in source
     assert "No repositories to display" in repos_source
 

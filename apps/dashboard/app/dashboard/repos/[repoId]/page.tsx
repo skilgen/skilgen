@@ -2,6 +2,7 @@ import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { ArrowLeft, GitBranch, ShieldAlert } from "lucide-react";
 
+import { SectionFallback } from "@/components/section-fallback";
 import {
   API_URL,
   getRepoDependencies,
@@ -315,6 +316,7 @@ export default async function RepoDetailPage({ params }: PageProps) {
   let skills: RepoSkill[] = [];
   let scoreHistory: ScoreHistoryPoint[] = [];
   let dependencies: DependencyReport | null = null;
+  let repoLoadFailed = false;
 
   try {
     const [repoPayload, skillsPayload, historyPayload, dependencyPayload] = await Promise.all([
@@ -328,6 +330,7 @@ export default async function RepoDetailPage({ params }: PageProps) {
     scoreHistory = historyPayload ?? [];
     dependencies = dependencyPayload;
   } catch (error) {
+    repoLoadFailed = true;
     console.error("Failed to fetch repo detail:", error);
   }
 
@@ -338,9 +341,11 @@ export default async function RepoDetailPage({ params }: PageProps) {
           <ArrowLeft className="h-4 w-4" />
           Back to repos
         </Link>
-        <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center text-[color:var(--text-secondary)]">
-          Repository not found.
-        </section>
+        {repoLoadFailed ? <SectionFallback section="repository" /> : (
+          <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center text-[color:var(--text-secondary)]">
+            Repository not found.
+          </section>
+        )}
       </div>
     );
   }

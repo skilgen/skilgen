@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Play } from "lucide-react";
 
+import { captureDashboardEvent } from "@/lib/posthog";
+
 type AnalyseState = "idle" | "queued" | "error";
 
 export function AnalyseNowButton({
@@ -20,6 +22,7 @@ export function AnalyseNowButton({
   async function handleAnalyse(): Promise<void> {
     setState("idle");
     setMessage("");
+    captureDashboardEvent({ name: "repo_analyse_triggered", properties: {} });
 
     try {
       const response = await fetch(`${apiUrl}/repos/${repoId}/analyse`, {

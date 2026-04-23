@@ -59,6 +59,7 @@ def test_analyse_button_triggers_run() -> None:
     assert 'method: "POST"' in button
     assert "`${apiUrl}/repos/${repoId}/analyse`" in button
     assert 'Authorization: `Bearer ${accessToken}`' in button
+    assert "repo_analyse_triggered" in button
     assert 'trigger="manual"' in api
     assert "await db.commit()" in api
     assert '"ref": repo.default_branch' in api

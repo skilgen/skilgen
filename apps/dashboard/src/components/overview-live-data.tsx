@@ -3,6 +3,7 @@ import { Github } from "lucide-react";
 import type { OrgStats, Repo } from "../../lib/data";
 import { MetricCard } from "./metric-card";
 import { ReposTable } from "./repos-table";
+import { SectionFallback } from "./section-fallback";
 
 type OverviewLiveDataProps = {
   initialStats?: OrgStats | null;
@@ -45,15 +46,6 @@ function MetricSkeleton() {
         <div className="h-3 w-24 rounded bg-white/10" />
       </div>
     </article>
-  );
-}
-
-function SectionError({ detail, section }: { detail: string; section: string }) {
-  return (
-    <section className="rounded-xl border border-red-900/40 bg-red-950/20 p-5">
-      <h2 className="text-[15px] font-semibold text-red-200">Unable to load {section}.</h2>
-      <p className="mt-1 text-[13px] text-red-200/75">{detail} Refresh the page or contact support.</p>
-    </section>
   );
 }
 
@@ -100,7 +92,7 @@ export function OverviewLiveData({
     <>
       {statsErrorDetail ? (
         <div className="mb-8">
-          <SectionError detail={statsErrorDetail} section="overview metrics" />
+          <SectionFallback section="overview metrics" />
         </div>
       ) : (
         <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -127,7 +119,7 @@ export function OverviewLiveData({
       {repos.length > 0 ? (
         <ReposTable repos={repos} />
       ) : reposErrorDetail ? (
-        <SectionError detail={reposErrorDetail} section="repositories" />
+        <SectionFallback section="repositories" />
       ) : (
         <OnboardingCard />
       )}

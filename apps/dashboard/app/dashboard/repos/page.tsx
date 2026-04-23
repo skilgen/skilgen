@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Github, Plus } from "lucide-react";
 
+import { SectionFallback } from "@/components/section-fallback";
 import { API_URL, type Org, type Repo } from "../../../lib/data";
 import { ReposBrowser, type RepoListItem } from "./repos-browser";
 
@@ -8,6 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ReposPage() {
   let repos: RepoListItem[] = [];
+  let reposError = false;
 
   try {
     const bootstrapRes = await fetch(`${API_URL}/orgs/bootstrap`, {
@@ -20,9 +22,14 @@ export default async function ReposPage() {
       });
       if (reposRes.ok) {
         repos = (((await reposRes.json()) as Repo[]) ?? []) as RepoListItem[];
+      } else {
+        reposError = true;
       }
+    } else {
+      reposError = true;
     }
   } catch (error) {
+    reposError = true;
     console.error("Failed to fetch repos:", error);
   }
 
@@ -51,7 +58,9 @@ export default async function ReposPage() {
         </Link>
       </div>
 
-      {repos.length > 0 ? (
+      {reposError ? (
+        <SectionFallback section="repositories" />
+      ) : repos.length > 0 ? (
         <ReposBrowser repos={repos} />
       ) : (
         <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center">

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { captureDashboardEvent } from "@/lib/posthog";
 import { createCheckoutSession } from "../../lib/stripe";
 
 type UpgradeButtonProps = {
@@ -28,6 +29,7 @@ export function UpgradeButton({ accessToken, label, plan }: UpgradeButtonProps) 
     setError(null);
     setIsLoading(true);
     try {
+      captureDashboardEvent({ name: "checkout_started", properties: { plan, seat_count: seatCount } });
       const checkoutUrl = await createCheckoutSession(plan, seatCount, accessToken);
       window.location.assign(checkoutUrl);
     } catch (err) {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import hashlib
 import hmac
 
@@ -9,9 +10,53 @@ from fastapi.testclient import TestClient
 
 from apps.api.api import auth
 from apps.api.api.index import app
+from apps.api.api.routes import metrics
 from apps.api.api.routes.webhook import _verify_github_signature
 from packages.db.config import settings
 from packages.db.models import Base, Org, Repo
+
+
+class FakeMetricsResult:
+    """Small SQLAlchemy result double for metrics route tests."""
+
+    def __init__(self, value: object | None = None) -> None:
+        self.value = value
+
+    def scalar_one(self) -> object | None:
+        """Return the configured scalar value."""
+        return self.value
+
+    def scalar_one_or_none(self) -> object | None:
+        """Return the configured optional scalar value."""
+        return self.value
+
+
+class FakeMetricsDb:
+    """Async database double that returns metrics query results in order."""
+
+    def __init__(self, values: list[object | None]) -> None:
+        self.values = values
+        self.query_count = 0
+
+    async def execute(self, _statement: object) -> FakeMetricsResult:
+        """Return the next configured query result."""
+        self.query_count += 1
+        return FakeMetricsResult(self.values.pop(0))
+
+
+class FakeMetricsSession:
+    """Async context manager that yields a fake metrics database."""
+
+    def __init__(self, db: FakeMetricsDb) -> None:
+        self.db = db
+
+    async def __aenter__(self) -> FakeMetricsDb:
+        """Return the configured fake database."""
+        return self.db
+
+    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        """Exit the fake context manager without suppressing errors."""
+        return None
 
 
 def test_health_reports_degraded_without_database(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -21,6 +66,52 @@ def test_health_reports_degraded_without_database(monkeypatch: pytest.MonkeyPatc
     assert response.status_code == 200
     assert response.json()["status"] == "degraded"
     assert response.json()["db"] == "error"
+
+
+def test_health_endpoint_is_excluded_from_request_logs(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Health probes should not emit structured request log records."""
+    monkeypatch.setattr(settings, "DATABASE_URL", "")
+    caplog.set_level("INFO", logger="skillayer.api")
+
+    response = TestClient(app).get("/health")
+
+    assert response.status_code == 200
+    assert all('"/health"' not in record.getMessage() for record in caplog.records)
+
+
+def test_metrics_endpoint_returns_public_cached_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The metrics endpoint should be unauthenticated and reuse cached count data."""
+    metrics._cached_metrics = None
+    last_run_at = datetime(2026, 4, 23, 12, 30, 0)
+    db = FakeMetricsDb([7, 11, 2, 4, 83.5, last_run_at])
+    monkeypatch.setattr(metrics, "AsyncSessionLocal", lambda: FakeMetricsSession(db))
+    try:
+        client = TestClient(app)
+        first = client.get("/metrics")
+        second = client.get("/metrics")
+    finally:
+        metrics._cached_metrics = None
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["total_analysis_runs"] == 7
+    assert first.json()["total_skills"] == 11
+    assert first.json()["total_orgs"] == 2
+    assert first.json()["total_repos"] == 4
+    assert first.json()["avg_score"] == 83.5
+    assert first.json()["last_run_at"] == "2026-04-23T12:30:00Z"
+    assert db.query_count == 6
+
+
+def test_metrics_endpoint_returns_structured_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Metrics failures should return a stable structured error payload."""
+    metrics._cached_metrics = None
+    monkeypatch.setattr(metrics, "AsyncSessionLocal", lambda: (_ for _ in ()).throw(RuntimeError("no db")))
+    response = TestClient(app).get("/metrics")
+
+    metrics._cached_metrics = None
+    assert response.status_code == 503
+    assert response.json() == {"detail": {"detail": "Unable to load metrics", "code": "METRICS_UNAVAILABLE"}}
 
 
 def test_github_webhook_signature_validation(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -34,6 +34,19 @@ class UpgradeFlowTests(unittest.TestCase):
         self.assertIn('type="number"', source)
         self.assertIn("value={seatCount}", source)
         self.assertIn("createCheckoutSession(plan, seatCount, accessToken)", source)
+        self.assertIn("checkout_started", source)
+
+    def test_posthog_is_initialized_from_layout_in_production_only(self) -> None:
+        layout = read("apps/dashboard/app/layout.tsx")
+        helper = read("apps/dashboard/src/lib/posthog.ts")
+        upgrade = read("apps/dashboard/app/dashboard/upgrade/page.tsx")
+        tracker = read("apps/dashboard/src/components/upgrade-page-tracker.tsx")
+
+        self.assertIn("PostHogProvider", layout)
+        self.assertIn('process.env.NODE_ENV !== "production"', helper)
+        self.assertIn("posthog.init", helper)
+        self.assertIn("UpgradePageTracker", upgrade)
+        self.assertIn("upgrade_page_viewed", tracker)
 
     def test_checkout_helper_posts_authenticated_session_request(self) -> None:
         source = read("apps/dashboard/lib/stripe.ts")
