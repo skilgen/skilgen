@@ -1,0 +1,43 @@
+directive @key(fields: String!) on OBJECT | INTERFACE
+
+type Query {
+  pets(first: Int, after: String): PetConnection!
+  user(id: ID!): User
+}
+
+type Mutation {
+  createPet(input: CreatePetInput!): Pet!
+}
+
+type User @key(fields: "id") {
+  id: ID!
+  displayName: String!
+  pets: [Pet!]!
+  oldEmail: String @deprecated(reason: "Use contactEmail")
+}
+
+type Pet {
+  id: ID!
+  name: String!
+  owner: User
+}
+
+type PetConnection {
+  edges: [PetEdge!]!
+  pageInfo: PageInfo!
+}
+
+type PetEdge {
+  node: Pet!
+  cursor: String!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+input CreatePetInput {
+  name: String!
+  ownerId: ID!
+}
