@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import hashlib
+import logging
 from pathlib import Path
 import shutil
 import sys
@@ -9,11 +10,24 @@ import tempfile
 import traceback
 from typing import Any
 
-from sqlalchemy import func, select, update
+import httpx
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.github import clone_repo
-from packages.db.models import AnalysisRun, Repo, ScoreHistory, Skill, SkillVersion
+from packages.db.models import AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillVersion
+from skilgen.core.dependency_risk import analyze_dependency_risks
+from skilgen.core.models import DependencyFinding, DependencyRiskReport
+
+
+LOGGER = logging.getLogger("skillayer.analysis")
+OSV_ENDPOINT = "https://api.osv.dev/v1/querybatch"
+OSV_ECOSYSTEMS = {
+    "pip": "PyPI",
+    "npm": "npm",
+    "cargo": "crates.io",
+    "go": "Go",
+}
 
 
 def _score_value(score: dict[str, Any], key: str) -> int:
@@ -151,6 +165,114 @@ async def save_skills(
         saved.append(skill)
 
     return saved
+
+
+def _osv_version(version: str | None) -> str | None:
+    """Return a concrete version string acceptable to OSV, when one is available."""
+    if not version:
+        return None
+    cleaned = version.strip()
+    if cleaned.startswith("=="):
+        return cleaned[2:].strip()
+    if cleaned.startswith("="):
+        return cleaned[1:].strip()
+    if cleaned[:1].isdigit() or cleaned.startswith("v"):
+        return cleaned
+    return None
+
+
+def _osv_key(finding: DependencyFinding) -> str:
+    """Return the map key used to attach OSV vulnerabilities to dependency findings."""
+    return f"{finding.ecosystem}:{finding.name.lower()}"
+
+
+def _osv_queries(findings: list[DependencyFinding]) -> list[tuple[dict[str, object], str]]:
+    """Build deduplicated OSV batch queries from dependency findings."""
+    queries: list[tuple[dict[str, object], str]] = []
+    seen: set[tuple[str, str, str | None]] = set()
+    for finding in findings:
+        ecosystem = OSV_ECOSYSTEMS.get(finding.ecosystem)
+        if ecosystem is None:
+            continue
+        version = _osv_version(finding.version)
+        key = (ecosystem, finding.name, version)
+        if key in seen:
+            continue
+        seen.add(key)
+        query: dict[str, object] = {"package": {"name": finding.name, "ecosystem": ecosystem}}
+        if version:
+            query["version"] = version
+        queries.append((query, _osv_key(finding)))
+    return queries
+
+
+async def _fetch_osv_vulnerabilities(findings: list[DependencyFinding]) -> dict[str, list[dict[str, object]]]:
+    """Fetch OSV vulnerabilities with bounded retries and per-request timeouts."""
+    queries = _osv_queries(findings)
+    if not queries:
+        return {}
+
+    vulnerabilities: dict[str, list[dict[str, object]]] = {}
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        for start in range(0, len(queries), 50):
+            chunk_pairs = queries[start:start + 50]
+            chunk = [item[0] for item in chunk_pairs]
+            chunk_keys = [item[1] for item in chunk_pairs]
+            for attempt in range(3):
+                try:
+                    response = await client.post(OSV_ENDPOINT, json={"queries": chunk})
+                    response.raise_for_status()
+                    results = response.json().get("results", [])
+                    if not isinstance(results, list):
+                        break
+                    for key, result in zip(chunk_keys, results):
+                        vulns = result.get("vulns", []) if isinstance(result, dict) else []
+                        if isinstance(vulns, list):
+                            vulnerabilities.setdefault(key, []).extend(
+                                item for item in vulns if isinstance(item, dict)
+                            )
+                    break
+                except (httpx.TimeoutException, httpx.HTTPError, ValueError) as exc:
+                    LOGGER.warning("OSV dependency lookup failed", extra={"attempt": attempt + 1, "error": str(exc)})
+                    if attempt == 2:
+                        break
+    return vulnerabilities
+
+
+async def save_dependencies(
+    db: AsyncSession,
+    repo_id: str,
+    run_id: str,
+    report: DependencyRiskReport,
+) -> list[Dependency]:
+    """Persist dependency risk findings for a completed analysis run."""
+    await db.execute(delete(Dependency).where(Dependency.run_id == run_id))
+    saved: list[Dependency] = []
+    for finding in report.dependencies:
+        dependency = Dependency(
+            repo_id=repo_id,
+            run_id=run_id,
+            name=finding.name,
+            version=finding.version,
+            ecosystem=finding.ecosystem,
+            risk_level=finding.risk_level,
+            cves=finding.cves,
+            latest_version=finding.latest_version,
+            license=finding.license,
+        )
+        db.add(dependency)
+        saved.append(dependency)
+    await db.flush()
+    return saved
+
+
+async def analyze_and_store_dependencies(db: AsyncSession, repo_id: str, run_id: str, project_root: Path) -> DependencyRiskReport:
+    """Run dependency risk analysis, enrich with OSV data, and persist findings."""
+    base_report = analyze_dependency_risks(project_root)
+    vulnerabilities = await _fetch_osv_vulnerabilities(base_report.dependencies)
+    report = analyze_dependency_risks(project_root, vulnerabilities)
+    await save_dependencies(db, repo_id, run_id, report)
+    return report
 
 
 async def run_skilgen_analysis(project_root: Path) -> dict[str, Any]:
@@ -297,6 +419,7 @@ async def run_analysis(
         score = dict(analysis_result.get("score") or {})
         skill_files = list(analysis_result.get("skill_files") or [])
         saved_skills = await save_skills(db, repo_id, run_id, skill_files)
+        await analyze_and_store_dependencies(db, repo_id, run_id, tmpdir)
 
         db.add(
             ScoreHistory(
@@ -338,6 +461,7 @@ async def run_analysis(
                 base_score=base_score,
             )
     except Exception as exc:
+        await db.rollback()
         await update_run_failed(db, run_id, str(exc))
         await db.commit()
         raise

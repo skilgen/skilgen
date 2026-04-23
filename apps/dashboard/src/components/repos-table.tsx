@@ -42,6 +42,15 @@ export function relativeTime(value: string | null) {
 export function ReposTable({ repos }: { repos: Repo[] }) {
   const router = useRouter();
 
+  if (repos.length === 0) {
+    return (
+      <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-8 text-center">
+        <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">No repositories to display</h2>
+        <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Connect a repository to start tracking Skilgen readiness.</p>
+      </section>
+    );
+  }
+
   return (
     <section className="overflow-hidden rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
       <div className="border-b border-[color:var(--bg-border)] px-5 py-4">

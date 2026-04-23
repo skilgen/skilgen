@@ -16,9 +16,11 @@ from skilgen.agents import build_import_graph, build_roadmap_plan, extract_featu
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.core.analytics import log_skill_usage
+from skilgen.core.dependency_risk import analyze_dependency_risks, render_dependency_risk_report
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
 from skilgen.core.corpus_index import build_corpus_index
 from skilgen.core.runtime_data import purge_runtime_data
+from skilgen.core.score import ci_result, score_badge_markdown
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
 from skilgen.enterprise_skills import (
@@ -157,6 +159,42 @@ class CliProgressReporter:
             print(f"\r{line}", file=sys.stderr, end="", flush=True)
 
 
+def write_ci_workflow(project_root: Path) -> Path:
+    """Write the default GitHub Actions workflow for Skilgen quality gates."""
+    workflow_path = project_root / ".github" / "workflows" / "skilgen.yml"
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(
+        "\n".join(
+            [
+                "name: Skilgen",
+                "",
+                "on:",
+                "  pull_request:",
+                "",
+                "jobs:",
+                "  skilgen:",
+                "    runs-on: ubuntu-latest",
+                "    steps:",
+                "      - uses: actions/checkout@v4",
+                "      - uses: actions/setup-python@v5",
+                "        with:",
+                "          python-version: '3.12'",
+                "      - name: Install Skilgen",
+                "        run: python -m pip install -e .",
+                "      - name: Generate skills",
+                "        run: skilgen deliver --project-root .",
+                "      - name: Enforce Skilgen Score",
+                "        run: skilgen score --ci --min-score 60 --min-groundedness 15 --min-coverage 15 --project-root .",
+                "      - name: Enforce enterprise policy",
+                "        run: skilgen enterprise policy check --project-root .",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return workflow_path
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="skilgen", description="Requirements-driven skill and scaffold generator.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -164,6 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = subparsers.add_parser("init", help="Write a default skilgen.yml to the project root.")
     init.add_argument("--project-root", default=".")
+    init.add_argument("--ci", action="store_true", help="Write a GitHub Actions workflow for Skilgen CI checks.")
     init.add_argument(
         "--provider",
         choices=[
@@ -252,6 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = subparsers.add_parser("analyze", help="Assemble framework, signal, and relationship analysis for the project.")
     analyze.add_argument("--project-root", default=".")
     analyze.add_argument("--requirements")
+    analyze.add_argument("--deps", action="store_true", help="Show dependency CVE, version drift, and upgrade guidance.")
 
     diff = subparsers.add_parser("diff", help="Show what changed since the last generation and which skills are stale.")
     diff.add_argument("--project-root", default=".")
@@ -400,6 +440,11 @@ def build_parser() -> argparse.ArgumentParser:
     score = subparsers.add_parser("score", help="Compute the Skilgen Score quality metric for the current skill tree.")
     score.add_argument("--project-root", default=".")
     score.add_argument("--badge-file")
+    score.add_argument("--badge", action="store_true", help="Print a shields.io Markdown badge instead of JSON.")
+    score.add_argument("--ci", action="store_true", help="Exit non-zero when score thresholds are not met.")
+    score.add_argument("--min-score", type=int, default=60)
+    score.add_argument("--min-groundedness", type=int, default=15)
+    score.add_argument("--min-coverage", type=int, default=15)
     score.add_argument("--history", action="store_true", help="Show recent score history and score trends instead of only the current score.")
     score.add_argument("--history-limit", type=int, default=10)
 
@@ -452,8 +497,12 @@ def main() -> None:
         config_path = project_root / "skilgen.yml"
         if not config_path.exists():
             config_path.write_text(render_default_config(args.provider), encoding="utf-8")
+        ci_workflow_path = write_ci_workflow(project_root) if args.ci else None
         worker = ensure_auto_update_worker(project_root)
-        print(json.dumps({"config_path": str(config_path), "auto_update": worker}, indent=2))
+        payload = {"config_path": str(config_path), "auto_update": worker}
+        if ci_workflow_path is not None:
+            payload["ci_workflow_path"] = str(ci_workflow_path)
+        print(json.dumps(payload, indent=2))
         return
     if args.command == "index":
         root = Path(args.project_root).resolve()
@@ -512,6 +561,10 @@ def main() -> None:
         print(json.dumps({"import_graph": build_import_graph(Path(args.project_root).resolve())}, indent=2))
         return
     if args.command == "analyze":
+        if args.deps:
+            report = analyze_dependency_risks(Path(args.project_root).resolve())
+            print(render_dependency_risk_report(report))
+            return
         print(json.dumps(analyze_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None), indent=2))
         return
     if args.command == "diff":
@@ -824,7 +877,23 @@ def main() -> None:
         return
     if args.command == "score":
         emit_progress("Computing the Skilgen Score from groundedness, coverage, freshness, and structure signals.")
-        print(json.dumps(score_payload(Path(args.project_root).resolve(), args.badge_file, history=args.history, history_limit=args.history_limit), indent=2))
+        payload = score_payload(Path(args.project_root).resolve(), args.badge_file, history=args.history, history_limit=args.history_limit)
+        score_payload_for_checks = payload["current"] if args.history and isinstance(payload.get("current"), dict) else payload
+        if args.badge:
+            print(score_badge_markdown(score_payload_for_checks))
+            return
+        if args.ci:
+            passed, message = ci_result(
+                score_payload_for_checks,
+                min_score=args.min_score,
+                min_groundedness=args.min_groundedness,
+                min_coverage=args.min_coverage,
+            )
+            print(message)
+            if not passed:
+                sys.exit(1)
+            return
+        print(json.dumps(payload, indent=2))
         return
     if args.command == "eval":
         if args.eval_command == "scaffold":

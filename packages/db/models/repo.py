@@ -10,6 +10,7 @@ from packages.db.models.base import Base, new_uuid, utcnow
 
 if TYPE_CHECKING:
     from packages.db.models.analysis_run import AnalysisRun
+    from packages.db.models.dependency import Dependency
     from packages.db.models.org import Org
     from packages.db.models.skill import Skill
 
@@ -33,3 +34,4 @@ class Repo(Base):
     org: Mapped["Org"] = relationship(back_populates="repos")
     runs: Mapped[list["AnalysisRun"]] = relationship(back_populates="repo")
     skills: Mapped[list["Skill"]] = relationship(back_populates="repo")
+    dependencies: Mapped[list["Dependency"]] = relationship(back_populates="repo")

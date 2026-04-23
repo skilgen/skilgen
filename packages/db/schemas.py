@@ -70,6 +70,27 @@ class SkillVersionResponse(BaseModel):
     is_latest: bool
 
 
+class DependencyResponse(BaseModel):
+    id: str
+    name: str
+    version: str | None
+    ecosystem: str
+    risk_level: str
+    cves: list[str]
+    latest_version: str | None
+    license: str | None
+    created_at: datetime
+    upgrade_command: str | None = None
+
+
+class DependencyReportResponse(BaseModel):
+    high_risk: list[DependencyResponse]
+    medium_risk: list[DependencyResponse]
+    healthy: list[DependencyResponse]
+    total_count: int
+    risk_score: int
+
+
 class AnalysisRunResponse(BaseModel):
     id: str
     status: str

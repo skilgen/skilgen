@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +13,13 @@ from packages.db.schemas import OrgResponse, RepoResponse, ScoreResponse
 
 
 router = APIRouter(prefix="/orgs", tags=["orgs"])
+
+
+def _last_30_score_dates() -> list[str]:
+    """Return the last 30 UTC score dates in chronological order."""
+    today = datetime.now(UTC).date()
+    return [(today - timedelta(days=offset)).isoformat() for offset in range(29, -1, -1)]
+
 
 
 def _score_response(row: object) -> ScoreResponse | None:
@@ -165,18 +174,16 @@ async def get_org_stats(
             skill_count += int(latest_run.skill_count or 0)
 
     trend_date = func.date(ScoreHistory.recorded_at).label("date")
+    start_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=29)
     trend_result = await db.execute(
         select(trend_date, func.avg(ScoreHistory.score_total).label("avg_score"))
         .join(Repo, ScoreHistory.repo_id == Repo.id)
-        .where(Repo.org_id == org_id)
+        .where(Repo.org_id == org_id, ScoreHistory.recorded_at >= start_at)
         .group_by(trend_date)
-        .order_by(desc(trend_date))
-        .limit(7)
+        .order_by(trend_date)
     )
-    trend = [
-        {"date": str(row.date), "score": round(row.avg_score or 0)}
-        for row in reversed(trend_result.fetchall())
-    ]
+    daily_scores = {str(row.date): round(row.avg_score or 0) for row in trend_result.fetchall()}
+    trend = [{"date": date, "score": daily_scores.get(date, 0)} for date in _last_30_score_dates()]
 
     return {
         "repo_count": int(repo_count or 0),

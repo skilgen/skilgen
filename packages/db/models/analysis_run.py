@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from packages.db.models.base import Base, new_uuid, utcnow
 
 if TYPE_CHECKING:
+    from packages.db.models.dependency import Dependency
     from packages.db.models.repo import Repo
 
 
@@ -35,3 +36,4 @@ class AnalysisRun(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     repo: Mapped["Repo"] = relationship(back_populates="runs")
+    dependencies: Mapped[list["Dependency"]] = relationship(back_populates="run")
