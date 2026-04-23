@@ -7,8 +7,20 @@ from scripts.deploy_dashboard import dashboard_project_link, deploy_command, loa
 
 
 def test_dashboard_deploy_command_supports_production_flag() -> None:
-    assert deploy_command(production=True) == ["vercel", "deploy", "--prod"]
-    assert deploy_command(production=False) == ["vercel", "deploy"]
+    config = Path("vercel.dashboard.json")
+    assert deploy_command(production=True, config_path=config) == [
+        "vercel",
+        "deploy",
+        "--local-config",
+        "vercel.dashboard.json",
+        "--prod",
+    ]
+    assert deploy_command(production=False, config_path=config) == [
+        "vercel",
+        "deploy",
+        "--local-config",
+        "vercel.dashboard.json",
+    ]
 
 
 def test_dashboard_project_link_restores_root_link(tmp_path: Path) -> None:

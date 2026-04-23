@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD_PROJECT_LINK = ROOT / "apps" / "dashboard" / ".vercel" / "project.json"
 ROOT_PROJECT_LINK = ROOT / ".vercel" / "project.json"
+DASHBOARD_VERCEL_CONFIG = ROOT / "vercel.dashboard.json"
 REQUIRED_PROJECT_KEYS = {"projectId", "orgId", "projectName"}
 
 
@@ -26,9 +27,9 @@ def load_project_link(path: Path) -> dict[str, str]:
     return {key: str(payload[key]) for key in REQUIRED_PROJECT_KEYS}
 
 
-def deploy_command(*, production: bool) -> list[str]:
+def deploy_command(*, production: bool, config_path: Path = DASHBOARD_VERCEL_CONFIG) -> list[str]:
     """Build the Vercel CLI command for dashboard deployment."""
-    command = ["vercel", "deploy"]
+    command = ["vercel", "deploy", "--local-config", str(config_path)]
     if production:
         command.append("--prod")
     return command
@@ -55,6 +56,8 @@ def dashboard_project_link(
 
 def deploy_dashboard(*, production: bool, dry_run: bool) -> int:
     """Deploy the dashboard with the complete monorepo uploaded."""
+    if not DASHBOARD_VERCEL_CONFIG.exists():
+        raise FileNotFoundError(f"Missing dashboard Vercel config: {DASHBOARD_VERCEL_CONFIG}")
     if dry_run:
         print(" ".join(deploy_command(production=production)))
         return 0
