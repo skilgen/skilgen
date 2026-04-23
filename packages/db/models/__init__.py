@@ -4,6 +4,16 @@ from packages.db.models.org import Org
 from packages.db.models.repo import Repo
 from packages.db.models.score_history import ScoreHistory
 from packages.db.models.skill import Skill
+from packages.db.models.skill_usage_event import SkillUsageEvent
 from packages.db.models.skill_version import SkillVersion
 
-__all__ = ["AnalysisRun", "Base", "Org", "Repo", "ScoreHistory", "Skill", "SkillVersion"]
+__all__ = [
+    "AnalysisRun",
+    "Base",
+    "Org",
+    "Repo",
+    "ScoreHistory",
+    "Skill",
+    "SkillUsageEvent",
+    "SkillVersion",
+]

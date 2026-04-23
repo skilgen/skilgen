@@ -157,6 +157,53 @@ class CliProgressReporter:
             print(f"\r{line}", file=sys.stderr, end="", flush=True)
 
 
+def _format_analytics_summary(payload: dict[str, object]) -> str:
+    """Render analytics as readable CLI text instead of raw JSON."""
+    usage_mode = str(payload.get("usage_mode", "none"))
+    live_events = int(payload.get("live_event_count", 0) or 0)
+    planner_events = int(payload.get("planner_event_count", 0) or 0)
+    traced_agents = payload.get("traced_agents", [])
+    if not isinstance(traced_agents, list):
+        traced_agents = []
+    lines = [
+        "Skilgen Analytics",
+        "",
+        f"Usage mode: {usage_mode}",
+        f"Live events: {live_events}",
+        f"Planner warmups ignored: {planner_events}",
+        f"Agents: {', '.join(str(agent) for agent in traced_agents) if traced_agents else 'none'}",
+        "",
+        "Top skills:",
+    ]
+    top_skills = payload.get("top_skills", [])
+    if isinstance(top_skills, list) and top_skills:
+        for index, item in enumerate(top_skills, start=1):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "Skill")
+            skill = str(item.get("skill") or "unknown")
+            loads = int(item.get("loads", 0) or 0)
+            mode = str(item.get("mode") or usage_mode)
+            suffix = "s" if loads != 1 else ""
+            lines.append(f"  {index}. {title} - {skill} - {loads} {mode} load{suffix}")
+    else:
+        lines.append("  No skill usage detected yet.")
+    lines.extend(["", "Least used:"])
+    least_used = payload.get("least_used", [])
+    if isinstance(least_used, list) and least_used:
+        for index, item in enumerate(least_used, start=1):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "Skill")
+            skill = str(item.get("skill") or "unknown")
+            loads = int(item.get("loads", 0) or 0)
+            suffix = "s" if loads != 1 else ""
+            lines.append(f"  {index}. {title} - {skill} - {loads} load{suffix}")
+    else:
+        lines.append("  No low-usage skills detected.")
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="skilgen", description="Requirements-driven skill and scaffold generator.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -430,6 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
     analytics.add_argument("--context", default="agent_runtime")
     analytics.add_argument("--session-id")
     analytics.add_argument("--task")
+    analytics.add_argument("--json", action="store_true", help="Output the raw analytics JSON payload.")
 
     validate = subparsers.add_parser("validate", help="Validate generated outputs and skill references.")
     validate.add_argument("--project-root", default=".")
@@ -871,7 +919,11 @@ def main() -> None:
                 )
             )
             return
-        print(json.dumps(analytics_payload(root, limit=args.limit), indent=2))
+        payload = analytics_payload(root, limit=args.limit)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(_format_analytics_summary(payload))
         return
     if args.command == "doctor":
         payload = doctor_payload(Path(args.project_root).resolve())

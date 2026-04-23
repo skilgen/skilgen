@@ -81,6 +81,29 @@ export type ScoreHistoryPoint = {
   structure: number;
 };
 
+export type AnalyticsSkill = {
+  id: string;
+  domain: string;
+  skill_path: string;
+  repo_id: string;
+  repo_name: string;
+  repo_full_name: string;
+  loads?: number;
+  last_loaded_at?: string | null;
+};
+
+export type OrgAnalytics = {
+  total_loads_30d: number;
+  unique_skills_loaded: number;
+  total_skills: number;
+  top_skills: AnalyticsSkill[];
+  never_loaded: AnalyticsSkill[];
+  agent_breakdown: Record<string, number>;
+  daily_loads: { date: string; loads: number }[];
+  most_active_repo: { id: string; name: string; full_name: string; loads: number } | null;
+  most_loaded_skill: AnalyticsSkill | null;
+};
+
 async function apiFetch<T>(path: string, accessToken?: string | null): Promise<T | null> {
   const headers: HeadersInit = {
     "Content-Type": "application/json",
@@ -89,12 +112,17 @@ async function apiFetch<T>(path: string, accessToken?: string | null): Promise<T
     headers.Authorization = `Bearer ${accessToken}`;
   }
 
-  const res = await fetch(`${API_URL}${path}`, {
-    headers,
-    next: { revalidate: 60 },
-  });
-  if (!res.ok) return null;
-  return res.json();
+  try {
+    const res = await fetch(`${API_URL}${path}`, {
+      headers,
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch (error) {
+    console.error(`Failed to fetch ${path}:`, error);
+    return null;
+  }
 }
 
 export async function getMyOrg(accessToken: string | null): Promise<Org | null> {
@@ -107,6 +135,10 @@ export async function getOrgStats(accessToken: string | null, orgId: string): Pr
 
 export async function getOrgRepos(accessToken: string | null, orgId: string): Promise<Repo[] | null> {
   return apiFetch<Repo[]>(`/orgs/${orgId}/repos`, accessToken);
+}
+
+export async function getOrgAnalytics(accessToken: string | null, orgId: string): Promise<OrgAnalytics | null> {
+  return apiFetch<OrgAnalytics>(`/orgs/${orgId}/analytics`, accessToken);
 }
 
 export async function getRepo(accessToken: string | null, repoId: string): Promise<Repo | null> {

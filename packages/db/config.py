@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     QSTASH_CURRENT_SIGNING_KEY: str = ""
     QSTASH_NEXT_SIGNING_KEY: str = ""
 
+    ADMIN_SECRET: str = ""
+
     DEPLOYMENT_MODE: str = "saas"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
