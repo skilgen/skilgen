@@ -28,6 +28,19 @@ class PrCommentTests(unittest.TestCase):
         self.assertIn("| Coverage | 19/25 | — |", comment)
         self.assertIn("Run ID: `12345678`", comment)
 
+    def test_build_comment_includes_real_domain_badges(self) -> None:
+        """Comment includes a compact summary of analysed skill domains."""
+        comment = build_comment(
+            _score(74),
+            None,
+            "run-domains",
+            domains=["backend/api", "frontend", "backend", "roadmap", "auth", "billing", "data"],
+        )
+
+        self.assertIn("**6 domains analysed:**", comment)
+        self.assertIn("`auth` `backend` `billing` `data` `frontend` `roadmap`", comment)
+        self.assertNotIn("placeholder", comment.lower())
+
     def test_build_comment_with_positive_delta(self) -> None:
         """Comment includes positive total and dimension deltas."""
         comment = build_comment(

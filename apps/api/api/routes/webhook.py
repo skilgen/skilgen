@@ -147,6 +147,7 @@ async def _run_development_job(payload: dict[str, Any]) -> None:
             db,
             pr_number=payload.get("pr_number"),
             base_score=payload.get("base_score"),
+            head_sha=payload.get("head_sha"),
         )
 
 
@@ -156,7 +157,15 @@ async def _queue_analysis(request: Request, background_tasks: BackgroundTasks, p
     elif settings.DEPLOYMENT_MODE == "selfhosted":
         from apps.worker.worker import run_analysis_task
 
-        run_analysis_task.delay(payload["run_id"], payload["repo_id"], payload["installation_id"], payload["full_name"])
+        run_analysis_task.delay(
+            payload["run_id"],
+            payload["repo_id"],
+            payload["installation_id"],
+            payload["full_name"],
+            payload.get("pr_number"),
+            payload.get("base_score"),
+            payload.get("head_sha"),
+        )
         return True
     elif settings.DEPLOYMENT_MODE == "development":
         background_tasks.add_task(_run_development_job, payload)
@@ -292,6 +301,7 @@ async def github_webhook(
                         "ref": str(head.get("ref") or ""),
                         "pr_number": pr_number,
                         "base_score": base_score,
+                        "head_sha": str(head.get("sha") or ""),
                     },
                 )
                 if not success:

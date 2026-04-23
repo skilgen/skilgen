@@ -29,10 +29,22 @@ def run_analysis_task(
     repo_id: str,
     installation_id: int,
     full_name: str,
+    pr_number: int | None = None,
+    base_score: dict[str, int] | None = None,
+    head_sha: str | None = None,
 ) -> None:
     async def _run() -> None:
         async with AsyncSessionLocal() as db:
-            await run_analysis(run_id, repo_id, installation_id, full_name, db)
+            await run_analysis(
+                run_id,
+                repo_id,
+                installation_id,
+                full_name,
+                db,
+                pr_number=pr_number,
+                base_score=base_score,
+                head_sha=head_sha,
+            )
 
     try:
         asyncio.run(_run())
