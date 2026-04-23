@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 
 class ScoreResponse(BaseModel):
@@ -21,6 +21,35 @@ class OrgResponse(BaseModel):
     plan: str
     repo_count: int
     avg_score: float | None
+
+
+class OrgSettingsResponse(BaseModel):
+    """Response body for organization settings."""
+
+    id: str
+    login: str
+    name: str
+    plan: str
+    score_threshold: int
+    slack_webhook_url: str | None
+    notify_on_pr: bool
+    notify_on_stale: bool
+    github_app_installed: bool
+    github_installation_id: int | None
+    webhook_url: str
+    recent_deliveries: list[dict[str, object]]
+
+
+class OrgSettingsUpdate(BaseModel):
+    """Partial update body for organization settings."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    score_threshold: int | None = Field(default=None, ge=0, le=100)
+    slack_webhook_url: AnyHttpUrl | None = None
+    notify_on_pr: bool | None = None
+    notify_on_stale: bool | None = None
 
 
 class RepoResponse(BaseModel):

@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id
+from apps.api.api.notifications import build_test_notification_message, post_slack_message
 from packages.db.database import get_db
 from packages.db.models import AnalysisRun, Org, Repo, ScoreHistory, Skill, SkillUsageEvent
-from packages.db.schemas import OrgResponse, RepoResponse, ScoreResponse
+from packages.db.schemas import OrgResponse, OrgSettingsResponse, OrgSettingsUpdate, RepoResponse, ScoreResponse
 
 
 router = APIRouter(prefix="/orgs", tags=["orgs"])
+logger = logging.getLogger(__name__)
 
 
 def _last_30_score_dates() -> list[str]:
@@ -78,6 +82,67 @@ async def _repo_response(db: AsyncSession, repo: Repo) -> RepoResponse:
 def _assert_org_scope(requested_org_id: str, current_org_id: str) -> None:
     if requested_org_id != current_org_id:
         raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def _error(status_code: int, detail: str, code: str) -> JSONResponse:
+    """Build a structured JSON error response for organization routes."""
+    return JSONResponse(status_code=status_code, content={"detail": detail, "code": code})
+
+
+async def _rollback(db: AsyncSession, context: str) -> None:
+    """Rollback an org route transaction and log rollback failures."""
+    try:
+        await db.rollback()
+    except Exception:
+        logger.exception("Org route rollback failed during %s", context)
+
+
+def _org_settings_response(org: Org, installation_id: int | None, recent_runs: list[AnalysisRun]) -> OrgSettingsResponse:
+    """Convert an org and its GitHub state into a settings response."""
+    return OrgSettingsResponse(
+        id=org.id,
+        login=org.login,
+        name=org.name,
+        plan=org.plan,
+        score_threshold=int(org.score_threshold or 60),
+        slack_webhook_url=org.slack_webhook_url,
+        notify_on_pr=bool(org.notify_on_pr),
+        notify_on_stale=bool(org.notify_on_stale),
+        github_app_installed=installation_id is not None,
+        github_installation_id=installation_id,
+        webhook_url="/webhook/github",
+        recent_deliveries=[
+            {
+                "id": run.id,
+                "status": run.status,
+                "trigger": run.trigger,
+                "created_at": run.created_at.isoformat() if run.created_at else None,
+            }
+            for run in recent_runs
+        ],
+    )
+
+
+async def _load_org_settings(db: AsyncSession, org: Org) -> OrgSettingsResponse:
+    """Load org settings plus lightweight GitHub installation state."""
+    installation_id = (
+        await db.execute(
+            select(Repo.github_installation_id)
+            .where(Repo.org_id == org.id, Repo.github_installation_id.is_not(None), Repo.is_active.is_(True))
+            .order_by(desc(Repo.created_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    recent_runs = (
+        await db.execute(
+            select(AnalysisRun)
+            .join(Repo, Repo.id == AnalysisRun.repo_id)
+            .where(Repo.org_id == org.id)
+            .order_by(desc(AnalysisRun.created_at))
+            .limit(5)
+        )
+    ).scalars().all()
+    return _org_settings_response(org, installation_id, list(recent_runs))
 
 
 @router.get("/bootstrap")
@@ -193,6 +258,82 @@ async def get_org_stats(
         "active_agents": 0,
         "score_trend": trend,
     }
+
+
+@router.get("/{org_id}/settings", response_model=OrgSettingsResponse)
+async def get_org_settings(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgSettingsResponse | JSONResponse:
+    """Return organization settings for the authenticated organization."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            return _error(404, "Org not found", "ORG_NOT_FOUND")
+        return await _load_org_settings(db, org)
+    except SQLAlchemyError:
+        await _rollback(db, "org settings lookup")
+        return _error(400, "Could not load org settings", "ORG_SETTINGS_LOOKUP_FAILED")
+
+
+@router.patch("/{org_id}/settings", response_model=OrgSettingsResponse)
+async def update_org_settings(
+    org_id: str,
+    payload: OrgSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgSettingsResponse | JSONResponse:
+    """Update organization settings for the authenticated organization."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            return _error(404, "Org not found", "ORG_NOT_FOUND")
+
+        fields = payload.model_fields_set
+        if "name" in fields and payload.name is not None:
+            org.name = payload.name
+        if "score_threshold" in fields and payload.score_threshold is not None:
+            org.score_threshold = payload.score_threshold
+        if "slack_webhook_url" in fields:
+            org.slack_webhook_url = str(payload.slack_webhook_url) if payload.slack_webhook_url else None
+        if "notify_on_pr" in fields and payload.notify_on_pr is not None:
+            org.notify_on_pr = payload.notify_on_pr
+        if "notify_on_stale" in fields and payload.notify_on_stale is not None:
+            org.notify_on_stale = payload.notify_on_stale
+
+        await db.flush()
+        await db.commit()
+        return await _load_org_settings(db, org)
+    except SQLAlchemyError:
+        await _rollback(db, "org settings update")
+        return _error(400, "Could not update org settings", "ORG_SETTINGS_UPDATE_FAILED")
+
+
+@router.post("/{org_id}/test-notification", response_model=None)
+async def test_org_notification(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, bool] | JSONResponse:
+    """Send a test Slack notification for the authenticated organization."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        org = await db.get(Org, org_id)
+    except SQLAlchemyError:
+        await _rollback(db, "org test notification lookup")
+        return _error(400, "Could not load org settings", "ORG_SETTINGS_LOOKUP_FAILED")
+    if org is None:
+        return _error(404, "Org not found", "ORG_NOT_FOUND")
+    if not org.slack_webhook_url:
+        return _error(400, "Slack webhook URL is not configured", "SLACK_WEBHOOK_NOT_CONFIGURED")
+    try:
+        await post_slack_message(org.slack_webhook_url, build_test_notification_message(org))
+    except Exception:
+        return _error(502, "Could not send Slack test notification", "SLACK_TEST_FAILED")
+    return {"ok": True}
 
 
 def _last_30_dates(now: datetime) -> list[str]:

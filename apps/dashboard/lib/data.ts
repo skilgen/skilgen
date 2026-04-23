@@ -17,6 +17,26 @@ export type Org = {
   plan: string;
 };
 
+export type OrgSettings = {
+  id: string;
+  login: string;
+  name: string;
+  plan: string;
+  score_threshold: number;
+  slack_webhook_url: string | null;
+  notify_on_pr: boolean;
+  notify_on_stale: boolean;
+  github_app_installed: boolean;
+  github_installation_id: number | null;
+  webhook_url: string;
+  recent_deliveries: {
+    id: string;
+    status: string;
+    trigger: string;
+    created_at: string | null;
+  }[];
+};
+
 export type OrgStats = {
   repo_count: number;
   avg_score: number;
@@ -183,6 +203,10 @@ export async function getOrgRepos(accessToken: string | null, orgId: string): Pr
 
 export async function getOrgAnalytics(accessToken: string | null, orgId: string): Promise<OrgAnalytics | null> {
   return apiFetch<OrgAnalytics>(`/orgs/${orgId}/analytics`, accessToken);
+}
+
+export async function getOrgSettings(accessToken: string | null, orgId: string): Promise<OrgSettings | null> {
+  return apiFetch<OrgSettings>(`/orgs/${orgId}/settings`, accessToken);
 }
 
 export async function getRepo(accessToken: string | null, repoId: string): Promise<Repo | null> {
