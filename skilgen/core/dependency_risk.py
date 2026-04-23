@@ -10,7 +10,13 @@ except ImportError:  # pragma: no cover
 
 from skilgen.agents.relationship_mapper import build_import_graph
 from skilgen.agents.workspace_graph import build_workspace_graph
-from skilgen.core.models import DependencyRiskEdge, DependencyRiskGraph, DependencyRiskNode
+from skilgen.core.models import (
+    DependencyFinding,
+    DependencyRiskEdge,
+    DependencyRiskGraph,
+    DependencyRiskNode,
+    DependencyRiskReport,
+)
 
 
 _DEPRECATED_PACKAGES = {
@@ -21,12 +27,105 @@ _DEPRECATED_PACKAGES = {
 }
 _CONFIG_DIRS = {".git", ".skilgen", "skills", "node_modules", "__pycache__", ".venv", "venv"}
 _UNPINNED_PATTERNS = (
-    re.compile(r"^[A-Za-z0-9_.-]+$"),
     re.compile(r"^\^"),
     re.compile(r"^~"),
     re.compile(r"^\*"),
-    re.compile(r"^>=?"),
+    re.compile(r"^(>=|>|<=|<|!=|~=)"),
 )
+
+
+def _dependency_key(ecosystem: str, name: str) -> str:
+    """Return a stable key for joining local dependency data to vulnerability data."""
+    return f"{ecosystem}:{name.lower()}"
+
+
+def _clean_exact_version(version: str | None) -> str | None:
+    """Extract an exact package version when a manifest pin is strict enough for OSV."""
+    if not version:
+        return None
+    cleaned = version.strip()
+    if cleaned.startswith("=="):
+        return cleaned[2:].strip()
+    if cleaned.startswith("="):
+        return cleaned[1:].strip()
+    if cleaned.startswith("v") and re.match(r"^v\d", cleaned):
+        return cleaned
+    if re.match(r"^\d+(\.\d+)*([A-Za-z0-9_.+-]+)?$", cleaned):
+        return cleaned
+    return None
+
+
+def _upgrade_command(ecosystem: str, name: str, latest_version: str | None) -> str:
+    """Return the safest package-manager upgrade hint for a dependency."""
+    target = f"{name}@{latest_version}" if latest_version and ecosystem == "npm" else name
+    if ecosystem == "npm":
+        return f"npm install {target}"
+    if ecosystem == "pip":
+        version = f"=={latest_version}" if latest_version else ""
+        return f"python -m pip install --upgrade {name}{version}"
+    if ecosystem == "cargo":
+        return f"cargo update -p {name}"
+    if ecosystem == "go":
+        version = f"@{latest_version}" if latest_version else "@latest"
+        return f"go get {name}{version}"
+    return f"Upgrade {name}"
+
+
+def _risk_level(signals: list[str], cves: list[str]) -> str:
+    """Classify a dependency from local signals plus vulnerability data."""
+    if cves:
+        return "high"
+    if any(signal.startswith("deprecated:") for signal in signals):
+        return "medium"
+    if any(signal in {"version:loosely-pinned", "version:missing", "version:prerelease"} for signal in signals):
+        return "medium"
+    return "healthy"
+
+
+def _vulnerability_ids(vulnerabilities: dict[str, list[dict[str, object]]], ecosystem: str, name: str) -> list[str]:
+    """Extract CVE or advisory ids from an OSV response map."""
+    cves: list[str] = []
+    for item in vulnerabilities.get(_dependency_key(ecosystem, name), []):
+        aliases = item.get("aliases", [])
+        if isinstance(aliases, list):
+            cves.extend(str(alias) for alias in aliases if str(alias).startswith("CVE-"))
+        vuln_id = item.get("id")
+        if not cves and vuln_id:
+            cves.append(str(vuln_id))
+    return sorted(dict.fromkeys(cves))
+
+
+def _manifest_dependency_records(project_root: Path) -> list[tuple[str, str | None, str, str]]:
+    """Read supported dependency manifests into name, version, ecosystem, manifest path rows."""
+    records: list[tuple[str, str | None, str, str]] = []
+    for path in sorted(project_root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(project_root).as_posix()
+        if set(Path(relative).parts) & _CONFIG_DIRS:
+            continue
+        dependencies: list[tuple[str, str | None]] = []
+        ecosystem: str | None = None
+        if path.name == "package.json":
+            dependencies = _package_json_deps(path)
+            ecosystem = "npm"
+        elif path.name == "requirements.txt":
+            dependencies = _requirements_deps(path)
+            ecosystem = "pip"
+        elif path.name == "pyproject.toml":
+            dependencies = _pyproject_deps(path)
+            ecosystem = "pip"
+        elif path.name == "Cargo.toml":
+            dependencies = _cargo_deps(path)
+            ecosystem = "cargo"
+        elif path.name == "go.mod":
+            dependencies = _go_mod_deps(path)
+            ecosystem = "go"
+        if ecosystem is None:
+            continue
+        for name, version in dependencies:
+            records.append((name, version, ecosystem, relative))
+    return records
 
 
 def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
@@ -68,7 +167,7 @@ def _external_dependency_signals(name: str, version: str | None) -> list[str]:
         signals.append(f"deprecated:{_DEPRECATED_PACKAGES[name]}")
     if version:
         cleaned = version.strip()
-        if any(pattern.search(cleaned) for pattern in _UNPINNED_PATTERNS):
+        if cleaned.lower() in {"latest", "x", "*"} or any(pattern.search(cleaned) for pattern in _UNPINNED_PATTERNS):
             signals.append("version:loosely-pinned")
         if any(marker in cleaned.lower() for marker in ("alpha", "beta", "rc")):
             signals.append("version:prerelease")
@@ -345,3 +444,135 @@ def build_dependency_risk_graph(project_root: Path) -> DependencyRiskGraph:
         cycles=cycles,
         recommendations=recommendations,
     )
+
+
+def analyze_dependency_risks(
+    project_root: Path,
+    vulnerabilities: dict[str, list[dict[str, object]]] | None = None,
+) -> DependencyRiskReport:
+    """Build a dependency risk report from manifests and optional OSV findings."""
+    vulnerability_map = vulnerabilities or {}
+    findings: list[DependencyFinding] = []
+    seen: set[tuple[str, str, str | None]] = set()
+    for name, version, ecosystem, manifest_path in _manifest_dependency_records(project_root.resolve()):
+        dedupe_key = (ecosystem, name.lower(), version)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        signals = _external_dependency_signals(name, version)
+        cves = _vulnerability_ids(vulnerability_map, ecosystem, name)
+        risk_level = _risk_level(signals, cves)
+        latest_version: str | None = None
+        findings.append(
+            DependencyFinding(
+                name=name,
+                version=_clean_exact_version(version) or version,
+                ecosystem=ecosystem,
+                manifest_path=manifest_path,
+                risk_level=risk_level,
+                cves=cves,
+                latest_version=latest_version,
+                license=None,
+                signals=signals,
+                upgrade_command=_upgrade_command(ecosystem, name, latest_version) if risk_level != "healthy" else None,
+            )
+        )
+
+    risk_order = {"high": 0, "medium": 1, "low": 2, "healthy": 3}
+    dependencies = sorted(findings, key=lambda item: (risk_order.get(item.risk_level, 4), item.ecosystem, item.name.lower()))
+    high_risk = [item for item in dependencies if item.risk_level == "high"]
+    medium_risk = [item for item in dependencies if item.risk_level == "medium"]
+    healthy = [item for item in dependencies if item.risk_level == "healthy"]
+    low = [item for item in dependencies if item.risk_level == "low"]
+    risk_score = min(100, len(high_risk) * 30 + len(medium_risk) * 12 + len(low) * 4)
+    recommendations: list[str] = []
+    if high_risk:
+        recommendations.append("Upgrade or remove dependencies with known CVEs before relying on generated skills for this repo.")
+    if medium_risk:
+        recommendations.append("Pin loose or deprecated dependencies to reduce dependency drift across agent runs.")
+    if not dependencies:
+        recommendations.append("No supported dependency manifests were detected.")
+    return DependencyRiskReport(
+        dependencies=dependencies,
+        high_risk=high_risk,
+        medium_risk=medium_risk,
+        healthy=healthy,
+        total_count=len(dependencies),
+        risk_score=risk_score,
+        recommendations=recommendations,
+    )
+
+
+def dependency_report_to_dict(report: DependencyRiskReport) -> dict[str, object]:
+    """Convert a dependency risk report to a JSON-serializable dictionary."""
+    def finding_payload(item: DependencyFinding) -> dict[str, object]:
+        return {
+            "name": item.name,
+            "version": item.version,
+            "ecosystem": item.ecosystem,
+            "manifest_path": item.manifest_path,
+            "risk_level": item.risk_level,
+            "cves": item.cves,
+            "latest_version": item.latest_version,
+            "license": item.license,
+            "signals": item.signals,
+            "upgrade_command": item.upgrade_command,
+        }
+
+    return {
+        "high_risk": [finding_payload(item) for item in report.high_risk],
+        "medium_risk": [finding_payload(item) for item in report.medium_risk],
+        "healthy": [finding_payload(item) for item in report.healthy],
+        "dependencies": [finding_payload(item) for item in report.dependencies],
+        "total_count": report.total_count,
+        "risk_score": report.risk_score,
+        "recommendations": report.recommendations,
+    }
+
+
+def render_dependency_risk_report(report: DependencyRiskReport) -> str:
+    """Render a human-readable dependency risk report for the CLI."""
+    lines = [
+        "Dependency risk report",
+        "",
+        f"Total dependencies: {report.total_count}",
+        f"Risk score: {report.risk_score}/100",
+        f"High risk: {len(report.high_risk)}",
+        f"Medium risk: {len(report.medium_risk)}",
+        f"Healthy: {len(report.healthy)}",
+        "",
+    ]
+    risky = [item for item in report.dependencies if item.risk_level != "healthy"]
+    if risky:
+        lines.append("Risks:")
+        for item in risky:
+            marker = "⚠" if item.risk_level in {"high", "medium"} else "✓"
+            version = item.version or "unversioned"
+            cves = f" CVEs: {', '.join(item.cves)}" if item.cves else ""
+            signals = f" Signals: {', '.join(item.signals)}" if item.signals else ""
+            lines.append(f"  {marker} {item.name} ({item.ecosystem} {version}) — {item.risk_level}{cves}{signals}")
+            if item.upgrade_command:
+                lines.append(f"    Upgrade: {item.upgrade_command}")
+    else:
+        lines.append("✓ No dependency risks detected in supported manifests.")
+    if report.recommendations:
+        lines.extend(["", "Recommendations:"])
+        lines.extend(f"  - {item}" for item in report.recommendations)
+    return "\n".join(lines)
+
+
+def dependency_skill_signals(project_root: Path, ecosystem_filter: set[str] | None = None) -> list[str]:
+    """Return compact dependency bullets suitable for generated SKILL.md files."""
+    report = analyze_dependency_risks(project_root)
+    ecosystems = ecosystem_filter or {"pip", "npm", "cargo", "go"}
+    bullets: list[str] = []
+    for item in report.dependencies:
+        if item.ecosystem not in ecosystems:
+            continue
+        if item.risk_level == "healthy":
+            continue
+        detail = item.upgrade_command or ", ".join(item.signals) or "review manifest pinning"
+        bullets.append(f"`{item.name}` in `{item.manifest_path}` is {item.risk_level}; {detail}.")
+        if len(bullets) >= 5:
+            break
+    return bullets

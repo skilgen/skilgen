@@ -10,6 +10,7 @@ from skilgen.agents.codebase_signals import analyze_codebase
 from skilgen.agents.requirements_parser import parse_project_intent
 from skilgen.agents.roadmap_planner import build_roadmap_plan
 from skilgen.core.config import load_config
+from skilgen.core.dependency_risk import dependency_skill_signals
 from skilgen.core.models import ArchitectureBlueprint, ArchitectureDomain, SkillMaterializationPlan
 from skilgen.core.context import build_codebase_context
 from skilgen.core.models import RequirementsContext, SkillSpec
@@ -64,6 +65,33 @@ def _architecture_domain_map(context: RequirementsContext, project_root: Path) -
 
 def _materialization_plan_map(architecture: ArchitectureBlueprint) -> dict[str, SkillMaterializationPlan]:
     return {item.domain: item for item in architecture.materialization_plan}
+
+
+def _dependency_ecosystems_for_spec(spec: SkillSpec) -> set[str]:
+    """Map a skill domain to dependency ecosystems likely to affect that domain."""
+    domain_text = f"{spec.domain} {spec.sub_domain}".lower()
+    if "frontend" in domain_text or "component" in domain_text or "route" in domain_text:
+        return {"npm"}
+    if "backend" in domain_text or "api" in domain_text or "data" in domain_text or "service" in domain_text:
+        return {"pip", "go", "cargo", "npm"}
+    return {"pip", "npm", "go", "cargo"}
+
+
+def _with_dependency_patterns(spec: SkillSpec, signals: list[str]) -> SkillSpec:
+    """Append dependency risk bullets to a generated skill when manifests expose risks."""
+    if not signals:
+        return spec
+    return SkillSpec(
+        path=spec.path,
+        name=spec.name,
+        domain=spec.domain,
+        sub_domain=spec.sub_domain,
+        overview=spec.overview,
+        checks=spec.checks,
+        patterns=[*spec.patterns, ("Dependency signals", signals)],
+        how_to=spec.how_to,
+        references=spec.references,
+    )
 
 
 def _dynamic_parent_specs(
@@ -452,6 +480,14 @@ def build_skill_specs(
         if spec.domain in merged_domains and spec.sub_domain != "platform":
             continue
         specs.append(spec)
+    dependency_cache: dict[frozenset[str], list[str]] = {}
+    specs_with_dependencies: list[SkillSpec] = []
+    for spec in specs:
+        ecosystems = frozenset(_dependency_ecosystems_for_spec(spec))
+        if ecosystems not in dependency_cache:
+            dependency_cache[ecosystems] = dependency_skill_signals(project_root, set(ecosystems))
+        specs_with_dependencies.append(_with_dependency_patterns(spec, dependency_cache[ecosystems]))
+    specs = specs_with_dependencies
     seen: set[str] = set()
     unique: list[SkillSpec] = []
     for spec in specs:

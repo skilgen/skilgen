@@ -81,6 +81,27 @@ export type ScoreHistoryPoint = {
   structure: number;
 };
 
+export type Dependency = {
+  id: string;
+  name: string;
+  version: string | null;
+  ecosystem: string;
+  risk_level: "high" | "medium" | "low" | "healthy";
+  cves: string[];
+  latest_version: string | null;
+  license: string | null;
+  created_at: string;
+  upgrade_command: string | null;
+};
+
+export type DependencyReport = {
+  high_risk: Dependency[];
+  medium_risk: Dependency[];
+  healthy: Dependency[];
+  total_count: number;
+  risk_score: number;
+};
+
 async function apiFetch<T>(path: string, accessToken?: string | null): Promise<T | null> {
   const headers: HeadersInit = {
     "Content-Type": "application/json",
@@ -119,6 +140,10 @@ export async function getRepoSkills(accessToken: string | null, repoId: string):
 
 export async function getRepoScoreHistory(accessToken: string | null, repoId: string): Promise<ScoreHistoryPoint[] | null> {
   return apiFetch<ScoreHistoryPoint[]>(`/repos/${repoId}/score-history`, accessToken);
+}
+
+export async function getRepoDependencies(accessToken: string | null, repoId: string): Promise<DependencyReport | null> {
+  return apiFetch<DependencyReport>(`/repos/${repoId}/dependencies`, accessToken);
 }
 
 export async function getSkill(accessToken: string | null, skillId: string): Promise<Skill | null> {

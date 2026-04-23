@@ -16,6 +16,7 @@ from skilgen.agents import build_import_graph, build_roadmap_plan, extract_featu
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.core.analytics import log_skill_usage
+from skilgen.core.dependency_risk import analyze_dependency_risks, render_dependency_risk_report
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
 from skilgen.core.corpus_index import build_corpus_index
 from skilgen.core.runtime_data import purge_runtime_data
@@ -290,6 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = subparsers.add_parser("analyze", help="Assemble framework, signal, and relationship analysis for the project.")
     analyze.add_argument("--project-root", default=".")
     analyze.add_argument("--requirements")
+    analyze.add_argument("--deps", action="store_true", help="Show dependency CVE, version drift, and upgrade guidance.")
 
     diff = subparsers.add_parser("diff", help="Show what changed since the last generation and which skills are stale.")
     diff.add_argument("--project-root", default=".")
@@ -559,6 +561,10 @@ def main() -> None:
         print(json.dumps({"import_graph": build_import_graph(Path(args.project_root).resolve())}, indent=2))
         return
     if args.command == "analyze":
+        if args.deps:
+            report = analyze_dependency_risks(Path(args.project_root).resolve())
+            print(render_dependency_risk_report(report))
+            return
         print(json.dumps(analyze_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None), indent=2))
         return
     if args.command == "diff":

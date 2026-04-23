@@ -306,6 +306,31 @@ class DependencyRiskGraph:
 
 
 @dataclass(frozen=True)
+class DependencyFinding:
+    name: str
+    version: str | None
+    ecosystem: str
+    manifest_path: str
+    risk_level: str
+    cves: list[str]
+    latest_version: str | None
+    license: str | None
+    signals: list[str]
+    upgrade_command: str | None
+
+
+@dataclass(frozen=True)
+class DependencyRiskReport:
+    dependencies: list[DependencyFinding]
+    high_risk: list[DependencyFinding]
+    medium_risk: list[DependencyFinding]
+    healthy: list[DependencyFinding]
+    total_count: int
+    risk_score: int
+    recommendations: list[str]
+
+
+@dataclass(frozen=True)
 class EvidenceGraph:
     language_inventory: dict[str, int]
     dominant_languages: list[str]

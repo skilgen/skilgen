@@ -4,9 +4,12 @@ import { ArrowLeft, GitBranch, ShieldAlert } from "lucide-react";
 
 import {
   API_URL,
+  getRepoDependencies,
   getRepo,
   getRepoScoreHistory,
   getRepoSkills,
+  type Dependency,
+  type DependencyReport,
   type Repo,
   type Score,
   type ScoreHistoryPoint,
@@ -149,6 +152,102 @@ function ScoreHistoryChart({ points }: { points: ScoreHistoryPoint[] }) {
   );
 }
 
+function riskBadgeClass(riskLevel: Dependency["risk_level"]): string {
+  if (riskLevel === "high") return "bg-red-900/40 text-red-300";
+  if (riskLevel === "medium") return "bg-amber-900/30 text-amber-300";
+  if (riskLevel === "low") return "bg-blue-900/30 text-blue-300";
+  return "bg-green-900/25 text-green-300";
+}
+
+function RiskBadge({ riskLevel }: { riskLevel: Dependency["risk_level"] }) {
+  return <span className={`inline-flex rounded-full px-2 py-0.5 text-[12px] font-semibold ${riskBadgeClass(riskLevel)}`}>{riskLevel}</span>;
+}
+
+function DependencyMetric({ label, value, suffix = "" }: { label: string; value: number; suffix?: string }) {
+  return (
+    <article className="rounded-xl border border-[color:var(--bg-border)] bg-black/10 p-4">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">{label}</div>
+      <div className="mt-2 text-[24px] font-bold text-[color:var(--text-primary)]">
+        {value}
+        {suffix ? <span className="ml-1 text-[13px] font-medium text-[color:var(--text-tertiary)]">{suffix}</span> : null}
+      </div>
+    </article>
+  );
+}
+
+function DependenciesSection({ report }: { report: DependencyReport | null }) {
+  const dependencies = [
+    ...(report?.high_risk ?? []),
+    ...(report?.medium_risk ?? []),
+    ...(report?.healthy ?? []),
+  ];
+
+  return (
+    <section className="mb-8 overflow-hidden rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
+      <div className="border-b border-[color:var(--bg-border)] px-5 py-4">
+        <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">Dependencies</h2>
+        <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Dependency risk summary for the latest analysis run</p>
+      </div>
+      <div className="grid gap-3 border-b border-[color:var(--bg-border)] p-5 md:grid-cols-4">
+        <DependencyMetric label="Risk score" suffix="/100" value={report?.risk_score ?? 0} />
+        <DependencyMetric label="High risk" value={report?.high_risk.length ?? 0} />
+        <DependencyMetric label="Medium risk" value={report?.medium_risk.length ?? 0} />
+        <DependencyMetric label="Total deps" value={report?.total_count ?? 0} />
+      </div>
+      {report && report.high_risk.length > 0 ? (
+        <div className="border-b border-[color:var(--bg-border)] p-5">
+          <h3 className="mb-3 text-[13px] font-semibold uppercase tracking-wide text-red-300">High risk CVEs</h3>
+          <div className="space-y-3">
+            {report.high_risk.map((dependency) => (
+              <div className="rounded-lg border border-red-900/40 bg-red-950/20 p-4" key={dependency.id}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-[color:var(--text-primary)]">{dependency.name}</span>
+                  <RiskBadge riskLevel={dependency.risk_level} />
+                  <span className="font-mono text-[12px] text-[color:var(--text-tertiary)]">{dependency.ecosystem}</span>
+                </div>
+                <p className="mt-2 text-[13px] text-[color:var(--text-secondary)]">CVEs: {dependency.cves.join(", ") || "OSV advisory found"}</p>
+                {dependency.upgrade_command ? (
+                  <code className="mt-3 block rounded-md bg-black/30 px-3 py-2 font-mono text-[12px] text-[color:var(--accent-primary)]">{dependency.upgrade_command}</code>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] border-collapse text-left text-[13px]">
+          <thead className="text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            <tr className="border-b border-[color:var(--bg-border)]">
+              <th className="px-5 py-3 font-semibold">Package</th>
+              <th className="px-5 py-3 font-semibold">Ecosystem</th>
+              <th className="px-5 py-3 font-semibold">Version</th>
+              <th className="px-5 py-3 font-semibold">Risk</th>
+              <th className="px-5 py-3 font-semibold">CVEs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {dependencies.length > 0 ? (
+              dependencies.map((dependency) => (
+                <tr className="border-b border-[color:var(--bg-elevated)] last:border-b-0" key={dependency.id}>
+                  <td className="px-5 py-4 font-medium text-[color:var(--text-primary)]">{dependency.name}</td>
+                  <td className="px-5 py-4 text-[color:var(--text-secondary)]">{dependency.ecosystem}</td>
+                  <td className="px-5 py-4 font-mono text-[12px] text-[color:var(--text-tertiary)]">{dependency.version || "—"}</td>
+                  <td className="px-5 py-4"><RiskBadge riskLevel={dependency.risk_level} /></td>
+                  <td className="px-5 py-4 text-[color:var(--text-secondary)]">{dependency.cves.join(", ") || "—"}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td className="px-5 py-8 text-center text-[color:var(--text-secondary)]" colSpan={5}>No supported dependency manifests were found.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function SkillsTable({ repoId, skills }: { repoId: string; skills: RepoSkill[] }) {
   const sortedSkills = [...skills].sort((left, right) => (right.score?.total ?? 0) - (left.score?.total ?? 0));
 
@@ -215,16 +314,19 @@ export default async function RepoDetailPage({ params }: PageProps) {
   let repo: RepoDetail | null = null;
   let skills: RepoSkill[] = [];
   let scoreHistory: ScoreHistoryPoint[] = [];
+  let dependencies: DependencyReport | null = null;
 
   try {
-    const [repoPayload, skillsPayload, historyPayload] = await Promise.all([
+    const [repoPayload, skillsPayload, historyPayload, dependencyPayload] = await Promise.all([
       getRepo(accessToken, repoId),
       getRepoSkills(accessToken, repoId),
       getRepoScoreHistory(accessToken, repoId),
+      getRepoDependencies(accessToken, repoId),
     ]);
     repo = repoPayload as RepoDetail | null;
     skills = ((skillsPayload ?? []) as RepoSkill[]) ?? [];
     scoreHistory = historyPayload ?? [];
+    dependencies = dependencyPayload;
   } catch (error) {
     console.error("Failed to fetch repo detail:", error);
   }
@@ -294,6 +396,8 @@ export default async function RepoDetailPage({ params }: PageProps) {
       <div className="mb-8">
         <ScoreHistoryChart points={scoreHistory} />
       </div>
+
+      <DependenciesSection report={dependencies} />
 
       {skills.length > 0 ? (
         <SkillsTable repoId={repoId} skills={skills} />

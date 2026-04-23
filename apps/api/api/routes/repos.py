@@ -12,8 +12,8 @@ from apps.api.api.auth import get_current_org_id, get_current_user
 from apps.api.api.routes.orgs import _repo_response, _score_response
 from apps.api.api.routes.webhook import _queue_analysis
 from packages.db.database import get_db
-from packages.db.models import AnalysisRun, Repo, ScoreHistory, Skill, SkillVersion
-from packages.db.schemas import AnalysisRunResponse
+from packages.db.models import AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillVersion
+from packages.db.schemas import AnalysisRunResponse, DependencyReportResponse, DependencyResponse
 from skilgen.core.score import render_repo_score_badge_svg
 
 
@@ -161,6 +161,52 @@ async def get_score_history(
         }
         for row in reversed(rows)
     ]
+
+
+@router.get("/{repo_id}/dependencies", response_model=DependencyReportResponse)
+async def get_dependencies(
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> DependencyReportResponse:
+    """Return the latest dependency risk report for a repo in the current org."""
+    await _repo_in_scope(db, repo_id, current_org_id)
+    try:
+        latest_run_result = await db.execute(
+            select(AnalysisRun.id)
+            .join(Dependency, Dependency.run_id == AnalysisRun.id)
+            .where(AnalysisRun.repo_id == repo_id)
+            .order_by(desc(AnalysisRun.created_at))
+            .limit(1)
+        )
+        latest_run_id = latest_run_result.scalar_one_or_none()
+        if latest_run_id is None:
+            return DependencyReportResponse(high_risk=[], medium_risk=[], healthy=[], total_count=0, risk_score=0)
+
+        dependencies = (
+            await db.execute(
+                select(Dependency)
+                .where(Dependency.repo_id == repo_id, Dependency.run_id == latest_run_id)
+                .order_by(Dependency.risk_level, Dependency.ecosystem, Dependency.name)
+            )
+        ).scalars().all()
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"detail": "Unable to load dependency risk report", "code": "DEPENDENCY_REPORT_FAILED"},
+        ) from exc
+
+    high_risk = [_dependency_response(item) for item in dependencies if item.risk_level == "high"]
+    medium_risk = [_dependency_response(item) for item in dependencies if item.risk_level == "medium"]
+    healthy = [_dependency_response(item) for item in dependencies if item.risk_level == "healthy"]
+    return DependencyReportResponse(
+        high_risk=high_risk,
+        medium_risk=medium_risk,
+        healthy=healthy,
+        total_count=len(dependencies),
+        risk_score=_dependency_risk_score(list(dependencies)),
+    )
 
 
 @router.get("/{repo_id}/runs", response_model=list[AnalysisRunResponse])
