@@ -20,6 +20,13 @@ from skilgen.core.dependency_risk import analyze_dependency_risks, render_depend
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
 from skilgen.core.corpus_index import build_corpus_index
 from skilgen.core.runtime_data import purge_runtime_data
+from skilgen.core.enterprise_policy import (
+    enterprise_compliance_report,
+    enterprise_policy_checks,
+    render_policy_checks,
+    validate_policy_file,
+    write_default_policy,
+)
 from skilgen.core.score import ci_result, score_badge_markdown
 from skilgen.registry_client import RegistryClientError, import_skill as import_registry_skill, publish_skill as publish_registry_skill
 from skilgen.delivery import run_delivery, watch_delivery
@@ -485,6 +492,19 @@ def build_parser() -> argparse.ArgumentParser:
     enterprise_list = enterprise_subparsers.add_parser("list", help="List enterprise skill packs installed for this project.")
     enterprise_list.add_argument("--project-root", default=".")
 
+    enterprise_policy = enterprise_subparsers.add_parser("policy", help="Manage enterprise compliance policy.")
+    enterprise_policy_subparsers = enterprise_policy.add_subparsers(dest="policy_command", required=True)
+    enterprise_policy_init = enterprise_policy_subparsers.add_parser("init", help="Create .skilgen/policy.yml with enterprise defaults.")
+    enterprise_policy_init.add_argument("--project-root", default=".")
+    enterprise_policy_validate = enterprise_policy_subparsers.add_parser("validate", help="Validate .skilgen/policy.yml.")
+    enterprise_policy_validate.add_argument("--project-root", default=".")
+    enterprise_policy_check = enterprise_policy_subparsers.add_parser("check", help="Check the project against .skilgen/policy.yml.")
+    enterprise_policy_check.add_argument("--project-root", default=".")
+
+    enterprise_report = enterprise_subparsers.add_parser("report", help="Show the enterprise compliance report.")
+    enterprise_report.add_argument("--project-root", default=".")
+    enterprise_report.add_argument("--json", action="store_true", help="Emit the compliance report as JSON.")
+
     enterprise_ingest = enterprise_subparsers.add_parser("ingest", help="Ingest an existing enterprise skill pack from a local path or git repo.")
     enterprise_ingest.add_argument("--project-root", default=".")
     enterprise_ingest.add_argument("--name", required=True)
@@ -594,10 +614,13 @@ def main() -> None:
         if not config_path.exists():
             config_path.write_text(render_default_config(args.provider), encoding="utf-8")
         ci_workflow_path = write_ci_workflow(project_root) if args.ci else None
+        policy_file = write_default_policy(project_root) if args.ci else None
         worker = ensure_auto_update_worker(project_root)
         payload = {"config_path": str(config_path), "auto_update": worker}
         if ci_workflow_path is not None:
             payload["ci_workflow_path"] = str(ci_workflow_path)
+        if policy_file is not None:
+            payload["policy_path"] = str(policy_file)
         print(json.dumps(payload, indent=2))
         return
     if args.command == "index":
@@ -904,6 +927,39 @@ def main() -> None:
         if args.enterprise_command == "list":
             emit_progress("Loading enterprise skill packs installed for this project.")
             print(json.dumps({"skills": list_enterprise_skills(root)}, indent=2))
+            return
+        if args.enterprise_command == "policy":
+            if args.policy_command == "init":
+                policy_file = write_default_policy(root)
+                print(json.dumps({"policy_path": str(policy_file)}, indent=2))
+                return
+            if args.policy_command == "validate":
+                passed, message = validate_policy_file(root)
+                print(message)
+                if not passed:
+                    sys.exit(1)
+                return
+            if args.policy_command == "check":
+                try:
+                    checks = enterprise_policy_checks(root)
+                except ValueError as exc:
+                    print(f"Enterprise policy check failed: {exc}", file=sys.stderr)
+                    sys.exit(1)
+                print(render_policy_checks(checks))
+                if not all(check.passed for check in checks):
+                    sys.exit(1)
+                return
+        if args.enterprise_command == "report":
+            try:
+                payload = enterprise_compliance_report(root)
+            except ValueError as exc:
+                print(f"Enterprise report failed: {exc}", file=sys.stderr)
+                sys.exit(1)
+            if args.json:
+                print(json.dumps(payload, indent=2))
+            else:
+                checks = enterprise_policy_checks(root)
+                print(render_policy_checks(checks))
             return
         if args.enterprise_command == "ingest":
             emit_progress("Ingesting an existing enterprise skill pack into .skilgen/enterprise-skills.")
