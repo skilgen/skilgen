@@ -91,6 +91,37 @@ class DependencyReportResponse(BaseModel):
     risk_score: int
 
 
+class RegistrySkillSummaryResponse(BaseModel):
+    id: str
+    org_id: str
+    repo_id: str
+    skill_id: str
+    domain: str
+    name: str
+    description: str
+    is_public: bool
+    is_official: bool
+    import_count: int
+    tags: list[str]
+    created_at: datetime
+    score_total: int
+
+
+class RegistryListResponse(BaseModel):
+    skills: list[RegistrySkillSummaryResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class RegistrySkillDetailResponse(RegistrySkillSummaryResponse):
+    content: str
+    content_hash: str | None
+    skill_path: str
+    repo_name: str
+    repo_full_name: str
+
+
 class AnalysisRunResponse(BaseModel):
     id: str
     status: str

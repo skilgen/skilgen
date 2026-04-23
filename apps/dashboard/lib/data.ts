@@ -125,6 +125,29 @@ export type OrgAnalytics = {
   most_loaded_skill: AnalyticsSkill | null;
 };
 
+export type RegistrySkill = {
+  id: string;
+  org_id: string;
+  repo_id: string;
+  skill_id: string;
+  domain: string;
+  name: string;
+  description: string;
+  is_public: boolean;
+  is_official: boolean;
+  import_count: number;
+  tags: string[];
+  created_at: string;
+  score_total: number;
+};
+
+export type RegistryList = {
+  skills: RegistrySkill[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 async function apiFetch<T>(path: string, accessToken?: string | null): Promise<T | null> {
   const headers: HeadersInit = {
     "Content-Type": "application/json",
@@ -188,4 +211,9 @@ export async function getSkillVersions(accessToken: string | null, skillId: stri
 
 export async function getSkillVersion(accessToken: string | null, skillId: string, versionId: string): Promise<SkillVersion | null> {
   return apiFetch<SkillVersion>(`/skills/${skillId}/versions/${versionId}`, accessToken);
+}
+
+export async function getRegistrySkills(params: URLSearchParams): Promise<RegistryList | null> {
+  const query = params.toString();
+  return apiFetch<RegistryList>(`/registry${query ? `?${query}` : ""}`, null);
 }

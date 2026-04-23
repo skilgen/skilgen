@@ -3,6 +3,7 @@ from packages.db.models.base import Base
 from packages.db.models.dependency import Dependency
 from packages.db.models.org import Org
 from packages.db.models.repo import Repo
+from packages.db.models.registry_skill import RegistrySkill
 from packages.db.models.score_history import ScoreHistory
 from packages.db.models.skill import Skill
 from packages.db.models.skill_usage_event import SkillUsageEvent
@@ -14,6 +15,7 @@ __all__ = [
     "Dependency",
     "Org",
     "Repo",
+    "RegistrySkill",
     "ScoreHistory",
     "Skill",
     "SkillUsageEvent",
