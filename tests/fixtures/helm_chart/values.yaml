@@ -1,0 +1,11 @@
+replicaCount: 2
+image:
+  repository: ghcr.io/skilgen/api
+  tag: "1.2.3"
+service:
+  type: ClusterIP
+  port: 80
+secret:
+  stripeKey: sk_live_secret
+postgresql:
+  enabled: true
