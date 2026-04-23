@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime
+from html import escape
 from pathlib import Path
 from threading import Lock
+from urllib.parse import quote
 
 from skilgen.agents.codebase_signals import CODE_EXTENSIONS, IGNORED_PARTS
 from skilgen.core.context import build_codebase_context
@@ -565,6 +567,84 @@ def _badge_color(score: float) -> str:
     if score >= 60:
         return "#d29922"
     return "#cf222e"
+
+
+def shield_badge_color(score: float) -> str:
+    """Return the shields.io color name for a Skilgen Score."""
+    if score >= 85:
+        return "brightgreen"
+    if score >= 70:
+        return "green"
+    if score >= 50:
+        return "yellow"
+    return "red"
+
+
+def score_badge_markdown(score_payload: dict[str, object]) -> str:
+    """Render a shields.io Markdown badge for the current score payload."""
+    score = float(score_payload["score"])
+    message = quote(f"{int(round(score))}/100", safe="")
+    color = shield_badge_color(score)
+    return f"![Skilgen Score](https://img.shields.io/badge/Skilgen_Score-{message}-{color})"
+
+
+def ci_result(
+    score_payload: dict[str, object],
+    *,
+    min_score: int = 60,
+    min_groundedness: int = 15,
+    min_coverage: int = 15,
+) -> tuple[bool, str]:
+    """Evaluate score payload thresholds and return a CI message."""
+    score = int(round(float(score_payload["score"])))
+    subscores = score_payload["subscores"]
+    groundedness = int(round(float(subscores["groundedness"]["score"])))
+    coverage = int(round(float(subscores["coverage"]["score"])))
+    if score < min_score:
+        return False, f"CI FAIL: Skilgen Score {score}/100 is below minimum {min_score}/100. Run skilgen deliver to fix."
+    if groundedness < min_groundedness:
+        return False, (
+            f"CI FAIL: Groundedness {groundedness}/25 is below minimum "
+            f"{min_groundedness}/25. Run skilgen deliver to fix."
+        )
+    if coverage < min_coverage:
+        return False, f"CI FAIL: Coverage {coverage}/25 is below minimum {min_coverage}/25. Run skilgen deliver to fix."
+    return True, f"CI PASS: Skilgen Score {score}/100 ✓"
+
+
+def render_repo_score_badge_svg(total_score: int, *, style: str = "flat") -> str:
+    """Render an inline SVG badge for a stored repository score."""
+    if style not in {"flat", "flat-square", "for-the-badge"}:
+        raise ValueError("Unsupported badge style")
+    label = "Skilgen Score"
+    bounded_score = max(0, min(100, total_score))
+    message = f"{bounded_score}/100"
+    color = {
+        "brightgreen": "#4c1",
+        "green": "#97ca00",
+        "yellow": "#dfb317",
+        "red": "#e05d44",
+    }[shield_badge_color(float(bounded_score))]
+    height = 28 if style == "for-the-badge" else 20
+    font_size = 10 if style == "for-the-badge" else 11
+    label_width = 134 if style == "for-the-badge" else 108
+    value_width = 74 if style == "for-the-badge" else 58
+    radius = 0 if style == "flat-square" else 3
+    width = label_width + value_width
+    baseline = 18 if style == "for-the-badge" else 14
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" role="img" aria-label="{escape(label)}: {escape(message)}">
+<mask id="round">
+  <rect width="{width}" height="{height}" rx="{radius}" fill="#fff"/>
+</mask>
+<g mask="url(#round)">
+  <rect width="{label_width}" height="{height}" fill="#555"/>
+  <rect x="{label_width}" width="{value_width}" height="{height}" fill="{color}"/>
+</g>
+<g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="{font_size}">
+  <text x="{label_width / 2}" y="{baseline}">{escape(label)}</text>
+  <text x="{label_width + value_width / 2}" y="{baseline}">{escape(message)}</text>
+</g>
+</svg>"""
 
 
 def build_score_recommendations(scorecard: dict[str, object]) -> list[str]:

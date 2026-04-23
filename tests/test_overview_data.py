@@ -60,6 +60,7 @@ def test_org_repos_include_installation_id_for_manual_analysis() -> None:
 
     assert "installation_id=repo.github_installation_id" in orgs_source
     assert "round(avg_score or 0)" in orgs_source
-    assert ".limit(7)" in orgs_source
+    assert "ScoreHistory.recorded_at >= start_at" in orgs_source
+    assert "_last_30_score_dates" in orgs_source
     assert "score_trend" in orgs_source
     assert "installation_id" in RepoResponse.model_fields
