@@ -55,6 +55,44 @@ async def _latest_repo_score_total(db: AsyncSession, repo_id: str) -> int:
     return int(latest_history or 0)
 
 
+def _dependency_upgrade_command(dependency: Dependency) -> str | None:
+    """Return the safest package-manager upgrade command for a dependency."""
+    ecosystem = str(dependency.ecosystem or "").lower()
+    if ecosystem == "pip":
+        return f"python -m pip install --upgrade {dependency.name}"
+    if ecosystem == "npm":
+        return f"npm update {dependency.name}"
+    if ecosystem == "cargo":
+        return f"cargo update -p {dependency.name}"
+    if ecosystem == "go":
+        return f"go get {dependency.name}@latest"
+    return None
+
+
+def _dependency_response(dependency: Dependency) -> DependencyResponse:
+    """Serialize a stored dependency row for API responses."""
+    raw_cves = dependency.cves or []
+    cves = [str(item) for item in raw_cves] if isinstance(raw_cves, list) else []
+    return DependencyResponse(
+        id=str(dependency.id),
+        name=str(dependency.name),
+        version=dependency.version,
+        ecosystem=str(dependency.ecosystem),
+        risk_level=str(dependency.risk_level),
+        cves=cves,
+        latest_version=dependency.latest_version,
+        license=dependency.license,
+        created_at=dependency.created_at,
+        upgrade_command=_dependency_upgrade_command(dependency),
+    )
+
+
+def _dependency_risk_score(dependencies: list[Dependency]) -> int:
+    """Compute a 0-100 dependency risk score where lower means safer."""
+    weights = {"high": 30, "medium": 15, "low": 5, "healthy": 0}
+    return min(100, sum(weights.get(str(item.risk_level), 0) for item in dependencies))
+
+
 @router.get("/{repo_id}")
 async def get_repo(
     repo_id: str,
