@@ -15,7 +15,8 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.github import clone_repo
-from packages.db.models import AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillVersion
+from apps.api.api.notifications import build_stale_skill_message, post_slack_message
+from packages.db.models import AnalysisRun, Dependency, Org, Repo, ScoreHistory, Skill, SkillVersion
 from skilgen.core.dependency_risk import analyze_dependency_risks
 from skilgen.core.models import DependencyFinding, DependencyRiskReport
 
@@ -395,6 +396,37 @@ async def update_repo_analysed(db: AsyncSession, repo_id: str) -> None:
         repo.last_analysed_at = datetime.utcnow()
 
 
+def _stale_high_usage_skills(skills: list[Skill]) -> list[Skill]:
+    """Return skills that are stale enough and loaded often enough to alert."""
+    return [
+        skill
+        for skill in skills
+        if int(skill.score_freshness or 0) < 20 and int(skill.load_count_30d or 0) > 5
+    ]
+
+
+async def _notify_stale_skills(db: AsyncSession, repo_id: str, repo_full_name: str, skills: list[Skill]) -> None:
+    """Send a non-blocking Slack alert for stale high-usage skills when enabled."""
+    try:
+        stale_skills = _stale_high_usage_skills(skills)
+        if not stale_skills:
+            return
+        result = await db.execute(select(Org).join(Repo, Repo.org_id == Org.id).where(Repo.id == repo_id))
+        org = result.scalar_one_or_none()
+        if org is None or not org.slack_webhook_url or not org.notify_on_stale:
+            return
+        await post_slack_message(org.slack_webhook_url, build_stale_skill_message(org, repo_full_name, stale_skills))
+        LOGGER.info(
+            "Slack stale skill alert sent",
+            extra={"org_id": org.id, "repo_id": repo_id, "stale_skill_count": len(stale_skills)},
+        )
+    except Exception as exc:
+        LOGGER.warning(
+            "Slack stale skill alert failed",
+            extra={"repo_id": repo_id, "error": str(exc)},
+        )
+
+
 async def run_analysis(
     run_id: str,
     repo_id: str,
@@ -442,6 +474,7 @@ async def run_analysis(
         )
         await update_repo_analysed(db, repo_id)
         await db.commit()
+        await _notify_stale_skills(db, repo_id, full_name, saved_skills)
 
         if pr_number is not None:
             from apps.api.api.pr_comment import post_pr_comment
