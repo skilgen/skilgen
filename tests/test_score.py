@@ -3,9 +3,10 @@ import subprocess
 from tempfile import TemporaryDirectory
 import threading
 import unittest
+from unittest.mock import patch
 
 from skilgen.core.repo_state import classify_repo_change
-from skilgen.core.score import compute_skillgen_score, load_score_history, record_score_history, score_history_payload
+from skilgen.core.score import compute_skillgen_score, freshness_subscore, load_score_history, record_score_history, score_history_payload
 
 
 class ScoreTests(unittest.TestCase):
@@ -30,6 +31,29 @@ class ScoreTests(unittest.TestCase):
             self.assertLessEqual(payload["score"], payload["raw_score"])
             self.assertIn("domains", payload)
             self.assertIn("skills", payload)
+
+    def test_freshness_defaults_to_partial_credit_without_git_metadata(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "app.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+
+            score, payload = freshness_subscore(root)
+
+            self.assertEqual(score, 15.0)
+            self.assertEqual(payload["reason"], "missing_freshness_state_no_git")
+
+    def test_freshness_defaults_to_partial_credit_when_git_binary_missing(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "app.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+
+            with patch("skilgen.core.score.subprocess.run", side_effect=FileNotFoundError):
+                score, payload = freshness_subscore(root)
+
+            self.assertEqual(score, 15.0)
+            self.assertEqual(payload["reason"], "missing_freshness_state_no_git")
 
     def test_score_exposes_domain_and_skill_drilldowns(self) -> None:
         with TemporaryDirectory() as tmp:

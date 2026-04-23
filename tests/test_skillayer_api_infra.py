@@ -11,7 +11,7 @@ from apps.api.api import auth
 from apps.api.api.index import app
 from apps.api.api.routes.webhook import _verify_github_signature
 from packages.db.config import settings
-from packages.db.models import Base, Repo
+from packages.db.models import Base, Org, Repo
 
 
 def test_health_reports_degraded_without_database(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -38,6 +38,7 @@ def test_github_webhook_signature_validation(monkeypatch: pytest.MonkeyPatch) ->
 def test_shared_db_metadata_contains_skillayer_tables() -> None:
     assert {"orgs", "repos", "analysis_runs", "skills", "score_history"}.issubset(Base.metadata.tables)
     assert hasattr(Repo, "github_installation_id")
+    assert hasattr(Org, "score_threshold")
 
 
 def test_selfhosted_oidc_jwks_uri_default(monkeypatch: pytest.MonkeyPatch) -> None:

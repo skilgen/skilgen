@@ -26,6 +26,10 @@ class FakeAsyncClient:
         self.requests.append({"method": "PATCH", "url": url, **kwargs})
         return self.response
 
+    async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        self.requests.append({"method": "POST", "url": url, **kwargs})
+        return self.response
+
 
 @pytest.fixture(autouse=True)
 def fake_github_client(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,6 +98,44 @@ async def test_update_pr_comment_makes_patch_request() -> None:
             "method": "PATCH",
             "url": "https://api.github.com/repos/owner/repo/issues/comments/303",
             "json": {"body": "updated body"},
+            "headers": {
+                "Authorization": "Bearer token",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            "timeout": 10.0,
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_create_check_run_uses_threshold_for_failure_payload() -> None:
+    FakeAsyncClient.response = httpx.Response(201, json={"id": 404})
+
+    created = await pr_comment.create_check_run(
+        "owner/repo",
+        789,
+        "abc123",
+        "run-checks",
+        {"total": 69},
+        70,
+    )
+
+    assert created is True
+    assert FakeAsyncClient.requests == [
+        {
+            "method": "POST",
+            "url": "https://api.github.com/repos/owner/repo/check-runs",
+            "json": {
+                "name": "Skillayer / Skilgen Score",
+                "head_sha": "abc123",
+                "status": "completed",
+                "conclusion": "failure",
+                "output": {
+                    "title": "Skilgen Score: 69/100",
+                    "summary": "Threshold: 70/100\n\nRun ID: `run-chec`",
+                },
+            },
             "headers": {
                 "Authorization": "Bearer token",
                 "Accept": "application/vnd.github+json",

@@ -15,7 +15,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.github import clone_repo
-from packages.db.models import AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillVersion
+from packages.db.models import AnalysisRun, Dependency, Org, Repo, ScoreHistory, Skill, SkillVersion
 from skilgen.core.dependency_risk import analyze_dependency_risks
 from skilgen.core.models import DependencyFinding, DependencyRiskReport
 
@@ -395,6 +395,19 @@ async def update_repo_analysed(db: AsyncSession, repo_id: str) -> None:
         repo.last_analysed_at = datetime.utcnow()
 
 
+async def _score_threshold_for_repo(db: AsyncSession, repo_id: str) -> int:
+    """Fetch the org-level score threshold for a repository."""
+    result = await db.execute(
+        select(Org.score_threshold)
+        .join(Repo, Repo.org_id == Org.id)
+        .where(Repo.id == repo_id)
+    )
+    try:
+        return int(result.scalar_one_or_none() or 70)
+    except (TypeError, ValueError):
+        return 70
+
+
 async def run_analysis(
     run_id: str,
     repo_id: str,
@@ -403,6 +416,7 @@ async def run_analysis(
     db: AsyncSession,
     pr_number: int | None = None,
     base_score: dict[str, Any] | None = None,
+    head_sha: str | None = None,
 ) -> None:
     tmpdir = Path(tempfile.mkdtemp(prefix=f"skillayer_{run_id[:8]}_"))
     try:
@@ -446,20 +460,26 @@ async def run_analysis(
         if pr_number is not None:
             from apps.api.api.pr_comment import post_pr_comment
 
-            await post_pr_comment(
-                full_name=full_name,
-                pr_number=pr_number,
-                installation_id=installation_id,
-                run_id=run_id,
-                current_score={
-                    "total": _score_value(score, "total"),
-                    "groundedness": _score_value(score, "groundedness"),
-                    "coverage": _score_value(score, "coverage"),
-                    "freshness": _score_value(score, "freshness"),
-                    "structure": _score_value(score, "structure"),
-                },
-                base_score=base_score,
-            )
+            try:
+                await post_pr_comment(
+                    full_name=full_name,
+                    pr_number=pr_number,
+                    installation_id=installation_id,
+                    run_id=run_id,
+                    current_score={
+                        "total": _score_value(score, "total"),
+                        "groundedness": _score_value(score, "groundedness"),
+                        "coverage": _score_value(score, "coverage"),
+                        "freshness": _score_value(score, "freshness"),
+                        "structure": _score_value(score, "structure"),
+                    },
+                    base_score=base_score,
+                    domains=list(analysis_result.get("domains") or []),
+                    head_sha=head_sha,
+                    score_threshold=await _score_threshold_for_repo(db, repo_id),
+                )
+            except Exception as exc:
+                LOGGER.warning("PR feedback publication failed", extra={"run_id": run_id, "error": str(exc)})
     except Exception as exc:
         await db.rollback()
         await update_run_failed(db, run_id, str(exc))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
@@ -140,6 +141,20 @@ def _build_score_context(project_root: Path) -> dict[str, object]:
         "skill_files": _skill_files(project_root),
         "validation": validate_project(project_root),
     }
+
+
+def _has_git_metadata(project_root: Path) -> bool:
+    """Return whether git metadata can be inspected for a project root."""
+    try:
+        subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse", "--git-dir"],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+    return True
 
 
 def _nodes_by_domain(project_root: Path, score_context: dict[str, object] | None = None) -> dict[str, list[object]]:
@@ -348,10 +363,12 @@ def _freshness_score(project_root: Path, score_context: dict[str, object] | None
     context = score_context or _build_score_context(project_root)
     previous = context["previous_freshness"]
     if previous is None:
-        return 5.0, {
-            "score": 5.0,
+        score = 5.0 if _has_git_metadata(project_root) else 15.0
+        reason = "missing_freshness_state" if score == 5.0 else "missing_freshness_state_no_git"
+        return score, {
+            "score": score,
             "max_score": 25,
-            "reason": "missing_freshness_state",
+            "reason": reason,
             "changed_files": 0,
             "stale_skill_paths": 0,
         }
