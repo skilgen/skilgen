@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skillayer-api
+  namespace: skillayer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: skillayer-api
+  template:
+    metadata:
+      labels:
+        app: skillayer-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: api
+          image: ghcr.io/skilgen/api:1.2.3
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: skillayer-api
+  namespace: skillayer
+spec:
+  selector:
+    app: skillayer-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: info
+  API_TOKEN: from-env
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secret
+type: Opaque
+stringData:
+  password: super-secret-value
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: skillayer-api
+spec:
+  rules:
+    - host: api.example.com
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: api-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]

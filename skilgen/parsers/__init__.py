@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """Structured parsers for code-adjacent enterprise source artifacts."""
 
 from __future__ import annotations
@@ -6,12 +5,15 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from skilgen.parsers.dbt import DbtProjectAnalysis, DbtProjectParseError, parse_dbt_project
+from skilgen.parsers.helm import HelmChartParseResult, HelmParserError, parse_helm_chart
 from skilgen.parsers.kafka import KafkaAnalysis, KafkaParseError, parse_kafka_artifact
+from skilgen.parsers.kubernetes import KubernetesManifestParseResult, KubernetesParserError, parse_kubernetes_manifests
 from skilgen.parsers.runbook import ProcessParserError, ProcessSource, parse_runbook_file, parse_runbook_source
 from skilgen.parsers.sarif import SarifFinding, SarifResult, SarifTool, parse_sarif
 from skilgen.parsers.sbom import SbomPackage, SbomResult, parse_sbom
 from skilgen.parsers.security_policy import SecurityPolicyResult, parse_security_policy
 from skilgen.parsers.sql_schema import SqlSchemaAnalysis, SqlSchemaParseError, parse_sql_schema
+from skilgen.parsers.terraform import TerraformParseResult, TerraformParserError, parse_terraform_directory
 
 
 class ApiSpecParserError(ValueError):
@@ -83,8 +85,12 @@ __all__ = [
     "ApiSpecParserError",
     "DbtProjectAnalysis",
     "DbtProjectParseError",
+    "HelmChartParseResult",
+    "HelmParserError",
     "KafkaAnalysis",
     "KafkaParseError",
+    "KubernetesManifestParseResult",
+    "KubernetesParserError",
     "ProcessParserError",
     "ProcessSource",
     "SarifFinding",
@@ -95,12 +101,17 @@ __all__ = [
     "SecurityPolicyResult",
     "SqlSchemaAnalysis",
     "SqlSchemaParseError",
+    "TerraformParseResult",
+    "TerraformParserError",
     "parse_dbt_project",
+    "parse_helm_chart",
     "parse_kafka_artifact",
+    "parse_kubernetes_manifests",
     "parse_runbook_file",
     "parse_runbook_source",
     "parse_sarif",
     "parse_sbom",
     "parse_security_policy",
     "parse_sql_schema",
+    "parse_terraform_directory",
 ]
