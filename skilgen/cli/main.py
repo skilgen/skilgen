@@ -19,6 +19,7 @@ from skilgen.core.analytics import log_skill_usage
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
 from skilgen.core.corpus_index import build_corpus_index
 from skilgen.core.runtime_data import purge_runtime_data
+from skilgen.registry_client import RegistryClientError, import_skill as import_registry_skill, publish_skill as publish_registry_skill
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
 from skilgen.enterprise_skills import (
@@ -326,6 +327,18 @@ def build_parser() -> argparse.ArgumentParser:
     skills_import.add_argument("--project-root", default=".")
     skills_import.add_argument("--limit", type=int, default=5)
     skills_import.add_argument("--activate", action=argparse.BooleanOptionalAction, default=None)
+    skills_import.add_argument("--target-dir", help="Import a Skillayer registry skill into this existing directory as SKILL.md.")
+    skills_import.add_argument("--api-url", default="https://api.skillayer.com")
+
+    skills_publish = skills_subparsers.add_parser("publish", help="Publish a generated SKILL.md to the Skillayer registry.")
+    skills_publish.add_argument("skill_file")
+    skills_publish.add_argument("--project-root", default=".")
+    skills_publish.add_argument("--skill-id", required=True)
+    skills_publish.add_argument("--name", required=True)
+    skills_publish.add_argument("--description", required=True)
+    skills_publish.add_argument("--tag", action="append", default=[])
+    skills_publish.add_argument("--private", action="store_true")
+    skills_publish.add_argument("--api-url", default="https://api.skillayer.com")
 
     skills_sync = skills_subparsers.add_parser("sync", help="Sync an installed external skill source with its upstream repository.")
     skills_sync.add_argument("slug", nargs="?")
@@ -685,9 +698,51 @@ def main() -> None:
             )
             return
         if args.skills_command == "import":
+            if args.target_dir:
+                try:
+                    emit_progress("Importing a public Skillayer registry skill into the target skill directory.")
+                    print(
+                        json.dumps(
+                            {
+                                "imported_skill": import_registry_skill(
+                                    api_url=args.api_url,
+                                    registry_id=args.slug,
+                                    target_dir=Path(args.target_dir).resolve(),
+                                )
+                            },
+                            indent=2,
+                        )
+                    )
+                    return
+                except RegistryClientError as exc:
+                    print(f"skilgen skills import failed: {exc}", file=sys.stderr)
+                    sys.exit(1)
             emit_progress("Importing downstream repositories from the selected directory-style skill source.")
             print(json.dumps(import_external_skill_candidates(project_root=root, slug=args.slug, limit=args.limit, active=args.activate), indent=2))
             return
+        if args.skills_command == "publish":
+            try:
+                emit_progress("Publishing a generated SKILL.md to the Skillayer registry.")
+                print(
+                    json.dumps(
+                        {
+                            "published_skill": publish_registry_skill(
+                                api_url=args.api_url,
+                                skill_file=Path(args.skill_file).resolve(),
+                                skill_id=args.skill_id,
+                                name=args.name,
+                                description=args.description,
+                                tags=list(args.tag or []),
+                                is_public=not args.private,
+                            )
+                        },
+                        indent=2,
+                    )
+                )
+                return
+            except RegistryClientError as exc:
+                print(f"skilgen skills publish failed: {exc}", file=sys.stderr)
+                sys.exit(1)
         if args.skills_command == "sync":
             if args.all:
                 emit_progress("Syncing all installed external skill sources with their upstream repositories.")
