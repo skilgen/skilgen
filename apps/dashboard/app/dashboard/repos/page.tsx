@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Github, Plus } from "lucide-react";
 
+import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
 import { API_URL, type Org, type Repo } from "../../../lib/data";
 import { ReposBrowser, type RepoListItem } from "./repos-browser";
@@ -58,29 +59,31 @@ export default async function ReposPage() {
         </Link>
       </div>
 
-      {reposError ? (
-        <SectionFallback section="repositories" />
-      ) : repos.length > 0 ? (
-        <ReposBrowser repos={repos} />
-      ) : (
-        <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[rgb(var(--accent-primary-rgb)/0.12)] text-[color:var(--accent-primary)]">
-            <Plus className="h-5 w-5" />
-          </div>
-          <h2 className="text-[17px] font-semibold text-[color:var(--text-primary)]">Connect your first repository</h2>
-          <p className="mx-auto mt-2 max-w-md text-[14px] text-[color:var(--text-secondary)]">
-            Install the Skillayer GitHub App to analyse repositories, generate skills, and track score history.
-          </p>
-          <Link
-            className="mt-6 inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] transition-colors hover:bg-[color:var(--accent-bright)]"
-            href="https://github.com/apps/skillayer/installations/new"
-            target="_blank"
-          >
-            <Github className="mr-2 h-4 w-4" />
-            Connect repo
-          </Link>
-        </section>
-      )}
+      <SectionErrorBoundary section="repositories">
+        {reposError ? (
+          <SectionFallback section="repositories" />
+        ) : repos.length > 0 ? (
+          <ReposBrowser repos={repos} />
+        ) : (
+          <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[rgb(var(--accent-primary-rgb)/0.12)] text-[color:var(--accent-primary)]">
+              <Plus className="h-5 w-5" />
+            </div>
+            <h2 className="text-[17px] font-semibold text-[color:var(--text-primary)]">Connect your first repository</h2>
+            <p className="mx-auto mt-2 max-w-md text-[14px] text-[color:var(--text-secondary)]">
+              Install the Skillayer GitHub App to analyse repositories, generate skills, and track score history.
+            </p>
+            <Link
+              className="mt-6 inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] transition-colors hover:bg-[color:var(--accent-bright)]"
+              href="https://github.com/apps/skillayer/installations/new"
+              target="_blank"
+            >
+              <Github className="mr-2 h-4 w-4" />
+              Connect repo
+            </Link>
+          </section>
+        )}
+      </SectionErrorBoundary>
     </div>
   );
 }

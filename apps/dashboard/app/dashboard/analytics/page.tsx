@@ -1,5 +1,6 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
+import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
 import { getMyOrg, getOrgAnalytics, type AnalyticsSkill, type OrgAnalytics } from "../../../lib/data";
 
@@ -122,16 +123,22 @@ export default async function AnalyticsPage() {
 
       {analytics ? (
         <div className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-3">
-            <MetricPanel label="Total loads" value={analytics.total_loads_30d} sub="Last 30 days" />
-            <MetricPanel label="Most active repo" value={analytics.most_active_repo?.name ?? "-"} sub={`${analytics.most_active_repo?.loads ?? 0} loads`} />
-            <MetricPanel label="Most loaded skill" value={analytics.most_loaded_skill?.domain ?? "-"} sub={`${analytics.most_loaded_skill?.loads ?? 0} loads`} />
-          </div>
-          <Sparkline points={analytics.daily_loads} />
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-            <TopSkillsChart skills={analytics.top_skills} />
-            <NeverLoadedList skills={analytics.never_loaded} />
-          </div>
+          <SectionErrorBoundary section="analytics metrics">
+            <div className="grid gap-4 md:grid-cols-3">
+              <MetricPanel label="Total loads" value={analytics.total_loads_30d} sub="Last 30 days" />
+              <MetricPanel label="Most active repo" value={analytics.most_active_repo?.name ?? "-"} sub={`${analytics.most_active_repo?.loads ?? 0} loads`} />
+              <MetricPanel label="Most loaded skill" value={analytics.most_loaded_skill?.domain ?? "-"} sub={`${analytics.most_loaded_skill?.loads ?? 0} loads`} />
+            </div>
+          </SectionErrorBoundary>
+          <SectionErrorBoundary section="analytics activity">
+            <Sparkline points={analytics.daily_loads} />
+          </SectionErrorBoundary>
+          <SectionErrorBoundary section="analytics skills">
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+              <TopSkillsChart skills={analytics.top_skills} />
+              <NeverLoadedList skills={analytics.never_loaded} />
+            </div>
+          </SectionErrorBoundary>
         </div>
       ) : (
         <SectionFallback section="analytics" />

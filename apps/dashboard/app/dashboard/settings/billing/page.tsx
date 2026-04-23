@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
+import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { ManageBillingButton } from "./manage-billing-button";
 import { API_URL } from "../../../../lib/data";
 
@@ -71,46 +72,50 @@ export default async function BillingSettingsPage({ searchParams }: BillingPageP
         <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Manage your Skillayer plan and seats.</p>
       </div>
 
-      {success ? (
-        <div className="mb-6 rounded-xl border border-[#C9973A]/40 bg-[#C9973A]/10 px-5 py-4 text-[14px] font-medium text-[#f3d28e]">
-          Welcome to {label(upgradedPlan || plan)}! Your plan has been upgraded.
-        </div>
-      ) : null}
-
-      <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
-        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Current plan</h2>
-            <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Billing details update automatically after Stripe events are processed.</p>
+      <SectionErrorBoundary section="billing success message">
+        {success ? (
+          <div className="mb-6 rounded-xl border border-[#C9973A]/40 bg-[#C9973A]/10 px-5 py-4 text-[14px] font-medium text-[#f3d28e]">
+            Welcome to {label(upgradedPlan || plan)}! Your plan has been upgraded.
           </div>
-          <span className="rounded-full bg-[#C9973A]/15 px-3 py-1 text-[13px] font-semibold text-[#C9973A]">{label(plan)}</span>
-        </div>
+        ) : null}
+      </SectionErrorBoundary>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <div className="rounded-lg border border-[color:var(--bg-border)] bg-[#08080d] p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Seats</div>
-            <div className="mt-2 text-[24px] font-bold text-white">
-              {seatCount}
-              <span className="text-[13px] font-medium text-[color:var(--text-tertiary)]"> / {seatLimit >= 999999 ? "unlimited" : seatLimit}</span>
+      <SectionErrorBoundary section="billing">
+        <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
+          <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Current plan</h2>
+              <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Billing details update automatically after Stripe events are processed.</p>
+            </div>
+            <span className="rounded-full bg-[#C9973A]/15 px-3 py-1 text-[13px] font-semibold text-[#C9973A]">{label(plan)}</span>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-lg border border-[color:var(--bg-border)] bg-[#08080d] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Seats</div>
+              <div className="mt-2 text-[24px] font-bold text-white">
+                {seatCount}
+                <span className="text-[13px] font-medium text-[color:var(--text-tertiary)]"> / {seatLimit >= 999999 ? "unlimited" : seatLimit}</span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-[color:var(--bg-border)] bg-[#08080d] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Status</div>
+              <div className="mt-2 text-[24px] font-bold text-white">{status ? label(status) : "None"}</div>
+            </div>
+            <div className="rounded-lg border border-[color:var(--bg-border)] bg-[#08080d] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Billing account</div>
+              <div className="mt-2 truncate font-mono text-[13px] text-[color:var(--text-secondary)]">{subscription?.stripe_customer_id ?? "Not connected"}</div>
             </div>
           </div>
-          <div className="rounded-lg border border-[color:var(--bg-border)] bg-[#08080d] p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Status</div>
-            <div className="mt-2 text-[24px] font-bold text-white">{status ? label(status) : "None"}</div>
-          </div>
-          <div className="rounded-lg border border-[color:var(--bg-border)] bg-[#08080d] p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Billing account</div>
-            <div className="mt-2 truncate font-mono text-[13px] text-[color:var(--text-secondary)]">{subscription?.stripe_customer_id ?? "Not connected"}</div>
-          </div>
-        </div>
 
-        <div className="mt-6 flex flex-wrap gap-3">
-          <ManageBillingButton accessToken={accessToken} disabled={!subscription?.stripe_customer_id} />
-          <Link className="inline-flex items-center rounded-md bg-[#C9973A] px-4 py-2 text-sm font-semibold text-black transition-colors hover:bg-[#d7aa55]" href="/dashboard/upgrade">
-            Upgrade plan
-          </Link>
-        </div>
-      </section>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <ManageBillingButton accessToken={accessToken} disabled={!subscription?.stripe_customer_id} />
+            <Link className="inline-flex items-center rounded-md bg-[#C9973A] px-4 py-2 text-sm font-semibold text-black transition-colors hover:bg-[#d7aa55]" href="/dashboard/upgrade">
+              Upgrade plan
+            </Link>
+          </div>
+        </section>
+      </SectionErrorBoundary>
     </div>
   );
 }

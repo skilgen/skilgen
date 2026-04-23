@@ -3,6 +3,7 @@ import { Github } from "lucide-react";
 import type { OrgStats, Repo } from "../../lib/data";
 import { MetricCard } from "./metric-card";
 import { ReposTable } from "./repos-table";
+import { SectionErrorBoundary } from "./section-error-boundary";
 import { SectionFallback } from "./section-fallback";
 
 type OverviewLiveDataProps = {
@@ -90,39 +91,45 @@ export function OverviewLiveData({
 
   return (
     <>
-      {statsErrorDetail ? (
-        <div className="mb-8">
-          <SectionFallback section="overview metrics" />
-        </div>
-      ) : (
-        <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {showMetricSkeletons ? (
-            <>
-              <MetricSkeleton />
-              <MetricSkeleton />
-              <MetricSkeleton />
-              <MetricSkeleton />
-            </>
-          ) : (
-            <>
-              <MetricCard label="Repos monitored" value={stats.repo_count} sub="Connected repos" />
-              <MetricCard label="Avg Skilgen Score" value={`${stats.avg_score}/100`} sub="Org readiness" />
-              <MetricCard label="Skills generated" value={stats.skill_count} sub="Published skills" />
-              <MetricCard label="Active agents" value={stats.active_agents} sub="Live sessions" />
-            </>
-          )}
-        </div>
-      )}
+      <SectionErrorBoundary section="overview metrics">
+        {statsErrorDetail ? (
+          <div className="mb-8">
+            <SectionFallback section="overview metrics" />
+          </div>
+        ) : (
+          <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {showMetricSkeletons ? (
+              <>
+                <MetricSkeleton />
+                <MetricSkeleton />
+                <MetricSkeleton />
+                <MetricSkeleton />
+              </>
+            ) : (
+              <>
+                <MetricCard label="Repos monitored" value={stats.repo_count} sub="Connected repos" />
+                <MetricCard label="Avg Skilgen Score" value={`${stats.avg_score}/100`} sub="Org readiness" />
+                <MetricCard label="Skills generated" value={stats.skill_count} sub="Published skills" />
+                <MetricCard label="Active agents" value={stats.active_agents} sub="Live sessions" />
+              </>
+            )}
+          </div>
+        )}
+      </SectionErrorBoundary>
 
-      {stats ? <ScoreSparkline points={stats.score_trend} /> : null}
+      <SectionErrorBoundary section="score trend">
+        {stats ? <ScoreSparkline points={stats.score_trend} /> : null}
+      </SectionErrorBoundary>
 
-      {repos.length > 0 ? (
-        <ReposTable repos={repos} />
-      ) : reposErrorDetail ? (
-        <SectionFallback section="repositories" />
-      ) : (
-        <OnboardingCard />
-      )}
+      <SectionErrorBoundary section="repositories">
+        {repos.length > 0 ? (
+          <ReposTable repos={repos} />
+        ) : reposErrorDetail ? (
+          <SectionFallback section="repositories" />
+        ) : (
+          <OnboardingCard />
+        )}
+      </SectionErrorBoundary>
     </>
   );
 }

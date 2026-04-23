@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BookOpen, Search } from "lucide-react";
 
+import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { API_URL, getRegistrySkills, type Org, type RegistrySkill } from "../../../lib/data";
 
 export const dynamic = "force-dynamic";
@@ -104,37 +105,41 @@ export default async function RegistryPage({ searchParams }: RegistryPageProps) 
         </div>
       </div>
 
-      <form className="mb-6 grid gap-3 rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4 md:grid-cols-[1fr_180px_180px_auto]">
-        <input name="tab" type="hidden" value={tab} />
-        <label className="relative block">
-          <span className="sr-only">Search registry</span>
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--text-tertiary)]" />
-          <input className="h-10 w-full rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] pl-9 pr-3 text-[14px] outline-none focus:border-[color:var(--accent-primary)]" defaultValue={search} name="search" placeholder="Search skills" type="search" />
-        </label>
-        <input className="h-10 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 text-[14px] outline-none focus:border-[color:var(--accent-primary)]" defaultValue={tag} name="tag" placeholder="Tag" />
-        <select className="h-10 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 text-[14px] outline-none focus:border-[color:var(--accent-primary)]" defaultValue={sort} name="sort">
-          <option value="imports">Imports</option>
-          <option value="score">Score</option>
-          <option value="newest">Newest</option>
-        </select>
-        <button className="inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)]" type="submit">
-          Apply
-        </button>
-      </form>
+      <SectionErrorBoundary section="registry filters">
+        <form className="mb-6 grid gap-3 rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4 md:grid-cols-[1fr_180px_180px_auto]">
+          <input name="tab" type="hidden" value={tab} />
+          <label className="relative block">
+            <span className="sr-only">Search registry</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--text-tertiary)]" />
+            <input className="h-10 w-full rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] pl-9 pr-3 text-[14px] outline-none focus:border-[color:var(--accent-primary)]" defaultValue={search} name="search" placeholder="Search skills" type="search" />
+          </label>
+          <input className="h-10 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 text-[14px] outline-none focus:border-[color:var(--accent-primary)]" defaultValue={tag} name="tag" placeholder="Tag" />
+          <select className="h-10 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 text-[14px] outline-none focus:border-[color:var(--accent-primary)]" defaultValue={sort} name="sort">
+            <option value="imports">Imports</option>
+            <option value="score">Score</option>
+            <option value="newest">Newest</option>
+          </select>
+          <button className="inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)]" type="submit">
+            Apply
+          </button>
+        </form>
+      </SectionErrorBoundary>
 
-      {skills.length > 0 ? (
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {skills.map((skill) => (
-            <RegistryCard key={skill.id} skill={skill} />
-          ))}
-        </section>
-      ) : (
-        <section className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center">
-          <BookOpen className="mx-auto mb-4 h-8 w-8 text-[color:var(--accent-primary)]" />
-          <h2 className="text-[17px] font-semibold text-[color:var(--text-primary)]">No registry skills found</h2>
-          <p className="mt-2 text-[14px] text-[color:var(--text-secondary)]">Adjust the current filters or publish a skill from one of your repositories.</p>
-        </section>
-      )}
+      <SectionErrorBoundary section="registry skills">
+        {skills.length > 0 ? (
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {skills.map((skill) => (
+              <RegistryCard key={skill.id} skill={skill} />
+            ))}
+          </section>
+        ) : (
+          <section className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center">
+            <BookOpen className="mx-auto mb-4 h-8 w-8 text-[color:var(--accent-primary)]" />
+            <h2 className="text-[17px] font-semibold text-[color:var(--text-primary)]">No registry skills found</h2>
+            <p className="mt-2 text-[14px] text-[color:var(--text-secondary)]">Adjust the current filters or publish a skill from one of your repositories.</p>
+          </section>
+        )}
+      </SectionErrorBoundary>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { ArrowLeft, GitBranch, ShieldAlert } from "lucide-react";
 
+import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
 import {
   API_URL,
@@ -309,14 +310,20 @@ function SkillsTable({ repoId, skills }: { repoId: string; skills: RepoSkill[] }
 
 export default async function RepoDetailPage({ params }: PageProps) {
   const { repoId } = await params;
-  const session = await withAuth({ ensureSignedIn: true });
-  const accessToken = session.accessToken || "";
+  let accessToken = "";
 
   let repo: RepoDetail | null = null;
   let skills: RepoSkill[] = [];
   let scoreHistory: ScoreHistoryPoint[] = [];
   let dependencies: DependencyReport | null = null;
   let repoLoadFailed = false;
+
+  try {
+    const session = await withAuth({ ensureSignedIn: true });
+    accessToken = session.accessToken || "";
+  } catch (error) {
+    console.error("Repo detail auth unavailable:", error);
+  }
 
   try {
     const [repoPayload, skillsPayload, historyPayload, dependencyPayload] = await Promise.all([
@@ -366,51 +373,61 @@ export default async function RepoDetailPage({ params }: PageProps) {
         <span className="text-[color:var(--text-secondary)]">{repo.name}</span>
       </div>
 
-      <section className="mb-8 flex flex-col gap-6 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <Link className="mb-5 inline-flex items-center gap-2 text-[13px] text-[color:var(--text-secondary)] hover:text-[color:var(--accent-primary)]" href="/dashboard/repos">
-            <ArrowLeft className="h-4 w-4" />
-            Back to repos
-          </Link>
-          <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">{repo.name}</h1>
-          <p className="mt-2 font-mono text-sm text-[color:var(--text-secondary)]">{repo.full_name}</p>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <span className="inline-flex rounded-full border border-[color:var(--bg-border)] px-2.5 py-1 text-[12px] text-[color:var(--text-secondary)]">
-              {repo.language || "—"}
-            </span>
-            <span className="inline-flex items-center rounded-full border border-[color:var(--bg-border)] px-2.5 py-1 text-[12px] text-[color:var(--text-secondary)]">
-              <GitBranch className="mr-1 h-3 w-3" />
-              {repo.default_branch || "main"}
-            </span>
+      <SectionErrorBoundary section="repository header">
+        <section className="mb-8 flex flex-col gap-6 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <Link className="mb-5 inline-flex items-center gap-2 text-[13px] text-[color:var(--text-secondary)] hover:text-[color:var(--accent-primary)]" href="/dashboard/repos">
+              <ArrowLeft className="h-4 w-4" />
+              Back to repos
+            </Link>
+            <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">{repo.name}</h1>
+            <p className="mt-2 font-mono text-sm text-[color:var(--text-secondary)]">{repo.full_name}</p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="inline-flex rounded-full border border-[color:var(--bg-border)] px-2.5 py-1 text-[12px] text-[color:var(--text-secondary)]">
+                {repo.language || "—"}
+              </span>
+              <span className="inline-flex items-center rounded-full border border-[color:var(--bg-border)] px-2.5 py-1 text-[12px] text-[color:var(--text-secondary)]">
+                <GitBranch className="mr-1 h-3 w-3" />
+                {repo.default_branch || "main"}
+              </span>
+            </div>
           </div>
-        </div>
 
-        <div className="flex flex-col gap-5 md:flex-row md:items-center">
-          <AnalyseNowButton accessToken={accessToken} apiUrl={API_URL} repoId={repoId} />
-          <ScoreRing score={score?.total} />
-        </div>
-      </section>
-
-      <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SubscoreCard label="Groundedness" value={score?.groundedness} />
-        <SubscoreCard label="Coverage" value={score?.coverage} />
-        <SubscoreCard label="Freshness" value={score?.freshness} />
-        <SubscoreCard label="Structure" value={score?.structure} />
-      </div>
-
-      <div className="mb-8">
-        <ScoreHistoryChart points={scoreHistory} />
-      </div>
-
-      <DependenciesSection report={dependencies} />
-
-      {skills.length > 0 ? (
-        <SkillsTable repoId={repoId} skills={skills} />
-      ) : (
-        <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center text-[color:var(--text-secondary)]">
-          No skills found for this repository.
+          <div className="flex flex-col gap-5 md:flex-row md:items-center">
+            <AnalyseNowButton accessToken={accessToken} apiUrl={API_URL} repoId={repoId} />
+            <ScoreRing score={score?.total} />
+          </div>
         </section>
-      )}
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="repository subscores">
+        <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <SubscoreCard label="Groundedness" value={score?.groundedness} />
+          <SubscoreCard label="Coverage" value={score?.coverage} />
+          <SubscoreCard label="Freshness" value={score?.freshness} />
+          <SubscoreCard label="Structure" value={score?.structure} />
+        </div>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="score history">
+        <div className="mb-8">
+          <ScoreHistoryChart points={scoreHistory} />
+        </div>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="dependencies">
+        <DependenciesSection report={dependencies} />
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="skills">
+        {skills.length > 0 ? (
+          <SkillsTable repoId={repoId} skills={skills} />
+        ) : (
+          <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center text-[color:var(--text-secondary)]">
+            No skills found for this repository.
+          </section>
+        )}
+      </SectionErrorBoundary>
     </div>
   );
 }

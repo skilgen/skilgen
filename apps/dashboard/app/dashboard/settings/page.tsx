@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { Bell, CreditCard, Github, Settings } from "lucide-react";
 
+import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { API_URL, getMyOrg, getOrgSettings, type OrgSettings } from "../../../lib/data";
 import { ManageBillingButton } from "./billing/manage-billing-button";
 import { SettingsControls } from "./settings-controls";
@@ -133,9 +134,11 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
         })}
       </div>
 
-      {tab === "general" || tab === "notifications" ? <SettingsControls accessToken={accessToken} initialSettings={settings} orgId={settings.id} tab={tab} /> : null}
-      {tab === "github" ? <GitHubSettingsPanel settings={settings} /> : null}
-      {tab === "billing" ? <BillingPanel accessToken={accessToken} success={success} subscription={subscription} upgradedPlan={upgradedPlan} /> : null}
+      <SectionErrorBoundary section={`${tab} settings`}>
+        {tab === "general" || tab === "notifications" ? <SettingsControls accessToken={accessToken} initialSettings={settings} orgId={settings.id} tab={tab} /> : null}
+        {tab === "github" ? <GitHubSettingsPanel settings={settings} /> : null}
+        {tab === "billing" ? <BillingPanel accessToken={accessToken} success={success} subscription={subscription} upgradedPlan={upgradedPlan} /> : null}
+      </SectionErrorBoundary>
     </div>
   );
 }

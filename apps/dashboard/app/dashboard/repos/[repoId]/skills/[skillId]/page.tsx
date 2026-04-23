@@ -2,6 +2,7 @@ import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { ArrowLeft, FileText } from "lucide-react";
 
+import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
 import { SkillDetailViewer } from "@/components/skill-detail-viewer";
 import { SkillViewTracker } from "@/components/skill-view-tracker";
@@ -61,13 +62,19 @@ function SubscoreCard({ label, value }: { label: string; value: number }) {
 
 export default async function SkillDetailPage({ params }: PageProps) {
   const { repoId, skillId } = await params;
-  const session = await withAuth({ ensureSignedIn: true });
-  const accessToken = session.accessToken || "";
+  let accessToken = "";
 
   let skill: Skill | null = null;
   let repo: Repo | null = null;
   let versions: SkillVersionSummary[] = [];
   let skillLoadFailed = false;
+
+  try {
+    const session = await withAuth({ ensureSignedIn: true });
+    accessToken = session.accessToken || "";
+  } catch (error) {
+    console.error("Skill detail auth unavailable:", error);
+  }
 
   try {
     const [repoPayload, skillPayload, versionsPayload] = await Promise.all([
@@ -118,38 +125,44 @@ export default async function SkillDetailPage({ params }: PageProps) {
         <span className="text-[color:var(--text-secondary)]">{skill.domain}</span>
       </nav>
 
-      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <Link className="mb-4 inline-flex items-center gap-2 text-[13px] text-[color:var(--text-secondary)] hover:text-[color:var(--accent-primary)]" href={`/dashboard/repos/${repoId}`}>
-            <ArrowLeft className="h-4 w-4" />
-            Back to repository
-          </Link>
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-[rgb(var(--accent-primary-rgb)/0.2)] bg-[rgb(var(--accent-primary-rgb)/0.1)]">
-              <FileText className="h-5 w-5 text-[color:var(--accent-primary)]" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">{skill.domain}</h1>
-              <p className="mt-1 font-mono text-[12px] text-[color:var(--text-secondary)]">{skill.skill_path}</p>
+      <SectionErrorBoundary section="skill header">
+        <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <Link className="mb-4 inline-flex items-center gap-2 text-[13px] text-[color:var(--text-secondary)] hover:text-[color:var(--accent-primary)]" href={`/dashboard/repos/${repoId}`}>
+              <ArrowLeft className="h-4 w-4" />
+              Back to repository
+            </Link>
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-[rgb(var(--accent-primary-rgb)/0.2)] bg-[rgb(var(--accent-primary-rgb)/0.1)]">
+                <FileText className="h-5 w-5 text-[color:var(--accent-primary)]" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">{skill.domain}</h1>
+                <p className="mt-1 font-mono text-[12px] text-[color:var(--text-secondary)]">{skill.skill_path}</p>
+              </div>
             </div>
           </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <ScoreBadge score={skill.score} />
+            <StaleBadge isStale={skill.is_stale} />
+            <VersionBadge versionNumber={skill.latest_version_number} />
+          </div>
         </div>
+      </SectionErrorBoundary>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <ScoreBadge score={skill.score} />
-          <StaleBadge isStale={skill.is_stale} />
-          <VersionBadge versionNumber={skill.latest_version_number} />
+      <SectionErrorBoundary section="skill subscores">
+        <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <SubscoreCard label="Groundedness" value={skill.score.groundedness} />
+          <SubscoreCard label="Coverage" value={skill.score.coverage} />
+          <SubscoreCard label="Freshness" value={skill.score.freshness} />
+          <SubscoreCard label="Structure" value={skill.score.structure} />
         </div>
-      </div>
+      </SectionErrorBoundary>
 
-      <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SubscoreCard label="Groundedness" value={skill.score.groundedness} />
-        <SubscoreCard label="Coverage" value={skill.score.coverage} />
-        <SubscoreCard label="Freshness" value={skill.score.freshness} />
-        <SubscoreCard label="Structure" value={skill.score.structure} />
-      </div>
-
-      <SkillDetailViewer accessToken={accessToken} skill={skill} versions={versions} />
+      <SectionErrorBoundary section="skill content">
+        <SkillDetailViewer accessToken={accessToken} skill={skill} versions={versions} />
+      </SectionErrorBoundary>
     </div>
   );
 }
