@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: orders
+    description: Clean order mart with customer and payment enrichment.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - order_id
+            - user_id
+    columns:
+      - name: order_id
+        description: Stable order identifier.
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: User that placed the order.
+        tests:
+          - not_null
+      - name: amount
+        description: Order amount in dollars.
+      - name: status
+
+sources:
+  - name: raw
+    description: Raw ingestion schema.
+    tables:
+      - name: orders
+        description: Orders from the transactional system.
+        columns:
+          - name: id
+            description: Source order identifier.
+            tests:
+              - not_null
+
+macros:
+  - name: cents_to_dollars
+    description: Converts integer cents to decimal dollars.
+    arguments:
+      - name: column_name

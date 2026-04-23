@@ -1,0 +1,23 @@
+topic:
+  name: orders.events.v1
+  partitions: 1
+  replication_factor: 2
+  configs:
+    cleanup.policy: delete
+    retention.ms: 604800000
+    throughput: high
+    min.insync.replicas: 2
+schema:
+  type: record
+  name: OrderEvent
+  namespace: com.example.orders
+  compatibility: BACKWARD
+  fields:
+    - name: order_id
+      type: string
+      doc: Stable order identifier.
+    - name: user_id
+      type:
+        - "null"
+        - string
+      default: null
