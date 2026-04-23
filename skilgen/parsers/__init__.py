@@ -1,8 +1,12 @@
-"""Shared contracts for API specification parsers."""
+"""Structured parsers for code-adjacent enterprise source artifacts."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+
+from skilgen.parsers.dbt import DbtProjectAnalysis, DbtProjectParseError, parse_dbt_project
+from skilgen.parsers.kafka import KafkaAnalysis, KafkaParseError, parse_kafka_artifact
+from skilgen.parsers.sql_schema import SqlSchemaAnalysis, SqlSchemaParseError, parse_sql_schema
 
 
 class ApiSpecParserError(ValueError):
@@ -60,12 +64,10 @@ class ApiSpecParseResult:
     @property
     def items(self) -> list[ApiSpecItem]:
         """Return all parsed items in group order."""
-
         return [item for group_items in self.groups.values() for item in group_items]
 
     def as_dict(self) -> dict[str, object]:
         """Return a JSON-serializable representation of the parse result."""
-
         return asdict(self)
 
 
@@ -74,4 +76,13 @@ __all__ = [
     "ApiSpecItem",
     "ApiSpecParseResult",
     "ApiSpecParserError",
+    "DbtProjectAnalysis",
+    "DbtProjectParseError",
+    "KafkaAnalysis",
+    "KafkaParseError",
+    "SqlSchemaAnalysis",
+    "SqlSchemaParseError",
+    "parse_dbt_project",
+    "parse_kafka_artifact",
+    "parse_sql_schema",
 ]

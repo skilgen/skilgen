@@ -1,0 +1,11 @@
+name: analytics
+version: "1.0"
+profile: analytics
+model-paths:
+  - models
+macro-paths:
+  - macros
+models:
+  analytics:
+    marts:
+      +materialized: table
