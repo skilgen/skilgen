@@ -4,7 +4,7 @@ This file summarizes the generated skill tree and cross references.
 
 ## Architecture Blueprint
 - Headline: Evidence-backed architecture blueprint for the codebase
-- Summary: Skilgen identified 2 top-level architecture domains from 38 evidence items and 12 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 101 symbol-bearing files, 98 call-bearing files, 43 mapped tests, and 0 workspace packages.
+- Summary: Skilgen identified 2 top-level architecture domains from 91 evidence items and 12 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 124 symbol-bearing files, 121 call-bearing files, 54 mapped tests, and 6 workspace packages.
 - Hotspots:
   - Dominant languages: python.
 
@@ -26,10 +26,10 @@ This file summarizes the generated skill tree and cross references.
 - decision: `split`
 - parent: `skills/roadmap/SKILL.md`
 - child skills:
-  - `skills/roadmap/phase-0/SKILL.md` (planned)
-  - `skills/roadmap/phase-1/SKILL.md` (planned)
-  - `skills/roadmap/phase-2/SKILL.md` (planned)
-  - `skills/roadmap/phase-3/SKILL.md` (planned)
+  - `skills/roadmap/phase-0/SKILL.md` (materialized)
+  - `skills/roadmap/phase-1/SKILL.md` (materialized)
+  - `skills/roadmap/phase-2/SKILL.md` (materialized)
+  - `skills/roadmap/phase-3/SKILL.md` (materialized)
 - rationale: Split because 4 concrete child skill surfaces emerged from 2 grounded evidence paths. The parent skill can hold shared context while child skills isolate the distinct capability seams around roadmap-phase-0, roadmap-phase-1, roadmap-phase-2.
 
 ## platform/SKILL.md
@@ -43,6 +43,15 @@ This file summarizes the generated skill tree and cross references.
   - `core/SKILL.md`
   - `generators/SKILL.md`
   - `scripts/SKILL.md`
+
+## roadmap/SKILL.md
+- domain: `roadmap`
+- sub_domain: `platform`
+- references:
+  - `phase-0/SKILL.md`
+  - `phase-1/SKILL.md`
+  - `phase-2/SKILL.md`
+  - `phase-3/SKILL.md`
 
 ## platform/runtime/SKILL.md
 - domain: `platform`
@@ -85,3 +94,27 @@ This file summarizes the generated skill tree and cross references.
 - references:
   - `../SKILL.md`
   - `../../roadmap/SKILL.md`
+
+## roadmap/phase-0/SKILL.md
+- domain: `roadmap`
+- sub_domain: `roadmap-phase-0`
+- references:
+  - `../SKILL.md`
+
+## roadmap/phase-1/SKILL.md
+- domain: `roadmap`
+- sub_domain: `roadmap-phase-1`
+- references:
+  - `../SKILL.md`
+
+## roadmap/phase-2/SKILL.md
+- domain: `roadmap`
+- sub_domain: `roadmap-phase-2`
+- references:
+  - `../SKILL.md`
+
+## roadmap/phase-3/SKILL.md
+- domain: `roadmap`
+- sub_domain: `roadmap-phase-3`
+- references:
+  - `../SKILL.md`

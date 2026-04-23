@@ -7,7 +7,7 @@
 - Frontend route files: 0
 - Component files: 0
 - Service files: 1
-- Test files: 45
+- Test files: 64
 - Data model files: 0
 - Persistence files: 0
 - Background job files: 2
@@ -40,10 +40,10 @@
 - Active packs: 6
 - Preferred packs to load first:
   - `anthropic-skills` (score 87, trust `official`, license `unknown`)
-  - `huggingface-skills` (score 87, trust `official`, license `Apache License`)
-  - `langchain-skills` (score 80, trust `official`, license `unknown`)
-  - `langsmith-skills` (score 77, trust `official`, license `unknown`)
-  - `huggingface-upskill` (score 73, trust `official`, license `Apache License`)
+  - `huggingface-skills` (score 75, trust `official`, license `Apache License`)
+  - `langchain-skills` (score 63, trust `official`, license `unknown`)
+  - `huggingface-upskill` (score 61, trust `official`, license `Apache License`)
+  - `agentskills-spec` (score 58, trust `spec`, license `Apache License`)
 
 ## External Skill Provenance
 - `agentskills-spec` from `https://github.com/agentskills/agentskills.git` at `8d8fcbc69e0c42e05922c2ffc287a3bbdef7b0a3`

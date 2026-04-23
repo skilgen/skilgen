@@ -11,13 +11,60 @@ from skilgen.core.models import DomainGraph, FreshnessReport, FreshnessState, Re
 
 IGNORED_PARTS = {
     ".git",
+    ".skilgen",
+    ".vercel",
     ".venv",
+    ".venv-api",
     "venv",
+    "env",
     "node_modules",
     "__pycache__",
     "dist",
     "build",
+    ".pytest_cache",
+    "skills",
 }
+IGNORED_FILE_NAMES = {".ds_store", "thumbs.db"}
+INTERNAL_MONOREPO_PARTS = {"apps", "packages", "infra"}
+
+
+def _is_internal_skillayer_monorepo(project_root: Path) -> bool:
+    """Return whether Skilgen is running inside its product monorepo wrapper."""
+    return project_root.name == "skilgen-upstream-work" or (
+        (project_root / "skilgen").is_dir()
+        and (project_root / "apps").is_dir()
+        and (project_root / "packages").is_dir()
+    )
+
+
+def _is_ignored(relative: Path, *, internal_monorepo: bool = False) -> bool:
+    """Return whether a path should be ignored for source freshness."""
+    lowered = [part.lower() for part in relative.parts]
+    if internal_monorepo and lowered and lowered[0] in INTERNAL_MONOREPO_PARTS:
+        return True
+    return any(
+        part in IGNORED_PARTS
+        or part.startswith(".venv")
+        or part.endswith(".egg-info")
+        or part in IGNORED_FILE_NAMES
+        for part in lowered
+    )
+
+
+def _is_trackable_source_path(relative: Path, *, internal_monorepo: bool = False) -> bool:
+    """Return whether a relative path belongs in freshness source state."""
+    return not _is_ignored(relative, internal_monorepo=internal_monorepo) and not is_generated_output_path(relative)
+
+
+def _filter_source_hashes(source_hashes: dict[str, str], *, internal_monorepo: bool = False) -> dict[str, str]:
+    """Remove stale entries for ignored/generated files from persisted state."""
+    return {
+        path: digest
+        for path, digest in source_hashes.items()
+        if _is_trackable_source_path(Path(path), internal_monorepo=internal_monorepo)
+    }
+
+
 def _state_dir(project_root: Path) -> Path:
     return project_root.resolve() / ".skilgen" / "state"
 
@@ -28,14 +75,13 @@ def _state_path(project_root: Path) -> Path:
 
 def _iter_source_files(project_root: Path) -> list[Path]:
     root = project_root.resolve()
+    internal_monorepo = _is_internal_skillayer_monorepo(root)
     files: list[Path] = []
     for path in root.rglob("*"):
         if not path.is_file():
             continue
         relative = path.relative_to(root)
-        if set(relative.parts) & IGNORED_PARTS:
-            continue
-        if is_generated_output_path(relative):
+        if not _is_trackable_source_path(relative, internal_monorepo=internal_monorepo):
             continue
         files.append(path)
     return sorted(files)
@@ -69,8 +115,12 @@ def load_freshness_state(project_root: Path) -> FreshnessState | None:
     if not path.exists():
         return None
     payload = json.loads(path.read_text(encoding="utf-8"))
+    internal_monorepo = _is_internal_skillayer_monorepo(project_root.resolve())
     return FreshnessState(
-        source_hashes={str(key): str(value) for key, value in payload.get("source_hashes", {}).items()},
+        source_hashes=_filter_source_hashes(
+            {str(key): str(value) for key, value in payload.get("source_hashes", {}).items()},
+            internal_monorepo=internal_monorepo,
+        ),
         requirements_source_hash=str(payload.get("requirements_source_hash", "")),
         domain_graph_nodes=list(payload.get("domain_graph_nodes", [])),
         top_level_domains=[str(item) for item in payload.get("top_level_domains", [])],
@@ -92,6 +142,14 @@ def compute_freshness_report(
 ) -> FreshnessReport:
     current_state = snapshot_freshness_state(project_root, requirements, domain_graph)
     top_level_domains = current_state.top_level_domains
+    if previous_state is not None:
+        internal_monorepo = _is_internal_skillayer_monorepo(project_root.resolve())
+        previous_state = FreshnessState(
+            source_hashes=_filter_source_hashes(previous_state.source_hashes, internal_monorepo=internal_monorepo),
+            requirements_source_hash=previous_state.requirements_source_hash,
+            domain_graph_nodes=previous_state.domain_graph_nodes,
+            top_level_domains=previous_state.top_level_domains,
+        )
     if previous_state is None:
         stale_paths = [node.skill_path for node in domain_graph.nodes if node.skill_path]
         return FreshnessReport(

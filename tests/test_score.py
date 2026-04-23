@@ -326,6 +326,78 @@ class ScoreTests(unittest.TestCase):
             self.assertGreaterEqual(coverage["mapped_unit_count"], 2)
             self.assertGreater(coverage["coverage_ratio"], 0.2)
 
+    def test_coverage_ignores_local_build_and_virtualenv_paths(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api").mkdir()
+            (root / "api" / "users.py").write_text("def users():\n    return []\n", encoding="utf-8")
+            (root / ".venv-api" / "lib").mkdir(parents=True)
+            (root / ".venv-api" / "lib" / "vendor.py").write_text("def vendor():\n    return None\n", encoding="utf-8")
+            (root / ".vercel" / "output" / "functions").mkdir(parents=True)
+            (root / ".vercel" / "output" / "functions" / "api.py").write_text("def handler():\n    return None\n", encoding="utf-8")
+            (root / "skilgen.egg-info").mkdir()
+            (root / "skilgen.egg-info" / "metadata.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (root / "skills" / "backend").mkdir(parents=True)
+            (root / "skills" / "backend" / "SKILL.md").write_text(
+                "\n".join(
+                    [
+                        "# Backend",
+                        "references:",
+                        "- ../MANIFEST.md",
+                        "## Check These Paths First",
+                        "- {{project_root}}/api/users.py",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "skills" / "MANIFEST.md").write_text("# Manifest\n", encoding="utf-8")
+            (root / "skills" / "GRAPH.md").write_text("# Graph\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text("# Agents\n", encoding="utf-8")
+            (root / "FEATURES.md").write_text("# Features\n", encoding="utf-8")
+            (root / "TRACEABILITY.md").write_text("# Traceability\n", encoding="utf-8")
+
+            payload = compute_skillgen_score(root)
+            coverage = payload["subscores"]["coverage"]
+
+            self.assertEqual(coverage["source_file_count"], 1)
+            self.assertEqual(coverage["unmapped_files"], [])
+
+    def test_coverage_ignores_skillayer_monorepo_wrapper_paths(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "skilgen-upstream-work"
+            root.mkdir()
+            (root / "skilgen").mkdir()
+            (root / "skilgen" / "core.py").write_text("def core():\n    return None\n", encoding="utf-8")
+            (root / "apps" / "api").mkdir(parents=True)
+            (root / "apps" / "api" / "main.py").write_text("def app():\n    return None\n", encoding="utf-8")
+            (root / "packages" / "db").mkdir(parents=True)
+            (root / "packages" / "db" / "models.py").write_text("class Model:\n    pass\n", encoding="utf-8")
+            (root / "skills" / "platform").mkdir(parents=True)
+            (root / "skills" / "platform" / "SKILL.md").write_text(
+                "\n".join(
+                    [
+                        "# Platform",
+                        "references:",
+                        "- ../MANIFEST.md",
+                        "## Check These Paths First",
+                        "- {{project_root}}/skilgen/core.py",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "skills" / "MANIFEST.md").write_text("# Manifest\n", encoding="utf-8")
+            (root / "skills" / "GRAPH.md").write_text("# Graph\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text("# Agents\n", encoding="utf-8")
+            (root / "FEATURES.md").write_text("# Features\n", encoding="utf-8")
+            (root / "TRACEABILITY.md").write_text("# Traceability\n", encoding="utf-8")
+
+            payload = compute_skillgen_score(root)
+            coverage = payload["subscores"]["coverage"]
+
+            self.assertEqual(coverage["source_file_count"], 1)
+            self.assertNotIn("apps/api/main.py", coverage["unmapped_files"])
+            self.assertNotIn("packages/db/models.py", coverage["unmapped_files"])
+
 
 if __name__ == "__main__":
     unittest.main()

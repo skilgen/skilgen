@@ -4,7 +4,7 @@ from pathlib import Path
 
 from skilgen.agents.domain_graph_planner import _top_level_app_surfaces, build_domain_graph, detect_repo_archetype
 from skilgen.agents.framework_fingerprint import fingerprint_project
-from skilgen.agents.codebase_signals import analyze_codebase
+from skilgen.agents.codebase_signals import analyze_codebase, is_ignored_path_parts, is_internal_skillayer_monorepo
 from skilgen.agents.workspace_graph import build_workspace_graph
 from skilgen.core.models import (
     CodebaseContext,
@@ -17,10 +17,14 @@ from skilgen.core.models import (
 
 
 def _build_file_tree(project_root: Path) -> list[str]:
+    internal_monorepo = is_internal_skillayer_monorepo(project_root)
     return sorted(
         path.relative_to(project_root).as_posix()
         for path in project_root.rglob("*")
-        if path.is_file() and ".git/" not in path.as_posix() and not path.relative_to(project_root).as_posix().startswith(".skilgen/")
+        if path.is_file()
+        and ".git/" not in path.as_posix()
+        and not path.relative_to(project_root).as_posix().startswith(".skilgen/")
+        and not is_ignored_path_parts(path.relative_to(project_root).parts, internal_monorepo=internal_monorepo)
     )
 
 
@@ -86,10 +90,13 @@ def build_codebase_context(project_root: Path, requirements: RequirementsContext
     signals = analyze_codebase(root)
     workspace_graph = build_workspace_graph(root)
     package_root = None
-    for candidate in sorted(root.iterdir()):
-        if candidate.is_dir() and (candidate / "__init__.py").exists() and candidate.name not in {"tests", "docs", "scripts", "skills"}:
-            package_root = candidate
-            break
+    if is_internal_skillayer_monorepo(root) and (root / "skilgen" / "__init__.py").exists():
+        package_root = root / "skilgen"
+    else:
+        for candidate in sorted(root.iterdir()):
+            if candidate.is_dir() and (candidate / "__init__.py").exists() and candidate.name not in {"tests", "docs", "scripts", "skills"}:
+                package_root = candidate
+                break
     package_top_level_files = sorted(
         path.relative_to(root).as_posix()
         for path in package_root.glob("*.py")

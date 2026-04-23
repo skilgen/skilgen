@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from skilgen.agents import build_agent_decision, fingerprint_project
-from skilgen.agents.codebase_signals import clear_codebase_signal_caches
+from skilgen.agents.codebase_signals import clear_codebase_signal_caches, is_ignored_path_parts, is_internal_skillayer_monorepo
 from skilgen.agents.source_graphs import clear_source_graph_caches
 from skilgen.core.audit import append_audit_event
 from skilgen.core.analytics import log_skill_usage
@@ -199,13 +199,13 @@ def watch_delivery(
 
     def snapshot() -> dict[str, object]:
         tracked: dict[str, int] = {}
-        ignored_parts = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build"}
+        internal_monorepo = is_internal_skillayer_monorepo(root)
         for path in root.rglob("*"):
             if not path.is_file():
                 continue
             relative = path.relative_to(root).as_posix()
             relative_parts = Path(relative).parts
-            if set(relative_parts) & ignored_parts:
+            if is_ignored_path_parts(relative_parts, internal_monorepo=internal_monorepo):
                 continue
             if is_generated_output_path(relative):
                 continue

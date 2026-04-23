@@ -2,7 +2,7 @@
 
 ## Evidence-backed architecture blueprint for the codebase
 
-Skilgen identified 2 top-level architecture domains from 38 evidence items and 12 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 101 symbol-bearing files, 98 call-bearing files, 43 mapped tests, and 0 workspace packages.
+Skilgen identified 2 top-level architecture domains from 91 evidence items and 12 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 124 symbol-bearing files, 121 call-bearing files, 54 mapped tests, and 6 workspace packages.
 
 ## Visual Overview
 ```mermaid
@@ -33,6 +33,12 @@ graph TD
   scripts_bump_version_py["scripts/bump_version.py"]
   scripts_bump_version_py --> scripts_bump_version_py_from_future_import_annotations["from __future__ import annotations"]
   scripts_bump_version_py --> scripts_bump_version_py_imports_argparse["imports argparse"]
+  scripts_deploy_api_py["scripts/deploy_api.py"]
+  scripts_deploy_api_py --> scripts_deploy_api_py_from_future_import_annotations["from __future__ import annotations"]
+  scripts_deploy_api_py --> scripts_deploy_api_py_imports_argparse["imports argparse"]
+  scripts_deploy_dashboard_py["scripts/deploy_dashboard.py"]
+  scripts_deploy_dashboard_py --> scripts_deploy_dashboard_py_from_future_import_annotations["from __future__ import annotations"]
+  scripts_deploy_dashboard_py --> scripts_deploy_dashboard_py_imports_argparse["imports argparse"]
   scripts_run_requirements_pipeline_py["scripts/run_requirements_pipeline.py"]
   scripts_run_requirements_pipeline_py --> scripts_run_requirements_pipeline_py_from_future_import_annotations["from __future__ import annotations"]
   scripts_run_requirements_pipeline_py --> scripts_run_requirements_pipeline_py_imports_argparse["imports argparse"]
@@ -41,52 +47,72 @@ graph TD
   skilgen_init_py["skilgen/__init__.py"]
   skilgen_init_py --> skilgen_init_py_from_skilgen_agents_import_fingerprint_project["from skilgen.agents import fingerprint_project"]
   skilgen_init_py --> skilgen_init_py_from_skilgen_autoupdate_import_auto_update_status_ensure_auto_update_worker_stop_auto_update_worker["from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, stop_auto_update_worker"]
-  skilgen_agents_init_py["skilgen/agents/__init__.py"]
-  skilgen_agents_init_py --> skilgen_agents_init_py_from_skilgen_agents_codebase_signals_import_analyze_codebase_collect_code_evidence_collect_structural_evidence["from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence"]
-  skilgen_agents_init_py --> skilgen_agents_init_py_from_skilgen_agents_architecture_planner_import_build_architecture_blueprint["from skilgen.agents.architecture_planner import build_architecture_blueprint"]
-  skilgen_agents_architecture_planner_py["skilgen/agents/architecture_planner.py"]
-  skilgen_agents_architecture_planner_py --> skilgen_agents_architecture_planner_py_from_future_import_annotations["from __future__ import annotations"]
-  skilgen_agents_architecture_planner_py --> skilgen_agents_architecture_planner_py_from_dataclasses_import_asdict["from dataclasses import asdict"]
+  workspace_apps_dashboard["apps/dashboard"]
+  workspace_apps_web["apps/web"]
+  workspace_packages_config["packages/config"]
+  workspace_packages_db["packages/db"]
+  workspace_packages_types["packages/types"]
+  workspace_packages_ui["packages/ui"]
+  workspace_apps_dashboard -. workspace .-> workspace_packages_config
+  workspace_apps_dashboard -. workspace .-> workspace_packages_types
+  workspace_apps_dashboard -. workspace .-> workspace_packages_ui
+  workspace_apps_web -. workspace .-> workspace_packages_config
+  workspace_apps_web -. workspace .-> workspace_packages_types
+  workspace_apps_web -. workspace .-> workspace_packages_ui
+  workspace_packages_types -. workspace .-> workspace_packages_config
+  workspace_packages_ui -. workspace .-> workspace_packages_config
 ```
 
 ## Dominant Languages
 - `python`
 
 ## Source Comprehension
-- Symbol graph files: `101`
-- Cross-file symbol relationships: `49`
-- Call graph files: `98`
-- Config/runtime files: `6`
-- Tests mapped to code: `43`
-- Runtime artifacts ingested: `0`
-- Dependency risk nodes: `119`
+- Symbol graph files: `124`
+- Cross-file symbol relationships: `54`
+- Call graph files: `121`
+- Config/runtime files: `908`
+- Tests mapped to code: `54`
+- Runtime artifacts ingested: `2`
+- Dependency risk nodes: `211`
 
 ## Parser Backends
 - `empty`: `3` files
-- `python-ast`: `101` files
+- `python-ast`: `124` files
 - `regex`: `1` files
 
 ## Workspace Topology
 - Repo archetype: `skilgen-platform`
-- Workspace tool: `none`
-- Workspace packages: `0`
-- Package dependency edges: `0`
+- Workspace tool: `turbo`
+- Workspace packages: `6`
+- Package dependency edges: `8`
 
 ### Example Workspace Packages
-- No first-class workspace graph detected.
+- `apps/dashboard` (workspace)
+- `apps/web` (app)
+- `packages/config` (library)
+- `packages/db` (library)
+- `packages/types` (library)
+- `packages/ui` (library)
 
 ### Workspace Package Edges
-- No internal package dependency edges were extracted.
+- `apps/dashboard` -> `packages/config`
+- `apps/dashboard` -> `packages/types`
+- `apps/dashboard` -> `packages/ui`
+- `apps/web` -> `packages/config`
+- `apps/web` -> `packages/types`
+- `apps/web` -> `packages/ui`
+- `packages/types` -> `packages/config`
+- `packages/ui` -> `packages/config`
 
 ### Example Symbol Surfaces
 - `scripts/bump_version.py`: `from __future__ import annotations`, `imports argparse`, `imports re`, `from pathlib import Path`
+- `scripts/deploy_api.py`: `from __future__ import annotations`, `imports argparse`, `imports json`, `imports shutil`
+- `scripts/deploy_dashboard.py`: `from __future__ import annotations`, `imports argparse`, `imports json`, `imports subprocess`
 - `scripts/run_requirements_pipeline.py`: `from __future__ import annotations`, `imports argparse`, `imports json`, `from pathlib import Path`
 - `setup.py`: `from setuptools import setup`
 - `skilgen/__init__.py`: `from skilgen.agents import fingerprint_project`, `from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, stop_auto_update_worker`, `from skilgen.delivery import run_delivery`, `from skilgen.sdk import activate_project_mcp_connector, activate_skill_source, analyze_project, architecture_project`
 - `skilgen/agents/__init__.py`: `from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence`, `from skilgen.agents.architecture_planner import build_architecture_blueprint`, `from skilgen.agents.evidence_graph import build_evidence_graph`, `from skilgen.agents.language_parsers import parse_language_evidence`
 - `skilgen/agents/architecture_planner.py`: `from __future__ import annotations`, `from dataclasses import asdict`, `from pathlib import Path`, `from skilgen.agents.domain_graph_planner import build_domain_graph`
-- `skilgen/agents/codebase_signals.py`: `from __future__ import annotations`, `imports ast`, `from functools import lru_cache`, `imports re`
-- `skilgen/agents/decision_planner.py`: `from __future__ import annotations`, `from pathlib import Path`, `from skilgen.deep_agents_core import run_deep_json`, `from skilgen.core.freshness import compute_freshness_report, load_freshness_state`
 
 ### Cross-File Symbol Relationships
 - `skilgen/api/jobs.py`: `JobCancelledError` `extends` `RuntimeError` (confidence 0.35)
@@ -94,27 +120,30 @@ graph TD
 - `skilgen/api/server.py`: `JsonFormatter` `extends` `logging.Formatter` (confidence 0.35)
 - `skilgen/api/server.py`: `SkilgenHandler` `extends` `BaseHTTPRequestHandler` (confidence 0.35)
 - `skilgen/core/auth_tokens.py`: `SignedTokenError` `extends` `ValueError` (confidence 0.35)
+- `skilgen/registry_client.py`: `RegistryClientError` `extends` `RuntimeError` (confidence 0.35)
 - `tests/oidc_test_utils.py`: `Handler` `extends` `BaseHTTPRequestHandler` (confidence 0.35)
 - `tests/test_analytics.py`: `AnalyticsTests` `extends` `unittest.TestCase` (confidence 0.35)
 - `tests/test_api_smoke.py`: `ApiSmokeTests` `extends` `unittest.TestCase` (confidence 0.35)
 - `tests/test_architecture_cli.py`: `ArchitectureCliTests` `extends` `unittest.TestCase` (confidence 0.35)
-- `tests/test_architecture_planner.py`: `ArchitecturePlannerTests` `extends` `unittest.TestCase` (confidence 0.35)
 
 ### Example Config And Runtime Signals
+- `.env.example`: `env:API_URL`, `env:DATABASE_URL`, `env:DEPLOYMENT_MODE`, `env:GITHUB_APP_ID`, `env:GITHUB_APP_PRIVATE_KEY`
 - `.github/ISSUE_TEMPLATE/bug_report.yml`: `env:API`, `env:CLI`, `env:SDK`
 - `.github/workflows/skilgen-sync.yml`: `env:AGENTS`, `env:ANALYSIS`, `env:ANTHROPIC_API_KEY`, `env:ARCHITECTURE`, `env:BASE_REQUIREMENTS`
-- `docs/examples/librechat-skill-tree/skilgen.yml`: `env:ANTHROPIC_API_KEY`, `env:AZURE_OPENAI_API_KEY`, `env:GOOGLE_API_KEY`, `env:HUGGINGFACEHUB_API_TOKEN`, `env:IAM`
-- `examples/github-actions/skilgen-sync.yml`: `env:AGENTS`, `env:ANALYSIS`, `env:ANTHROPIC_API_KEY`, `env:ARCHITECTURE`, `env:FEATURES`
-- `pyproject.toml`: `env:LICENSE`, `env:MIT`, `env:OSI`, `env:README`
-- `skilgen.yml`: `env:OPENAI_API_KEY`
+- `.turbo/cache/05d96156f2209614-manifest.json`: `env:BUILD_ID`, `env:LICENSE`, `runtime:docker`, `runtime:s3`
+- `.turbo/cache/088ccf5a78438390-manifest.json`: `env:BUILD_ID`
+- `.turbo/cache/1324b94b6a39f947-manifest.json`: `env:BUILD_ID`
+- `.turbo/cache/2584744feac7447b-manifest.json`: `env:BUILD_ID`
+- `.turbo/cache/2eabdbab3a2e656b-manifest.json`: `env:BUILD_ID`, `env:LICENSE`, `runtime:docker`, `runtime:s3`
 
 ### Runtime Artifact Ingestion
-- No coverage reports, test result artifacts, SARIF outputs, or trace payloads were detected.
+- `.vercel/output/diagnostics/cli_traces.json` (traces/json): 0 spans across 0 services
+- `apps/web/.vercel/output/diagnostics/cli_traces.json` (traces/json): 0 spans across 0 services
 
 ### Example Test Mapping
 - `tests/__init__.py` -> `skilgen/__init__.py`, `skilgen/agents/__init__.py`, `skilgen/api/__init__.py`, `skilgen/cli/__init__.py`
 - `tests/test_analytics.py` -> `skilgen/core/analytics.py`
-- `tests/test_api_smoke.py` -> `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`
+- `tests/test_api_smoke.py` -> `scripts/deploy_api.py`, `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`
 - `tests/test_architecture_cli.py` -> `skilgen/agents/architecture_planner.py`, `skilgen/cli/__init__.py`, `skilgen/cli/main.py`
 - `tests/test_architecture_planner.py` -> `skilgen/agents/architecture_planner.py`, `skilgen/agents/decision_planner.py`, `skilgen/agents/domain_graph_planner.py`, `skilgen/agents/roadmap_planner.py`
 - `tests/test_audit.py` -> `skilgen/core/audit.py`
@@ -128,8 +157,8 @@ graph TD
 - `skilgen/deep_agents_runtime.py`: `fanout:high`, `cycle:internal`
 - `skilgen/delivery.py`: `fanout:high`, `cycle:internal`
 - `skilgen/generators/package.py`: `fanout:high`, `cycle:internal`
-- `package:PyYAML`: `version:loosely-pinned`
-- `package:beautifulsoup4`: `version:loosely-pinned`
+- `manifest:packages/ui/package.json`: `fanout:large-manifest`
+- `manifest:pyproject.toml`: `fanout:large-manifest`
 
 ## Skill Materialization Plan
 ### platform
@@ -197,7 +226,7 @@ graph TD
 - Use the symbol graph to align skill boundaries with real modules, classes, and callable surfaces.
 - Parser backends in use: empty, python-ast, regex.
 - Keep skill guidance grounded in both implementation evidence and the nearest mapped tests.
-- Use cross-file symbol relationships to keep inheritance and interface seams aligned with the skill tree.
+- Model package boundaries from the `turbo` workspace graph separately from file-level import edges.
 
 ## Hotspots
 - Dominant languages: python.

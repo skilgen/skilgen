@@ -48,9 +48,12 @@ LANGUAGE_BY_EXTENSION = {
 IGNORED_PARTS = {
     ".git",
     ".skilgen",
+    ".vercel",
     "external-skills",
     ".venv",
+    ".venv-api",
     "venv",
+    "env",
     "node_modules",
     "__pycache__",
     "dist",
@@ -59,6 +62,35 @@ IGNORED_PARTS = {
     ".idea",
     ".pytest_cache",
 }
+IGNORED_FILE_NAMES = {".ds_store", "thumbs.db"}
+INTERNAL_MONOREPO_PARTS = {"apps", "packages", "infra"}
+
+
+def is_internal_skillayer_monorepo(project_root: Path) -> bool:
+    """Return whether Skilgen is running inside its product monorepo wrapper."""
+    return project_root.name == "skilgen-upstream-work" or (
+        (project_root / "skilgen").is_dir()
+        and (project_root / "apps").is_dir()
+        and (project_root / "packages").is_dir()
+    )
+
+
+def is_ignored_path_parts(
+    parts: tuple[str, ...] | list[str],
+    *,
+    internal_monorepo: bool = False,
+) -> bool:
+    """Return whether a relative path is generated, vendored, or local-only."""
+    lowered = [part.lower() for part in parts]
+    if internal_monorepo and lowered and lowered[0] in INTERNAL_MONOREPO_PARTS:
+        return True
+    return any(
+        part in IGNORED_PARTS
+        or part.startswith(".venv")
+        or part.endswith(".egg-info")
+        or part in IGNORED_FILE_NAMES
+        for part in lowered
+    )
 
 
 def _relative_parts(path: Path, project_root: Path) -> set[str]:
@@ -68,13 +100,14 @@ def _relative_parts(path: Path, project_root: Path) -> set[str]:
 @lru_cache(maxsize=64)
 def _iter_code_file_strings(project_root_value: str) -> tuple[str, ...]:
     project_root = Path(project_root_value)
+    internal_monorepo = is_internal_skillayer_monorepo(project_root)
     files: list[str] = []
     for path in project_root.rglob("*"):
         if not path.is_file():
             continue
         if path.suffix.lower() not in CODE_EXTENSIONS:
             continue
-        if _relative_parts(path, project_root) & IGNORED_PARTS:
+        if is_ignored_path_parts(path.relative_to(project_root).parts, internal_monorepo=internal_monorepo):
             continue
         files.append(str(path))
     return tuple(sorted(files))

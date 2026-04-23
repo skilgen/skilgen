@@ -43,11 +43,11 @@ The current input mode was: `codebase only`.
 
 ## Preferred External Skill Packs
 - `anthropic-skills` (score 87): Detected Claude/Anthropic repo hints.
-- `huggingface-skills` (score 87): Detected Hugging Face package usage.
-- `langchain-skills` (score 80): Detected LangChain/LangGraph/Deep Agents dependencies.
-- `langsmith-skills` (score 77): Detected LangSmith observability or tracing usage.
-- `huggingface-upskill` (score 73): Detected Hugging Face evaluation or teacher/student workflow hints.
+- `huggingface-skills` (score 75): Trust level `official` and ecosystem fit for this repo.
+- `langchain-skills` (score 63): Trust level `official` and ecosystem fit for this repo.
+- `huggingface-upskill` (score 61): Trust level `official` and ecosystem fit for this repo.
 - `agentskills-spec` (score 58): Detected SKILL.md-style files or an existing skills tree.
+- `langsmith-skills` (score 55): Trust level `official` and ecosystem fit for this repo.
 
 ## Enterprise Skill Packs
 - No enterprise skill packs are currently active.
@@ -59,16 +59,16 @@ The current input mode was: `codebase only`.
 - `github-enterprise` (GitHub, source `official`, auth `oauth2`): Read enterprise repositories, pull requests, and actions state.
 - `jira` (Atlassian, source `official`, auth `oauth2`): Track issues, delivery state, and engineering workflows.
 - `slack` (Slack, source `official`, auth `oauth2`): Read team communication context and incident coordination threads.
+- `stripe` (Stripe, source `official`, auth `oauth2`): Work with customers, products, payments, and billing through Stripe's official MCP endpoints.
 - `terraform` (HashiCorp, source `official`, auth `oauth2`): Inspect infrastructure definitions, plans, and cloud rollout workflows.
 
 ## Recommended MCP Connectors
 - `jira` (source `official`, oauth `True`): Detected connector keywords: jira, atlassian.
 - `confluence` (source `official`, oauth `True`): Detected connector keywords: confluence.
 - `compass` (source `official`, oauth `True`): Detected connector keywords: atlassian compass, compass.
-- `slack` (source `official`, oauth `True`): Detected connector keywords: slack.
 - `github-enterprise` (source `official`, oauth `True`): Detected connector keywords: github.
 - `azure` (source `official`, oauth `True`): Detected connector keywords: azure.
-- `terraform` (source `official`, oauth `True`): Detected connector keywords: terraform.
+- `stripe` (source `official`, oauth `True`): Detected connector keywords: stripe.
 
 ## Suggested External Skill Packs
 - `awesome-agent-skills-heilcheng`: Recommended directory of adjacent agent skills.
@@ -77,7 +77,6 @@ The current input mode was: `codebase only`.
 - `awesome-llm-skills`: Recommended directory of adjacent agent skills.
 - `curated-ai-agent-skills`: Recommended curated cross-agent collection.
 - `skill-seekers`: Recommended tooling for converting docs and repos into skills.
-- `skills-benchmarks`: Recommended because LangChain/LangSmith was detected.
 
 ## Recommended Start Order
 - Input mode: `codebase only`
@@ -86,6 +85,7 @@ The current input mode was: `codebase only`.
 - Decision planner reason: Source changes were detected and the impacted domains should be refreshed before the next coding task.
 - Load these prioritized skills first:
 - `skills/platform/SKILL.md`
+- `skills/roadmap/SKILL.md`
 - `.skilgen/external-skills/normalized/anthropic-skills/SUMMARY.md`
 - `.skilgen/external-skills/normalized/huggingface-skills/SUMMARY.md`
 - `.skilgen/external-skills/normalized/langchain-skills/SUMMARY.md`
@@ -93,7 +93,7 @@ The current input mode was: `codebase only`.
   - `.skilgen/memory/current_run.json`
   - `.skilgen/state/freshness.json`
   - `.skilgen/external-skills/lock.json`
-  - `.skilgen/memory/runs/run-7b430377f1ca.json`
+  - `.skilgen/memory/runs/run-4d2fa3b2b305.json`
   - `.skilgen/external-skills/normalized/anthropic-skills/SUMMARY.md`
   - `.skilgen/external-skills/normalized/anthropic-skills/index.json`
   - `.skilgen/external-skills/normalized/huggingface-skills/SUMMARY.md`

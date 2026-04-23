@@ -66,6 +66,30 @@ class DiffTests(unittest.TestCase):
             self.assertEqual(payload["reason"], "no_source_changes")
             self.assertEqual(payload["changed_files"], [])
 
+    def test_diff_sanitizes_ignored_paths_from_previous_state(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "users.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            _save_baseline(root)
+            state_path = root / ".skilgen" / "state" / "freshness.json"
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+            payload["source_hashes"].update(
+                {
+                    ".venv-api/lib/python/site-packages/vendor.py": "old",
+                    ".vercel/output/functions/api.py": "old",
+                    ".pytest_cache/v/cache/nodeids": "old",
+                    ".DS_Store": "old",
+                    "skilgen.egg-info/SOURCES.txt": "old",
+                }
+            )
+            state_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            diff = compute_diff(root)
+
+            self.assertEqual(diff["reason"], "no_source_changes")
+            self.assertEqual(diff["changed_files"], [])
+
     def test_diff_detects_modified_file_and_impacted_domain(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

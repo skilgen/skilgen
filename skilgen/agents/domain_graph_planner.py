@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence
+from skilgen.agents.codebase_signals import (
+    analyze_codebase,
+    collect_code_evidence,
+    collect_structural_evidence,
+    is_internal_skillayer_monorepo,
+)
 from skilgen.agents.requirements_parser import parse_project_intent_native
 from skilgen.agents.workspace_graph import build_workspace_graph
 from skilgen.deep_agents_core import run_deep_json
@@ -41,12 +46,14 @@ def _top_file(paths: list[str], fallback: list[str], limit: int = 4) -> list[str
 
 
 def _python_package_root(project_root: Path) -> Path | None:
+    if is_internal_skillayer_monorepo(project_root) and (project_root / "skilgen" / "__init__.py").exists():
+        return project_root / "skilgen"
     candidates = [
         path
         for path in sorted(project_root.iterdir())
         if path.is_dir()
         and (path / "__init__.py").exists()
-        and path.name not in {"tests", "docs", "scripts", "skills"}
+        and path.name not in {"tests", "docs", "scripts", "skills", "apps", "packages", "infra"}
     ]
     if candidates:
         return candidates[0]
@@ -98,6 +105,8 @@ def _top_level_app_surfaces(project_root: Path) -> list[tuple[str, Path, list[st
         "vendor",
         "__pycache__",
     }
+    if is_internal_skillayer_monorepo(project_root):
+        ignored.update({"apps", "packages", "infra"})
     for directory in sorted(path for path in project_root.iterdir() if path.is_dir() and not path.name.startswith(".")):
         if directory.name in ignored:
             continue
@@ -117,6 +126,8 @@ def detect_repo_archetype(
     workspace_graph: WorkspaceGraph,
     app_surfaces: list[tuple[str, Path, list[str]]],
 ) -> str:
+    if is_internal_skillayer_monorepo(project_root) and package_root is not None and package_root.name == "skilgen":
+        return "skilgen-platform"
     if workspace_graph.packages and workspace_graph.tool is not None:
         return f"{workspace_graph.tool}-workspace"
     if workspace_graph.packages and workspace_graph.tool is None:

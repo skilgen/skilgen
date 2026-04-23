@@ -4,7 +4,7 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 
 ## Requirements Source
 - Source file: `codebase-only input`
-- Source hash: `54b3e3912fb4`
+- Source hash: `2b845af34337`
 
 ## Intent To Output Mapping
 ### Endpoints
@@ -87,7 +87,7 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 - Sub-domains: none
 
 ### platform-scripts
-- Key files: `scripts/bump_version.py`, `scripts/run_requirements_pipeline.py`
+- Key files: `scripts/bump_version.py`, `scripts/deploy_api.py`, `scripts/deploy_dashboard.py`, `scripts/run_requirements_pipeline.py`
 - Key patterns: maintenance automation, release helpers, pipeline scripts
 - Sub-domains: none
 
@@ -159,10 +159,10 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 
 ### Preferred External Packs
 - `anthropic-skills`: Detected Claude/Anthropic repo hints.
-- `huggingface-skills`: Detected Hugging Face package usage.
-- `langchain-skills`: Detected LangChain/LangGraph/Deep Agents dependencies.
-- `langsmith-skills`: Detected LangSmith observability or tracing usage.
-- `huggingface-upskill`: Detected Hugging Face evaluation or teacher/student workflow hints.
+- `huggingface-skills`: Trust level `official` and ecosystem fit for this repo.
+- `langchain-skills`: Trust level `official` and ecosystem fit for this repo.
+- `huggingface-upskill`: Trust level `official` and ecosystem fit for this repo.
+- `agentskills-spec`: Detected SKILL.md-style files or an existing skills tree.
 
 ## Enterprise Skill Traceability
 - No active enterprise skills were installed for this run.
@@ -192,6 +192,10 @@ This file maps requirements and detected code evidence to the generated Skilgen 
   Source status: `official`; auth: `oauth2`; official source verified: `True`
   Authorization status: `pending_oauth`
   Official source: `https://api.slack.com/automation/mcp`
+- Active connector `stripe` (Stripe): Work with customers, products, payments, and billing through Stripe's official MCP endpoints.
+  Source status: `official`; auth: `oauth2`; official source verified: `True`
+  Authorization status: `pending_oauth`
+  Official source: `https://github.com/mcp/com.stripe/mcp`
 - Active connector `terraform` (HashiCorp): Inspect infrastructure definitions, plans, and cloud rollout workflows.
   Source status: `official`; auth: `oauth2`; official source verified: `True`
   Authorization status: `pending_oauth`
@@ -201,9 +205,9 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 - `jira` (`official`, oauth `True`): Detected connector keywords: jira, atlassian.
 - `confluence` (`official`, oauth `True`): Detected connector keywords: confluence.
 - `compass` (`official`, oauth `True`): Detected connector keywords: atlassian compass, compass.
-- `slack` (`official`, oauth `True`): Detected connector keywords: slack.
 - `github-enterprise` (`official`, oauth `True`): Detected connector keywords: github.
 - `azure` (`official`, oauth `True`): Detected connector keywords: azure.
+- `stripe` (`official`, oauth `True`): Detected connector keywords: stripe.
 
 ## Gaps And Next Actions
 - This run was codebase-only, so roadmap and intent guidance came from implementation signals rather than a product spec.

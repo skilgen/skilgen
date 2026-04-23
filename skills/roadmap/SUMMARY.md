@@ -7,16 +7,17 @@
 - sequenced implementation planning
 
 ## Evidence paths
+- `skills/roadmap/SKILL.md`
 - `REPORT.md`
 
 ## Roadmap Context
 - Codebase-only mode: no requirements file supplied.
 - Detected backend-oriented structure from routes, services, or server files.
 - Detected frontend-oriented structure from routes, pages, or component files.
-- Scanned 401 files from the project root.
-- Observed: .DS_Store
+- Scanned 543 files from the project root.
+- Observed: .env.example
+- Observed: .env.local
 - Observed: .github/CODEOWNERS
 - Observed: .github/ISSUE_TEMPLATE/bug_report.yml
 - Observed: .github/ISSUE_TEMPLATE/config.yml
 - Observed: .github/ISSUE_TEMPLATE/feature_request.yml
-- Observed: .github/pull_request_template.md

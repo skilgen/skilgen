@@ -4,6 +4,7 @@ import json
 import hashlib
 from pathlib import Path
 
+from skilgen.agents.codebase_signals import is_ignored_path_parts, is_internal_skillayer_monorepo
 from skilgen.core.document_ingestion import extract_document_text
 from skilgen.core.models import ProjectIntent, RequirementsContext
 
@@ -98,12 +99,14 @@ def load_requirements(path: Path) -> RequirementsContext:
 
 def synthesize_requirements_context(project_root: Path) -> RequirementsContext:
     root = project_root.resolve()
+    internal_monorepo = is_internal_skillayer_monorepo(root)
     file_tree = sorted(
         path.relative_to(root).as_posix()
         for path in root.rglob("*")
         if path.is_file()
         and ".git/" not in path.as_posix()
         and not path.relative_to(root).as_posix().startswith(("skills/", ".skilgen/"))
+        and not is_ignored_path_parts(path.relative_to(root).parts, internal_monorepo=internal_monorepo)
         and path.name
         not in {
             "AGENTS.md",

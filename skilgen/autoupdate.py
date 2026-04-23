@@ -9,6 +9,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from skilgen.agents.codebase_signals import is_ignored_path_parts, is_internal_skillayer_monorepo
 from skilgen.core.config import load_config
 from skilgen.core.generated_outputs import is_generated_output_path
 from skilgen.core.repo_state import classify_repo_change, git_repo_state
@@ -86,13 +87,13 @@ def _record_requirements_path(project_root: Path, requirements_path: str | Path 
 
 def _file_snapshot(project_root: Path) -> dict[str, int]:
     tracked: dict[str, int] = {}
-    ignored_parts = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build"}
+    internal_monorepo = is_internal_skillayer_monorepo(project_root)
     for path in project_root.rglob("*"):
         if not path.is_file():
             continue
         relative = path.relative_to(project_root).as_posix()
         relative_parts = Path(relative).parts
-        if set(relative_parts) & ignored_parts:
+        if is_ignored_path_parts(relative_parts, internal_monorepo=internal_monorepo):
             continue
         if is_generated_output_path(relative):
             continue
