@@ -61,6 +61,7 @@ export const dashboardNavItems = [
   { href: "/dashboard/repos", label: "Repos", icon: "GitBranch" as const },
   { href: "/dashboard/skills", label: "Skills", icon: "BookOpen" as const },
   { href: "/dashboard/analytics", label: "Analytics", icon: "BarChart3" as const },
+  { href: "/dashboard/sources", label: "Sources", icon: "Database" as const },
   { href: "/dashboard/registry", label: "Registry", icon: "Package" as const },
   { href: "/dashboard/settings", label: "Settings", icon: "Settings" as const },
 ];

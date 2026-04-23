@@ -47,6 +47,31 @@ function VersionBadge({ versionNumber }: { versionNumber: number | null }) {
   return <span className="inline-flex rounded-full bg-[rgb(var(--accent-primary-rgb)/0.12)] px-2.5 py-1 text-[12px] font-semibold text-[color:var(--accent-primary)]">v{versionNumber}</span>;
 }
 
+function sourceDescription(sourceType: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    code: "Generated from codebase analysis",
+    openapi: "Generated from OpenAPI spec",
+    graphql: "Generated from GraphQL schema",
+    postman: "Generated from Postman collection",
+    terraform: "Generated from Terraform modules",
+    kubernetes: "Generated from Kubernetes manifests",
+    helm: "Generated from Helm charts",
+    dbt: "Generated from dbt project",
+    sql_schema: "Generated from SQL schema",
+    kafka: "Generated from Kafka schemas",
+    sarif: "Generated from SARIF findings",
+    sbom: "Generated from SBOM inventory",
+    security_policy: "Generated from security policy",
+    runbook: "Generated from runbooks",
+    confluence: "Generated from Confluence export",
+    notion: "Generated from Notion export",
+    incident: "Generated from incident reports",
+    pagerduty: "Generated from PagerDuty export",
+  };
+  const key = sourceType ?? "code";
+  return labels[key] ?? `Generated from ${key}`;
+}
+
 /** Render one skill score dimension. */
 function SubscoreCard({ label, value }: { label: string; value: number }) {
   return (
@@ -140,6 +165,9 @@ export default async function SkillDetailPage({ params }: PageProps) {
                 <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">{skill.domain}</h1>
                 <p className="mt-1 font-mono text-[12px] text-[color:var(--text-secondary)]">{skill.skill_path}</p>
               </div>
+            </div>
+            <div className="mt-4 inline-flex rounded-full border border-[rgb(var(--accent-primary-rgb)/0.28)] bg-[rgb(var(--accent-primary-rgb)/0.08)] px-3 py-1 text-[12px] font-semibold text-[color:var(--accent-primary)]">
+              Source: {sourceDescription(skill.source_type)}
             </div>
           </div>
 

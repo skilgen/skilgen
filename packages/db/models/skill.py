@@ -13,6 +13,33 @@ if TYPE_CHECKING:
     from packages.db.models.skill_version import SkillVersion
 
 
+SOURCE_TYPE_TO_CATEGORY: dict[str, str] = {
+    "code": "codebase_architecture",
+    "openapi": "internal_tools",
+    "graphql": "internal_tools",
+    "postman": "internal_tools",
+    "terraform": "codebase_architecture",
+    "kubernetes": "codebase_architecture",
+    "helm": "codebase_architecture",
+    "dbt": "data_schema",
+    "sql_schema": "data_schema",
+    "kafka": "data_schema",
+    "sarif": "security_compliance",
+    "sbom": "security_compliance",
+    "security_policy": "security_compliance",
+    "runbook": "operational_knowledge",
+    "confluence": "operational_knowledge",
+    "notion": "operational_knowledge",
+    "incident": "operational_knowledge",
+    "pagerduty": "operational_knowledge",
+}
+
+
+def skill_category_for_source_type(source_type: str | None) -> str:
+    """Return the dashboard taxonomy category for a persisted skill source."""
+    return SOURCE_TYPE_TO_CATEGORY.get(source_type or "code", "codebase_architecture")
+
+
 class Skill(Base):
     __tablename__ = "skills"
 
@@ -23,6 +50,8 @@ class Skill(Base):
     skill_path: Mapped[str] = mapped_column(String(512))
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_type: Mapped[str | None] = mapped_column(String(50), nullable=True, default="code")
+    skill_category: Mapped[str | None] = mapped_column(String(50), nullable=True, default="codebase_architecture")
     score_total: Mapped[int] = mapped_column(default=0)
     score_groundedness: Mapped[int] = mapped_column(default=0)
     score_coverage: Mapped[int] = mapped_column(default=0)

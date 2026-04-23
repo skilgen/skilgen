@@ -67,11 +67,56 @@ export type Skill = {
   score: Score;
   content: string | null;
   content_hash: string | null;
+  source_type: string | null;
+  skill_category: string | null;
   is_stale: boolean;
   load_count_30d: number;
   last_loaded_at: string | null;
   version_count: number;
   latest_version_number: number | null;
+};
+
+export type SkillCategory =
+  | "codebase_architecture"
+  | "code_style"
+  | "testing_conventions"
+  | "internal_tools"
+  | "security_compliance"
+  | "design_system"
+  | "data_schema"
+  | "operational_knowledge";
+
+export type SkillCategoryCoverage = {
+  covered: boolean;
+  skill_count: number;
+  avg_score: number;
+};
+
+export type RepoSkillSource = {
+  source_type: string;
+  detected: boolean;
+  skill_count: number;
+  last_analysed_at: string | null;
+  skills: { id: string; domain: string; score: number }[];
+};
+
+export type RepoSkillSources = {
+  sources: RepoSkillSource[];
+  coverage_map: Record<SkillCategory, SkillCategoryCoverage>;
+  coverage_score: number;
+};
+
+export type RepoCoverageSummary = {
+  repo_id: string;
+  name: string;
+  coverage_score: number;
+  missing_categories: SkillCategory[];
+};
+
+export type OrgCoverageSummary = {
+  repos: RepoCoverageSummary[];
+  org_coverage_score: number;
+  most_missing_category: SkillCategory | null;
 };
 
 export type SkillVersionSummary = {
@@ -205,6 +250,10 @@ export async function getOrgAnalytics(accessToken: string | null, orgId: string)
   return apiFetch<OrgAnalytics>(`/orgs/${orgId}/analytics`, accessToken);
 }
 
+export async function getOrgCoverageSummary(accessToken: string | null, orgId: string): Promise<OrgCoverageSummary | null> {
+  return apiFetch<OrgCoverageSummary>(`/orgs/${orgId}/coverage-summary`, accessToken);
+}
+
 export async function getOrgSettings(accessToken: string | null, orgId: string): Promise<OrgSettings | null> {
   return apiFetch<OrgSettings>(`/orgs/${orgId}/settings`, accessToken);
 }
@@ -223,6 +272,10 @@ export async function getRepoScoreHistory(accessToken: string | null, repoId: st
 
 export async function getRepoDependencies(accessToken: string | null, repoId: string): Promise<DependencyReport | null> {
   return apiFetch<DependencyReport>(`/repos/${repoId}/dependencies`, accessToken);
+}
+
+export async function getRepoSkillSources(accessToken: string | null, repoId: string): Promise<RepoSkillSources | null> {
+  return apiFetch<RepoSkillSources>(`/repos/${repoId}/skill-sources`, accessToken);
 }
 
 export async function getSkill(accessToken: string | null, skillId: string): Promise<Skill | null> {

@@ -24,6 +24,8 @@ class AnalysisJobPayload(BaseModel):
     pr_number: int | None = None
     base_score: dict[str, int] | None = None
     head_sha: str | None = None
+    source_type: str | None = None
+    source_path: str | None = None
 
 
 def _verify_qstash_signature(signature: str | None) -> None:
@@ -60,5 +62,7 @@ async def worker_analyse(
         pr_number=payload.pr_number,
         base_score=payload.base_score,
         head_sha=payload.head_sha,
+        source_type=payload.source_type,
+        source_path=payload.source_path,
     )
     return {"ok": True, "run_id": payload.run_id}

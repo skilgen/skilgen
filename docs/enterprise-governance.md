@@ -1,32 +1,77 @@
 # Enterprise Governance
 
-Skilgen’s enterprise mode lets teams combine repo-local skills with centrally governed skills, private sources, and approved MCP connectors.
+Enterprise governance turns skill generation into an enforceable operating model: policies, CI gates, score thresholds, Slack alerts, and audit trails.
 
-## What it covers
+## Policy Engine
 
-- enterprise skill ingestion from:
-  - local paths
-  - private Git repositories
-  - approved URLs
-- connector policy packs for:
-  - allow lists
-  - deny lists
-  - approval-required connectors
-  - skill-to-tool binding hints
-- activation traceability inside `.skilgen/`
+Create a policy:
 
-## Typical setup
-
-```yaml
-enterprise_skill_paths:
-  - ./enterprise/platform-skills
-enterprise_skill_git_urls:
-  - git@github.company.com:platform/internal-skills.git
-enterprise_skill_urls:
-  - https://confluence.company.internal/export/engineering-playbook.md
-mcp_policy_pack_path: ./policy/mcp-policy.json
+```bash
+skilgen enterprise policy init --project-root .
 ```
 
-## Why it matters
+Default `.skilgen/policy.yml`:
 
-This gives coding agents the same repo-local operating context, but with enterprise-approved policies around private knowledge and runtime tool access.
+```yaml
+min_score: 60
+required_domains: []
+max_stale_days: 30
+blocked_licenses:
+  - AGPL-3.0
+  - GPL-3.0
+```
+
+Check it:
+
+```bash
+skilgen enterprise policy check --project-root .
+```
+
+Example output:
+
+```text
+PASS score threshold
+PASS required domains
+PASS freshness
+FAIL blocked licenses: GPL-3.0 detected in dependency evidence
+```
+
+Exit code is `0` when all checks pass and `1` on any violation.
+
+## Compliance Report
+
+```bash
+skilgen enterprise report --json --project-root .
+```
+
+Response:
+
+```json
+{
+  "timestamp": "2026-04-23T12:00:00Z",
+  "score": {"total": 74},
+  "policy_violations": [],
+  "stale_skills": [],
+  "missing_domains": [],
+  "dependency_risks": [],
+  "overall_status": "pass"
+}
+```
+
+The JSON can be sent to SIEM, Slack, or internal policy systems.
+
+## Score Threshold Enforcement
+
+Skillayer stores `org.score_threshold`, default `60`. PR check runs use this threshold. If the branch score is below the threshold, the GitHub Check Run fails and can be required by branch protection.
+
+## Slack Notifications
+
+Configure the Slack webhook in Dashboard Settings. Skillayer sends stale-skill alerts when a skill has freshness below 20 and more than 5 loads in the last 30 days. Slack failures are logged but never crash analysis.
+
+## Audit Trail
+
+Skillayer records recent analysis runs, GitHub webhook deliveries, registry imports, registry publishes, and settings changes. The dashboard exposes these in Settings under the GitHub App and general organization views.
+
+## BYOK LLM Roadmap
+
+Enterprise BYOK will support Anthropic, Azure OpenAI, OpenAI-compatible gateways, and local Ollama endpoints through configuration rather than source code changes.

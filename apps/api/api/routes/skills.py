@@ -12,6 +12,7 @@ from apps.api.api.auth import get_current_org_id, get_current_user
 from apps.api.api.routes.orgs import _score_response
 from packages.db.database import get_db
 from packages.db.models import Repo, Skill, SkillUsageEvent, SkillVersion
+from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import SkillResponse, SkillVersionResponse, SkillVersionSummaryResponse
 
 
@@ -54,6 +55,8 @@ async def _build_skill_response(db: AsyncSession, skill: Skill, repo: Repo) -> S
         score=_score_response(skill),  # type: ignore[arg-type]
         content=skill.content,
         content_hash=skill.content_hash,
+        source_type=getattr(skill, "source_type", None) or "code",
+        skill_category=getattr(skill, "skill_category", None) or skill_category_for_source_type(getattr(skill, "source_type", None)),
         is_stale=skill.is_stale,
         load_count_30d=skill.load_count_30d,
         last_loaded_at=skill.last_loaded_at,

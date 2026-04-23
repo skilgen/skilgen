@@ -25,6 +25,7 @@ DEFAULT_CONFIG = SkilgenConfig(
     model_redaction_mode="balanced",
     redact_model_error_secrets=True,
     corpus=CorpusSettings(),
+    sources={},
     auto_install_external_skills=True,
     external_skills_allowed_trust_levels=["official", "spec", "community", "curated"],
     external_skills_allowlist=[],
@@ -149,6 +150,8 @@ def _parse_yaml_like(text: str) -> dict[str, object]:
 
 def load_config(project_root: Path) -> SkilgenConfig:
     path = project_root / "skilgen.yml"
+    if not path.exists() and (project_root / ".skilgen.yml").exists():
+        path = project_root / ".skilgen.yml"
     if not path.exists():
         return DEFAULT_CONFIG
 
@@ -193,6 +196,7 @@ def load_config(project_root: Path) -> SkilgenConfig:
             data.get("redact_model_error_secrets"), DEFAULT_CONFIG.redact_model_error_secrets
         ),
         corpus=corpus,
+        sources=_dict_value(data.get("sources")),
         auto_install_external_skills=_bool_value(data.get("auto_install_external_skills"), DEFAULT_CONFIG.auto_install_external_skills),
         external_skills_allowed_trust_levels=_string_list(
             data.get("external_skills_allowed_trust_levels"), DEFAULT_CONFIG.external_skills_allowed_trust_levels
@@ -272,6 +276,23 @@ corpus:
   min_cluster_size: 3
   exclude_patterns: []
   cache_path: .skilgen/corpus/index.json
+sources:
+  openapi: true
+  graphql: true
+  postman: true
+  terraform: true
+  kubernetes: true
+  helm: true
+  dbt: true
+  sql_schema: true
+  kafka: true
+  sarif: true
+  sbom: true
+  security_policy: true
+  runbooks: runbooks/
+  confluence: false
+  notion: false
+  incidents: true
 auto_install_external_skills: true
 external_skills_allowed_trust_levels:
   - official

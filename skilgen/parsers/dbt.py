@@ -277,7 +277,14 @@ def _collect_schema_docs(root: Path, model_roots: list[str]) -> dict[str, Any]:
     candidates.update(path for path in root.glob("*.yaml") if path.name != "dbt_project.yaml")
 
     for path in sorted(candidates):
-        payload = _load_yaml_mapping(path, artifact="dbt schema YAML")
+        try:
+            payload = _load_yaml_mapping(path, artifact="dbt schema YAML")
+        except DbtProjectParseError:
+            if _is_under_model_roots(path, root, model_roots):
+                raise
+            continue
+        if not any(key in payload for key in ("models", "sources", "macros")):
+            continue
         for model in _as_list(payload.get("models")):
             if not isinstance(model, dict) or not model.get("name"):
                 continue
@@ -309,6 +316,18 @@ def _collect_schema_docs(root: Path, model_roots: list[str]) -> dict[str, Any]:
                 arguments=[str(arg.get("name")) for arg in _as_list(macro.get("arguments")) if isinstance(arg, dict) and arg.get("name")],
             )
     return {"models": model_docs, "sources": sources, "macros": macros}
+
+
+def _is_under_model_roots(path: Path, root: Path, model_roots: list[str]) -> bool:
+    """Return true when a schema YAML lives below configured model paths."""
+    for model_root in model_roots:
+        base = root / model_root
+        try:
+            path.relative_to(base)
+            return True
+        except ValueError:
+            continue
+    return False
 
 
 def _collect_macros(root: Path, macro_roots: list[str], documented: dict[str, DbtMacro]) -> list[DbtMacro]:

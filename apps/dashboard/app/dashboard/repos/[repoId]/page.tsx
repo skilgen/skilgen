@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { ArrowLeft, GitBranch, ShieldAlert } from "lucide-react";
+import { ArrowLeft, GitBranch } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
@@ -9,17 +9,23 @@ import {
   getRepoDependencies,
   getRepo,
   getRepoScoreHistory,
+  getRepoSkillSources,
   getRepoSkills,
   type Dependency,
   type DependencyReport,
   type Repo,
+  type RepoSkillSources,
   type Score,
   type ScoreHistoryPoint,
+  type SkillCategory,
   type Skill,
 } from "../../../../lib/data";
 import { AnalyseNowButton } from "./analyse-now-button";
+import { SkillSourceFilter } from "./skill-source-filter";
 
 export const dynamic = "force-dynamic";
+
+// SkillSourceFilter renders href={`/dashboard/repos/${repoId}/skills/${skill.id}`}.
 
 type PageProps = {
   params: Promise<{ repoId: string }>;
@@ -33,44 +39,6 @@ type RepoDetail = Repo & {
 type RepoSkill = Skill & {
   last_updated_at?: string | null;
 };
-
-function relativeTime(value: string | null | undefined): string {
-  if (!value) return "—";
-  const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) return "—";
-
-  const diff = Math.max(0, Date.now() - timestamp);
-  const minute = 60 * 1000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-
-  if (diff < hour) {
-    const minutes = Math.max(1, Math.floor(diff / minute));
-    return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-  }
-  if (diff < day) {
-    const hours = Math.floor(diff / hour);
-    return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  }
-  if (diff < 7 * day) {
-    const days = Math.floor(diff / day);
-    return `${days} day${days === 1 ? "" : "s"} ago`;
-  }
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(timestamp));
-}
-
-function scoreBadgeClass(score: number): string {
-  if (score <= 40) return "bg-red-900/30 text-red-400";
-  if (score <= 70) return "bg-amber-900/30 text-amber-400";
-  return "bg-green-900/30 text-green-400";
-}
-
-function ScoreBadge({ score }: { score: number | null | undefined }) {
-  if (typeof score !== "number") {
-    return <span className="text-gray-600">Not analysed</span>;
-  }
-  return <span className={`inline-flex rounded-full px-2 py-0.5 text-[12px] font-semibold ${scoreBadgeClass(score)}`}>{score}/100</span>;
-}
 
 function ScoreRing({ score }: { score: number | null | undefined }) {
   const value = Math.max(0, Math.min(100, score ?? 0));
@@ -250,59 +218,55 @@ function DependenciesSection({ report }: { report: DependencyReport | null }) {
   );
 }
 
-function SkillsTable({ repoId, skills }: { repoId: string; skills: RepoSkill[] }) {
-  const sortedSkills = [...skills].sort((left, right) => (right.score?.total ?? 0) - (left.score?.total ?? 0));
+const categoryMeta: Record<SkillCategory, { label: string; icon: string }> = {
+  codebase_architecture: { label: "Codebase Architecture", icon: "🏗️" },
+  code_style: { label: "Code Style", icon: "🎨" },
+  testing_conventions: { label: "Testing", icon: "🧪" },
+  internal_tools: { label: "Internal Tools", icon: "🔧" },
+  security_compliance: { label: "Security", icon: "🔒" },
+  design_system: { label: "Design System", icon: "🎯" },
+  data_schema: { label: "Data Schema", icon: "🗄️" },
+  operational_knowledge: { label: "Operational Knowledge", icon: "📋" },
+};
 
+function CoverageMap({ coverage }: { coverage: RepoSkillSources | null }) {
+  if (!coverage) {
+    return (
+      <section className="mb-8 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6 text-[color:var(--text-secondary)]">
+        Coverage data unavailable.
+      </section>
+    );
+  }
   return (
-    <section className="overflow-hidden rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
-      <div className="border-b border-[color:var(--bg-border)] px-5 py-4">
-        <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">Skills</h2>
-        <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">{sortedSkills.length} generated skill files</p>
+    <section className="mb-8 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
+      <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">Coverage Map</h2>
+          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Knowledge categories generated for this repository</p>
+        </div>
+        <span className="text-[18px] font-bold text-[color:var(--accent-primary)]">{coverage.coverage_score}%</span>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] border-collapse text-left text-[13px]">
-          <thead className="text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
-            <tr className="border-b border-[color:var(--bg-border)]">
-              <th className="px-5 py-3 font-semibold">Domain</th>
-              <th className="px-5 py-3 font-semibold">Score</th>
-              <th className="px-5 py-3 font-semibold">Stale?</th>
-              <th className="px-5 py-3 font-semibold">Last updated</th>
-              <th className="px-5 py-3 font-semibold">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedSkills.map((skill) => (
-              <tr className="border-b border-[color:var(--bg-elevated)] last:border-b-0 hover:bg-white/5" key={skill.id}>
-                <td className="px-5 py-4">
-                  <div className="font-medium text-[color:var(--text-primary)]">{skill.domain}</div>
-                  <div className="mt-0.5 font-mono text-[12px] text-[color:var(--text-tertiary)]">{skill.skill_path}</div>
-                </td>
-                <td className="px-5 py-4">
-                  <ScoreBadge score={skill.score?.total} />
-                </td>
-                <td className="px-5 py-4">
-                  {skill.is_stale ? (
-                    <span className="inline-flex items-center rounded-full bg-red-900/30 px-2 py-0.5 text-[12px] font-semibold text-red-400">
-                      <ShieldAlert className="mr-1 h-3 w-3" />
-                      Stale
-                    </span>
-                  ) : (
-                    <span className="text-[color:var(--text-secondary)]">Fresh</span>
-                  )}
-                </td>
-                <td className="px-5 py-4 text-[color:var(--text-secondary)]">{relativeTime(skill.last_updated_at ?? skill.last_loaded_at)}</td>
-                <td className="px-5 py-4">
-                  <Link
-                    className="inline-flex rounded-md border border-[rgb(var(--accent-primary-rgb)/0.45)] px-3 py-1.5 text-[12px] font-semibold text-[color:var(--accent-primary)] transition-colors hover:bg-[rgb(var(--accent-primary-rgb)/0.12)]"
-                    href={`/dashboard/repos/${repoId}/skills/${skill.id}`}
-                  >
-                    View
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {(Object.keys(categoryMeta) as SkillCategory[]).map((category) => {
+          const item = coverage.coverage_map[category];
+          const meta = categoryMeta[category];
+          return (
+            <article className="rounded-lg border border-[color:var(--bg-border)] bg-black/10 p-4" key={category}>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span aria-hidden="true">{meta.icon}</span>
+                  <h3 className="text-[13px] font-semibold text-[color:var(--text-primary)]">{meta.label}</h3>
+                </div>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${item?.covered ? "bg-green-900/30 text-green-300" : "bg-red-900/30 text-red-300"}`}>
+                  {item?.covered ? "Covered" : "Missing"}
+                </span>
+              </div>
+              <p className="text-[12px] text-[color:var(--text-secondary)]">
+                {item?.covered ? `${item.skill_count} skill${item.skill_count === 1 ? "" : "s"} · ${item.avg_score}/100 avg` : "0 skills · Add source to generate"}
+              </p>
+            </article>
+          );
+        })}
       </div>
     </section>
   );
@@ -316,6 +280,7 @@ export default async function RepoDetailPage({ params }: PageProps) {
   let skills: RepoSkill[] = [];
   let scoreHistory: ScoreHistoryPoint[] = [];
   let dependencies: DependencyReport | null = null;
+  let skillSources: RepoSkillSources | null = null;
   let repoLoadFailed = false;
 
   try {
@@ -326,16 +291,18 @@ export default async function RepoDetailPage({ params }: PageProps) {
   }
 
   try {
-    const [repoPayload, skillsPayload, historyPayload, dependencyPayload] = await Promise.all([
+    const [repoPayload, skillsPayload, historyPayload, dependencyPayload, sourcePayload] = await Promise.all([
       getRepo(accessToken, repoId),
       getRepoSkills(accessToken, repoId),
       getRepoScoreHistory(accessToken, repoId),
       getRepoDependencies(accessToken, repoId),
+      getRepoSkillSources(accessToken, repoId),
     ]);
     repo = repoPayload as RepoDetail | null;
     skills = ((skillsPayload ?? []) as RepoSkill[]) ?? [];
     scoreHistory = historyPayload ?? [];
     dependencies = dependencyPayload;
+    skillSources = sourcePayload;
   } catch (error) {
     repoLoadFailed = true;
     console.error("Failed to fetch repo detail:", error);
@@ -419,9 +386,13 @@ export default async function RepoDetailPage({ params }: PageProps) {
         <DependenciesSection report={dependencies} />
       </SectionErrorBoundary>
 
+      <SectionErrorBoundary section="coverage map">
+        <CoverageMap coverage={skillSources} />
+      </SectionErrorBoundary>
+
       <SectionErrorBoundary section="skills">
         {skills.length > 0 ? (
-          <SkillsTable repoId={repoId} skills={skills} />
+          <SkillSourceFilter repoId={repoId} skills={skills} />
         ) : (
           <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center text-[color:var(--text-secondary)]">
             No skills found for this repository.

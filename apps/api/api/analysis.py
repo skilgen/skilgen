@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.api.github import clone_repo
 from apps.api.api.notifications import build_stale_skill_message, post_slack_message
 from packages.db.models import AnalysisRun, Dependency, Org, Repo, ScoreHistory, Skill, SkillVersion
+from packages.db.models.skill import skill_category_for_source_type
 from skilgen.core.dependency_risk import analyze_dependency_risks
 from skilgen.core.models import DependencyFinding, DependencyRiskReport
 
@@ -106,6 +107,8 @@ async def save_skills(
         domain = str(skill_data["domain"])
         content = str(skill_data["content"])
         content_hash = hashlib.sha256(content.encode()).hexdigest()
+        source_type = str(skill_data.get("source_type") or "code")
+        skill_category = str(skill_data.get("skill_category") or skill_category_for_source_type(source_type))
 
         existing = await db.execute(
             select(Skill)
@@ -123,6 +126,8 @@ async def save_skills(
                 skill_path=str(skill_data["skill_path"]),
                 content=content,
                 content_hash=content_hash,
+                source_type=source_type,
+                skill_category=skill_category,
                 is_stale=False,
             )
             _apply_skill_scores(skill, skill_data)
@@ -133,6 +138,8 @@ async def save_skills(
             _apply_skill_scores(skill, skill_data)
             if skill.content_hash == content_hash:
                 skill.run_id = run_id
+                skill.source_type = source_type
+                skill.skill_category = skill_category
                 skill.is_stale = False
                 saved.append(skill)
                 continue
@@ -150,6 +157,8 @@ async def save_skills(
             skill.content_hash = content_hash
             skill.run_id = run_id
             skill.skill_path = str(skill_data["skill_path"])
+            skill.source_type = source_type
+            skill.skill_category = skill_category
             skill.is_stale = False
 
         version = SkillVersion(
@@ -333,6 +342,8 @@ async def run_skilgen_analysis(project_root: Path) -> dict[str, Any]:
                         "score_coverage": _score_value(score, "coverage"),
                         "score_freshness": _score_value(score, "freshness"),
                         "score_structure": _score_value(score, "structure"),
+                        "source_type": "code",
+                        "skill_category": skill_category_for_source_type("code"),
                     }
                 )
 
@@ -449,6 +460,8 @@ async def run_analysis(
     pr_number: int | None = None,
     base_score: dict[str, Any] | None = None,
     head_sha: str | None = None,
+    source_type: str | None = None,
+    source_path: str | None = None,
 ) -> None:
     tmpdir = Path(tempfile.mkdtemp(prefix=f"skillayer_{run_id[:8]}_"))
     try:

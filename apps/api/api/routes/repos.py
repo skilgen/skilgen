@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,15 +13,82 @@ from apps.api.api.routes.orgs import _repo_response, _score_response
 from apps.api.api.routes.webhook import _queue_analysis
 from packages.db.database import get_db
 from packages.db.models import AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillVersion
-from packages.db.schemas import AnalysisRunResponse, DependencyReportResponse, DependencyResponse
+from packages.db.models.skill import skill_category_for_source_type
+from packages.db.schemas import (
+    AnalysisRunResponse,
+    AnalyzeSourceResponse,
+    DependencyReportResponse,
+    DependencyResponse,
+    RepoSkillSourceSummary,
+    RepoSkillSourcesResponse,
+    SkillCategoryCoverage,
+    SkillSourceSkillSummary,
+)
 from skilgen.core.score import render_repo_score_badge_svg
 
 
 router = APIRouter(prefix="/repos", tags=["repos"])
 
+SKILL_CATEGORIES = [
+    "codebase_architecture",
+    "code_style",
+    "testing_conventions",
+    "internal_tools",
+    "security_compliance",
+    "design_system",
+    "data_schema",
+    "operational_knowledge",
+]
+
+SOURCE_TYPES = [
+    "code",
+    "openapi",
+    "graphql",
+    "postman",
+    "terraform",
+    "kubernetes",
+    "helm",
+    "dbt",
+    "sql_schema",
+    "kafka",
+    "sarif",
+    "sbom",
+    "security_policy",
+    "runbook",
+    "confluence",
+    "notion",
+    "incident",
+    "pagerduty",
+]
+
 
 class ManualAnalysisRequest(BaseModel):
     installation_id: int | None = None
+
+
+class AnalyzeSourceRequest(BaseModel):
+    """Request body for source-specific analysis jobs."""
+
+    source_type: Literal[
+        "openapi",
+        "graphql",
+        "postman",
+        "terraform",
+        "kubernetes",
+        "helm",
+        "dbt",
+        "sql_schema",
+        "kafka",
+        "sarif",
+        "sbom",
+        "security_policy",
+        "runbook",
+        "confluence",
+        "notion",
+        "incident",
+        "pagerduty",
+    ]
+    path: str | None = Field(default=None, max_length=512)
 
 
 async def _repo_in_scope(db: AsyncSession, repo_id: str, org_id: str) -> Repo:
@@ -31,6 +98,53 @@ async def _repo_in_scope(db: AsyncSession, repo_id: str, org_id: str) -> Repo:
     if repo.org_id != org_id:
         raise HTTPException(status_code=403, detail="Forbidden")
     return repo
+
+
+def _normalized_source_type(skill: Skill) -> str:
+    """Return the persisted source type or the backwards-compatible default."""
+    return str(skill.source_type or "code")
+
+
+def _normalized_skill_category(skill: Skill) -> str:
+    """Return the persisted skill category or derive one from source type."""
+    return str(skill.skill_category or skill_category_for_source_type(_normalized_source_type(skill)))
+
+
+def _coverage_score(coverage_map: dict[str, SkillCategoryCoverage]) -> int:
+    """Compute the 0-100 category coverage score."""
+    covered = sum(1 for item in coverage_map.values() if item.covered)
+    return round((covered / len(SKILL_CATEGORIES)) * 100)
+
+
+async def _latest_repo_skills(db: AsyncSession, repo_id: str) -> list[Skill]:
+    """Return latest skills by domain for a repository."""
+    rows = (
+        await db.execute(select(Skill).where(Skill.repo_id == repo_id).order_by(desc(Skill.created_at)))
+    ).scalars().all()
+    latest_by_domain: dict[str, Skill] = {}
+    for skill in rows:
+        latest_by_domain.setdefault(skill.domain, skill)
+    return list(latest_by_domain.values())
+
+
+def _build_coverage_map(skills: list[Skill]) -> dict[str, SkillCategoryCoverage]:
+    """Build the eight-category coverage map used by API and dashboard."""
+    grouped: dict[str, list[Skill]] = {category: [] for category in SKILL_CATEGORIES}
+    for skill in skills:
+        category = _normalized_skill_category(skill)
+        if category in grouped:
+            grouped[category].append(skill)
+    coverage_map: dict[str, SkillCategoryCoverage] = {}
+    for category, category_skills in grouped.items():
+        avg = 0
+        if category_skills:
+            avg = round(sum(int(skill.score_total or 0) for skill in category_skills) / len(category_skills))
+        coverage_map[category] = SkillCategoryCoverage(
+            covered=bool(category_skills),
+            skill_count=len(category_skills),
+            avg_score=avg,
+        )
+    return coverage_map
 
 async def _latest_repo_score_total(db: AsyncSession, repo_id: str) -> int:
     """Return the most recent stored score total for a repository."""
@@ -131,13 +245,7 @@ async def get_repo_skills(
     repo = await db.get(Repo, repo_id)
     if repo is None:
         raise HTTPException(status_code=404, detail="Repo not found")
-    rows = (
-        await db.execute(select(Skill).where(Skill.repo_id == repo_id).order_by(desc(Skill.created_at)))
-    ).scalars().all()
-    latest_by_domain: dict[str, Skill] = {}
-    for skill in rows:
-        latest_by_domain.setdefault(skill.domain, skill)
-    skills = sorted(latest_by_domain.values(), key=lambda item: (-int(item.score_total or 0), item.domain))
+    skills = sorted(await _latest_repo_skills(db, repo_id), key=lambda item: (-int(item.score_total or 0), item.domain))
     responses: list[dict[str, object]] = []
     for skill in skills:
         version_count = (
@@ -161,6 +269,8 @@ async def get_repo_skills(
             "score": score.model_dump() if score else None,
             "content": (skill.content[:500] if skill.content else None),
             "content_hash": skill.content_hash,
+            "source_type": _normalized_source_type(skill),
+            "skill_category": _normalized_skill_category(skill),
             "is_stale": skill.is_stale,
             "load_count_30d": skill.load_count_30d,
             "last_loaded_at": skill.last_loaded_at,
@@ -199,6 +309,49 @@ async def get_score_history(
         }
         for row in reversed(rows)
     ]
+
+
+@router.get("/{repo_id}/skill-sources", response_model=RepoSkillSourcesResponse)
+async def get_repo_skill_sources(
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> RepoSkillSourcesResponse:
+    """Return source-type and category coverage for a repository."""
+    await _repo_in_scope(db, repo_id, current_org_id)
+    try:
+        skills = await _latest_repo_skills(db, repo_id)
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"detail": "Unable to load skill source coverage", "code": "SKILL_SOURCES_FAILED"},
+        ) from exc
+
+    sources: list[RepoSkillSourceSummary] = []
+    for source_type in SOURCE_TYPES:
+        source_skills = [skill for skill in skills if _normalized_source_type(skill) == source_type]
+        if not source_skills and source_type != "code":
+            continue
+        source_skills.sort(key=lambda skill: (-int(skill.score_total or 0), skill.domain))
+        sources.append(
+            RepoSkillSourceSummary(
+                source_type=source_type,
+                detected=bool(source_skills),
+                skill_count=len(source_skills),
+                last_analysed_at=max((skill.created_at for skill in source_skills), default=None),
+                skills=[
+                    SkillSourceSkillSummary(id=skill.id, domain=skill.domain, score=int(skill.score_total or 0))
+                    for skill in source_skills
+                ],
+            )
+        )
+    coverage_map = _build_coverage_map(skills)
+    return RepoSkillSourcesResponse(
+        sources=sources,
+        coverage_map=coverage_map,
+        coverage_score=_coverage_score(coverage_map),
+    )
 
 
 @router.get("/{repo_id}/dependencies", response_model=DependencyReportResponse)
@@ -316,3 +469,54 @@ async def trigger_analysis(
         },
     )
     return {"queued": run.id}
+
+
+@router.post("/{repo_id}/analyze-source", response_model=AnalyzeSourceResponse)
+async def trigger_source_analysis(
+    repo_id: str,
+    payload: AnalyzeSourceRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+    _current_user: dict[str, object] = Depends(get_current_user),
+) -> AnalyzeSourceResponse:
+    """Queue a source-specific analysis run for a repository."""
+    repo = await _repo_in_scope(db, repo_id, current_org_id)
+    if not repo.github_installation_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"detail": "Repo installation id is not available", "code": "INSTALLATION_ID_MISSING"},
+        )
+    run = AnalysisRun(
+        repo_id=repo_id,
+        trigger=f"source:{payload.source_type}",
+        status="queued",
+        branch=repo.default_branch,
+        created_at=datetime.utcnow(),
+    )
+    try:
+        db.add(run)
+        await db.flush()
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"detail": "Could not queue source analysis", "code": "SOURCE_ANALYSIS_QUEUE_FAILED"},
+        ) from exc
+
+    await _queue_analysis(
+        request,
+        background_tasks,
+        {
+            "run_id": run.id,
+            "repo_id": repo.id,
+            "installation_id": int(repo.github_installation_id),
+            "full_name": repo.full_name,
+            "ref": repo.default_branch,
+            "source_type": payload.source_type,
+            "source_path": payload.path,
+        },
+    )
+    return AnalyzeSourceResponse(job_id=run.id, status="queued")

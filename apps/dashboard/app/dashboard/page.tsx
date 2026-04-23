@@ -1,7 +1,7 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
 import { OverviewLiveData } from "@/components/overview-live-data";
-import { API_URL, type Org, type OrgStats, type Repo } from "../../lib/data";
+import { API_URL, type Org, type OrgCoverageSummary, type OrgStats, type Repo } from "../../lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -58,9 +58,11 @@ export default async function OverviewPage() {
   let org: Org | null = null;
   let stats: OrgStats | null = null;
   let repos: Repo[] = [];
+  let coverageSummary: OrgCoverageSummary | null = null;
   let orgError: string | null = null;
   let statsError: string | null = null;
   let reposError: string | null = null;
+  let coverageError: string | null = null;
 
   try {
     const session = await withAuth({ ensureSignedIn: true });
@@ -154,6 +156,33 @@ export default async function OverviewPage() {
       reposError = "Unable to load repositories.";
       logOverviewError("repos_fetch_error", error, { orgId: org.id });
     }
+
+    try {
+      const coverageRes = await fetch(`${API_URL}/orgs/${org.id}/coverage-summary`, {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+        next: { revalidate: 60 },
+      });
+      logOverviewEvent("coverage_fetch_completed", {
+        status: coverageRes.status,
+        ok: coverageRes.ok,
+        orgId: org.id,
+      });
+
+      if (!coverageRes.ok) {
+        coverageError = `Unable to load coverage (${coverageRes.status}).`;
+      } else {
+        coverageSummary = (await coverageRes.json()) as OrgCoverageSummary;
+        logOverviewEvent("coverage_loaded", {
+          orgId: org.id,
+          org_coverage_score: coverageSummary.org_coverage_score,
+          repo_count: coverageSummary.repos.length,
+          most_missing_category: coverageSummary.most_missing_category,
+        });
+      }
+    } catch (error) {
+      coverageError = "Unable to load coverage.";
+      logOverviewError("coverage_fetch_error", error, { orgId: org.id });
+    }
   }
 
   return (
@@ -169,6 +198,8 @@ export default async function OverviewPage() {
         orgError={orgError}
         reposError={reposError}
         statsError={statsError}
+        coverageError={coverageError}
+        coverageSummary={coverageSummary}
       />
     </div>
   );

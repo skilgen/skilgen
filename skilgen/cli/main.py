@@ -28,6 +28,7 @@ from skilgen.core.enterprise_policy import (
     write_default_policy,
 )
 from skilgen.core.score import ci_result, score_badge_markdown
+from skilgen.parsers.sources import SOURCE_TYPES, run_source_parsers
 from skilgen.registry_client import RegistryClientError, import_skill as import_registry_skill, publish_skill as publish_registry_skill
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
@@ -189,7 +190,7 @@ def write_ci_workflow(project_root: Path) -> Path:
                 "      - name: Install Skilgen",
                 "        run: python -m pip install -e .",
                 "      - name: Generate skills",
-                "        run: skilgen deliver --project-root .",
+                "        run: skilgen deliver --project-root . --auto-detect",
                 "      - name: Enforce Skilgen Score",
                 "        run: skilgen score --ci --min-score 60 --min-groundedness 15 --min-coverage 15 --project-root .",
                 "      - name: Enforce enterprise policy",
@@ -249,6 +250,26 @@ def _format_analytics_summary(payload: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
+def _render_source_summary(result: object) -> str:
+    """Render non-code source parser output for CLI users."""
+    analysed = getattr(result, "analysed", {})
+    failures = getattr(result, "failures", {})
+    written_files = getattr(result, "written_files", [])
+    lines = ["Non-code sources analysed:"]
+    if isinstance(analysed, dict) and analysed:
+        for source_type, domains in sorted(analysed.items()):
+            domain_list = ", ".join(str(domain) for domain in domains) if isinstance(domains, list) else str(domains)
+            lines.append(f"  {source_type:<12} -> source_skill ({domain_list})")
+    else:
+        lines.append("  none detected")
+    if isinstance(failures, dict) and failures:
+        lines.extend(["", "Parser warnings:"])
+        lines.extend(f"  {source_type}: {message}" for source_type, message in sorted(failures.items()))
+    count = len(written_files) if isinstance(written_files, list) else 0
+    lines.extend(["", f"Generated {count} additional SKILL.md files from non-code sources."])
+    return "\n".join(lines)
+
+
 def write_ci_workflow(project_root: Path) -> Path:
     """Write the default GitHub Actions workflow for Skilgen quality gates."""
     workflow_path = project_root / ".github" / "workflows" / "skilgen.yml"
@@ -272,7 +293,7 @@ def write_ci_workflow(project_root: Path) -> Path:
                 "      - name: Install Skilgen",
                 "        run: python -m pip install -e .",
                 "      - name: Generate skills",
-                "        run: skilgen deliver --project-root .",
+                "        run: skilgen deliver --project-root . --auto-detect",
                 "      - name: Enforce Skilgen Score",
                 "        run: skilgen score --ci --min-score 60 --min-groundedness 15 --min-coverage 15 --project-root .",
                 "      - name: Enforce enterprise policy",
@@ -330,6 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
     deliver.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     deliver.add_argument("--dry-run", action="store_true")
     deliver.add_argument("--skip-index", action="store_true")
+    deliver.add_argument("--auto-detect", action=argparse.BooleanOptionalAction, default=True, help="Auto-detect non-code source artifacts during delivery.")
 
     update = subparsers.add_parser("update", help="Refresh generated outputs for all or selected domains.")
     update.add_argument("--requirements")
@@ -382,6 +404,9 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--project-root", default=".")
     analyze.add_argument("--requirements")
     analyze.add_argument("--deps", action="store_true", help="Show dependency CVE, version drift, and upgrade guidance.")
+    analyze.add_argument("--source", action="append", choices=sorted(SOURCE_TYPES), help="Run one non-code source parser in addition to code analysis. Can be repeated.")
+    analyze.add_argument("--all", action="store_true", help="Run all detected non-code source parsers.")
+    analyze.add_argument("--auto-detect", action=argparse.BooleanOptionalAction, default=True, help="Auto-detect configured non-code source artifacts.")
 
     diff = subparsers.add_parser("diff", help="Show what changed since the last generation and which skills are stale.")
     diff.add_argument("--project-root", default=".")
@@ -684,7 +709,16 @@ def main() -> None:
             report = analyze_dependency_risks(Path(args.project_root).resolve())
             print(render_dependency_risk_report(report))
             return
-        print(json.dumps(analyze_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None), indent=2))
+        root = Path(args.project_root).resolve()
+        requested_sources = list(args.source or [])
+        if args.all:
+            requested_sources.append("all")
+        if requested_sources or args.auto_detect:
+            result = run_source_parsers(root, requested_sources or None)
+            if requested_sources or getattr(result, "written_files", []):
+                print(_render_source_summary(result))
+                return
+        print(json.dumps(analyze_payload(root, Path(args.requirements).resolve() if args.requirements else None), indent=2))
         return
     if args.command == "diff":
         payload = diff_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None)
@@ -1209,14 +1243,26 @@ def main() -> None:
             skip_index=args.skip_index,
             progress_callback=progress.emit,
         )
+        source_result = None
+        if getattr(args, "auto_detect", False) and not args.dry_run and "skills" in targets:
+            progress.emit("Scanning non-code sources for API, infrastructure, data, security, and operational knowledge.")
+            source_result = run_source_parsers(root, None)
     finally:
         progress.stop()
+    source_payload: dict[str, object] | None = None
+    if source_result is not None:
+        source_payload = {
+            "analysed": source_result.analysed,
+            "generated_files": [str(path) for path in source_result.written_files],
+            "failures": source_result.failures,
+        }
     print(
         json.dumps(
             {
                 "runtime": current_runtime_mode(root),
                 "runtime_diagnostics": diagnostics,
                 "generated_files": [str(path) for path in generated],
+                "non_code_sources": source_payload,
             },
             indent=2,
         )

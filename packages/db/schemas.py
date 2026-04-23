@@ -74,6 +74,8 @@ class SkillResponse(BaseModel):
     score: ScoreResponse
     content: str | None = None
     content_hash: str | None = None
+    source_type: str | None = "code"
+    skill_category: str | None = "codebase_architecture"
     is_stale: bool
     load_count_30d: int
     last_loaded_at: datetime | None
@@ -118,6 +120,50 @@ class DependencyReportResponse(BaseModel):
     healthy: list[DependencyResponse]
     total_count: int
     risk_score: int
+
+
+class SkillSourceSkillSummary(BaseModel):
+    id: str
+    domain: str
+    score: int
+
+
+class RepoSkillSourceSummary(BaseModel):
+    source_type: str
+    detected: bool
+    skill_count: int
+    last_analysed_at: datetime | None
+    skills: list[SkillSourceSkillSummary]
+
+
+class SkillCategoryCoverage(BaseModel):
+    covered: bool
+    skill_count: int
+    avg_score: int
+
+
+class RepoSkillSourcesResponse(BaseModel):
+    sources: list[RepoSkillSourceSummary]
+    coverage_map: dict[str, SkillCategoryCoverage]
+    coverage_score: int
+
+
+class AnalyzeSourceResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+class RepoCoverageSummary(BaseModel):
+    repo_id: str
+    name: str
+    coverage_score: int
+    missing_categories: list[str]
+
+
+class OrgCoverageSummaryResponse(BaseModel):
+    repos: list[RepoCoverageSummary]
+    org_coverage_score: int
+    most_missing_category: str | None
 
 
 class RegistrySkillSummaryResponse(BaseModel):

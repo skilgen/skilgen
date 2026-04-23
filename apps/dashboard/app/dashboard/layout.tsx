@@ -6,6 +6,7 @@ import {
   Building2,
   ChevronDown,
   CreditCard,
+  Database,
   GitBranch,
   LayoutDashboard,
   LogOut,
@@ -79,6 +80,7 @@ export default async function DashboardLayout({
     BarChart3,
     BookOpen,
     Package,
+    Database,
     Settings,
     CreditCard,
   };

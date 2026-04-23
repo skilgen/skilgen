@@ -1,6 +1,6 @@
 import { Github } from "lucide-react";
 
-import type { OrgStats, Repo } from "../../lib/data";
+import type { OrgCoverageSummary, OrgStats, Repo, SkillCategory } from "../../lib/data";
 import { MetricCard } from "./metric-card";
 import { ReposTable } from "./repos-table";
 import { SectionErrorBoundary } from "./section-error-boundary";
@@ -12,6 +12,8 @@ type OverviewLiveDataProps = {
   orgError?: string | null;
   statsError?: string | null;
   reposError?: string | null;
+  coverageSummary?: OrgCoverageSummary | null;
+  coverageError?: string | null;
 };
 
 function OnboardingCard() {
@@ -76,12 +78,65 @@ function ScoreSparkline({ points }: { points: OrgStats["score_trend"] }) {
   );
 }
 
+const categoryLabels: Record<SkillCategory, string> = {
+  codebase_architecture: "Codebase Architecture",
+  code_style: "Code Style",
+  testing_conventions: "Testing Conventions",
+  internal_tools: "Internal Tools",
+  security_compliance: "Security Compliance",
+  design_system: "Design System",
+  data_schema: "Data Schema",
+  operational_knowledge: "Operational Knowledge",
+};
+
+function formatCategory(category: SkillCategory): string {
+  return categoryLabels[category] ?? category.replaceAll("_", " ");
+}
+
+function KnowledgeCoverage({ summary }: { summary: OrgCoverageSummary }) {
+  const worstRepo = [...summary.repos].sort((left, right) => left.coverage_score - right.coverage_score)[0] ?? null;
+  const missingCategories = worstRepo?.missing_categories.slice(0, 4) ?? [];
+  const coveredCategories = Math.round((summary.org_coverage_score / 100) * 8);
+
+  return (
+    <section className="mb-8 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
+      <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h2 className="text-[14px] font-semibold text-[color:var(--text-primary)]">Knowledge Coverage</h2>
+          <p className="mt-1 text-[12px] text-[color:var(--text-tertiary)]">
+            {summary.org_coverage_score}% ({coveredCategories} of 8 categories)
+          </p>
+        </div>
+        {worstRepo ? (
+          <a className="text-[12px] font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]" href={`/dashboard/repos/${worstRepo.repo_id}`}>
+            Improve {worstRepo.name}
+          </a>
+        ) : null}
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-white/10">
+        <div className="h-full rounded-full bg-[color:var(--accent-primary)]" style={{ width: `${summary.org_coverage_score}%` }} />
+      </div>
+      {missingCategories.length > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {missingCategories.map((category) => (
+            <span className="rounded-full bg-red-900/30 px-2.5 py-1 text-[12px] font-semibold text-red-300" key={category}>
+              {formatCategory(category)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function OverviewLiveData({
   initialStats = null,
   initialRepos = [],
   orgError = null,
   statsError = null,
   reposError = null,
+  coverageSummary = null,
+  coverageError = null,
 }: OverviewLiveDataProps) {
   const stats = initialStats;
   const repos = initialRepos;
@@ -115,6 +170,16 @@ export function OverviewLiveData({
             )}
           </div>
         )}
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="knowledge coverage">
+        {coverageError ? (
+          <div className="mb-8">
+            <SectionFallback section="knowledge coverage" />
+          </div>
+        ) : coverageSummary ? (
+          <KnowledgeCoverage summary={coverageSummary} />
+        ) : null}
       </SectionErrorBoundary>
 
       <SectionErrorBoundary section="score trend">

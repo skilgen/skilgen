@@ -5,8 +5,21 @@ theme:
   name: material
 nav:
   - Home: index.md
-  - Architecture Mode: architecture-mode.md
-  - Evidence Graph: evidence-graph.md
-  - Skilgen Score: score.md
-  - Diff And Auto-Refresh: diff-and-autoupdate.md
-  - Enterprise Governance: enterprise-governance.md
+  - Getting Started:
+    - Quickstart: quickstart.md
+    - CLI Reference: cli-reference.md
+  - Core Features:
+    - Skilgen Score: score.md
+    - Non-Code Sources: non-code-sources.md
+    - Coverage Map: coverage-map.md
+    - Diff & Auto-Refresh: diff-and-autoupdate.md
+    - Architecture Mode: architecture-mode.md
+    - Evidence Graph: evidence-graph.md
+  - Skillayer Platform:
+    - Dashboard Guide: dashboard.md
+    - GitHub App: github-app.md
+    - Skill Registry: skill-registry.md
+    - Analytics: analytics.md
+    - API Reference: api-reference.md
+  - Enterprise:
+    - Enterprise Governance: enterprise-governance.md

@@ -13,11 +13,31 @@ from apps.api.api.auth import get_current_org_id
 from apps.api.api.notifications import build_test_notification_message, post_slack_message
 from packages.db.database import get_db
 from packages.db.models import AnalysisRun, Org, Repo, ScoreHistory, Skill, SkillUsageEvent
-from packages.db.schemas import OrgResponse, OrgSettingsResponse, OrgSettingsUpdate, RepoResponse, ScoreResponse
+from packages.db.models.skill import skill_category_for_source_type
+from packages.db.schemas import (
+    OrgCoverageSummaryResponse,
+    OrgResponse,
+    OrgSettingsResponse,
+    OrgSettingsUpdate,
+    RepoCoverageSummary,
+    RepoResponse,
+    ScoreResponse,
+)
 
 
 router = APIRouter(prefix="/orgs", tags=["orgs"])
 logger = logging.getLogger(__name__)
+
+SKILL_CATEGORIES = [
+    "codebase_architecture",
+    "code_style",
+    "testing_conventions",
+    "internal_tools",
+    "security_compliance",
+    "design_system",
+    "data_schema",
+    "operational_knowledge",
+]
 
 
 def _last_30_score_dates() -> list[str]:
@@ -87,6 +107,18 @@ def _assert_org_scope(requested_org_id: str, current_org_id: str) -> None:
 def _error(status_code: int, detail: str, code: str) -> JSONResponse:
     """Build a structured JSON error response for organization routes."""
     return JSONResponse(status_code=status_code, content={"detail": detail, "code": code})
+
+
+def _skill_category(skill: Skill) -> str:
+    """Return the skill category persisted in DB or derive it from source type."""
+    return str(skill.skill_category or skill_category_for_source_type(skill.source_type))
+
+
+def _repo_coverage_score(skills: list[Skill]) -> tuple[int, list[str]]:
+    """Return the coverage score and missing categories for a repo skill set."""
+    covered = {_skill_category(skill) for skill in skills if _skill_category(skill) in SKILL_CATEGORIES}
+    missing = [category for category in SKILL_CATEGORIES if category not in covered]
+    return round((len(covered) / len(SKILL_CATEGORIES)) * 100), missing
 
 
 async def _rollback(db: AsyncSession, context: str) -> None:
@@ -258,6 +290,58 @@ async def get_org_stats(
         "active_agents": 0,
         "score_trend": trend,
     }
+
+
+@router.get("/{org_id}/coverage-summary", response_model=OrgCoverageSummaryResponse)
+async def get_org_coverage_summary(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgCoverageSummaryResponse:
+    """Return per-repo knowledge coverage for the authenticated organization."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        repos = (
+            await db.execute(
+                select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Repo.full_name)
+            )
+        ).scalars().all()
+        summaries: list[RepoCoverageSummary] = []
+        missing_counts = {category: 0 for category in SKILL_CATEGORIES}
+        for repo in repos:
+            skills = (
+                await db.execute(select(Skill).where(Skill.repo_id == repo.id).order_by(desc(Skill.created_at)))
+            ).scalars().all()
+            latest_by_domain: dict[str, Skill] = {}
+            for skill in skills:
+                latest_by_domain.setdefault(skill.domain, skill)
+            score, missing = _repo_coverage_score(list(latest_by_domain.values()))
+            for category in missing:
+                missing_counts[category] += 1
+            summaries.append(
+                RepoCoverageSummary(
+                    repo_id=repo.id,
+                    name=repo.name,
+                    coverage_score=score,
+                    missing_categories=missing,
+                )
+            )
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"detail": "Unable to load org coverage summary", "code": "COVERAGE_SUMMARY_FAILED"},
+        ) from exc
+
+    org_score = round(sum(repo.coverage_score for repo in summaries) / len(summaries)) if summaries else 0
+    most_missing = None
+    if summaries:
+        most_missing = max(missing_counts.items(), key=lambda item: item[1])[0]
+    return OrgCoverageSummaryResponse(
+        repos=summaries,
+        org_coverage_score=org_score,
+        most_missing_category=most_missing,
+    )
 
 
 @router.get("/{org_id}/settings", response_model=OrgSettingsResponse)
