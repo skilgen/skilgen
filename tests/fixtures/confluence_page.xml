@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<confluence>
+  <page>
+    <title>Incident Response Procedure</title>
+    <labels>
+      <label>incident</label>
+      <label>on-call</label>
+    </labels>
+    <body>
+      <h1>Incident Response Procedure</h1>
+      <p>Coordinate severity-one production incidents.</p>
+      <h2>Process</h2>
+      <p>1. Page the primary on-call.</p>
+      <p>2. Open the incident bridge.</p>
+      <h2>Health checks</h2>
+      <p>Confirm service dashboards are green.</p>
+      <pre>curl https://status.example.com/incidents</pre>
+      <table>
+        <tr><th>Role</th><th>Owner</th></tr>
+        <tr><td>Incident commander</td><td>Primary on-call</td></tr>
+      </table>
+    </body>
+  </page>
+</confluence>
