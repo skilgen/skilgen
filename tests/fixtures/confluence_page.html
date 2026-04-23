@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <title>Payments Deploy Procedure - Confluence</title>
+  <meta name="ajs-page-title" content="Payments Deploy Procedure">
+  <meta name="ajs-labels" content="payments, release, runbook">
+</head>
+<body>
+  <div id="main-content" class="wiki-content">
+    <h1>Payments Deploy Procedure</h1>
+    <p>Production deployment page owned by release engineering.</p>
+    <h2>Procedure</h2>
+    <ol>
+      <li>Open the approved release ticket.</li>
+      <li>Run the production deployment pipeline.</li>
+    </ol>
+    <h2>Validation</h2>
+    <ul>
+      <li>Confirm every region reports healthy.</li>
+      <li>Review https://status.example.com/payments.</li>
+    </ul>
+    <h2>Avoid</h2>
+    <ul>
+      <li>Avoid deploying during the freeze window.</li>
+    </ul>
+    <pre><code>helm upgrade payments charts/payments --namespace prod</code></pre>
+    <table>
+      <tr><th>Signal</th><th>Expected</th></tr>
+      <tr><td>error_rate</td><td>&lt; 1%</td></tr>
+    </table>
+  </div>
+</body>
+</html>

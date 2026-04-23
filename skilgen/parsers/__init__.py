@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 """Structured parsers for code-adjacent enterprise source artifacts."""
 
 from __future__ import annotations
@@ -6,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 
 from skilgen.parsers.dbt import DbtProjectAnalysis, DbtProjectParseError, parse_dbt_project
 from skilgen.parsers.kafka import KafkaAnalysis, KafkaParseError, parse_kafka_artifact
+from skilgen.parsers.runbook import ProcessParserError, ProcessSource, parse_runbook_file, parse_runbook_source
 from skilgen.parsers.sarif import SarifFinding, SarifResult, SarifTool, parse_sarif
 from skilgen.parsers.sbom import SbomPackage, SbomResult, parse_sbom
 from skilgen.parsers.security_policy import SecurityPolicyResult, parse_security_policy
@@ -83,6 +85,8 @@ __all__ = [
     "DbtProjectParseError",
     "KafkaAnalysis",
     "KafkaParseError",
+    "ProcessParserError",
+    "ProcessSource",
     "SarifFinding",
     "SarifResult",
     "SarifTool",
@@ -93,6 +97,8 @@ __all__ = [
     "SqlSchemaParseError",
     "parse_dbt_project",
     "parse_kafka_artifact",
+    "parse_runbook_file",
+    "parse_runbook_source",
     "parse_sarif",
     "parse_sbom",
     "parse_security_policy",
