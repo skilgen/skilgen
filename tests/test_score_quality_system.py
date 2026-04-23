@@ -150,12 +150,14 @@ def test_init_ci_writes_github_actions_workflow() -> None:
 
         assert result.returncode == 0
         assert payload["ci_workflow_path"] == str(workflow.resolve())
+        assert payload["policy_path"] == str((root / ".skilgen" / "policy.yml").resolve())
         assert workflow.exists()
         content = workflow.read_text(encoding="utf-8")
         assert "on:\n  pull_request:" in content
         assert "skilgen deliver --project-root ." in content
         assert "skilgen score --ci --min-score 60 --min-groundedness 15 --min-coverage 15 --project-root ." in content
         assert "skilgen enterprise policy check --project-root ." in content
+        assert (root / ".skilgen" / "policy.yml").exists()
 
 
 def test_repo_score_badge_endpoint_returns_svg() -> None:
