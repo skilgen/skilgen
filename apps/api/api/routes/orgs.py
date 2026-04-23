@@ -4,11 +4,12 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id
 from packages.db.database import get_db
-from packages.db.models import AnalysisRun, Org, Repo, ScoreHistory, Skill
+from packages.db.models import AnalysisRun, Org, Repo, ScoreHistory, Skill, SkillUsageEvent
 from packages.db.schemas import OrgResponse, RepoResponse, ScoreResponse
 
 
@@ -191,4 +192,135 @@ async def get_org_stats(
         "skill_count": int(skill_count or 0),
         "active_agents": 0,
         "score_trend": trend,
+    }
+
+
+def _last_30_dates(now: datetime) -> list[str]:
+    """Return the inclusive UTC date labels for the current 30-day window."""
+    start = now.date() - timedelta(days=29)
+    return [(start + timedelta(days=offset)).isoformat() for offset in range(30)]
+
+
+@router.get("/{org_id}/analytics")
+async def get_org_analytics(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    """Return org-scoped skill usage analytics for the dashboard."""
+    _assert_org_scope(org_id, current_org_id)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    cutoff = now - timedelta(days=30)
+    try:
+        total_skills = (
+            await db.execute(
+                select(func.count(Skill.id))
+                .join(Repo, Repo.id == Skill.repo_id)
+                .where(Repo.org_id == org_id, Repo.is_active.is_(True))
+            )
+        ).scalar_one()
+        usage_totals = (
+            await db.execute(
+                select(
+                    func.coalesce(func.sum(Skill.load_count_30d), 0).label("total_loads"),
+                    func.count(Skill.id).filter(Skill.load_count_30d > 0).label("unique_loaded"),
+                )
+                .join(Repo, Repo.id == Skill.repo_id)
+                .where(Repo.org_id == org_id, Repo.is_active.is_(True))
+            )
+        ).one()
+        top_rows = (
+            await db.execute(
+                select(Skill, Repo.name.label("repo_name"), Repo.full_name.label("repo_full_name"))
+                .join(Repo, Repo.id == Skill.repo_id)
+                .where(Repo.org_id == org_id, Repo.is_active.is_(True), Skill.load_count_30d > 0)
+                .order_by(desc(Skill.load_count_30d), Skill.domain)
+                .limit(10)
+            )
+        ).all()
+        never_rows = (
+            await db.execute(
+                select(Skill, Repo.name.label("repo_name"), Repo.full_name.label("repo_full_name"))
+                .join(Repo, Repo.id == Skill.repo_id)
+                .where(Repo.org_id == org_id, Repo.is_active.is_(True), Skill.load_count_30d == 0)
+                .order_by(Repo.full_name, Skill.domain)
+                .limit(25)
+            )
+        ).all()
+        agent_rows = (
+            await db.execute(
+                select(SkillUsageEvent.agent_runtime, func.count(SkillUsageEvent.id))
+                .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff)
+                .group_by(SkillUsageEvent.agent_runtime)
+                .order_by(desc(func.count(SkillUsageEvent.id)))
+            )
+        ).all()
+        daily_label = func.date(SkillUsageEvent.loaded_at).label("day")
+        daily_rows = (
+            await db.execute(
+                select(daily_label, func.count(SkillUsageEvent.id))
+                .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff)
+                .group_by(daily_label)
+                .order_by(daily_label)
+            )
+        ).all()
+        repo_loads = func.coalesce(func.sum(Skill.load_count_30d), 0).label("loads")
+        repo_rows = (
+            await db.execute(
+                select(Repo.id, Repo.name, Repo.full_name, repo_loads)
+                .join(Skill, Skill.repo_id == Repo.id)
+                .where(Repo.org_id == org_id, Repo.is_active.is_(True))
+                .group_by(Repo.id, Repo.name, Repo.full_name)
+                .order_by(desc(repo_loads), Repo.full_name)
+                .limit(1)
+            )
+        ).first()
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to load org analytics") from exc
+
+    daily_counts = {str(row[0]): int(row[1] or 0) for row in daily_rows}
+    daily_loads = [{"date": day, "loads": daily_counts.get(day, 0)} for day in _last_30_dates(now)]
+    top_skills = [
+        {
+            "id": skill.id,
+            "domain": skill.domain,
+            "skill_path": skill.skill_path,
+            "repo_id": skill.repo_id,
+            "repo_name": repo_name,
+            "repo_full_name": repo_full_name,
+            "loads": int(skill.load_count_30d or 0),
+            "last_loaded_at": skill.last_loaded_at,
+        }
+        for skill, repo_name, repo_full_name in top_rows
+    ]
+    never_loaded = [
+        {
+            "id": skill.id,
+            "domain": skill.domain,
+            "skill_path": skill.skill_path,
+            "repo_id": skill.repo_id,
+            "repo_name": repo_name,
+            "repo_full_name": repo_full_name,
+        }
+        for skill, repo_name, repo_full_name in never_rows
+    ]
+    most_active_repo = None
+    if repo_rows is not None:
+        most_active_repo = {
+            "id": repo_rows.id,
+            "name": repo_rows.name,
+            "full_name": repo_rows.full_name,
+            "loads": int(repo_rows.loads or 0),
+        }
+    return {
+        "total_loads_30d": int(usage_totals.total_loads or 0),
+        "unique_skills_loaded": int(usage_totals.unique_loaded or 0),
+        "total_skills": int(total_skills or 0),
+        "top_skills": top_skills,
+        "never_loaded": never_loaded,
+        "agent_breakdown": {str(agent): int(count or 0) for agent, count in agent_rows},
+        "daily_loads": daily_loads,
+        "most_active_repo": most_active_repo,
+        "most_loaded_skill": top_skills[0] if top_skills else None,
     }

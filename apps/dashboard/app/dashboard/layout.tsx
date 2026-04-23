@@ -1,6 +1,7 @@
 import Image from "next/image";
 import {
   Bell,
+  BarChart3,
   BookOpen,
   Building2,
   ChevronDown,
@@ -75,6 +76,7 @@ export default async function DashboardLayout({
   const icons = {
     LayoutDashboard,
     GitBranch,
+    BarChart3,
     BookOpen,
     Package,
     Settings,

@@ -202,13 +202,50 @@ class CliTests(unittest.TestCase):
                 check=True,
             )
             analytics = subprocess.run(
-                [sys.executable, "-m", "skilgen.cli.main", "analytics", "--project-root", str(root)],
+                [sys.executable, "-m", "skilgen.cli.main", "analytics", "--project-root", str(root), "--json"],
                 text=True,
                 capture_output=True,
                 check=True,
             )
             self.assertIn("history", json.loads(history.stdout))
             self.assertIn("top_skills", json.loads(analytics.stdout))
+
+    def test_analytics_command_defaults_to_human_readable_summary(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "skills" / "backend").mkdir(parents=True)
+            (root / "skills" / "backend" / "SKILL.md").write_text("# Backend\n\nCore backend skill.\n", encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "analytics",
+                    "--project-root",
+                    str(root),
+                    "--record-skill",
+                    "skills/backend/SKILL.md",
+                    "--agent",
+                    "codex",
+                    "--context",
+                    "codex_live",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            result = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "analytics", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertIn("Skilgen Analytics", result.stdout)
+            self.assertIn("Usage mode: live", result.stdout)
+            self.assertIn("Top skills:", result.stdout)
+            self.assertIn("skills/backend/SKILL.md", result.stdout)
 
     def test_analytics_command_can_record_real_skill_load_events(self) -> None:
         with TemporaryDirectory() as tmp:
