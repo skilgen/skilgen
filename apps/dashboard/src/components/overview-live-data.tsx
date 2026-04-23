@@ -1,16 +1,15 @@
-"use client";
-
-import { useEffect, useState } from "react";
 import { Github } from "lucide-react";
 
-import type { Org, OrgStats, Repo } from "../../lib/data";
+import type { OrgStats, Repo } from "../../lib/data";
 import { MetricCard } from "./metric-card";
 import { ReposTable } from "./repos-table";
 
 type OverviewLiveDataProps = {
-  apiUrl: string;
   initialStats?: OrgStats | null;
   initialRepos?: Repo[];
+  orgError?: string | null;
+  statsError?: string | null;
+  reposError?: string | null;
 };
 
 function OnboardingCard() {
@@ -49,6 +48,15 @@ function MetricSkeleton() {
   );
 }
 
+function SectionError({ detail, section }: { detail: string; section: string }) {
+  return (
+    <section className="rounded-xl border border-red-900/40 bg-red-950/20 p-5">
+      <h2 className="text-[15px] font-semibold text-red-200">Unable to load {section}.</h2>
+      <p className="mt-1 text-[13px] text-red-200/75">{detail} Refresh the page or contact support.</p>
+    </section>
+  );
+}
+
 function ScoreSparkline({ points }: { points: OrgStats["score_trend"] }) {
   if (points.length === 0) return null;
   const width = 240;
@@ -75,72 +83,54 @@ function ScoreSparkline({ points }: { points: OrgStats["score_trend"] }) {
   );
 }
 
-export function OverviewLiveData({ apiUrl, initialStats = null, initialRepos = [] }: OverviewLiveDataProps) {
-  const [stats, setStats] = useState<OrgStats | null>(initialStats);
-  const [repos, setRepos] = useState<Repo[]>(initialRepos);
-  const [loaded, setLoaded] = useState(Boolean(initialStats || initialRepos.length));
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadOverviewData() {
-      try {
-        const bootstrapRes = await fetch(`${apiUrl}/orgs/bootstrap`);
-        if (!bootstrapRes.ok) return;
-
-        const org = (await bootstrapRes.json()) as Org;
-        const [statsRes, reposRes] = await Promise.all([
-          fetch(`${apiUrl}/orgs/${org.id}/stats`),
-          fetch(`${apiUrl}/orgs/${org.id}/repos`),
-        ]);
-
-        if (!cancelled && statsRes.ok) {
-          setStats((await statsRes.json()) as OrgStats);
-        }
-        if (!cancelled && reposRes.ok) {
-          setRepos(((await reposRes.json()) as Repo[]) ?? []);
-        }
-      } catch (error) {
-        console.error("Overview browser fetch error:", error);
-      } finally {
-        if (!cancelled) {
-          setLoaded(true);
-        }
-      }
-    }
-
-    loadOverviewData();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [apiUrl]);
-
+export function OverviewLiveData({
+  initialStats = null,
+  initialRepos = [],
+  orgError = null,
+  statsError = null,
+  reposError = null,
+}: OverviewLiveDataProps) {
+  const stats = initialStats;
+  const repos = initialRepos;
   const showMetricSkeletons = stats === null;
+  const statsErrorDetail = statsError ?? orgError;
+  const reposErrorDetail = reposError ?? orgError;
 
   return (
     <>
-      <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {showMetricSkeletons ? (
-          <>
-            <MetricSkeleton />
-            <MetricSkeleton />
-            <MetricSkeleton />
-            <MetricSkeleton />
-          </>
-        ) : (
-          <>
-            <MetricCard label="Repos monitored" value={stats.repo_count} sub="Connected repos" />
-            <MetricCard label="Avg Skilgen Score" value={`${stats.avg_score}/100`} sub="Org readiness" />
-            <MetricCard label="Skills generated" value={stats.skill_count} sub="Published skills" />
-            <MetricCard label="Active agents" value={stats.active_agents} sub="Live sessions" />
-          </>
-        )}
-      </div>
+      {statsErrorDetail ? (
+        <div className="mb-8">
+          <SectionError detail={statsErrorDetail} section="overview metrics" />
+        </div>
+      ) : (
+        <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {showMetricSkeletons ? (
+            <>
+              <MetricSkeleton />
+              <MetricSkeleton />
+              <MetricSkeleton />
+              <MetricSkeleton />
+            </>
+          ) : (
+            <>
+              <MetricCard label="Repos monitored" value={stats.repo_count} sub="Connected repos" />
+              <MetricCard label="Avg Skilgen Score" value={`${stats.avg_score}/100`} sub="Org readiness" />
+              <MetricCard label="Skills generated" value={stats.skill_count} sub="Published skills" />
+              <MetricCard label="Active agents" value={stats.active_agents} sub="Live sessions" />
+            </>
+          )}
+        </div>
+      )}
 
       {stats ? <ScoreSparkline points={stats.score_trend} /> : null}
 
-      {loaded && repos.length > 0 ? <ReposTable repos={repos} /> : <OnboardingCard />}
+      {repos.length > 0 ? (
+        <ReposTable repos={repos} />
+      ) : reposErrorDetail ? (
+        <SectionError detail={reposErrorDetail} section="repositories" />
+      ) : (
+        <OnboardingCard />
+      )}
     </>
   );
 }
