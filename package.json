@@ -5,6 +5,7 @@
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "build": "turbo build",
+    "deploy:api": "python3 scripts/deploy_api.py --prod",
     "dev": "turbo dev",
     "lint": "turbo lint",
     "type-check": "turbo type-check"
