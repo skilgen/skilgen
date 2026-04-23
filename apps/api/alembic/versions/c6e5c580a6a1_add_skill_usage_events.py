@@ -1,7 +1,7 @@
 """add_skill_usage_events
 
 Revision ID: c6e5c580a6a1
-Revises: a4c2e3f91b65
+Revises: b7d4a6f2c9e1
 Create Date: 2026-04-23 00:00:00.000000
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = "c6e5c580a6a1"
-down_revision: Union[str, Sequence[str], None] = "a4c2e3f91b65"
+down_revision: Union[str, Sequence[str], None] = "b7d4a6f2c9e1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
