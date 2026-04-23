@@ -77,7 +77,10 @@ def test_skill_detail_page_and_viewer_show_content_versions_and_usage() -> None:
     assert "Usage stats" in viewer
     assert "loads in last 30 days" in viewer
     assert "Last loaded" in viewer
+    assert "CopySkillButton content={content} domain={skill.domain}" in viewer
     assert "fetch(`${API_URL}/skills/${skillId}/versions/${versionId}`" in viewer
+    assert "SkillViewTracker" in page
+    assert "skill_viewed" in (ROOT / "apps/dashboard/src/components/skill-view-tracker.tsx").read_text(encoding="utf-8")
     assert "<StaleBadge isStale={skill.is_stale}" in page
     assert "<VersionBadge versionNumber={skill.latest_version_number}" in page
 
@@ -86,6 +89,7 @@ def test_copy_button_copies_content_and_resets_success_state() -> None:
     source = (ROOT / "apps/dashboard/src/components/copy-skill-button.tsx").read_text(encoding="utf-8")
 
     assert "navigator.clipboard.writeText(content)" in source
+    assert "skill_content_copied" in source
     assert "setCopied(true)" in source
     assert "setTimeout(() => setCopied(false), 2000)" in source
     assert "Copied!" in source

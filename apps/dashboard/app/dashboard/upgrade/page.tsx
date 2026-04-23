@@ -2,6 +2,7 @@ import { withAuth } from "@workos-inc/authkit-nextjs";
 import { Mail } from "lucide-react";
 
 import { UpgradeButton } from "@/components/upgrade-button";
+import { UpgradePageTracker } from "@/components/upgrade-page-tracker";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,7 @@ export default async function UpgradePage() {
 
   return (
     <div>
+      <UpgradePageTracker />
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">Upgrade</h1>
         <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Choose the plan that matches your team&apos;s AI-readiness workflow.</p>

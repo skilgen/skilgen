@@ -26,6 +26,7 @@ type SkillSnapshot = {
   id: string;
   content: string | null;
   content_hash: string | null;
+  domain: string;
   load_count_30d: number;
   last_loaded_at: string | null;
   version_count: number;
@@ -151,7 +152,7 @@ export function SkillDetailViewer({ accessToken, skill, versions }: SkillDetailV
               {activeVersionDate ? `Viewing historical version from ${formatVersionDate(activeVersionDate)}` : "Viewing current generated content"}
             </p>
           </div>
-          <CopySkillButton content={content} />
+          <CopySkillButton content={content} domain={skill.domain} />
         </div>
 
         <pre className="max-h-[680px] overflow-auto whitespace-pre-wrap break-words bg-[#07070c] p-5 font-mono text-sm leading-6 text-gray-300">

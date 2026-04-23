@@ -1,5 +1,6 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
+import { SectionFallback } from "@/components/section-fallback";
 import { getMyOrg, getOrgAnalytics, type AnalyticsSkill, type OrgAnalytics } from "../../../lib/data";
 
 export const dynamic = "force-dynamic";
@@ -11,14 +12,6 @@ function MetricPanel({ label, value, sub }: { label: string; value: string | num
       <div className="text-[28px] font-bold leading-none text-[color:var(--text-primary)]">{value}</div>
       <div className="mt-4 border-t border-[color:var(--bg-elevated)] pt-3 text-[12px] text-[color:var(--text-tertiary)]">{sub}</div>
     </article>
-  );
-}
-
-function EmptySection({ section }: { section: string }) {
-  return (
-    <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-8 text-[13px] text-[color:var(--text-secondary)]">
-      Unable to load {section}. Refresh the page or contact support.
-    </section>
   );
 }
 
@@ -141,7 +134,7 @@ export default async function AnalyticsPage() {
           </div>
         </div>
       ) : (
-        <EmptySection section="analytics" />
+        <SectionFallback section="analytics" />
       )}
     </div>
   );
