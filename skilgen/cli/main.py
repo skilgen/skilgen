@@ -242,6 +242,42 @@ def _format_analytics_summary(payload: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
+def write_ci_workflow(project_root: Path) -> Path:
+    """Write the default GitHub Actions workflow for Skilgen quality gates."""
+    workflow_path = project_root / ".github" / "workflows" / "skilgen.yml"
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(
+        "\n".join(
+            [
+                "name: Skilgen",
+                "",
+                "on:",
+                "  pull_request:",
+                "",
+                "jobs:",
+                "  skilgen:",
+                "    runs-on: ubuntu-latest",
+                "    steps:",
+                "      - uses: actions/checkout@v4",
+                "      - uses: actions/setup-python@v5",
+                "        with:",
+                "          python-version: '3.12'",
+                "      - name: Install Skilgen",
+                "        run: python -m pip install -e .",
+                "      - name: Generate skills",
+                "        run: skilgen deliver --project-root .",
+                "      - name: Enforce Skilgen Score",
+                "        run: skilgen score --ci --min-score 60 --min-groundedness 15 --min-coverage 15 --project-root .",
+                "      - name: Enforce enterprise policy",
+                "        run: skilgen enterprise policy check --project-root .",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return workflow_path
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="skilgen", description="Requirements-driven skill and scaffold generator.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
