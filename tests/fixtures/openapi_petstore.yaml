@@ -1,0 +1,106 @@
+openapi: 3.0.3
+info:
+  title: Enterprise Petstore
+  version: 1.0.0
+security:
+  - bearerAuth: []
+x-rate-limit:
+  limit: 1000
+  window: 1m
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      summary: List pets
+      tags:
+        - pets
+      responses:
+        "200":
+          description: Pets response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pet"
+              example:
+                - id: pet-1
+                  name: Fido
+        "429":
+          description: Too many requests
+          headers:
+            RateLimit-Limit:
+              schema:
+                type: integer
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      responses:
+        "200":
+          description: Pet response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+        "404":
+          description: Pet not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /users:
+    post:
+      operationId: createUser
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/User"
+            example:
+              email: jane@example.com
+              ssn: 123-45-6789
+      responses:
+        "201":
+          description: Created
+        "400":
+          description: Bad request
+  /legacy/pets:
+    get:
+      operationId: legacyPets
+      deprecated: true
+      responses:
+        "200":
+          description: Legacy pets
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Pet:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    User:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        ssn:
+          type: string
+    Error:
+      type: object
+      properties:
+        message:
+          type: string

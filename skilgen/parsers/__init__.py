@@ -1,0 +1,77 @@
+"""Shared contracts for API specification parsers."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+
+
+class ApiSpecParserError(ValueError):
+    """Raised when an API specification cannot be parsed safely."""
+
+
+@dataclass(frozen=True)
+class ApiSpecFinding:
+    """A parser finding with evidence suitable for generated skills."""
+
+    category: str
+    message: str
+    evidence: list[str] = field(default_factory=list)
+    location: str | None = None
+
+
+@dataclass(frozen=True)
+class ApiSpecItem:
+    """A parsed endpoint, request, or GraphQL field."""
+
+    group: str
+    name: str
+    kind: str
+    path: str
+    method: str | None = None
+    url: str | None = None
+    operation_id: str | None = None
+    auth: list[str] = field(default_factory=list)
+    deprecated: bool = False
+    directives: list[str] = field(default_factory=list)
+    type_name: str | None = None
+    rate_limits: list[str] = field(default_factory=list)
+    error_responses: list[str] = field(default_factory=list)
+    examples: list[str] = field(default_factory=list)
+    scripts: list[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ApiSpecParseResult:
+    """Normalized output from an API specification parser."""
+
+    source_type: str
+    title: str
+    version: str | None
+    groups: dict[str, list[ApiSpecItem]]
+    auth_schemes: list[str] = field(default_factory=list)
+    rate_limits: list[str] = field(default_factory=list)
+    error_responses: list[str] = field(default_factory=list)
+    examples: list[str] = field(default_factory=list)
+    patterns: list[ApiSpecFinding] = field(default_factory=list)
+    anti_patterns: list[ApiSpecFinding] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
+
+    @property
+    def items(self) -> list[ApiSpecItem]:
+        """Return all parsed items in group order."""
+
+        return [item for group_items in self.groups.values() for item in group_items]
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable representation of the parse result."""
+
+        return asdict(self)
+
+
+__all__ = [
+    "ApiSpecFinding",
+    "ApiSpecItem",
+    "ApiSpecParseResult",
+    "ApiSpecParserError",
+]
