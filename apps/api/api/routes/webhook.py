@@ -39,19 +39,26 @@ def _account_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return dict(account)
 
 
-async def _upsert_org(db: AsyncSession, payload: dict[str, Any]) -> Org:
+async def _upsert_org(db: AsyncSession, payload: dict[str, Any], installation_id: int | None = None) -> Org:
     account = _account_from_payload(payload)
     github_org_id = int(account.get("id") or 0)
     login = str(account.get("login") or f"github-{github_org_id}")
     result = await db.execute(select(Org).where(Org.github_org_id == github_org_id))
     org = result.scalar_one_or_none()
     if org is None:
-        org = Org(github_org_id=github_org_id, login=login, name=str(account.get("name") or login))
+        org = Org(
+            github_org_id=github_org_id,
+            login=login,
+            name=str(account.get("name") or login),
+            github_installation_id=installation_id,
+        )
         db.add(org)
         await db.flush()
     else:
         org.login = login
         org.name = str(account.get("name") or login)
+        if installation_id and not org.github_installation_id:
+            org.github_installation_id = installation_id
     return org
 
 
@@ -188,18 +195,21 @@ async def github_webhook(
     action = payload.get("action")
 
     if x_github_event == "installation":
-        org = await _upsert_org(db, payload)
         installation_id = int((payload.get("installation") or {}).get("id") or 0) or None
+        org = await _upsert_org(db, payload, installation_id)
         if action == "created":
             for repo_payload in payload.get("repositories", []):
                 await _upsert_repo(db, org, repo_payload, installation_id)
         elif action == "deleted":
             await db.execute(update(Repo).where(Repo.org_id == org.id).values(is_active=False))
+            if org.github_installation_id == installation_id:
+                org.github_installation_id = None
+        await db.commit()
         return {"ok": True}
 
     if x_github_event == "installation_repositories":
-        org = await _upsert_org(db, payload)
         installation_id = int((payload.get("installation") or {}).get("id") or 0) or None
+        org = await _upsert_org(db, payload, installation_id)
         if action == "added":
             for repo_payload in payload.get("repositories_added", []):
                 await _upsert_repo(db, org, repo_payload, installation_id)
@@ -207,6 +217,7 @@ async def github_webhook(
             removed_ids = [int(repo.get("id")) for repo in payload.get("repositories_removed", []) if repo.get("id")]
             if removed_ids:
                 await db.execute(update(Repo).where(Repo.github_repo_id.in_(removed_ids)).values(is_active=False))
+        await db.commit()
         return {"ok": True}
 
     if x_github_event == "push":

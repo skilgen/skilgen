@@ -1,6 +1,6 @@
 "use client";
 
-import { Github, Loader2, Square, SquareCheckBig, X } from "lucide-react";
+import { Loader2, Square, SquareCheckBig, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -32,6 +32,8 @@ export function AddReposModal({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [installationIdInput, setInstallationIdInput] = useState("");
+  const [fetchTrigger, setFetchTrigger] = useState(0);
 
   const headers = useMemo(
     () => ({
@@ -47,12 +49,18 @@ export function AddReposModal({
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`${API_URL}/orgs/${orgId}/available-repos`, {
+        const url = installationIdInput
+          ? `${API_URL}/orgs/${orgId}/available-repos?installation_id=${installationIdInput}`
+          : `${API_URL}/orgs/${orgId}/available-repos`;
+        const response = await fetch(url, {
           headers,
         });
         const body = await response.json().catch(() => ([]));
         if (!response.ok) throw new Error(body.detail || "Unable to load repositories");
-        if (!cancelled) setRepos(body as AvailableRepo[]);
+        if (!cancelled) {
+          setRepos(body as AvailableRepo[]);
+          setSelectedIds([]);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Unable to load repositories");
       } finally {
@@ -63,7 +71,7 @@ export function AddReposModal({
     return () => {
       cancelled = true;
     };
-  }, [headers, orgId]);
+  }, [fetchTrigger, headers, orgId]);
 
   useEffect(() => {
     if (!success) return;
@@ -120,18 +128,37 @@ export function AddReposModal({
               <p className="text-[14px]">Loading your repositories…</p>
             </div>
           ) : error ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-[14px] text-red-200">{error}</div>
-              {error.toLowerCase().includes("installation") || error.toLowerCase().includes("authenticated") ? (
-                <a
-                  className="inline-flex items-center gap-2 text-[13px] font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]"
-                  href="https://github.com/apps/skillayer/installations/new"
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  <Github className="h-4 w-4" />
-                  Open GitHub App installer →
-                </a>
+              {error.toLowerCase().includes("installation") ? (
+                <div className="space-y-3">
+                  <p className="text-[13px] text-[color:var(--text-secondary)]">
+                    Paste your GitHub App installation ID to continue. Find it in your GitHub URL:{" "}
+                    <span className="font-mono text-[color:var(--text-tertiary)]">
+                      github.com/settings/installations/<strong>125707663</strong>
+                    </span>
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      className="h-10 flex-1 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 font-mono text-[14px] text-[color:var(--text-primary)] outline-none focus:border-[color:var(--accent-primary)]"
+                      onChange={(e) => setInstallationIdInput(e.target.value)}
+                      placeholder="e.g. 125707663"
+                      type="text"
+                      value={installationIdInput}
+                    />
+                    <button
+                      className="inline-flex h-10 items-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] disabled:opacity-50"
+                      disabled={!installationIdInput.trim()}
+                      onClick={() => {
+                        setError(null);
+                        setFetchTrigger((n) => n + 1);
+                      }}
+                      type="button"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                </div>
               ) : null}
             </div>
           ) : repos.length === 0 ? (

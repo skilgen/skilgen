@@ -970,22 +970,34 @@ async def upsert_org_policies(
 @router.get("/{org_id}/available-repos")
 async def list_available_repos(
     org_id: str,
+    installation_id: int | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     current_org_id: str | None = Depends(get_current_org_id_optional),
 ) -> list[dict[str, object]]:
     """Return GitHub repos from the installation not yet connected to this org."""
     if current_org_id is not None:
         _assert_org_scope(org_id, current_org_id)
-    installation_id = (
-        await db.execute(
-            select(Repo.github_installation_id)
-            .where(Repo.org_id == org_id, Repo.github_installation_id.is_not(None))
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    resolved_installation_id: int | None = installation_id
 
-    if not installation_id:
-        raise HTTPException(status_code=404, detail="No GitHub installation found for this org")
+    if resolved_installation_id is None:
+        org = await db.get(Org, org_id)
+        if org is not None and org.github_installation_id:
+            resolved_installation_id = org.github_installation_id
+
+    if resolved_installation_id is None:
+        resolved_installation_id = (
+            await db.execute(
+                select(Repo.github_installation_id)
+                .where(Repo.org_id == org_id, Repo.github_installation_id.is_not(None))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    if not resolved_installation_id:
+        raise HTTPException(
+            status_code=404,
+            detail="No GitHub installation found for this org. Provide installation_id as a query param.",
+        )
 
     existing_ids = set(
         (
@@ -995,7 +1007,7 @@ async def list_available_repos(
         ).scalars().all()
     )
 
-    token = get_installation_token(int(installation_id))
+    token = get_installation_token(int(resolved_installation_id))
 
     all_repos: list[dict[str, object]] = []
     page = 1
@@ -1026,7 +1038,7 @@ async def list_available_repos(
                             "language": repo.get("language"),
                             "default_branch": repo.get("default_branch", "main"),
                             "private": repo.get("private", False),
-                            "installation_id": installation_id,
+                            "installation_id": resolved_installation_id,
                         }
                     )
             if len(batch) < 100:

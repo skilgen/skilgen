@@ -31,6 +31,7 @@ class Org(Base):
     notify_on_stale: Mapped[bool] = mapped_column(default=True)
     notification_settings: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True, default=dict)
     workos_org_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    github_installation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
