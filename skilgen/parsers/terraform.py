@@ -329,8 +329,121 @@ def _public_mapping(body: object) -> dict[str, object]:
     if isinstance(body, dict):
         return {str(key): _redacted_value(value) for key, value in sorted(body.items(), key=lambda item: str(item[0]))}
     if isinstance(body, str):
-        return {key: _redacted_value(value.strip().strip('"')) for key, value in ASSIGNMENT_RE.findall(body)}
+        return _parse_hcl_mapping(body)
     return {}
+
+
+def _parse_hcl_mapping(text: str) -> dict[str, object]:
+    result: dict[str, object] = {}
+    index = 0
+    length = len(text)
+    while index < length:
+        index = _skip_hcl_whitespace(text, index)
+        if index >= length:
+            break
+        key_match = re.match(r"[A-Za-z_][A-Za-z0-9_-]*", text[index:])
+        if not key_match:
+            index = _advance_to_next_line(text, index)
+            continue
+        key = key_match.group(0)
+        index += len(key)
+        index = _skip_hcl_whitespace(text, index)
+        if index < length and text[index] == "=":
+            index += 1
+            index = _skip_hcl_whitespace(text, index)
+            if index < length and text[index] == "{":
+                block_end = _matching_brace_index(text, index)
+                result[key] = _redacted_value(_parse_hcl_mapping(text[index + 1 : block_end]))
+                index = block_end + 1
+                continue
+            value, index = _read_hcl_scalar(text, index)
+            result[key] = _redacted_value(value)
+            continue
+        if index < length and text[index] == "{":
+            block_end = _matching_brace_index(text, index)
+            result[key] = _redacted_value(_parse_hcl_mapping(text[index + 1 : block_end]))
+            index = block_end + 1
+            continue
+        index = _advance_to_next_line(text, index)
+    return result
+
+
+def _skip_hcl_whitespace(text: str, index: int) -> int:
+    length = len(text)
+    while index < length:
+        if text.startswith("//", index) or text[index] == "#":
+            index = _advance_to_next_line(text, index)
+            continue
+        if text[index].isspace():
+            index += 1
+            continue
+        break
+    return index
+
+
+def _advance_to_next_line(text: str, index: int) -> int:
+    newline = text.find("\n", index)
+    return len(text) if newline == -1 else newline + 1
+
+
+def _matching_brace_index(text: str, open_index: int) -> int:
+    depth = 0
+    index = open_index
+    in_string = False
+    escaped = False
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        else:
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return index
+        index += 1
+    return len(text) - 1
+
+
+def _read_hcl_scalar(text: str, index: int) -> tuple[str, int]:
+    if index >= len(text):
+        return "", index
+    if text[index] == '"':
+        index += 1
+        chars: list[str] = []
+        escaped = False
+        while index < len(text):
+            char = text[index]
+            if escaped:
+                chars.append(char)
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                index += 1
+                break
+            else:
+                chars.append(char)
+            index += 1
+        return "".join(chars), index
+
+    line_end = text.find("\n", index)
+    if line_end == -1:
+        line_end = len(text)
+    value = text[index:line_end].strip()
+    if "#" in value:
+        value = value.split("#", 1)[0].strip()
+    if "//" in value:
+        value = value.split("//", 1)[0].strip()
+    return value.rstrip(","), line_end + 1 if line_end < len(text) else line_end
 
 
 def _redacted_value(value: object) -> object:

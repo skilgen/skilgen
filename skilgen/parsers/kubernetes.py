@@ -92,11 +92,46 @@ def parse_kubernetes_manifests(path: str | Path) -> KubernetesManifestParseResul
 def _manifest_files(root: Path) -> list[Path]:
     if root.is_file():
         return [root] if root.suffix.lower() in {".yaml", ".yml"} else []
-    return sorted(
-        path
-        for path in root.rglob("*")
-        if path.is_file() and path.suffix.lower() in {".yaml", ".yml"} and "helm_chart/templates" not in path.as_posix()
+    candidate_roots = _candidate_manifest_roots(root)
+    files: set[Path] = set()
+    for candidate_root in candidate_roots:
+        files.update(
+            path
+            for path in candidate_root.rglob("*")
+            if path.is_file()
+            and path.suffix.lower() in {".yaml", ".yml"}
+            and not _is_within_helm_chart(path)
+            and _looks_like_kubernetes_manifest(path)
+        )
+    return sorted(files)
+
+
+def _candidate_manifest_roots(root: Path) -> list[Path]:
+    named_roots = sorted(
+        {
+            path
+            for path in root.rglob("*")
+            if path.is_dir() and path.name.lower() in {"k8s", "kubernetes", "manifests", "deploy", "deployment"}
+        }
     )
+    if named_roots:
+        return named_roots
+    return [root]
+
+
+def _is_within_helm_chart(path: Path) -> bool:
+    for parent in [path.parent, *path.parents]:
+        if (parent / "Chart.yaml").is_file():
+            return True
+    return False
+
+
+def _looks_like_kubernetes_manifest(path: Path) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return "apiVersion:" in text and "kind:" in text
 
 
 def _load_yaml_documents(path: Path) -> list[object]:

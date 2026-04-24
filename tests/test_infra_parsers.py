@@ -26,6 +26,7 @@ class TerraformParserTests(unittest.TestCase):
         self.assertIn("artifact_bucket", result.outputs)
         self.assertIn("vpc", result.modules)
         self.assertIn("s3", result.backend_config)
+        self.assertEqual(result.providers["aws"]["default_tags"]["tags"]["Service"], "skillayer")
         self.assertIn("remote_state_backend", result.patterns)
         self.assertIn("variable_validation", result.patterns)
         self.assertIn("resource_without_tags:aws_iam_role.worker", result.anti_patterns)
@@ -60,6 +61,12 @@ class KubernetesParserTests(unittest.TestCase):
         self.assertEqual(result.secrets[0].details["keys"], ["password"])
         self.assertNotIn("super-secret-value", repr(result))
         self.assertIn("configmap_secret_key:app-config:API_TOKEN", result.anti_patterns)
+
+    def test_parse_kubernetes_directory_ignores_non_manifest_yaml_and_helm_chart_files(self) -> None:
+        result = parse_kubernetes_manifests(FIXTURES)
+
+        self.assertEqual(result.files, ["k8s_deployment.yaml"])
+        self.assertEqual(result.counts_by_kind["Deployment"], 1)
 
     def test_parse_malformed_kubernetes_manifest_raises_helpful_error(self) -> None:
         with TemporaryDirectory() as tmp:
