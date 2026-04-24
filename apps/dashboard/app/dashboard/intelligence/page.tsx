@@ -98,12 +98,12 @@ function RepoLeaderboard({ repos }: { repos: OrgRepoSummary[] }) {
           <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Repo Leaderboard</h2>
           <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">All repos ranked by skill quality score.</p>
         </div>
-        <div className="text-[12px] text-[color:var(--text-tertiary)]">🟢 Healthy (&gt;70) 🟡 Warning (40-70) 🔴 At Risk (&lt;40)</div>
+        <div className="text-[12px] text-[color:var(--text-tertiary)]">🟢 Healthy (≥70) 🟡 Warning (40-69) 🔴 At Risk (&lt;40)</div>
       </div>
       {repos.length === 0 ? (
         <div className="px-6 py-14 text-center">
           <p className="text-[14px] text-[color:var(--text-secondary)]">No repositories connected yet.</p>
-          <Link className="mt-4 inline-flex rounded-full border border-[color:var(--bg-border)] px-4 py-2 text-[12px] font-semibold text-[color:var(--accent-primary)] hover:border-[color:var(--accent-primary)]" href="/dashboard">
+          <Link className="mt-4 inline-flex rounded-full border border-[color:var(--bg-border)] px-4 py-2 text-[12px] font-semibold text-[color:var(--accent-primary)] hover:border-[color:var(--accent-primary)]" href="/dashboard/repos">
             Connect a repo →
           </Link>
         </div>
@@ -205,7 +205,6 @@ function CoverageCell({ entry }: { entry: CategoryMatrixEntry | undefined }) {
 }
 
 function CoverageMatrix({ intelligence }: { intelligence: OrgIntelligence }) {
-  if (intelligence.repos.length === 0) return null;
   const visibleRepos = intelligence.repos.slice(0, 8);
   const hiddenRepoCount = Math.max(0, intelligence.repos.length - visibleRepos.length);
 
@@ -215,6 +214,9 @@ function CoverageMatrix({ intelligence }: { intelligence: OrgIntelligence }) {
         <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Category Coverage Matrix</h2>
         <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Which skill categories are covered across each repo.</p>
       </div>
+      {intelligence.repos.length === 0 ? (
+        <div className="px-6 py-14 text-center text-[14px] text-[color:var(--text-secondary)]">No repositories connected yet.</div>
+      ) : (
       <div className="overflow-x-auto">
         <table className="w-full min-w-[900px] border-collapse text-left text-[13px]">
           <thead className="text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
@@ -244,6 +246,7 @@ function CoverageMatrix({ intelligence }: { intelligence: OrgIntelligence }) {
           </tbody>
         </table>
       </div>
+      )}
       <div className="flex flex-wrap gap-4 border-t border-[color:var(--bg-border)] px-5 py-4 text-[12px] text-[color:var(--text-tertiary)]">
         <span>🟢 ≥70 Healthy</span>
         <span>🟡 40-69 Needs work</span>

@@ -957,8 +957,7 @@ async def get_org_intelligence(
                 dead_skill_count=sum(
                     1
                     for skill in repo_skills
-                    if int(skill.load_count_30d or 0) == 0
-                    and (skill.last_loaded_at is None or (skill.last_loaded_at.replace(tzinfo=None) if skill.last_loaded_at.tzinfo else skill.last_loaded_at) < cutoff_30)
+                    if _skill_alert(skill, int(skill.load_count_30d or 0), now) == "dead_skill"
                 ),
                 stale_skill_count=sum(1 for skill in repo_skills if bool(skill.is_stale)),
                 last_analysed_at=last_analysed_at,
@@ -991,10 +990,9 @@ async def get_org_intelligence(
             continue
         loads_30d = int(skill.load_count_30d or 0)
         last_loaded_at = skill.last_loaded_at
-        is_dead = loads_30d == 0 and (last_loaded_at is None or (last_loaded_at.replace(tzinfo=None) if last_loaded_at.tzinfo else last_loaded_at) < cutoff_30)
         helper_alert = _skill_alert(skill, loads_30d, now)
         alert_type: Literal["dead", "stale_but_active", "dormant_repo"] | None = None
-        if is_dead or helper_alert == "dead_skill":
+        if helper_alert == "dead_skill":
             alert_type = "dead"
         elif bool(skill.is_stale):
             alert_type = "stale_but_active"
@@ -1016,7 +1014,7 @@ async def get_org_intelligence(
         )
     stale_alerts.sort(
         key=lambda alert: (
-            0 if alert.alert_type == "dead" else 1,
+            {"dead": 0, "stale_but_active": 1, "dormant_repo": 2}[alert.alert_type],
             alert.last_loaded_at is not None,
             alert.last_loaded_at or datetime.min,
         )

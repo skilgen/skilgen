@@ -117,6 +117,7 @@ def _skill(
     *,
     is_stale: bool = False,
     last_loaded_days_ago: int | None = 1,
+    created_days_ago: int = 40,
 ) -> Skill:
     return Skill(
         id=skill_id,
@@ -134,7 +135,7 @@ def _skill(
         load_count_30d=loads,
         is_stale=is_stale,
         last_loaded_at=None if last_loaded_days_ago is None else _now() - timedelta(days=last_loaded_days_ago),
-        created_at=_now() - timedelta(days=40),
+        created_at=_now() - timedelta(days=created_days_ago),
     )
 
 
@@ -144,6 +145,7 @@ def _populated_db() -> FakeDb:
     repo_b = _repo("repo_2", "web", analysed_days_ago=45)
     skills = [
         _skill("skill_dead", "repo_1", "backend", "codebase_architecture", 30, 0, last_loaded_days_ago=None),
+        _skill("skill_new", "repo_1", "new-skill", "code_style", 45, 0, last_loaded_days_ago=None, created_days_ago=1),
         _skill("skill_stale", "repo_1", "testing", "testing_conventions", 55, 3, is_stale=True),
         _skill("skill_top", "repo_2", "frontend", "design_system", 88, 12),
         _skill("skill_dormant", "repo_2", "ops", "operational_knowledge", 70, 1),
@@ -183,7 +185,7 @@ def test_org_intelligence_returns_200_with_shape_when_org_has_repos_and_skills()
         "top_skills",
     }
     assert payload["total_repos"] == 2
-    assert payload["total_skills"] == 4
+    assert payload["total_skills"] == 5
     assert payload["total_loads_30d"] == 16
 
 
@@ -206,7 +208,16 @@ def test_stale_alerts_put_dead_skills_before_stale_skills() -> None:
     alerts = response.json()["stale_alerts"]
     assert alerts[0]["alert_type"] == "dead"
     assert alerts[0]["skill_id"] == "skill_dead"
-    assert any(alert["alert_type"] == "stale_but_active" for alert in alerts)
+    assert [alert["alert_type"] for alert in alerts[:3]] == ["dead", "stale_but_active", "dormant_repo"]
+
+
+def test_new_never_loaded_skills_are_not_dead_during_grace_period() -> None:
+    response = _client(_populated_db()).get("/orgs/org_123/intelligence")
+
+    payload = response.json()
+    repo = next(item for item in payload["repos"] if item["id"] == "repo_1")
+    assert repo["dead_skill_count"] == 1
+    assert "skill_new" not in {alert["skill_id"] for alert in payload["stale_alerts"]}
 
 
 def test_top_skills_are_ordered_by_loads_desc() -> None:
