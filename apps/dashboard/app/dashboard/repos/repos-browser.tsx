@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 
 import { captureDashboardEvent } from "@/lib/posthog";
+import { relativeTime } from "../../../lib/relative-time";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
 
@@ -34,31 +35,6 @@ function scoreBadgeClass(score: number): string {
   if (score <= 40) return "bg-red-900/30 text-red-400";
   if (score <= 70) return "bg-amber-900/30 text-amber-400";
   return "bg-green-900/30 text-green-400";
-}
-
-function relativeTime(value: string | null): string {
-  if (!value) return "Never";
-  const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) return "Never";
-
-  const diff = Math.max(0, Date.now() - timestamp);
-  const minute = 60 * 1000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-
-  if (diff < hour) {
-    const minutes = Math.max(1, Math.floor(diff / minute));
-    return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-  }
-  if (diff < day) {
-    const hours = Math.floor(diff / hour);
-    return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  }
-  if (diff < 7 * day) {
-    const days = Math.floor(diff / day);
-    return `${days} day${days === 1 ? "" : "s"} ago`;
-  }
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(timestamp));
 }
 
 function isRecentlyConnected(createdAt: string | null | undefined, lastAnalysedAt: string | null): boolean {

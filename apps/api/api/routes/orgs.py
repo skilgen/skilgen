@@ -847,8 +847,10 @@ async def upsert_org_policies(
 async def list_available_repos(
     org_id: str,
     db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
 ) -> list[dict[str, object]]:
     """Return GitHub repos from the installation not yet connected to this org."""
+    _assert_org_scope(org_id, current_org_id)
     installation_id = (
         await db.execute(
             select(Repo.github_installation_id)
@@ -914,8 +916,10 @@ async def connect_repos(
     org_id: str,
     payload: ConnectReposPayload,
     db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
 ) -> list[dict[str, str]]:
     """Idempotently create Repo rows for user-selected repos."""
+    _assert_org_scope(org_id, current_org_id)
     created: list[dict[str, str]] = []
     for item in payload.repos:
         existing = (

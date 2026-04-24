@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { withAuth } from "@workos-inc/authkit-nextjs";
 import { BookOpen, Search } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { API_URL, getRegistrySkills, type Org, type RegistrySkill } from "../../../lib/data";
+import { ImportButton } from "./import-button";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +47,7 @@ function scoreClass(score: number): string {
 
 function RegistryCard({ skill }: { skill: RegistrySkill }) {
   return (
-    <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
+    <article className="cursor-pointer rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5 transition-colors hover:border-[rgb(var(--accent-primary-rgb)/0.4)]">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="truncate text-[16px] font-semibold text-[color:var(--text-primary)]">{skill.name}</h2>
@@ -73,16 +75,24 @@ function RegistryCard({ skill }: { skill: RegistrySkill }) {
 }
 
 export default async function RegistryPage({ searchParams }: RegistryPageProps) {
+  let accessToken = "";
+  try {
+    const session = await withAuth({ ensureSignedIn: false });
+    accessToken = session?.accessToken || "";
+  } catch (error) {
+    console.error("Registry auth unavailable:", error);
+  }
+
   const params = searchParams ? await searchParams : {};
   const tab = tabValue(firstValue(params.tab));
   const search = firstValue(params.search);
   const tag = firstValue(params.tag);
   const sort = sortValue(firstValue(params.sort));
+  const orgId = await bootstrapOrgId();
   const query = new URLSearchParams({ limit: "24", sort });
   if (search) query.set("search", search);
   if (tag) query.set("tag", tag);
   if (tab === "published") {
-    const orgId = await bootstrapOrgId();
     if (orgId) query.set("org_id", orgId);
   }
   const registry = await getRegistrySkills(query);
@@ -92,17 +102,22 @@ export default async function RegistryPage({ searchParams }: RegistryPageProps) 
   return (
     <div>
       <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between md:gap-6">
           <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">Registry</h1>
-          <p className="mt-1 text-sm text-[color:var(--text-secondary)]">{registry?.total ?? 0} public skills available</p>
+          <div>
+            <p className="mt-1 text-sm text-[color:var(--text-secondary)]">{registry?.total ?? 0} public skills available</p>
+          </div>
         </div>
-        <div className="inline-flex rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-1">
-          <Link className={`rounded-md px-3 py-1.5 text-[13px] font-semibold ${tab === "browse" ? "bg-[color:var(--accent-primary)] text-[color:var(--bg-base)]" : "text-[color:var(--text-secondary)]"}`} href="/dashboard/registry">
-            Browse
-          </Link>
-          <Link className={`rounded-md px-3 py-1.5 text-[13px] font-semibold ${tab === "published" ? "bg-[color:var(--accent-primary)] text-[color:var(--bg-base)]" : "text-[color:var(--text-secondary)]"}`} href="/dashboard/registry?tab=published">
-            Published
-          </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="inline-flex rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-1">
+            <Link className={`rounded-md px-3 py-1.5 text-[13px] font-semibold ${tab === "browse" ? "bg-[color:var(--accent-primary)] text-[color:var(--bg-base)]" : "text-[color:var(--text-secondary)]"}`} href="/dashboard/registry">
+              Browse
+            </Link>
+            <Link className={`rounded-md px-3 py-1.5 text-[13px] font-semibold ${tab === "published" ? "bg-[color:var(--accent-primary)] text-[color:var(--bg-base)]" : "text-[color:var(--text-secondary)]"}`} href="/dashboard/registry?tab=published">
+              Published
+            </Link>
+          </div>
+          {orgId ? <ImportButton accessToken={accessToken} orgId={orgId} /> : null}
         </div>
       </div>
 
@@ -130,7 +145,9 @@ export default async function RegistryPage({ searchParams }: RegistryPageProps) 
         {skills.length > 0 ? (
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {skills.map((skill) => (
-              <RegistryCard key={skill.id} skill={skill} />
+              <Link href={`/dashboard/registry/${skill.id}`} key={skill.id}>
+                <RegistryCard skill={skill} />
+              </Link>
             ))}
           </section>
         ) : !hasActiveFilters ? (

@@ -28,6 +28,17 @@ class PublishRegistrySkillRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=10)
 
 
+class ImportSkillFileRequest(BaseModel):
+    """Validated request body for importing a raw skill file into the registry."""
+
+    name: str = Field(min_length=1, max_length=255)
+    domain: str = Field(min_length=1, max_length=255)
+    content: str = Field(min_length=10, max_length=50000)
+    source_type: str = "claude_md"
+    is_public: bool = False
+    tags: list[str] = Field(default_factory=list)
+
+
 def _error(status_code: int, message: str, code: str) -> HTTPException:
     """Build a structured API error response."""
     return HTTPException(status_code=status_code, detail={"detail": message, "code": code})
@@ -263,3 +274,110 @@ async def import_registry_skill(
         logger.exception("Registry import failed for %s", registry_id)
         await db.rollback()
         raise _error(400, "Unable to import registry skill", "REGISTRY_IMPORT_FAILED") from exc
+
+
+@router.delete("/{registry_id}", status_code=204)
+async def unpublish_registry_skill(
+    registry_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+    _current_user: dict[str, object] = Depends(get_current_user),
+) -> None:
+    """Remove a registry listing owned by the authenticated org."""
+    try:
+        listing = (
+            await db.execute(
+                select(RegistrySkill).where(
+                    RegistrySkill.id == registry_id,
+                    RegistrySkill.org_id == current_org_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if listing is None:
+            raise _error(404, "Registry skill not found or not owned by this org", "REGISTRY_SKILL_NOT_FOUND")
+        await db.delete(listing)
+        await db.flush()
+        await db.commit()
+    except HTTPException:
+        raise
+    except SQLAlchemyError as exc:
+        logger.exception("Registry unpublish failed for %s", registry_id)
+        await db.rollback()
+        raise _error(400, "Unable to unpublish registry skill", "REGISTRY_UNPUBLISH_FAILED") from exc
+
+
+@router.post("/import-skill-file", response_model=RegistrySkillSummaryResponse)
+async def import_skill_file(
+    payload: ImportSkillFileRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+    _current_user: dict[str, object] = Depends(get_current_user),
+) -> RegistrySkillSummaryResponse:
+    """Ingest a CLAUDE.md / AGENTS.md / .cursorrules file as a registry skill."""
+    sentinel_repo = (
+        await db.execute(
+            select(Repo).where(
+                Repo.org_id == current_org_id,
+                Repo.full_name == f"{current_org_id}/imported-skills",
+            )
+        )
+    ).scalar_one_or_none()
+
+    if sentinel_repo is None:
+        sentinel_repo = Repo(
+            org_id=current_org_id,
+            github_repo_id=abs(hash(f"{current_org_id}-imported")) % (10**9),
+            full_name=f"{current_org_id}/imported-skills",
+            name="imported-skills",
+            default_branch="main",
+            is_active=True,
+        )
+        db.add(sentinel_repo)
+        await db.flush()
+
+    lines = payload.content.splitlines()
+    section_count = sum(1 for line in lines if line.startswith("#"))
+    word_count = len(payload.content.split())
+    groundedness = min(25, max(5, section_count * 3))
+    coverage = min(25, max(5, word_count // 50))
+    freshness = 20
+    structure = min(25, max(5, section_count * 2))
+    score_total = groundedness + coverage + freshness + structure
+
+    skill = Skill(
+        repo_id=sentinel_repo.id,
+        domain=payload.domain.strip(),
+        source_type=payload.source_type,
+        content=payload.content,
+        score_total=score_total,
+        score_groundedness=groundedness,
+        score_coverage=coverage,
+        score_freshness=freshness,
+        score_structure=structure,
+        is_stale=False,
+        skill_path=f".skilgen/skills/{payload.domain.strip()}/SKILL.md",
+    )
+    db.add(skill)
+    await db.flush()
+
+    listing = RegistrySkill(
+        org_id=current_org_id,
+        repo_id=sentinel_repo.id,
+        skill_id=skill.id,
+        domain=payload.domain.strip(),
+        name=payload.name.strip(),
+        description=f"Imported from {payload.source_type.replace('_', '.')}",
+        is_public=payload.is_public,
+        tags=_normalized_tags(payload.tags),
+    )
+    db.add(listing)
+
+    try:
+        await db.flush()
+        await db.commit()
+    except SQLAlchemyError as exc:
+        logger.exception("Import skill file failed")
+        await db.rollback()
+        raise _error(400, "Unable to import skill file", "IMPORT_SKILL_FILE_FAILED") from exc
+
+    return _summary(listing, skill)

@@ -7,6 +7,7 @@ import { SectionFallback } from "@/components/section-fallback";
 import { SkillDetailViewer } from "@/components/skill-detail-viewer";
 import { SkillViewTracker } from "@/components/skill-view-tracker";
 import { getRepo, getRepoSkillUsageStats, getSkill, getSkillVersions, type Repo, type Score, type Skill, type SkillUsageStats, type SkillVersionSummary } from "../../../../../../lib/data";
+import { PublishSkillButton } from "./publish-skill-button";
 
 export const dynamic = "force-dynamic";
 
@@ -372,6 +373,7 @@ export default async function SkillDetailPage({ params }: PageProps) {
 
           <div className="flex flex-wrap items-center gap-2">
             <ScoreBadge score={skill.score} />
+            <PublishSkillButton accessToken={accessToken} domain={skill.domain} skillId={skill.id} />
             <StaleBadge isStale={skill.is_stale} />
             <VersionBadge versionNumber={skill.latest_version_number} />
           </div>

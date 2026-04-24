@@ -336,6 +336,14 @@ export type RegistryList = {
   offset: number;
 };
 
+export type RegistrySkillDetail = RegistrySkill & {
+  content: string;
+  content_hash: string | null;
+  skill_path: string | null;
+  repo_name: string;
+  repo_full_name: string;
+};
+
 type FetchOptions = {
   accessToken?: string | null;
   cache?: RequestCache;
@@ -461,4 +469,8 @@ export async function getSkillVersion(accessToken: string | null, skillId: strin
 export async function getRegistrySkills(params: URLSearchParams): Promise<RegistryList | null> {
   const query = params.toString();
   return apiFetch<RegistryList>(`/registry${query ? `?${query}` : ""}`, { revalidate: 60 });
+}
+
+export async function getRegistrySkillDetail(registryId: string): Promise<RegistrySkillDetail | null> {
+  return apiFetch<RegistrySkillDetail>(`/registry/${registryId}`, { cache: "no-store" });
 }

@@ -139,6 +139,13 @@ export default async function DashboardLayout({
       icon: "Users2",
     });
   }
+  if (!workspaceItems.some((item) => item.href === "/dashboard/heatmap")) {
+    workspaceItems.splice(3, 0, {
+      href: "/dashboard/heatmap",
+      label: "Heatmap",
+      icon: "BarChart3",
+    });
+  }
   if (shellOrg.plan === "free") {
     workspaceItems.push({
       href: "/dashboard/upgrade",
