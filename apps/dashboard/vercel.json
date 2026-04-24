@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd ../.. && npm ci --include=dev && npx turbo build --filter=skillayer-dashboard",
+  "buildCommand": "cd ../.. && npm ci --include=dev && npx turbo build --filter=skillayer-dashboard --force",
   "outputDirectory": ".next",
   "installCommand": "echo 'installed at root'"
 }
