@@ -167,7 +167,7 @@ async def _queue_analysis(request: Request, background_tasks: BackgroundTasks, p
             payload.get("head_sha"),
         )
         return True
-    elif settings.DEPLOYMENT_MODE == "development":
+    elif settings.DEPLOYMENT_MODE in {"development", "bootstrap"}:
         background_tasks.add_task(_run_development_job, payload)
         return True
     else:
