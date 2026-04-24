@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { ArrowLeft, GitBranch } from "lucide-react";
+import { ArrowLeft, ClipboardCopy, GitBranch } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
@@ -23,6 +23,7 @@ import {
   type Skill,
 } from "../../../../lib/data";
 import { AnalyseNowButton } from "./analyse-now-button";
+import { CopyTextButton } from "../repos-browser";
 import { RepoSkillsPanel } from "./skill-source-filter";
 
 export const dynamic = "force-dynamic";
@@ -232,12 +233,23 @@ function DependenciesSection({ report }: { report: DependencyReport | null }) {
                   <span className="font-mono text-[12px] text-[color:var(--text-tertiary)]">{dependency.ecosystem}</span>
                 </div>
                 <p className="mt-2 text-[13px] text-[color:var(--text-secondary)]">CVEs: {dependency.cves.join(", ") || "OSV advisory found"}</p>
+                <p className="mt-2 text-[12px] text-[color:var(--text-secondary)]">
+                  Found in your {dependency.ecosystem} dependencies with version constraint {dependency.version || "unknown"}. This version range includes the reported vulnerability.
+                </p>
                 {dependency.upgrade_command ? (
-                  <code className="mt-3 block rounded-md bg-black/30 px-3 py-2 font-mono text-[12px] text-[color:var(--accent-primary)]">{dependency.upgrade_command}</code>
+                  <div className="mt-3 flex items-start justify-between gap-2">
+                    <code className="block rounded-md bg-black/30 px-3 py-2 font-mono text-[12px] text-[color:var(--accent-primary)]">{dependency.upgrade_command}</code>
+                    <CopyTextButton label="" text={dependency.upgrade_command} title="Copy to clipboard">
+                      <ClipboardCopy className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]" />
+                    </CopyTextButton>
+                  </div>
                 ) : null}
               </div>
             ))}
           </div>
+          <p className="mt-4 text-[12px] italic text-[color:var(--text-tertiary)]">
+            CVEs are matched against declared dependency version ranges, not the exact installed version. Verify with your package manager.
+          </p>
         </div>
       ) : null}
       <div className="overflow-x-auto">
@@ -270,6 +282,53 @@ function DependenciesSection({ report }: { report: DependencyReport | null }) {
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+function ZeroScoreBanner({ score }: { score: Score | null }) {
+  if (score && score.total > 0) return null;
+
+  return (
+    <section className="mb-8 rounded-xl border border-amber-500/30 bg-amber-900/20 px-5 py-4 text-[13px] text-amber-200">
+      Analysis is still running or no skills have been generated yet. Click &quot;Analyse again&quot; to trigger a fresh analysis.
+    </section>
+  );
+}
+
+function ScoreInsight({ score, coverage }: { score: Score | null; coverage: RepoSkillSources | null }) {
+  const subscoreEntries: Array<{ label: string; value: number }> = [
+    { label: "Groundedness", value: score?.groundedness ?? 0 },
+    { label: "Coverage", value: score?.coverage ?? 0 },
+    { label: "Freshness", value: score?.freshness ?? 0 },
+    { label: "Structure", value: score?.structure ?? 0 },
+  ];
+  const weakest = [...subscoreEntries].sort((left, right) => left.value - right.value)[0];
+  const coveredCategories = coverage ? Object.values(coverage.coverage_map).filter((item) => item.covered).length : 0;
+  const missingCount = Math.max(0, 8 - coveredCategories);
+  const missingCategories = coverage
+    ? Object.entries(coverage.coverage_map)
+        .filter(([, item]) => !item.covered)
+        .map(([category]) => category.replaceAll("_", " "))
+    : [];
+
+  let text = "Skilgen found very few verified patterns to build skills from.";
+  if (score) {
+    if (score.total < 30) {
+      text =
+        "Skilgen found very few verified patterns to build skills from. The most common reasons: the repo has no SKILL.md files yet, the codebase is small or newly connected, or the analysis run is still in progress.";
+    } else if (score.total < 60) {
+      text = `Skills exist but coverage is narrow. ${missingCount} of 8 knowledge areas have no skill yet. Running 'Analyse again' adds more domains as Skilgen reads more of the codebase.${missingCategories.length > 0 ? ` Missing: ${missingCategories.join(", ")}.` : ""}`;
+    } else if (score.total < 80) {
+      text = `Good foundation. Score is held back by ${weakest.label} (${weakest.value}/25). See the subscore breakdown below.`;
+    } else {
+      text = "Strong skill coverage. Focus on keeping skills fresh with regular re-analysis as the codebase evolves.";
+    }
+  }
+
+  return (
+    <section className="mb-8 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-5 py-4 text-[13px] leading-relaxed text-[color:var(--text-secondary)]">
+      {text}
     </section>
   );
 }
@@ -384,6 +443,12 @@ export default async function RepoDetailPage({ params }: PageProps) {
   }
 
   const score: Score | null = repo.score;
+  const languageLabel = repo.language ? repo.language : skills.length > 0 ? "Multi-language" : "Unknown";
+  const languageTone = repo.language
+    ? "border-[color:var(--bg-border)] text-[color:var(--text-secondary)]"
+    : skills.length > 0
+      ? "border-blue-500/30 bg-blue-900/20 text-blue-300"
+      : "border-[color:var(--bg-border)] text-[color:var(--text-tertiary)]";
 
   return (
     <div>
@@ -409,8 +474,8 @@ export default async function RepoDetailPage({ params }: PageProps) {
             <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">{repo.name}</h1>
             <p className="mt-2 font-mono text-sm text-[color:var(--text-secondary)]">{repo.full_name}</p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className="inline-flex rounded-full border border-[color:var(--bg-border)] px-2.5 py-1 text-[12px] text-[color:var(--text-secondary)]">
-                {repo.language || "—"}
+              <span className={`inline-flex rounded-full border px-2.5 py-1 text-[12px] ${languageTone}`}>
+                {languageLabel}
               </span>
               <span className="inline-flex items-center rounded-full border border-[color:var(--bg-border)] px-2.5 py-1 text-[12px] text-[color:var(--text-secondary)]">
                 <GitBranch className="mr-1 h-3 w-3" />
@@ -427,6 +492,8 @@ export default async function RepoDetailPage({ params }: PageProps) {
       </SectionErrorBoundary>
 
       <SectionErrorBoundary section="repository subscores">
+        <ZeroScoreBanner score={score} />
+        <ScoreInsight coverage={skillSources} score={score} />
         <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <SubscoreCard label="Groundedness" value={score?.groundedness} />
           <SubscoreCard label="Coverage" value={score?.coverage} />

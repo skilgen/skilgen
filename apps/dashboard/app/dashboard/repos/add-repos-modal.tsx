@@ -1,8 +1,8 @@
 "use client";
 
-import { Loader2, Square, SquareCheckBig, X } from "lucide-react";
+import { Loader2, Search, Square, SquareCheckBig, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
 
@@ -33,7 +33,10 @@ export function AddReposModal({
   const [success, setSuccess] = useState(false);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [installationIdInput, setInstallationIdInput] = useState("");
+  const [requestedInstallationId, setRequestedInstallationId] = useState("");
+  const [query, setQuery] = useState("");
   const [fetchTrigger, setFetchTrigger] = useState(0);
+  const deferredQuery = useDeferredValue(query);
 
   const headers = useMemo(
     () => ({
@@ -49,8 +52,8 @@ export function AddReposModal({
       setLoading(true);
       setError(null);
       try {
-        const url = installationIdInput
-          ? `${API_URL}/orgs/${orgId}/available-repos?installation_id=${installationIdInput}`
+        const url = requestedInstallationId
+          ? `${API_URL}/orgs/${orgId}/available-repos?installation_id=${requestedInstallationId}`
           : `${API_URL}/orgs/${orgId}/available-repos`;
         const response = await fetch(url, {
           headers,
@@ -71,7 +74,7 @@ export function AddReposModal({
     return () => {
       cancelled = true;
     };
-  }, [fetchTrigger, headers, orgId]);
+  }, [fetchTrigger, headers, orgId, requestedInstallationId]);
 
   useEffect(() => {
     if (!success) return;
@@ -83,6 +86,12 @@ export function AddReposModal({
   }, [onClose, router, success]);
 
   const selectedRepos = repos.filter((repo) => selectedIds.includes(repo.github_repo_id));
+  const visibleRepos = useMemo(() => {
+    const normalized = deferredQuery.trim().toLowerCase();
+    if (!normalized) return repos;
+    return repos.filter((repo) => `${repo.full_name} ${repo.language ?? ""} ${repo.default_branch}`.toLowerCase().includes(normalized));
+  }, [deferredQuery, repos]);
+  const allVisibleSelected = visibleRepos.length > 0 && visibleRepos.every((repo) => selectedIds.includes(repo.github_repo_id));
 
   function toggleRepo(id: number) {
     setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
@@ -151,6 +160,7 @@ export function AddReposModal({
                       disabled={!installationIdInput.trim()}
                       onClick={() => {
                         setError(null);
+                        setRequestedInstallationId(installationIdInput.trim());
                         setFetchTrigger((n) => n + 1);
                       }}
                       type="button"
@@ -167,14 +177,44 @@ export function AddReposModal({
             </div>
           ) : (
             <>
+              <label className="relative mb-4 block">
+                <span className="sr-only">Search available repositories</span>
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--text-tertiary)]" />
+                <input
+                  className="h-11 w-full rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] pl-10 pr-10 text-[14px] text-[color:var(--text-primary)] outline-none transition-colors placeholder:text-[color:var(--text-tertiary)] focus:border-[color:var(--accent-primary)]"
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search available repos"
+                  type="search"
+                  value={query}
+                />
+                {query ? (
+                  <button
+                    aria-label="Clear search"
+                    className="absolute right-3 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-[color:var(--text-tertiary)] hover:bg-white/10 hover:text-[color:var(--text-primary)]"
+                    onClick={() => setQuery("")}
+                    type="button"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+              </label>
               <div className="mb-4 flex items-center justify-between gap-4">
-                <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">{repos.length} available</div>
-                <button className="text-[12px] font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]" onClick={() => setSelectedIds(selectedIds.length === repos.length ? [] : repos.map((repo) => repo.github_repo_id))} type="button">
-                  {selectedIds.length === repos.length ? "Deselect all" : "Select all"}
+                <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
+                  {visibleRepos.length} shown
+                  <span className="ml-2 normal-case tracking-normal text-[color:var(--text-secondary)]">{repos.length} available total</span>
+                </div>
+                <button
+                  className="text-[12px] font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]"
+                  onClick={() =>
+                    setSelectedIds(allVisibleSelected ? selectedIds.filter((id) => !visibleRepos.some((repo) => repo.github_repo_id === id)) : [...new Set([...selectedIds, ...visibleRepos.map((repo) => repo.github_repo_id)])])
+                  }
+                  type="button"
+                >
+                  {allVisibleSelected ? "Deselect shown" : "Select shown"}
                 </button>
               </div>
               <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
-                {repos.map((repo) => {
+                {visibleRepos.map((repo) => {
                   const selected = selectedIds.includes(repo.github_repo_id);
                   return (
                     <button
@@ -198,6 +238,11 @@ export function AddReposModal({
                     </button>
                   );
                 })}
+                {visibleRepos.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[color:var(--bg-border)] px-4 py-8 text-center text-[14px] text-[color:var(--text-secondary)]">
+                    No repositories match that search.
+                  </div>
+                ) : null}
               </div>
             </>
           )}

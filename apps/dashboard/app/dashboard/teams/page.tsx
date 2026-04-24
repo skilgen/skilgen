@@ -39,6 +39,7 @@ function MetricCard({ label, value, sub }: { label: string; value: string | numb
 
 function TeamCard({ team }: { team: TeamRollupTeam }) {
   const delta = team.score_delta_7d ?? 0;
+  const coveredCategoryEstimate = Math.max(0, Math.min(8, Math.round((team.coverage_score / 100) * 8)));
   return (
     <article className="rounded-[28px] border border-[color:var(--bg-border)] bg-[linear-gradient(160deg,rgba(255,255,255,0.04),rgba(255,255,255,0.015))] p-6">
       <div className="flex items-start justify-between gap-4">
@@ -57,11 +58,12 @@ function TeamCard({ team }: { team: TeamRollupTeam }) {
       <div className="mt-6">
         <div className="mb-2 flex items-center justify-between text-[13px]">
           <span className="text-[color:var(--text-secondary)]">Coverage</span>
-          <span className="font-semibold text-[color:var(--text-primary)]">{team.coverage_score}%</span>
+          <span className="font-semibold text-[color:var(--text-primary)]">{coveredCategoryEstimate} of 8 areas</span>
         </div>
         <div className="h-3 overflow-hidden rounded-full bg-white/10">
           <div className="h-full rounded-full bg-[#C9973A]" style={{ width: `${team.coverage_score}%` }} />
         </div>
+        <p className="mt-2 text-[12px] text-[color:var(--text-tertiary)]">{team.coverage_score}%</p>
       </div>
 
       <div className="mt-6 space-y-3 text-[14px]">

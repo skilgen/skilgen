@@ -55,6 +55,17 @@ SKILL_CATEGORIES = [
     "operational_knowledge",
 ]
 
+SKILL_CATEGORY_LANGUAGE_HINTS = {
+    "codebase_architecture": "Detected from repo structure",
+    "code_style": "Detected from code style patterns",
+    "testing_conventions": "Detected from test patterns",
+    "internal_tools": "Detected from internal tooling",
+    "security_compliance": "Detected from security patterns",
+    "design_system": "Detected from design system usage",
+    "data_schema": "Detected from data/schema patterns",
+    "operational_knowledge": "Detected from operational knowledge",
+}
+
 RUNTIME_DISPLAY_NAMES = {
     "claude_code": "Claude Code",
     "cursor": "Cursor",
@@ -273,6 +284,10 @@ async def _repo_response(db: AsyncSession, repo: Repo) -> RepoResponse:
     skill_count = (
         await db.execute(select(func.count(Skill.id)).where(Skill.repo_id == repo.id))
     ).scalar_one()
+    repo_skills = (
+        await db.execute(select(Skill).where(Skill.repo_id == repo.id).order_by(desc(Skill.created_at)))
+    ).scalars().all()
+    languages, display_language = _repo_language_metadata(list(repo_skills), repo.language)
     delta = None
     if len(latest_history) >= 2:
         delta = int(latest_history[0].score_total - latest_history[1].score_total)
@@ -282,6 +297,8 @@ async def _repo_response(db: AsyncSession, repo: Repo) -> RepoResponse:
         name=repo.name,
         installation_id=repo.github_installation_id,
         language=repo.language,
+        languages=languages,
+        display_language=display_language,
         is_monorepo=repo.is_monorepo,
         last_analysed_at=repo.last_analysed_at,
         score=_score_response(latest_run or (latest_history[0] if latest_history else None)),
@@ -305,9 +322,24 @@ def _skill_category(skill: Skill) -> str:
     return str(skill.skill_category or skill_category_for_source_type(skill.source_type))
 
 
+def _covered_categories(skills: list[Skill]) -> list[str]:
+    """Return covered skill categories in the dashboard taxonomy order."""
+    covered = {_skill_category(skill) for skill in skills if _skill_category(skill) in SKILL_CATEGORIES}
+    return [category for category in SKILL_CATEGORIES if category in covered]
+
+
+def _repo_language_metadata(skills: list[Skill], language: str | None) -> tuple[list[str], str]:
+    """Return supplemental language hints and a user-facing display language."""
+    covered_categories = _covered_categories(skills)
+    language_hints = [SKILL_CATEGORY_LANGUAGE_HINTS.get(category, category.replace("_", " ")) for category in covered_categories]
+    if language:
+        return language_hints, language
+    return language_hints, "Multiple" if len(covered_categories) > 2 else "Unknown"
+
+
 def _repo_coverage_score(skills: list[Skill]) -> tuple[int, list[str]]:
     """Return the coverage score and missing categories for a repo skill set."""
-    covered = {_skill_category(skill) for skill in skills if _skill_category(skill) in SKILL_CATEGORIES}
+    covered = _covered_categories(skills)
     missing = [category for category in SKILL_CATEGORIES if category not in covered]
     return round((len(covered) / len(SKILL_CATEGORIES)) * 100), missing
 
@@ -751,17 +783,14 @@ async def get_skill_debt(
     repo_gaps: list[dict[str, object]] = []
     for repo in repos:
         repo_skills = [skill for skill in all_skills if skill.repo_id == repo.id]
-        covered = {
-            skill.skill_category
-            for skill in repo_skills
-            if skill.skill_category in SKILL_CATEGORIES
-        }
+        covered = _covered_categories(repo_skills)
         missing = [category for category in SKILL_CATEGORIES if category not in covered]
         if missing:
             repo_gaps.append(
                 {
                     "repo_id": repo.id,
                     "repo_name": repo.name,
+                    "covered_categories": covered,
                     "missing_categories": missing,
                     "coverage_score": round((len(covered) / len(SKILL_CATEGORIES)) * 100),
                 }

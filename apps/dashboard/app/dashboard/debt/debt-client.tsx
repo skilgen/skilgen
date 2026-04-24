@@ -7,10 +7,25 @@ import type { SkillDebtResponse } from "../../../lib/data";
 
 type TabKey = "gaps" | "stale" | "low" | "never";
 
+const categoryLabelMap: Record<string, string> = {
+  codebase_architecture: "Architecture",
+  code_style: "Code Style",
+  testing_conventions: "Testing",
+  internal_tools: "Internal Tools",
+  security_compliance: "Security",
+  design_system: "Design System",
+  data_schema: "Data Schema",
+  operational_knowledge: "Operations",
+};
+
 function scoreBadgeClass(score: number): string {
   if (score < 40) return "bg-red-900/30 text-red-300";
   if (score < 70) return "bg-amber-900/30 text-amber-300";
   return "bg-green-900/30 text-green-300";
+}
+
+function titleize(category: string): string {
+  return categoryLabelMap[category] ?? category.replaceAll("_", " ");
 }
 
 export function DebtClient({ debt }: { debt: SkillDebtResponse }) {
@@ -52,19 +67,33 @@ export function DebtClient({ debt }: { debt: SkillDebtResponse }) {
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <h2 className="text-[16px] font-semibold text-[color:var(--text-primary)]">{gap.repo_name}</h2>
+                    <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">{gap.covered_categories?.length ?? 0} of 8 knowledge areas covered</p>
                     <div className="mt-3 h-2 w-full max-w-sm overflow-hidden rounded-full bg-white/8">
                       <div className="h-full rounded-full bg-[color:var(--accent-primary)]" style={{ width: `${gap.coverage_score}%` }} />
                     </div>
-                    <p className="mt-2 text-[13px] text-[color:var(--text-secondary)]">Coverage score: {gap.coverage_score}%</p>
+                    <p className="mt-2 text-[13px] text-[color:var(--text-secondary)]">
+                      {gap.covered_categories?.length ?? 0} of 8 knowledge areas ({gap.coverage_score}%)
+                    </p>
                   </div>
                   <Link className="text-[13px] font-semibold text-[color:var(--accent-primary)] hover:underline" href={`/dashboard/repos/${gap.repo_id}`}>
                     Go to repo
                   </Link>
                 </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {gap.missing_categories.map((category) => (
-                    <span className="rounded-full bg-red-900/30 px-2 py-0.5 text-[11px] font-semibold text-red-300" key={category}>
-                      {category}
+
+                {gap.covered_categories && gap.covered_categories.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {gap.covered_categories.map((cat) => (
+                      <span className="rounded-full bg-green-900/30 px-2 py-0.5 text-[11px] font-semibold text-green-300" key={cat}>
+                        ✓ {titleize(cat)}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {gap.missing_categories.map((cat) => (
+                    <span className="rounded-full bg-red-900/30 px-2 py-0.5 text-[11px] font-semibold text-red-300" key={cat}>
+                      {titleize(cat)}
                     </span>
                   ))}
                 </div>

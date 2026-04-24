@@ -171,6 +171,8 @@ export type Repo = {
   full_name: string;
   installation_id: number | null;
   language: string | null;
+  languages?: string[];
+  display_language?: string;
   is_monorepo?: boolean;
   last_analysed_at: string | null;
   score: Score | null;
@@ -336,6 +338,7 @@ export type SkillDebtResponse = {
   repo_coverage_gaps: Array<{
     repo_id: string;
     repo_name: string;
+    covered_categories: string[];
     missing_categories: string[];
     coverage_score: number;
   }>;

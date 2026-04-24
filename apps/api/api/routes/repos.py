@@ -12,6 +12,7 @@ from apps.api.api.auth import get_current_org_id, get_current_user
 from apps.api.api.routes.orgs import (
     _criticality_score,
     _last_30_dates,
+    _repo_language_metadata,
     _repo_response,
     _score_response,
     _skill_alert,
@@ -238,8 +239,12 @@ async def get_repo(
     if repo is None:
         raise HTTPException(status_code=404, detail="Repo not found")
     response = (await _repo_response(db, repo)).model_dump()
+    latest_skills = await _latest_repo_skills(db, repo.id)
+    languages, derived_display_language = _repo_language_metadata(latest_skills, repo.language)
     response["default_branch"] = repo.default_branch
     response["installation_id"] = repo.github_installation_id
+    response["languages"] = languages
+    response["display_language"] = repo.language or derived_display_language
     return response
 
 @router.get("/{repo_id}/score-badge")

@@ -58,6 +58,8 @@ class RepoResponse(BaseModel):
     name: str
     installation_id: int | None = None
     language: str | None
+    languages: list[str] = []
+    display_language: str | None = None
     is_monorepo: bool
     last_analysed_at: datetime | None
     score: ScoreResponse | None
