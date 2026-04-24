@@ -1,16 +1,18 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { Github, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
 import { API_URL, type Org, type Repo } from "../../../lib/data";
+import { AddReposButton } from "./add-repos-button";
 import { ReposBrowser, type RepoListItem } from "./repos-browser";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReposPage() {
   let accessToken = "";
+  let orgId = "";
   let repos: RepoListItem[] = [];
   let reposError = false;
 
@@ -22,8 +24,6 @@ export default async function ReposPage() {
   }
 
   try {
-    let orgId = "";
-
     if (accessToken) {
       const orgRes = await fetch(`${API_URL}/me/org`, {
         cache: "no-store",
@@ -86,14 +86,7 @@ export default async function ReposPage() {
           <p className="mt-1 text-sm text-[color:var(--text-secondary)]">{repos.length} repos connected</p>
         </div>
 
-        <Link
-          className="inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] transition-colors hover:bg-[color:var(--accent-bright)]"
-          href="https://github.com/apps/skillayer/installations/new"
-          target="_blank"
-        >
-          <Github className="mr-2 h-4 w-4" />
-          {connectLabel}
-        </Link>
+        <AddReposButton accessToken={accessToken} hasRepos={repos.length > 0} label={connectLabel} orgId={orgId} />
       </div>
 
       <SectionErrorBoundary section="repositories">
@@ -110,14 +103,9 @@ export default async function ReposPage() {
             <p className="mx-auto mt-2 max-w-md text-[14px] text-[color:var(--text-secondary)]">
               Install the Skillayer GitHub App to analyse repositories, generate skills, and track score history.
             </p>
-            <Link
-              className="mt-6 inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] transition-colors hover:bg-[color:var(--accent-bright)]"
-              href="https://github.com/apps/skillayer/installations/new"
-              target="_blank"
-            >
-              <Github className="mr-2 h-4 w-4" />
-              Connect repo
-            </Link>
+            <div className="mt-6 flex justify-center">
+              <AddReposButton accessToken={accessToken} hasRepos={false} label="Connect repo" orgId={orgId} />
+            </div>
           </section>
         )}
       </SectionErrorBoundary>
