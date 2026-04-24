@@ -19,6 +19,7 @@ from apps.api.api.routes.orgs import (
 )
 from uuid import uuid4
 
+from apps.api.api.analysis import _skill_category_for_domain
 from apps.api.api.routes.webhook import _queue_analysis
 from packages.db.database import get_db
 from packages.db.models import AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillUsageEvent, SkillVersion
@@ -743,6 +744,47 @@ async def trigger_source_analysis(
         },
     )
     return AnalyzeSourceResponse(job_id=run.id, status="queued")
+
+
+@router.post("/{repo_id}/backfill-categories")
+async def backfill_skill_categories(
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, int]:
+    """Re-infer skill_category for all existing skills in a repo without re-running analysis.
+
+    Uses the same domain/path keyword mapping as analysis.py so the categories
+    are consistent with future analysis runs.
+    """
+    repo = await db.get(Repo, repo_id)
+    if repo is None or repo.org_id != current_org_id:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    skills_result = await db.execute(select(Skill).where(Skill.repo_id == repo_id))
+    skills = skills_result.scalars().all()
+
+    updated = 0
+    for skill in skills:
+        source_type = str(skill.source_type or "code")
+        if source_type != "code":
+            new_category = skill_category_for_source_type(source_type)
+        else:
+            new_category = _skill_category_for_domain(
+                str(skill.domain or ""),
+                str(skill.skill_path or ""),
+            )
+        if skill.skill_category != new_category:
+            skill.skill_category = new_category
+            updated += 1
+
+    try:
+        await db.commit()
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to backfill categories") from exc
+
+    return {"updated": updated, "total": len(skills)}
 
 
 class _LocalUsageEvent(BaseModel):
