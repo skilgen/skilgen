@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
@@ -9,18 +9,26 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id, get_current_user
-from apps.api.api.routes.orgs import _repo_response, _score_response
+from apps.api.api.routes.orgs import (
+    _criticality_score,
+    _last_30_dates,
+    _repo_response,
+    _score_response,
+    _skill_alert,
+)
 from apps.api.api.routes.webhook import _queue_analysis
 from packages.db.database import get_db
-from packages.db.models import AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillVersion
+from packages.db.models import AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillUsageEvent, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
     AnalysisRunResponse,
     AnalyzeSourceResponse,
     DependencyReportResponse,
+    DailyLoadPointResponse,
     DependencyResponse,
     RepoSkillSourceSummary,
     RepoSkillSourcesResponse,
+    RepoSkillUsageStatsResponse,
     SkillCategoryCoverage,
     SkillSourceSkillSummary,
 )
@@ -279,6 +287,80 @@ async def get_repo_skills(
             "last_updated_at": latest_version.created_at if latest_version else skill.created_at,
         })
     return responses
+
+
+@router.get("/{repo_id}/skills/{skill_id}/usage-stats", response_model=RepoSkillUsageStatsResponse)
+async def get_repo_skill_usage_stats(
+    repo_id: str,
+    skill_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> RepoSkillUsageStatsResponse:
+    repo = await db.get(Repo, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
+    skill = await db.get(Skill, skill_id)
+    if skill is None or skill.repo_id != repo_id:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    cutoff_30d = now - timedelta(days=30)
+    cutoff_7d = now - timedelta(days=7)
+    daily_label = func.date(SkillUsageEvent.loaded_at).label("day")
+
+    try:
+        usage = (
+            await db.execute(
+                select(
+                    func.count(SkillUsageEvent.id).label("loads_30d"),
+                    func.count(SkillUsageEvent.id).filter(SkillUsageEvent.loaded_at >= cutoff_7d).label("loads_7d"),
+                    func.max(SkillUsageEvent.loaded_at).label("last_loaded_at"),
+                )
+                .where(SkillUsageEvent.skill_id == skill_id, SkillUsageEvent.loaded_at >= cutoff_30d)
+            )
+        ).one()
+        daily_rows = (
+            await db.execute(
+                select(daily_label, func.count(SkillUsageEvent.id).label("loads"))
+                .where(SkillUsageEvent.skill_id == skill_id, SkillUsageEvent.loaded_at >= cutoff_30d)
+                .group_by(daily_label)
+                .order_by(daily_label)
+            )
+        ).all()
+        repo_max_loads = (
+            await db.execute(select(func.max(Skill.load_count_30d)).where(Skill.repo_id == repo_id))
+        ).scalar_one_or_none()
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to load skill usage stats") from exc
+
+    try:
+        runtime_rows = (
+            await db.execute(
+                select(SkillUsageEvent.agent_runtime, func.count(SkillUsageEvent.id).label("loads"))
+                .where(SkillUsageEvent.skill_id == skill_id, SkillUsageEvent.loaded_at >= cutoff_30d)
+                .group_by(SkillUsageEvent.agent_runtime)
+                .order_by(desc(func.count(SkillUsageEvent.id)))
+            )
+        ).all()
+        runtime_counts = {str(row.agent_runtime or "unknown"): int(row.loads or 0) for row in runtime_rows}
+    except Exception:
+        await db.rollback()
+        runtime_counts = {"unknown": int(usage.loads_30d or 0)}
+
+    daily_map = {str(row.day): int(row.loads or 0) for row in daily_rows}
+    loads_30d = int(usage.loads_30d or 0)
+    loads_7d = int(usage.loads_7d or 0)
+    last_loaded_at = usage.last_loaded_at
+
+    return RepoSkillUsageStatsResponse(
+        criticality_score=_criticality_score(loads_30d, last_loaded_at, bool(skill.is_stale), int(repo_max_loads or 1)),
+        loads_30d=loads_30d,
+        loads_7d=loads_7d,
+        last_loaded_at=last_loaded_at,
+        alert=_skill_alert(skill, loads_30d, now),
+        daily_loads=[DailyLoadPointResponse(date=day, loads=daily_map.get(day, 0)) for day in _last_30_dates(now)],
+        agent_runtimes=runtime_counts,
+    )
 
 
 @router.get("/{repo_id}/score-history")
