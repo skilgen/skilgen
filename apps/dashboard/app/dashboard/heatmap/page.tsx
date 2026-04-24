@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Terminal } from "lucide-react";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
 import { getBootstrapOrg, getOrgSkillHeatmap } from "../../../lib/data";
@@ -66,6 +66,28 @@ export default async function HeatmapPage() {
       {summary.dead_skills > 0 ? (
         <section className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-5 py-4 text-[14px] text-amber-200">
           ⚠ {summary.dead_skills} skill{summary.dead_skills === 1 ? "" : "s"} haven&apos;t been loaded in 30+ days. Consider pruning or re-analysing.
+        </section>
+      ) : null}
+
+      {skills.length > 0 && summary.avg_criticality === 0 ? (
+        <section className="mb-6 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-5 py-5">
+          <div className="flex items-start gap-4">
+            <Terminal className="mt-0.5 h-5 w-5 shrink-0 text-[color:var(--accent-primary)]" />
+            <div>
+              <p className="text-[14px] font-semibold text-[color:var(--text-primary)]">No agent activity recorded yet</p>
+              <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">
+                Your skills are analysed but no loads have been tracked. Skill loads are recorded when agents (Claude Code, Codex, Cursor) read
+                your SKILL.md files through the Skillayer integration. To sync existing usage from your local analytics file, run:
+              </p>
+              <pre className="mt-3 overflow-x-auto rounded-lg bg-black/40 px-4 py-3 text-[12px] text-[color:var(--text-secondary)]">
+                {`SKILLAYER_API_KEY=<your-key> skilgen analytics --upload --repo-id <repo-uuid>`}
+              </pre>
+              <p className="mt-2 text-[12px] text-[color:var(--text-tertiary)]">
+                Find your repo UUID in the URL when viewing a repo in the dashboard (e.g.{" "}
+                <span className="font-mono">/dashboard/repos/&lt;uuid&gt;</span>). Your API key is in your org settings.
+              </p>
+            </div>
+          </div>
         </section>
       ) : null}
 

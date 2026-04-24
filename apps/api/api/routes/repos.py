@@ -17,10 +17,13 @@ from apps.api.api.routes.orgs import (
     _score_response,
     _skill_alert,
 )
+from uuid import uuid4
+
 from apps.api.api.routes.webhook import _queue_analysis
 from packages.db.database import get_db
 from packages.db.models import AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillUsageEvent, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
+from sqlalchemy.exc import SQLAlchemyError
 from packages.db.schemas import (
     AnalysisRunResponse,
     AnalyzeSourceResponse,
@@ -740,3 +743,78 @@ async def trigger_source_analysis(
         },
     )
     return AnalyzeSourceResponse(job_id=run.id, status="queued")
+
+
+class _LocalUsageEvent(BaseModel):
+    skill_path: str
+    agent_runtime: str = "unknown"
+    session_id: str = ""
+    timestamp: str = ""
+
+
+class _SyncAnalyticsPayload(BaseModel):
+    repo_id: str
+    events: list[_LocalUsageEvent]
+
+
+@router.post("/{repo_id}/sync-analytics")
+async def sync_repo_analytics(
+    repo_id: str,
+    payload: _SyncAnalyticsPayload,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, int]:
+    """Sync local ``.skilgen/analytics/usage.jsonl`` events to the API database.
+
+    Maps skill paths to DB skill records and increments ``load_count_30d``
+    so the dashboard heatmap reflects real agent usage data.
+    """
+    repo = await db.get(Repo, repo_id)
+    if repo is None or repo.org_id != current_org_id:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    skills_result = await db.execute(select(Skill).where(Skill.repo_id == repo_id))
+    skills_by_path: dict[str, Skill] = {
+        str(skill.skill_path or "").strip("/"): skill
+        for skill in skills_result.scalars().all()
+    }
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    synced = 0
+    skipped = 0
+
+    for event in payload.events:
+        normalized = event.skill_path.strip("/").removeprefix(".skilgen/").removeprefix("skilgen/")
+        skill = skills_by_path.get(event.skill_path.strip("/")) or skills_by_path.get(normalized)
+        if skill is None:
+            skipped += 1
+            continue
+
+        try:
+            loaded_at = datetime.fromisoformat(event.timestamp.replace("Z", "+00:00")).replace(tzinfo=None)
+        except (ValueError, AttributeError):
+            loaded_at = now
+
+        skill.load_count_30d = int(skill.load_count_30d or 0) + 1
+        if skill.last_loaded_at is None or loaded_at > skill.last_loaded_at:
+            skill.last_loaded_at = loaded_at
+
+        db.add(
+            SkillUsageEvent(
+                org_id=current_org_id,
+                repo_id=repo_id,
+                skill_id=skill.id,
+                agent_runtime=event.agent_runtime[:100] or "unknown",
+                session_id=event.session_id[:255] or str(uuid4()),
+                loaded_at=loaded_at,
+            )
+        )
+        synced += 1
+
+    try:
+        await db.commit()
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to sync analytics") from exc
+
+    return {"synced": synced, "skipped": skipped}

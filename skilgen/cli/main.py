@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 import threading
 import time
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from skilgen.api.server import run_server
 from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
@@ -617,6 +620,21 @@ def build_parser() -> argparse.ArgumentParser:
     analytics.add_argument("--session-id")
     analytics.add_argument("--task")
     analytics.add_argument("--json", action="store_true", help="Output the raw analytics JSON payload.")
+    analytics.add_argument(
+        "--upload",
+        action="store_true",
+        help="Sync local skill-load events to the Skillayer API so the dashboard heatmap reflects real usage.",
+    )
+    analytics.add_argument(
+        "--repo-id",
+        default="",
+        help="Skillayer repo UUID (shown in the dashboard URL) — required when using --upload.",
+    )
+    analytics.add_argument(
+        "--api-url",
+        default="",
+        help="Skillayer API base URL. Defaults to SKILLAYER_API_URL env var or https://api.skillayer.com.",
+    )
 
     validate = subparsers.add_parser("validate", help="Validate generated outputs and skill references.")
     validate.add_argument("--project-root", default=".")
@@ -1168,6 +1186,74 @@ def main() -> None:
                     indent=2,
                 )
             )
+            return
+        if getattr(args, "upload", False):
+            repo_id = getattr(args, "repo_id", "") or os.getenv("SKILLAYER_REPO_ID", "")
+            api_key = os.getenv("SKILLAYER_API_KEY", "")
+            api_url = (getattr(args, "api_url", "") or os.getenv("SKILLAYER_API_URL", "") or "https://api.skillayer.com").rstrip("/")
+            if not repo_id:
+                print("error: --repo-id is required (or set SKILLAYER_REPO_ID env var)", file=sys.stderr)
+                sys.exit(1)
+            if not api_key:
+                print("error: SKILLAYER_API_KEY environment variable is required", file=sys.stderr)
+                sys.exit(1)
+            usage_path = root / ".skilgen" / "analytics" / "usage.jsonl"
+            if not usage_path.exists():
+                print(json.dumps({"synced": 0, "skipped": 0, "error": "No local analytics file found."}))
+                return
+            events: list[dict[str, object]] = []
+            for line in usage_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                    skill = str(entry.get("skill", "")).strip()
+                    if not skill or str(entry.get("context", "")) == "decision_planner":
+                        continue
+                    events.append({
+                        "skill_path": skill,
+                        "agent_runtime": str(entry.get("agent_runtime", "unknown")).strip() or "unknown",
+                        "session_id": str(entry.get("session_id") or ""),
+                        "timestamp": str(entry.get("timestamp", "")),
+                    })
+                except json.JSONDecodeError:
+                    continue
+            body = json.dumps({"repo_id": repo_id, "events": events}).encode("utf-8")
+            request = Request(
+                f"{api_url}/orgs/sync-analytics-direct",  # will be routed via org context server-side
+                data=body,
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-Skilgen-Repo-Id": repo_id,
+                },
+            )
+            # The sync endpoint is under /orgs/{org_id}/sync-analytics but we
+            # need the org_id. Use a convenience endpoint that resolves it from the API key.
+            # For now call /repos/{repo_id}/sync-analytics which we add as an alias.
+            request = Request(
+                f"{api_url}/repos/{repo_id}/sync-analytics",
+                data=body,
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+            )
+            try:
+                with urlopen(request, timeout=15) as resp:
+                    result = json.loads(resp.read().decode("utf-8"))
+                print(json.dumps(result, indent=2))
+            except HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                print(f"error: API returned {exc.code}: {detail}", file=sys.stderr)
+                sys.exit(1)
+            except URLError as exc:
+                print(f"error: Unable to reach API: {exc.reason}", file=sys.stderr)
+                sys.exit(1)
             return
         payload = analytics_payload(root, limit=args.limit)
         if args.json:

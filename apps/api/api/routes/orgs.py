@@ -1434,3 +1434,97 @@ async def get_org_analytics(
         "most_active_repo": most_active_repo,
         "most_loaded_skill": top_skills[0] if top_skills else None,
     }
+
+
+class LocalUsageEvent(BaseModel):
+    """A single skill-load event exported from the local .skilgen/analytics/usage.jsonl file."""
+
+    skill_path: str
+    """Relative path to the SKILL.md file, e.g. '.skilgen/skills/backend/testing/SKILL.md'."""
+    agent_runtime: str = "unknown"
+    session_id: str = ""
+    timestamp: str = ""
+
+
+class SyncAnalyticsPayload(BaseModel):
+    """Payload for the sync-analytics endpoint — a batch of local usage events."""
+
+    repo_id: str
+    events: list[LocalUsageEvent]
+
+
+class SyncAnalyticsResponse(BaseModel):
+    synced: int
+    skipped: int
+
+
+@router.post("/{org_id}/sync-analytics", response_model=SyncAnalyticsResponse)
+async def sync_local_analytics(
+    org_id: str,
+    payload: SyncAnalyticsPayload,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> SyncAnalyticsResponse:
+    """Sync skill-load events from the local analytics file to the API database.
+
+    The skilgen CLI writes skill loads to ``.skilgen/analytics/usage.jsonl``
+    during local sessions.  This endpoint maps those events to DB skill records
+    (by ``skill_path``) and increments their ``load_count_30d`` counters,
+    creating the ``SkillUsageEvent`` rows that power the dashboard heatmap.
+    """
+    _assert_org_scope(org_id, current_org_id)
+    if not payload.events:
+        return SyncAnalyticsResponse(synced=0, skipped=0)
+
+    # Verify the repo belongs to this org.
+    repo = await db.get(Repo, payload.repo_id)
+    if repo is None or repo.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    # Load all skills for this repo so we can match by skill_path.
+    skills_result = await db.execute(select(Skill).where(Skill.repo_id == payload.repo_id))
+    skills_by_path: dict[str, Skill] = {
+        str(skill.skill_path or "").strip("/"): skill
+        for skill in skills_result.scalars().all()
+    }
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    synced = 0
+    skipped = 0
+
+    for event in payload.events:
+        normalized = event.skill_path.strip("/").removeprefix(".skilgen/").removeprefix("skilgen/")
+        # Try the raw path first, then a normalized version.
+        skill = skills_by_path.get(event.skill_path.strip("/")) or skills_by_path.get(normalized)
+        if skill is None:
+            skipped += 1
+            continue
+
+        try:
+            loaded_at = datetime.fromisoformat(event.timestamp.replace("Z", "+00:00")).replace(tzinfo=None)
+        except (ValueError, AttributeError):
+            loaded_at = now
+
+        skill.load_count_30d = int(skill.load_count_30d or 0) + 1
+        if skill.last_loaded_at is None or loaded_at > skill.last_loaded_at:
+            skill.last_loaded_at = loaded_at
+
+        db.add(
+            SkillUsageEvent(
+                org_id=org_id,
+                repo_id=payload.repo_id,
+                skill_id=skill.id,
+                agent_runtime=event.agent_runtime[:100] or "unknown",
+                session_id=event.session_id[:255] or str(uuid4()),
+                loaded_at=loaded_at,
+            )
+        )
+        synced += 1
+
+    try:
+        await db.commit()
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to sync analytics") from exc
+
+    return SyncAnalyticsResponse(synced=synced, skipped=skipped)

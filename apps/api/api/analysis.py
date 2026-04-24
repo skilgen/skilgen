@@ -26,6 +26,47 @@ from skilgen.parsers.sources import render_skill_source
 
 LOGGER = logging.getLogger("skillayer.analysis")
 OSV_ENDPOINT = "https://api.osv.dev/v1/querybatch"
+
+# Ordered priority list mapping domain/path keywords to knowledge-area categories.
+# First match wins — keywords are checked against a lowercased "domain/skill_path" string.
+# Use the full path component (e.g. "/data/") where the bare word could be ambiguous.
+_DOMAIN_PATH_KEYWORDS: list[tuple[str, str]] = [
+    ("testing", "testing_conventions"),
+    ("e2e", "testing_conventions"),
+    ("security", "security_compliance"),
+    ("/auth/", "security_compliance"),
+    ("compliance", "security_compliance"),
+    ("roadmap", "operational_knowledge"),
+    ("requirements", "operational_knowledge"),
+    ("runbook", "operational_knowledge"),
+    ("incident", "operational_knowledge"),
+    ("operations", "operational_knowledge"),
+    ("/scripts/", "operational_knowledge"),
+    ("/jobs/", "operational_knowledge"),
+    ("design-system", "design_system"),
+    ("design_system", "design_system"),
+    ("/tokens/", "design_system"),
+    ("data-platform", "data_schema"),
+    ("/data/", "data_schema"),
+    ("schema", "data_schema"),
+    ("/api/", "internal_tools"),
+    ("/routes/", "internal_tools"),
+    ("/style/", "code_style"),
+    ("linting", "code_style"),
+    ("formatting", "code_style"),
+]
+
+
+def _skill_category_for_domain(domain: str, skill_path: str) -> str:
+    """Infer the Skillayer knowledge-area category from the domain slug and file path.
+
+    Falls back to ``"codebase_architecture"`` when no keyword matches.
+    """
+    combined = f"{domain}/{skill_path}".lower()
+    for keyword, category in _DOMAIN_PATH_KEYWORDS:
+        if keyword in combined:
+            return category
+    return "codebase_architecture"
 OSV_ECOSYSTEMS = {
     "pip": "PyPI",
     "npm": "npm",
@@ -339,10 +380,12 @@ async def run_skilgen_analysis(
         if skills_dir.exists():
             for skill_file in skills_dir.rglob("SKILL.md"):
                 content = skill_file.read_text(encoding="utf-8", errors="ignore")
+                domain = skill_file.parent.name
+                rel_path = str(skill_file.relative_to(project_root))
                 skill_files.append(
                     {
-                        "domain": skill_file.parent.name,
-                        "skill_path": str(skill_file.relative_to(project_root)),
+                        "domain": domain,
+                        "skill_path": rel_path,
                         "content": content,
                         "score_total": _score_value(score, "total"),
                         "score_groundedness": _score_value(score, "groundedness"),
@@ -350,7 +393,7 @@ async def run_skilgen_analysis(
                         "score_freshness": _score_value(score, "freshness"),
                         "score_structure": _score_value(score, "structure"),
                         "source_type": "code",
-                        "skill_category": skill_category_for_source_type("code"),
+                        "skill_category": _skill_category_for_domain(domain, rel_path),
                     }
                 )
 
