@@ -3,6 +3,8 @@ WORKDIR /app
 
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+# Enable standalone output for Docker (see next.config.ts)
+ENV BUILD_STANDALONE=1
 
 COPY package*.json turbo.json ./
 COPY apps/dashboard/package*.json ./apps/dashboard/
