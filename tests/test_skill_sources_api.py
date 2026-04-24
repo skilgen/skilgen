@@ -63,3 +63,24 @@ def test_source_type_to_skill_category_mapping_is_complete_for_new_sources() -> 
     assert skill_category_for_source_type("dbt") == "data_schema"
     assert skill_category_for_source_type("sarif") == "security_compliance"
     assert skill_category_for_source_type("runbook") == "operational_knowledge"
+    assert skill_category_for_source_type("runbooks") == "operational_knowledge"
+    assert skill_category_for_source_type("incidents") == "operational_knowledge"
+
+
+def test_worker_payload_forwards_source_type_and_path_to_analysis() -> None:
+    source = _read("apps/api/api/routes/worker.py")
+
+    assert "source_type: str | None = None" in source
+    assert "source_path: str | None = None" in source
+    assert "source_type=payload.source_type" in source
+    assert "source_path=payload.source_path" in source
+
+
+def test_analysis_pipeline_uses_source_specific_skill_generation() -> None:
+    source = _read("apps/api/api/analysis.py")
+
+    assert "def _source_skill_files(" in source
+    assert "run_source_parsers(" in source
+    assert "source_type=source_type" in source
+    assert "source_path=source_path" in source
+    assert 'skill_category": skill_category_for_source_type(source.source_type)' in source

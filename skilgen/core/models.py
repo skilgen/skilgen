@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+SourceConfigValue = bool | str | list[str]
+
 
 @dataclass(frozen=True)
 class SkillSpec:
@@ -96,7 +98,7 @@ class SkilgenConfig:
     model_redaction_mode: str = "balanced"
     redact_model_error_secrets: bool = True
     corpus: CorpusSettings = field(default_factory=CorpusSettings)
-    sources: dict[str, object] = field(default_factory=dict)
+    sources: dict[str, SourceConfigValue] = field(default_factory=dict)
     auto_install_external_skills: bool = True
     external_skills_allowed_trust_levels: list[str] = field(default_factory=list)
     external_skills_allowlist: list[str] = field(default_factory=list)

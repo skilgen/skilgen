@@ -20,6 +20,8 @@ from packages.db.models import AnalysisRun, Dependency, Org, Repo, ScoreHistory,
 from packages.db.models.skill import skill_category_for_source_type
 from skilgen.core.dependency_risk import analyze_dependency_risks
 from skilgen.core.models import DependencyFinding, DependencyRiskReport
+from skilgen.parsers.runner import run_source_parsers
+from skilgen.parsers.sources import render_skill_source
 
 
 LOGGER = logging.getLogger("skillayer.analysis")
@@ -285,7 +287,12 @@ async def analyze_and_store_dependencies(db: AsyncSession, repo_id: str, run_id:
     return report
 
 
-async def run_skilgen_analysis(project_root: Path) -> dict[str, Any]:
+async def run_skilgen_analysis(
+    project_root: Path,
+    *,
+    source_type: str | None = None,
+    source_path: str | None = None,
+) -> dict[str, Any]:
     try:
         from skilgen.agents.domain_graph_planner import build_domain_graph_native
         from skilgen.agents.evidence_graph import build_evidence_graph
@@ -347,8 +354,13 @@ async def run_skilgen_analysis(project_root: Path) -> dict[str, Any]:
                     }
                 )
 
+        if source_type:
+            source_skill_files = _source_skill_files(project_root, score, source_type=source_type, source_path=source_path)
+            skill_files.extend(source_skill_files)
+            domains.extend(entry["domain"] for entry in source_skill_files)
+
         return {
-            "skill_count": skill_count,
+            "skill_count": len(skill_files),
             "domain_count": len(set(domains)),
             "domains": domains,
             "score": score,
@@ -359,6 +371,46 @@ async def run_skilgen_analysis(project_root: Path) -> dict[str, Any]:
         print(f"Analysis error: {exc}")
         print(traceback.format_exc())
         raise
+
+
+def _source_skill_files(
+    project_root: Path,
+    score: dict[str, Any],
+    *,
+    source_type: str,
+    source_path: str | None,
+) -> list[dict[str, Any]]:
+    """Build persisted skill payloads from one explicit non-code source analysis."""
+    explicit_paths = {source_type: [source_path]} if source_path else None
+    result = run_source_parsers(
+        project_root,
+        [source_type],
+        explicit_paths=explicit_paths,
+        persist=False,
+    )
+    if result.failures:
+        raise RuntimeError("; ".join(result.failures.values()))
+    if not result.skill_sources:
+        detail = f" at {source_path}" if source_path else ""
+        raise RuntimeError(f"No normalized skill sources were generated for {source_type}{detail}.")
+    payloads: list[dict[str, Any]] = []
+    for source in result.skill_sources:
+        skill_path = Path(".skilgen") / "skills" / source.domain / "SKILL.md"
+        payloads.append(
+            {
+                "domain": source.domain,
+                "skill_path": str(skill_path),
+                "content": render_skill_source(source),
+                "score_total": _score_value(score, "total"),
+                "score_groundedness": _score_value(score, "groundedness"),
+                "score_coverage": _score_value(score, "coverage"),
+                "score_freshness": _score_value(score, "freshness"),
+                "score_structure": _score_value(score, "structure"),
+                "source_type": source.source_type,
+                "skill_category": skill_category_for_source_type(source.source_type),
+            }
+        )
+    return payloads
 
 
 async def update_run_status(db: AsyncSession, run_id: str, status: str) -> None:
@@ -474,7 +526,7 @@ async def run_analysis(
         if skilgen_path.exists() and "/app" not in sys.path:
             sys.path.insert(0, "/app")
 
-        analysis_result = await run_skilgen_analysis(tmpdir)
+        analysis_result = await run_skilgen_analysis(tmpdir, source_type=source_type, source_path=source_path)
         score = dict(analysis_result.get("score") or {})
         skill_files = list(analysis_result.get("skill_files") or [])
         saved_skills = await save_skills(db, repo_id, run_id, skill_files)

@@ -28,9 +28,11 @@ SOURCE_TYPE_TO_CATEGORY: dict[str, str] = {
     "sbom": "security_compliance",
     "security_policy": "security_compliance",
     "runbook": "operational_knowledge",
+    "runbooks": "operational_knowledge",
     "confluence": "operational_knowledge",
     "notion": "operational_knowledge",
     "incident": "operational_knowledge",
+    "incidents": "operational_knowledge",
     "pagerduty": "operational_knowledge",
 }
 

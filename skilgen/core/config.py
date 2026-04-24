@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from skilgen.core.models import CorpusSettings, SkilgenConfig
+from skilgen.core.models import CorpusSettings, SkilgenConfig, SourceConfigValue
 
 
 DEFAULT_CONFIG = SkilgenConfig(
@@ -87,6 +87,21 @@ def _dict_value(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         return {}
     return {str(key): nested for key, nested in value.items()}
+
+
+def _source_dict_value(value: object) -> dict[str, SourceConfigValue]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, SourceConfigValue] = {}
+    for key, raw in value.items():
+        if isinstance(raw, bool):
+            normalized[str(key)] = raw
+        elif isinstance(raw, str):
+            normalized[str(key)] = raw
+        elif isinstance(raw, list):
+            entries = [str(item) for item in raw if isinstance(item, str)]
+            normalized[str(key)] = entries
+    return normalized
 
 
 def _parse_scalar(raw: str) -> object:
@@ -196,7 +211,7 @@ def load_config(project_root: Path) -> SkilgenConfig:
             data.get("redact_model_error_secrets"), DEFAULT_CONFIG.redact_model_error_secrets
         ),
         corpus=corpus,
-        sources=_dict_value(data.get("sources")),
+        sources=_source_dict_value(data.get("sources")),
         auto_install_external_skills=_bool_value(data.get("auto_install_external_skills"), DEFAULT_CONFIG.auto_install_external_skills),
         external_skills_allowed_trust_levels=_string_list(
             data.get("external_skills_allowed_trust_levels"), DEFAULT_CONFIG.external_skills_allowed_trust_levels

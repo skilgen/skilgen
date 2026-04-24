@@ -28,7 +28,8 @@ from skilgen.core.enterprise_policy import (
     write_default_policy,
 )
 from skilgen.core.score import ci_result, score_badge_markdown
-from skilgen.parsers.sources import SOURCE_TYPES, run_source_parsers
+from skilgen.parsers.runner import run_source_parsers
+from skilgen.parsers.sources import SOURCE_TYPES
 from skilgen.registry_client import RegistryClientError, import_skill as import_registry_skill, publish_skill as publish_registry_skill
 from skilgen.delivery import run_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
