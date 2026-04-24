@@ -6,7 +6,7 @@ import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
 import { SkillDetailViewer } from "@/components/skill-detail-viewer";
 import { SkillViewTracker } from "@/components/skill-view-tracker";
-import { getRepo, getSkill, getSkillVersions, type Repo, type Score, type Skill, type SkillVersionSummary } from "../../../../../../lib/data";
+import { getRepo, getRepoSkillUsageStats, getSkill, getSkillVersions, type Repo, type Score, type Skill, type SkillUsageStats, type SkillVersionSummary } from "../../../../../../lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -140,6 +140,133 @@ function categoryLabel(category: string | null): string | null {
     .join(" ");
 }
 
+function UsageAlertBadge({ alert }: { alert: SkillUsageStats["alert"] }) {
+  if (alert === "stale_but_active") {
+    return (
+      <span className="inline-flex items-center gap-2 rounded-full bg-red-500/12 px-3 py-1 text-[12px] font-semibold text-red-300">
+        <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
+        Stale but active
+      </span>
+    );
+  }
+  if (alert === "dead_skill") {
+    return (
+      <span className="inline-flex items-center gap-2 rounded-full bg-white/8 px-3 py-1 text-[12px] font-semibold text-[color:var(--text-secondary)]">
+        <span>💤</span>
+        Never loaded
+      </span>
+    );
+  }
+  return null;
+}
+
+function UsageSparkline({ points }: { points: SkillUsageStats["daily_loads"] }) {
+  const width = 420;
+  const height = 92;
+  const maxLoads = Math.max(1, ...points.map((point) => point.loads));
+  const coordinates = points.map((point, index) => {
+    const x = points.length <= 1 ? width / 2 : (index / (points.length - 1)) * width;
+    const y = height - (point.loads / maxLoads) * (height - 12) - 6;
+    return `${x},${y}`;
+  });
+
+  return (
+    <svg aria-label="30-day skill activity" className="h-[92px] w-full" preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`}>
+      <polyline fill="none" points={coordinates.join(" ")} stroke="#C9973A" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />
+    </svg>
+  );
+}
+
+function RuntimeBreakdown({ runtimes }: { runtimes: SkillUsageStats["agent_runtimes"] }) {
+  const entries = Object.entries(runtimes).sort((left, right) => right[1] - left[1]);
+  const total = entries.reduce((sum, [, count]) => sum + count, 0);
+  const labels: Record<string, string> = {
+    claude_code: "Claude Code",
+    cursor: "Cursor",
+    codex: "Codex",
+    copilot: "Copilot",
+    unknown: "Other",
+  };
+
+  if (total === 0 || entries.length === 0) {
+    return <div className="rounded-2xl border border-dashed border-[color:var(--bg-border)] p-4 text-[13px] text-[color:var(--text-secondary)]">No runtime activity recorded yet.</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {entries.map(([runtime, count]) => {
+        const percentage = total > 0 ? Math.round((count / total) * 100) : 0;
+        return (
+          <div className="grid grid-cols-[110px_minmax(0,1fr)_72px] items-center gap-3 text-[13px]" key={runtime}>
+            <span className="font-medium text-[color:var(--text-primary)]">{labels[runtime] ?? runtime}</span>
+            <div className="h-2.5 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full rounded-full bg-[#C9973A]" style={{ width: `${Math.max(6, percentage)}%` }} />
+            </div>
+            <span className="text-right text-[color:var(--text-secondary)]">
+              {count} ({percentage}%)
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function UsageIntelligencePanel({ usage }: { usage: SkillUsageStats | null }) {
+  if (!usage) {
+    return (
+      <section className="mb-8 rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
+        <div className="mb-2 text-[18px] font-semibold text-[color:var(--text-primary)]">Usage Intelligence</div>
+        <p className="text-[14px] text-[color:var(--text-secondary)]">No usage data recorded yet.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mb-8 rounded-[24px] border border-[color:var(--bg-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-6">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Usage Intelligence</h2>
+          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Live activity on this skill across the last 30 days.</p>
+        </div>
+        <UsageAlertBadge alert={usage.alert} />
+      </div>
+
+      <div className="mb-6 grid gap-4 md:grid-cols-3">
+        <article className="rounded-2xl border border-[color:var(--bg-border)] bg-black/15 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">Criticality Score</div>
+          <div className="mt-3 text-[32px] font-semibold text-[color:var(--text-primary)]">{usage.criticality_score}/100</div>
+        </article>
+        <article className="rounded-2xl border border-[color:var(--bg-border)] bg-black/15 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">Loads (30d)</div>
+          <div className="mt-3 text-[32px] font-semibold text-[color:var(--text-primary)]">{usage.loads_30d}</div>
+        </article>
+        <article className="rounded-2xl border border-[color:var(--bg-border)] bg-black/15 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">Last Loaded</div>
+          <div className="mt-3 text-[32px] font-semibold text-[color:var(--text-primary)]">{formatRelativeTime(usage.last_loaded_at)}</div>
+        </article>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
+        <div className="rounded-2xl border border-[color:var(--bg-border)] bg-black/15 p-5">
+          <h3 className="text-[14px] font-semibold text-[color:var(--text-primary)]">30-day load activity</h3>
+          <p className="mt-1 text-[12px] text-[color:var(--text-tertiary)]">Daily load counts with missing days filled as zero.</p>
+          <div className="mt-4">
+            <UsageSparkline points={usage.daily_loads} />
+          </div>
+        </div>
+        <div className="rounded-2xl border border-[color:var(--bg-border)] bg-black/15 p-5">
+          <h3 className="text-[14px] font-semibold text-[color:var(--text-primary)]">Runtime breakdown</h3>
+          <p className="mt-1 text-[12px] text-[color:var(--text-tertiary)]">Which coding agents are loading this skill.</p>
+          <div className="mt-4">
+            <RuntimeBreakdown runtimes={usage.agent_runtimes} />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default async function SkillDetailPage({ params }: PageProps) {
   const { repoId, skillId } = await params;
   let accessToken = "";
@@ -147,6 +274,7 @@ export default async function SkillDetailPage({ params }: PageProps) {
   let skill: Skill | null = null;
   let repo: Repo | null = null;
   let versions: SkillVersionSummary[] = [];
+  let usageStats: SkillUsageStats | null = null;
   let skillLoadFailed = false;
 
   try {
@@ -165,6 +293,7 @@ export default async function SkillDetailPage({ params }: PageProps) {
     repo = repoPayload;
     skill = skillPayload;
     versions = versionsPayload ?? [];
+    usageStats = await getRepoSkillUsageStats(accessToken, repoId, skillId);
   } catch (error) {
     skillLoadFailed = true;
     console.error("Failed to fetch skill detail:", error);
@@ -256,6 +385,10 @@ export default async function SkillDetailPage({ params }: PageProps) {
           <SubscoreCard label="Freshness" value={skill.score.freshness} />
           <SubscoreCard label="Structure" value={skill.score.structure} />
         </div>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="skill usage intelligence">
+        <UsageIntelligencePanel usage={usageStats} />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary section="skill content">
