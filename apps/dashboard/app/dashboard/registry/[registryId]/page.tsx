@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { ArrowLeft, GitBranch } from "lucide-react";
+import { ArrowLeft, BookOpen, GitBranch } from "lucide-react";
 
-import { getRegistrySkillDetail } from "../../../../lib/data";
+import { getBootstrapOrg, getRegistrySkillDetail } from "../../../../lib/data";
 import { CopyValueButton, SkillActions } from "./skill-actions";
+import { ImportOwnButton } from "./import-own-button";
 
 export const dynamic = "force-dynamic";
 
@@ -27,17 +28,28 @@ export default async function RegistryDetailPage({ params }: PageProps) {
     console.error("Registry detail auth unavailable:", error);
   }
 
+  const bootstrapOrg = await getBootstrapOrg();
+  const orgId = bootstrapOrg?.id ?? "";
   const detail = await getRegistrySkillDetail(registryId);
 
   if (!detail) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="w-full max-w-lg rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-8 text-center">
-          <h1 className="text-[24px] font-semibold text-[color:var(--text-primary)]">Skill not found</h1>
-          <p className="mt-2 text-[14px] text-[color:var(--text-secondary)]">This registry entry could not be loaded.</p>
-          <Link className="mt-6 inline-flex h-10 items-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)]" href="/dashboard/registry">
-            Back to Registry
+      <div className="flex min-h-[70vh] flex-col items-center justify-center gap-6 text-center">
+        <BookOpen className="h-16 w-16 text-[color:var(--text-tertiary)]" />
+        <div>
+          <h1 className="text-[28px] font-semibold text-[color:var(--text-primary)]">Skill not found</h1>
+          <p className="mx-auto mt-3 max-w-sm text-[15px] text-[color:var(--text-secondary)]">
+            This registry entry doesn&apos;t exist or has been unpublished.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <Link
+            className="inline-flex h-11 items-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] transition-colors hover:bg-[color:var(--accent-bright)]"
+            href="/dashboard/registry"
+          >
+            Browse Registry
           </Link>
+          {orgId ? <ImportOwnButton accessToken={accessToken} orgId={orgId} /> : null}
         </div>
       </div>
     );

@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Zap } from "lucide-react";
 
 import { relativeTime } from "../../../lib/relative-time";
 
@@ -12,6 +13,7 @@ type SortMode = "criticality" | "loads" | "score" | "alpha";
 type HeatmapClientProps = {
   skills: SkillHeatmapSkill[];
   summary: SkillHeatmapSummary;
+  hasSkills: boolean;
 };
 
 type SkillHeatmapSkill = {
@@ -60,7 +62,8 @@ function titleize(value: string | null): string {
     .join(" ");
 }
 
-export function HeatmapClient({ skills, summary: _summary }: HeatmapClientProps) {
+export function HeatmapClient({ skills, summary: _summary, hasSkills }: HeatmapClientProps) {
+  void _summary;
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [alert, setAlert] = useState<AlertFilter>("all");
@@ -187,6 +190,20 @@ export function HeatmapClient({ skills, summary: _summary }: HeatmapClientProps)
               ))}
             </tbody>
           </table>
+        ) : !hasSkills ? (
+          <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+            <Zap className="h-10 w-10 text-[color:var(--text-tertiary)]" />
+            <h2 className="mt-4 text-[18px] font-semibold text-[color:var(--text-primary)]">No agent usage recorded yet</h2>
+            <p className="mt-2 max-w-xl text-[14px] text-[color:var(--text-secondary)]">
+              Once agents start loading your skills via Claude Code, Codex, or Cursor, their activity will appear here.
+            </p>
+            <Link
+              className="mt-5 inline-flex h-10 items-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] transition-colors hover:bg-[color:var(--accent-bright)]"
+              href="/dashboard/repos"
+            >
+              Go to Repos
+            </Link>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
             <BookOpen className="h-9 w-9 text-[color:var(--text-tertiary)]" />

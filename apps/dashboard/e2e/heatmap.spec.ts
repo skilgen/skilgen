@@ -7,6 +7,12 @@ test("heatmap page", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /heatmap/i })).toBeVisible();
   await page.screenshot({ path: "test-results/heatmap-full.png", fullPage: true });
 
+  const noAgentUsage = page.getByText(/no agent usage recorded yet/i);
+  if (await noAgentUsage.isVisible().catch(() => false)) {
+    await page.screenshot({ path: "test-results/heatmap-empty-org.png", fullPage: true });
+    return;
+  }
+
   const deadCallout = page.getByText(/haven't been loaded in 30/i);
   if (await deadCallout.isVisible().catch(() => false)) {
     await page.screenshot({ path: "test-results/heatmap-dead-callout.png" });

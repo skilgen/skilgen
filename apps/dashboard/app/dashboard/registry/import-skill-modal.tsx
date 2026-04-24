@@ -42,7 +42,8 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export function ImportSkillModal({ orgId: _orgId, accessToken, onClose }: ImportSkillModalProps) {
+export function ImportSkillModal({ orgId, accessToken, onClose }: ImportSkillModalProps) {
+  void orgId;
   const [step, setStep] = useState<Step>("paste");
   const [sourceType, setSourceType] = useState<SourceType>("claude_md");
   const [content, setContent] = useState("");

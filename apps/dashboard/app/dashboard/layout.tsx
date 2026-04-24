@@ -15,6 +15,7 @@ import {
   Package,
   Plus,
   Settings,
+  AlertTriangle,
   Users2,
 } from "lucide-react";
 import { signOut, withAuth } from "@workos-inc/authkit-nextjs";
@@ -117,6 +118,7 @@ export default async function DashboardLayout({
     Database,
     Users2,
     ClipboardList,
+    AlertTriangle,
     Settings,
     CreditCard,
   };
@@ -144,6 +146,13 @@ export default async function DashboardLayout({
       href: "/dashboard/heatmap",
       label: "Heatmap",
       icon: "BarChart3",
+    });
+  }
+  if (!workspaceItems.some((item) => item.href === "/dashboard/debt")) {
+    workspaceItems.splice(4, 0, {
+      href: "/dashboard/debt",
+      label: "Skill Debt",
+      icon: "AlertTriangle",
     });
   }
   if (shellOrg.plan === "free") {

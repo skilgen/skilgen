@@ -312,6 +312,43 @@ def _repo_coverage_score(skills: list[Skill]) -> tuple[int, list[str]]:
     return round((len(covered) / len(SKILL_CATEGORIES)) * 100), missing
 
 
+def _skill_debt_item(
+    skill: Skill,
+    repo_name: str,
+    loads_30d: int,
+    criticality_score: int,
+    alert: str,
+) -> dict[str, object]:
+    """Normalize a risky or neglected skill into a debt-ledger entry."""
+    score_total = int(skill.score_total or 0)
+    debt_type = "stale_active" if alert == "stale_but_active" else "low_score" if score_total <= 45 else "unused"
+    severity = "high" if alert == "stale_but_active" or criticality_score >= 75 else "medium" if score_total <= 60 else "low"
+    suggested_action = (
+        "Re-analyse or prune this skill before the next agent session."
+        if alert == "stale_but_active"
+        else "Improve source coverage or regenerate this skill."
+        if score_total <= 45
+        else "Confirm whether this skill should remain in circulation."
+    )
+    return {
+        "skill_id": skill.id,
+        "repo_id": skill.repo_id,
+        "repo_name": repo_name,
+        "domain": skill.domain,
+        "skill_path": skill.skill_path,
+        "skill_category": _skill_category(skill),
+        "score_total": score_total,
+        "loads_30d": loads_30d,
+        "criticality_score": criticality_score,
+        "alert": alert,
+        "severity": severity,
+        "debt_type": debt_type,
+        "is_stale": bool(skill.is_stale),
+        "last_loaded_at": skill.last_loaded_at,
+        "suggested_action": suggested_action,
+    }
+
+
 async def _rollback(db: AsyncSession, context: str) -> None:
     """Rollback an org route transaction and log rollback failures."""
     try:
@@ -677,6 +714,93 @@ async def get_runtime_breakdown(
             ] if int(total_loads or 0) > 0 else [],
             total_loads_30d=int(total_loads or 0),
         )
+
+
+@router.get("/{org_id}/skill-debt")
+async def get_skill_debt(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    """Return skill debt summary: stale, never-loaded, low-score, and uncovered domains."""
+    _assert_org_scope(org_id, current_org_id)
+
+    repos = (
+        await db.execute(
+            select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True))
+        )
+    ).scalars().all()
+
+    all_skills = (
+        await db.execute(
+            select(Skill)
+            .join(Repo, Repo.id == Skill.repo_id)
+            .where(Repo.org_id == org_id, Repo.is_active.is_(True))
+        )
+    ).scalars().all()
+
+    stale_skills = [skill for skill in all_skills if skill.is_stale]
+    low_score_skills = [skill for skill in all_skills if int(skill.score_total or 0) < 40]
+    never_loaded_skills = [skill for skill in all_skills if int(skill.load_count_30d or 0) == 0]
+    zero_subscore_skills = [
+        skill
+        for skill in all_skills
+        if int(skill.score_groundedness or 0) == 0 and int(skill.score_coverage or 0) == 0
+    ]
+
+    repo_gaps: list[dict[str, object]] = []
+    for repo in repos:
+        repo_skills = [skill for skill in all_skills if skill.repo_id == repo.id]
+        covered = {
+            skill.skill_category
+            for skill in repo_skills
+            if skill.skill_category in SKILL_CATEGORIES
+        }
+        missing = [category for category in SKILL_CATEGORIES if category not in covered]
+        if missing:
+            repo_gaps.append(
+                {
+                    "repo_id": repo.id,
+                    "repo_name": repo.name,
+                    "missing_categories": missing,
+                    "coverage_score": round((len(covered) / len(SKILL_CATEGORIES)) * 100),
+                }
+            )
+
+    debt_score = min(
+        100,
+        len(stale_skills) * 3
+        + len(low_score_skills) * 2
+        + len(never_loaded_skills) * 1
+        + sum(len(gap["missing_categories"]) for gap in repo_gaps) * 2,
+    )
+
+    def _skill_dict(skill: Skill) -> dict[str, object]:
+        return {
+            "id": skill.id,
+            "domain": skill.domain,
+            "repo_id": skill.repo_id,
+            "score_total": int(skill.score_total or 0),
+            "is_stale": bool(skill.is_stale),
+            "load_count_30d": int(skill.load_count_30d or 0),
+        }
+
+    return {
+        "debt_score": debt_score,
+        "total_skills": len(all_skills),
+        "stale_skills": [_skill_dict(skill) for skill in stale_skills[:20]],
+        "low_score_skills": [_skill_dict(skill) for skill in sorted(low_score_skills, key=lambda item: item.score_total or 0)[:20]],
+        "never_loaded_skills": [_skill_dict(skill) for skill in never_loaded_skills[:20]],
+        "zero_subscore_skills": [_skill_dict(skill) for skill in zero_subscore_skills[:20]],
+        "repo_coverage_gaps": repo_gaps,
+        "summary": {
+            "stale_count": len(stale_skills),
+            "low_score_count": len(low_score_skills),
+            "never_loaded_count": len(never_loaded_skills),
+            "zero_subscore_count": len(zero_subscore_skills),
+            "repos_with_gaps": len(repo_gaps),
+        },
+    }
 
 
 @router.get("/{org_id}/team-rollup", response_model=TeamRollupResponse)

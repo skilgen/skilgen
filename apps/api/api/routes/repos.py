@@ -177,6 +177,19 @@ async def _latest_repo_score_total(db: AsyncSession, repo_id: str) -> int:
     return int(latest_history or 0)
 
 
+async def _repo_score_history_rows(db: AsyncSession, repo_id: str, limit: int = 30) -> list[ScoreHistory]:
+    """Load recent score history in ascending order for charting and projections."""
+    rows = (
+        await db.execute(
+            select(ScoreHistory)
+            .where(ScoreHistory.repo_id == repo_id)
+            .order_by(desc(ScoreHistory.recorded_at))
+            .limit(limit)
+        )
+    ).scalars().all()
+    return list(reversed(rows))
+
+
 def _dependency_upgrade_command(dependency: Dependency) -> str | None:
     """Return the safest package-manager upgrade command for a dependency."""
     ecosystem = str(dependency.ecosystem or "").lower()
@@ -372,14 +385,7 @@ async def get_score_history(
     repo = await db.get(Repo, repo_id)
     if repo is None:
         raise HTTPException(status_code=404, detail="Repo not found")
-    rows = (
-        await db.execute(
-            select(ScoreHistory)
-            .where(ScoreHistory.repo_id == repo_id)
-            .order_by(desc(ScoreHistory.recorded_at))
-            .limit(10)
-        )
-    ).scalars().all()
+    rows = await _repo_score_history_rows(db, repo_id, limit=10)
     return [
         {
             "date": row.recorded_at.date().isoformat(),
@@ -389,8 +395,135 @@ async def get_score_history(
             "freshness": row.score_freshness,
             "structure": row.score_structure,
         }
-        for row in reversed(rows)
+        for row in rows
     ]
+
+
+@router.get("/{repo_id}/score-forecast")
+async def get_score_forecast(
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Return a simple linear forecast for 30/90-day score based on score history."""
+    import statistics
+
+    repo = await db.get(Repo, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    history = await _repo_score_history_rows(db, repo_id, limit=30)
+    if len(history) < 2:
+        return {
+            "has_forecast": False,
+            "reason": "Not enough history — analyse more frequently to enable forecasting.",
+            "current_score": int(history[-1].score_total) if history else None,
+            "forecast_30d": None,
+            "forecast_90d": None,
+            "trend": "stable",
+        }
+
+    scores = [int(point.score_total or 0) for point in history]
+    n = len(scores)
+    x_vals = list(range(n))
+    x_mean = statistics.mean(x_vals)
+    y_mean = statistics.mean(scores)
+
+    numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_vals, scores))
+    denominator = sum((x - x_mean) ** 2 for x in x_vals)
+    slope = numerator / denominator if denominator != 0 else 0
+
+    total_days = max(1, (history[-1].recorded_at - history[0].recorded_at).days)
+    days_per_point = total_days / (n - 1) if n > 1 else 7
+
+    slope_per_day = slope / max(days_per_point, 1)
+    current = scores[-1]
+    forecast_30 = max(0, min(100, round(current + slope_per_day * 30)))
+    forecast_90 = max(0, min(100, round(current + slope_per_day * 90)))
+    trend = "improving" if slope_per_day > 0.1 else "declining" if slope_per_day < -0.1 else "stable"
+
+    return {
+        "has_forecast": True,
+        "current_score": current,
+        "forecast_30d": forecast_30,
+        "forecast_90d": forecast_90,
+        "trend": trend,
+        "slope_per_day": round(slope_per_day, 3),
+        "data_points": n,
+        "reason": None,
+    }
+
+
+@router.get("/{repo_id}/skills/{skill_id}/versions/{version_id}/diff")
+async def get_skill_version_diff(
+    repo_id: str,
+    skill_id: str,
+    version_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Return line-level diff between a skill version and its predecessor."""
+    from difflib import unified_diff
+
+    skill = await db.get(Skill, skill_id)
+    if skill is None or skill.repo_id != repo_id:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    version = await db.get(SkillVersion, version_id)
+    if version is None or version.skill_id != skill_id:
+        raise HTTPException(status_code=404, detail="Skill version not found")
+
+    previous_version = (
+        await db.execute(
+            select(SkillVersion)
+            .where(
+                SkillVersion.skill_id == skill_id,
+                SkillVersion.version_number < version.version_number,
+            )
+            .order_by(desc(SkillVersion.version_number))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    old_content = previous_version.content if previous_version else ""
+    new_content = version.content or ""
+    old_lines = (old_content or "").splitlines(keepends=True)
+    new_lines = (new_content or "").splitlines(keepends=True)
+    diff = list(
+        unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=f"v{previous_version.version_number if previous_version else 0}",
+            tofile=f"v{version.version_number}",
+            lineterm="",
+        )
+    )
+
+    lines: list[dict[str, str]] = []
+    if previous_version is None:
+        for line in (version.content or "").splitlines():
+            lines.append({"type": "added", "text": line})
+    else:
+        for line in diff:
+            if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+                lines.append({"type": "meta", "text": line})
+            elif line.startswith("+"):
+                lines.append({"type": "added", "text": line[1:]})
+            elif line.startswith("-"):
+                lines.append({"type": "removed", "text": line[1:]})
+            else:
+                lines.append({"type": "context", "text": line[1:] if line.startswith(" ") else line})
+
+    return {
+        "skill_id": skill_id,
+        "repo_id": repo_id,
+        "domain": skill.domain,
+        "version_id": version_id,
+        "version_number": version.version_number,
+        "prev_version_number": previous_version.version_number if previous_version else None,
+        "is_first_version": previous_version is None,
+        "lines": lines,
+        "added_count": sum(1 for line in lines if line["type"] == "added"),
+        "removed_count": sum(1 for line in lines if line["type"] == "removed"),
+    }
 
 
 @router.get("/{repo_id}/skill-sources", response_model=RepoSkillSourcesResponse)

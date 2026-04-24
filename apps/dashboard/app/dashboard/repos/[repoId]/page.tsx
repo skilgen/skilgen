@@ -8,6 +8,7 @@ import {
   API_URL,
   getRepoDependencies,
   getRepo,
+  getRepoScoreForecast,
   getRepoScoreHistory,
   getRepoSkillSources,
   getRepoSkills,
@@ -15,6 +16,7 @@ import {
   type DependencyReport,
   type Repo,
   type RepoSkillSources,
+  type ScoreForecast,
   type Score,
   type ScoreHistoryPoint,
   type SkillCategory,
@@ -118,6 +120,60 @@ function ScoreHistoryChart({ points }: { points: ScoreHistoryPoint[] }) {
           No score history yet.
         </div>
       )}
+    </section>
+  );
+}
+
+function scoreTone(value: number): string {
+  if (value < 40) return "bg-red-900/30 text-red-300";
+  if (value < 70) return "bg-amber-900/30 text-amber-300";
+  return "bg-green-900/30 text-green-300";
+}
+
+function ForecastCard({ label, value, delta }: { label: string; value: number; delta?: number }) {
+  return (
+    <article className="rounded-xl border border-[color:var(--bg-border)] bg-black/10 p-4">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">{label}</div>
+      <div className="mt-3 flex items-center gap-3">
+        <span className={`rounded-full px-2.5 py-1 text-[14px] font-semibold ${scoreTone(value)}`}>{value}/100</span>
+        {typeof delta === "number" ? (
+          <span className={`text-[13px] font-semibold ${delta > 0 ? "text-green-300" : delta < 0 ? "text-red-300" : "text-[color:var(--text-tertiary)]"}`}>
+            {delta > 0 ? `+${delta}` : `${delta}`}
+          </span>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function ForecastSection({ forecast }: { forecast: ScoreForecast | null }) {
+  if (!forecast?.has_forecast || forecast.current_score === null || forecast.forecast_30d === null || forecast.forecast_90d === null) {
+    return null;
+  }
+
+  const directionCopy =
+    forecast.trend === "improving" ? "↑ Improving" : forecast.trend === "declining" ? "↓ Declining" : "→ Stable";
+  const directionTone =
+    forecast.trend === "improving" ? "bg-green-900/30 text-green-300" : forecast.trend === "declining" ? "bg-red-900/30 text-red-300" : "bg-white/10 text-[color:var(--text-secondary)]";
+  const delta30 = forecast.forecast_30d - forecast.current_score;
+  const delta90 = forecast.forecast_90d - forecast.current_score;
+
+  return (
+    <section className="mb-8 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">Score Forecast</h2>
+          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">
+            Based on {forecast.data_points} analysis runs. Re-analyse regularly to improve forecast accuracy.
+          </p>
+        </div>
+        <span className={`inline-flex rounded-full px-3 py-1 text-[12px] font-semibold ${directionTone}`}>{directionCopy}</span>
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <ForecastCard label="Current" value={forecast.current_score} />
+        <ForecastCard delta={delta30} label="In 30 days" value={forecast.forecast_30d} />
+        <ForecastCard delta={delta90} label="In 90 days" value={forecast.forecast_90d} />
+      </div>
     </section>
   );
 }
@@ -279,6 +335,7 @@ export default async function RepoDetailPage({ params }: PageProps) {
   let repo: RepoDetail | null = null;
   let skills: RepoSkill[] = [];
   let scoreHistory: ScoreHistoryPoint[] = [];
+  let scoreForecast: ScoreForecast | null = null;
   let dependencies: DependencyReport | null = null;
   let skillSources: RepoSkillSources | null = null;
   let repoLoadFailed = false;
@@ -291,16 +348,18 @@ export default async function RepoDetailPage({ params }: PageProps) {
   }
 
   try {
-    const [repoPayload, skillsPayload, historyPayload, dependencyPayload, sourcePayload] = await Promise.all([
+    const [repoPayload, skillsPayload, historyPayload, forecastPayload, dependencyPayload, sourcePayload] = await Promise.all([
       getRepo(accessToken, repoId),
       getRepoSkills(accessToken, repoId),
       getRepoScoreHistory(accessToken, repoId),
+      getRepoScoreForecast(accessToken, repoId),
       getRepoDependencies(accessToken, repoId),
       getRepoSkillSources(accessToken, repoId),
     ]);
     repo = repoPayload as RepoDetail | null;
     skills = ((skillsPayload ?? []) as RepoSkill[]) ?? [];
     scoreHistory = historyPayload ?? [];
+    scoreForecast = forecastPayload;
     dependencies = dependencyPayload;
     skillSources = sourcePayload;
   } catch (error) {
@@ -380,6 +439,10 @@ export default async function RepoDetailPage({ params }: PageProps) {
         <div className="mb-8">
           <ScoreHistoryChart points={scoreHistory} />
         </div>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="score forecast">
+        <ForecastSection forecast={scoreForecast} />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary section="dependencies">

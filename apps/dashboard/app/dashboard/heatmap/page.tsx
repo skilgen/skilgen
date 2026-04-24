@@ -69,7 +69,7 @@ export default async function HeatmapPage() {
         </section>
       ) : null}
 
-      <HeatmapClient skills={skills} summary={summary} />
+      <HeatmapClient hasSkills={skills.length > 0} skills={skills} summary={summary} />
     </div>
   );
 }

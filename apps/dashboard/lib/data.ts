@@ -260,6 +260,22 @@ export type SkillVersion = {
   is_latest: boolean;
 };
 
+export type SkillVersionDiff = {
+  skill_id: string;
+  repo_id: string;
+  domain: string;
+  version_id: string;
+  version_number: number;
+  prev_version_number: number | null;
+  is_first_version: boolean;
+  lines: Array<{
+    type: "meta" | "added" | "removed" | "context";
+    text: string;
+  }>;
+  added_count: number;
+  removed_count: number;
+};
+
 export type ScoreHistoryPoint = {
   date: string;
   score_total: number;
@@ -288,6 +304,48 @@ export type DependencyReport = {
   healthy: Dependency[];
   total_count: number;
   risk_score: number;
+};
+
+export type ScoreForecast = {
+  has_forecast: boolean;
+  reason: string | null;
+  current_score: number | null;
+  forecast_30d: number | null;
+  forecast_90d: number | null;
+  trend: "improving" | "declining" | "stable";
+  slope_per_day?: number;
+  data_points?: number;
+};
+
+export type SkillDebtSkill = {
+  id: string;
+  domain: string;
+  repo_id: string;
+  score_total: number;
+  is_stale: boolean;
+  load_count_30d: number;
+};
+
+export type SkillDebtResponse = {
+  debt_score: number;
+  total_skills: number;
+  stale_skills: SkillDebtSkill[];
+  low_score_skills: SkillDebtSkill[];
+  never_loaded_skills: SkillDebtSkill[];
+  zero_subscore_skills: SkillDebtSkill[];
+  repo_coverage_gaps: Array<{
+    repo_id: string;
+    repo_name: string;
+    missing_categories: string[];
+    coverage_score: number;
+  }>;
+  summary: {
+    stale_count: number;
+    low_score_count: number;
+    never_loaded_count: number;
+    zero_subscore_count: number;
+    repos_with_gaps: number;
+  };
 };
 
 export type AnalyticsSkill = {
@@ -442,6 +500,10 @@ export async function getRepoScoreHistory(accessToken: string | null, repoId: st
   return apiFetch<ScoreHistoryPoint[]>(`/repos/${repoId}/score-history`, { accessToken, cache: "no-store" });
 }
 
+export async function getRepoScoreForecast(accessToken: string | null, repoId: string): Promise<ScoreForecast | null> {
+  return apiFetch<ScoreForecast>(`/repos/${repoId}/score-forecast`, { accessToken, cache: "no-store" });
+}
+
 export async function getRepoDependencies(accessToken: string | null, repoId: string): Promise<DependencyReport | null> {
   return apiFetch<DependencyReport>(`/repos/${repoId}/dependencies`, { accessToken, cache: "no-store" });
 }
@@ -464,6 +526,19 @@ export async function getSkillVersions(accessToken: string | null, skillId: stri
 
 export async function getSkillVersion(accessToken: string | null, skillId: string, versionId: string): Promise<SkillVersion | null> {
   return apiFetch<SkillVersion>(`/skills/${skillId}/versions/${versionId}`, { accessToken, cache: "no-store" });
+}
+
+export async function getSkillVersionDiff(
+  accessToken: string | null,
+  repoId: string,
+  skillId: string,
+  versionId: string,
+): Promise<SkillVersionDiff | null> {
+  return apiFetch<SkillVersionDiff>(`/repos/${repoId}/skills/${skillId}/versions/${versionId}/diff`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgSkillDebt(accessToken: string | null, orgId: string): Promise<SkillDebtResponse | null> {
+  return apiFetch<SkillDebtResponse>(`/orgs/${orgId}/skill-debt`, { accessToken, cache: "no-store" });
 }
 
 export async function getRegistrySkills(params: URLSearchParams): Promise<RegistryList | null> {

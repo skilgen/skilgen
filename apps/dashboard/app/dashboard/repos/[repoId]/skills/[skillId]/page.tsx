@@ -268,6 +268,77 @@ function UsageIntelligencePanel({ usage }: { usage: SkillUsageStats | null }) {
   );
 }
 
+function ZeroSubscoreWarning({ score }: { score: Score }) {
+  const zeroCount = [
+    score.groundedness,
+    score.coverage,
+    score.freshness,
+    score.structure,
+  ].filter((value) => value === 0).length;
+
+  if (score.total <= 0 || zeroCount < 2) {
+    return null;
+  }
+
+  return (
+    <section className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px] text-amber-200">
+      ⚠ Some subscores are incomplete. Re-analysing this repo will produce a full Skilgen Score across all four dimensions.
+    </section>
+  );
+}
+
+function VersionDiffLinks({
+  repoId,
+  skillId,
+  versions,
+}: {
+  repoId: string;
+  skillId: string;
+  versions: SkillVersionSummary[];
+}) {
+  if (versions.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mb-8 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
+      <div className="border-b border-[color:var(--bg-border)] px-5 py-4">
+        <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">Version diffs</h2>
+        <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Compare each version against the previous saved snapshot.</p>
+      </div>
+      <div className="divide-y divide-[color:var(--bg-elevated)]">
+        {versions.map((version, index) => {
+          const hasPrevious = index < versions.length - 1;
+          return (
+            <div className="flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:justify-between" key={version.id}>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-semibold text-[color:var(--text-primary)]">v{version.version_number}</span>
+                  {version.is_latest ? (
+                    <span className="rounded-full bg-[rgb(var(--accent-green-rgb)/0.12)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--accent-green)]">
+                      Latest
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-1 text-[12px] text-[color:var(--text-tertiary)]">
+                  {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(version.created_at))}
+                </div>
+              </div>
+              {hasPrevious ? (
+                <Link className="text-[12px] text-[color:var(--accent-primary)] hover:underline" href={`/dashboard/repos/${repoId}/skills/${skillId}/versions/${version.id}`}>
+                  View diff →
+                </Link>
+              ) : (
+                <span className="text-[12px] text-[color:var(--text-tertiary)]">No previous version</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export default async function SkillDetailPage({ params }: PageProps) {
   const { repoId, skillId } = await params;
   let accessToken = "";
@@ -381,6 +452,7 @@ export default async function SkillDetailPage({ params }: PageProps) {
       </SectionErrorBoundary>
 
       <SectionErrorBoundary section="skill subscores">
+        <ZeroSubscoreWarning score={skill.score} />
         <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <SubscoreCard label="Groundedness" value={skill.score.groundedness} />
           <SubscoreCard label="Coverage" value={skill.score.coverage} />
@@ -391,6 +463,10 @@ export default async function SkillDetailPage({ params }: PageProps) {
 
       <SectionErrorBoundary section="skill usage intelligence">
         <UsageIntelligencePanel usage={usageStats} />
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="skill version diffs">
+        <VersionDiffLinks repoId={repoId} skillId={skillId} versions={versions} />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary section="skill content">
