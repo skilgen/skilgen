@@ -62,12 +62,6 @@ function sortRepos(repos: RepoListItem[], sortMode: SortMode): RepoListItem[] {
   });
 }
 
-function displayLanguage(repo: RepoListItem): string {
-  if (repo.language) return repo.language;
-  if (repo.display_language === "Multiple") return "Multi-language";
-  if (repo.display_language && repo.display_language !== "Unknown") return repo.display_language;
-  return "Unknown";
-}
 
 export function CopyTextButton({
   text,
