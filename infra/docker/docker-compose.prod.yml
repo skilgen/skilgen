@@ -37,11 +37,18 @@ services:
     build:
       context: ../..
       dockerfile: apps/dashboard/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     restart: unless-stopped
     ports:
       - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     env_file:
-      - ../../apps/dashboard/.env.local
+      - ../../.env
 
   postgres:
     image: postgres:16-alpine

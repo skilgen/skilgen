@@ -23,5 +23,21 @@ spec:
                 name: {{ include "skillayer.fullname" . }}-config
             - secretRef:
                 name: {{ include "skillayer.fullname" . }}-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.api.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.api.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
 {{ toYaml .Values.api.resources | indent 12 }}

@@ -23,6 +23,7 @@ worker:
   image:
     repository: skillayer/worker
     tag: latest
+    pullPolicy: IfNotPresent
   replicas: 2
   resources:
     requests:
@@ -53,15 +54,23 @@ redis:
 ingress:
   enabled: true
   className: nginx
+  annotations: {}
+  api:
+    enabled: true
+    path: /api(/|$)(.*)
+    pathType: ImplementationSpecific
+    annotations:
+      nginx.ingress.kubernetes.io/use-regex: "true"
+      nginx.ingress.kubernetes.io/rewrite-target: /$2
   hosts:
     - host: skillayer.yourcompany.com
       paths:
         - path: /
+          pathType: Prefix
           service: dashboard
-        - path: /api
-          service: api
 
 config:
   deploymentMode: selfhosted
   githubAppId: ""
   workosApiKey: ""
+  nextPublicApiUrl: "https://skillayer.yourcompany.com/api"

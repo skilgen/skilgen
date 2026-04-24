@@ -5,3 +5,5 @@ metadata:
 data:
   DEPLOYMENT_MODE: {{ .Values.config.deploymentMode | quote }}
   GITHUB_APP_ID: {{ .Values.config.githubAppId | quote }}
+  NEXT_PUBLIC_API_URL: {{ .Values.config.nextPublicApiUrl | quote }}
+  API_URL: {{ .Values.config.nextPublicApiUrl | quote }}

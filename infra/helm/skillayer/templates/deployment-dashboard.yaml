@@ -17,3 +17,14 @@ spec:
           image: "{{ .Values.dashboard.image.repository }}:{{ .Values.dashboard.image.tag }}"
           ports:
             - containerPort: {{ .Values.dashboard.service.port }}
+          env:
+            - name: NEXT_PUBLIC_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillayer.fullname" . }}-config
+                  key: NEXT_PUBLIC_API_URL
+            - name: API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillayer.fullname" . }}-config
+                  key: API_URL
