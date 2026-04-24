@@ -1,8 +1,9 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest import mock
 
-from skilgen.core.analytics import analytics_summary, log_skill_usage
+from skilgen.core.analytics import _detect_agent_runtime, analytics_summary, log_skill_usage
 from skilgen.generators.package import render_analytics_radial_data
 
 
@@ -66,12 +67,29 @@ class AnalyticsTests(unittest.TestCase):
 
             self.assertEqual(summary["usage_mode"], "live")
             self.assertIn("codex", summary["traced_agents"])
+            self.assertIn("unknown", summary["traced_runtimes"])
             self.assertIn("codex_live", summary["traced_contexts"])
             self.assertEqual(summary["traced_session_count"], 1)
             self.assertEqual(summary["skill_usage"][0]["agents"], ["codex"])
+            self.assertEqual(summary["skill_usage"][0]["agent_runtimes"], ["unknown"])
             self.assertEqual(summary["skill_usage"][0]["contexts"], ["codex_live"])
             self.assertEqual(summary["skill_usage"][0]["session_count"], 1)
             self.assertTrue(summary["skill_usage"][0]["last_loaded_at"])
+
+    def test_log_skill_usage_detects_runtime_from_environment(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / "skills" / "backend"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("# Backend\n\nCore backend skill.\n", encoding="utf-8")
+
+            with mock.patch.dict("os.environ", {"OPENAI_CODEX": "1"}, clear=False):
+                log_skill_usage(root, ["skills/backend/SKILL.md"], context="codex_live")
+
+            summary = analytics_summary(root, limit=10)
+
+            self.assertEqual(summary["traced_runtimes"], ["codex"])
+            self.assertEqual(summary["skill_usage"][0]["agent_runtimes"], ["codex"])
 
     def test_log_skill_usage_normalizes_absolute_repo_paths(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -136,6 +154,16 @@ class AnalyticsTests(unittest.TestCase):
             titles = [entry["title"] for entry in radial]
 
             self.assertEqual(len(titles), len(set(titles)))
+
+    def test_detect_agent_runtime_prefers_known_environment_markers(self) -> None:
+        with mock.patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "session"}, clear=True):
+            self.assertEqual(_detect_agent_runtime(), "claude_code")
+
+        with mock.patch.dict("os.environ", {"CURSOR_WORKSPACE": "/tmp/demo"}, clear=True):
+            self.assertEqual(_detect_agent_runtime(), "cursor")
+
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(_detect_agent_runtime(), "unknown")
 
 
 if __name__ == "__main__":

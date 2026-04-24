@@ -18,6 +18,21 @@ def _timestamp() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _detect_agent_runtime() -> str:
+    env = os.environ
+    if env.get("CLAUDE_CODE") or env.get("CLAUDE_CODE_SESSION_ID"):
+        return "claude_code"
+    if env.get("OPENAI_CODEX") or env.get("CODEX_SESSION_ID"):
+        return "codex"
+    if env.get("CURSOR_SESSION_ID") or env.get("CURSOR_WORKSPACE"):
+        return "cursor"
+    if env.get("GITHUB_COPILOT_TOKEN") or env.get("COPILOT_SESSION_ID"):
+        return "copilot"
+    if env.get("GEMINI_API_KEY") or env.get("GEMINI_CLI"):
+        return "gemini_cli"
+    return "unknown"
+
+
 def _iter_repo_skill_files(project_root: str | Path) -> list[Path]:
     root = Path(project_root).resolve() / "skills"
     if not root.exists():
@@ -113,6 +128,7 @@ def log_skill_usage(
     path = _analytics_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     agent_name = agent or os.getenv("SKILGEN_AGENT_NAME") or "skilgen"
+    agent_runtime = _detect_agent_runtime()
     session = session_id or os.getenv("SKILGEN_SESSION_ID")
     task_name = task or os.getenv("SKILGEN_TASK_NAME")
     existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
@@ -125,6 +141,7 @@ def log_skill_usage(
                     "skill": normalized_skill,
                     "event": event,
                     "agent": agent_name,
+                    "agent_runtime": agent_runtime,
                     "context": context,
                     "session_id": session,
                     "task": task_name,
@@ -150,6 +167,7 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
     live_counts = Counter(str(event.get("skill", "")) for event in live_events if event.get("skill"))
     planner_counts = Counter(str(event.get("skill", "")) for event in planner_events if event.get("skill"))
     agents_by_skill: dict[str, set[str]] = defaultdict(set)
+    runtimes_by_skill: dict[str, set[str]] = defaultdict(set)
     contexts_by_skill: dict[str, set[str]] = defaultdict(set)
     sessions_by_skill: dict[str, set[str]] = defaultdict(set)
     last_loaded_at: dict[str, str] = {}
@@ -159,12 +177,15 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
             continue
         agent = str(event.get("agent", "")).strip()
         context = str(event.get("context", "")).strip()
+        runtime = str(event.get("agent_runtime", "")).strip()
         session_id = str(event.get("session_id", "")).strip()
         timestamp = str(event.get("timestamp", "")).strip()
         if agent:
             agents_by_skill[skill].add(agent)
         if context:
             contexts_by_skill[skill].add(context)
+        if runtime:
+            runtimes_by_skill[skill].add(runtime)
         if session_id:
             sessions_by_skill[skill].add(session_id)
         if timestamp and timestamp > last_loaded_at.get(skill, ""):
@@ -196,6 +217,7 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
                 "metrics": metrics,
                 "modeled_loads": modeled_loads,
                 "agents": sorted(agents_by_skill.get(rel, set())),
+                "agent_runtimes": sorted(runtimes_by_skill.get(rel, set())),
                 "contexts": sorted(contexts_by_skill.get(rel, set())),
                 "session_count": len(sessions_by_skill.get(rel, set())),
                 "last_loaded_at": last_loaded_at.get(rel),
@@ -222,6 +244,7 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
                 "metrics": metrics,
                 "modeled_loads": _modeled_attention_score(depth=1, richness=2, metrics=metrics, kind="external"),
                 "agents": sorted(agents_by_skill.get(key, set())),
+                "agent_runtimes": sorted(runtimes_by_skill.get(key, set())),
                 "contexts": sorted(contexts_by_skill.get(key, set())),
                 "session_count": len(sessions_by_skill.get(key, set())),
                 "last_loaded_at": last_loaded_at.get(key),
@@ -255,6 +278,9 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
         "planner_event_count": len(planner_events),
         "usage_mode": usage_mode,
         "traced_agents": sorted({str(event.get("agent", "")).strip() for event in live_events if str(event.get("agent", "")).strip()}),
+        "traced_runtimes": sorted(
+            {str(event.get("agent_runtime", "")).strip() for event in live_events if str(event.get("agent_runtime", "")).strip()}
+        ),
         "traced_contexts": sorted({str(event.get("context", "")).strip() for event in live_events if str(event.get("context", "")).strip()}),
         "traced_session_count": len({str(event.get("session_id", "")).strip() for event in live_events if str(event.get("session_id", "")).strip()}),
         "skill_usage": skill_usage,
