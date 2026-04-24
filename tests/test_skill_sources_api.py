@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from apps.api.api.routes.repos import _build_coverage_map, _coverage_score
+from apps.api.api.routes.repos import _build_coverage_map, _compute_skill_score, _coverage_score
 from packages.db.models.skill import skill_category_for_source_type
 
 
@@ -30,6 +30,35 @@ def test_analyze_source_endpoint_validates_body_and_queues_job() -> None:
     assert '@router.post("/{repo_id}/analyze-source", response_model=AnalyzeSourceResponse)' in source
     assert '"source_type": payload.source_type' in source
     assert '"source_path": payload.path' in source
+
+
+def test_skill_content_update_endpoint_versions_content_and_requires_org_scope() -> None:
+    source = _read("apps/api/api/routes/repos.py")
+
+    assert "class SkillContentUpdate(BaseModel)" in source
+    assert '@router.patch("/{repo_id}/skills/{skill_id}/content")' in source
+    assert "current_org_id: str = Depends(get_current_org_id)" in source
+    assert "await _repo_in_scope(db, repo_id, current_org_id)" in source
+    assert "if skill is None or skill.repo_id != repo_id" in source
+    assert "run_id=skill.run_id or str(uuid4())" in source
+    assert '"updated": False' in source
+    assert '"updated": True' in source
+    assert '"version_number": version_number' in source
+    assert '"score": _score_response(skill).model_dump()' in source
+
+
+def test_compute_skill_score_for_manual_content_update() -> None:
+    content = "# Backend\n\n" + "Use the existing route and service patterns. " * 80
+
+    score = _compute_skill_score(content)
+
+    assert score == {
+        "total": 53,
+        "groundedness": 5,
+        "coverage": 25,
+        "freshness": 10,
+        "structure": 13,
+    }
 
 
 def test_org_coverage_summary_endpoint_requires_org_scope() -> None:

@@ -115,6 +115,58 @@ export type TeamRollupResponse = {
   needs_attention: string | null;
 };
 
+export type OrgRepoSummary = {
+  id: string;
+  name: string;
+  score: number;
+  score_trend: number | null;
+  skill_count: number;
+  dead_skill_count: number;
+  stale_skill_count: number;
+  last_analysed_at: string | null;
+  dormant: boolean;
+};
+
+export type CategoryMatrixEntry = {
+  repo_id: string;
+  repo_name: string;
+  covered: boolean;
+  avg_score: number;
+  skill_count: number;
+};
+
+export type StaleAlert = {
+  skill_id: string;
+  repo_id: string;
+  repo_name: string;
+  domain: string;
+  skill_path: string;
+  alert_type: "dead" | "stale_but_active" | "dormant_repo";
+  last_loaded_at: string | null;
+  loads_30d: number;
+};
+
+export type TopSkill = {
+  skill_id: string;
+  repo_id: string;
+  repo_name: string;
+  domain: string;
+  loads_30d: number;
+  score: number;
+};
+
+export type OrgIntelligence = {
+  org_health_score: number;
+  org_health_trend: number | null;
+  total_repos: number;
+  total_skills: number;
+  total_loads_30d: number;
+  repos: OrgRepoSummary[];
+  category_matrix: Record<string, CategoryMatrixEntry[]>;
+  stale_alerts: StaleAlert[];
+  top_skills: TopSkill[];
+};
+
 export type AuditLogEvent = {
   id: string;
   event_type: string;
@@ -276,6 +328,12 @@ export type SkillVersionDiff = {
   }>;
   added_count: number;
   removed_count: number;
+};
+
+export type SkillContentUpdateResult = {
+  updated: boolean;
+  version_number: number;
+  score: Score;
 };
 
 export type ScoreHistoryPoint = {
@@ -482,6 +540,10 @@ export async function getOrgTeamRollup(accessToken: string | null, orgId: string
   return apiFetch<TeamRollupResponse>(`/orgs/${orgId}/team-rollup`, { accessToken, cache: "no-store" });
 }
 
+export async function getOrgIntelligence(accessToken: string, orgId: string): Promise<OrgIntelligence | null> {
+  return apiFetch<OrgIntelligence>(`/orgs/${orgId}/intelligence`, { accessToken, cache: "no-store" });
+}
+
 export async function getOrgAuditLog(accessToken: string | null, orgId: string, params?: URLSearchParams): Promise<AuditLogResponse | null> {
   const query = params?.toString();
   return apiFetch<AuditLogResponse>(`/orgs/${orgId}/audit-log${query ? `?${query}` : ""}`, { accessToken, cache: "no-store" });
@@ -538,6 +600,24 @@ export async function getSkillVersionDiff(
   versionId: string,
 ): Promise<SkillVersionDiff | null> {
   return apiFetch<SkillVersionDiff>(`/repos/${repoId}/skills/${skillId}/versions/${versionId}/diff`, { accessToken, cache: "no-store" });
+}
+
+export async function updateSkillContent(
+  accessToken: string,
+  repoId: string,
+  skillId: string,
+  content: string,
+): Promise<SkillContentUpdateResult> {
+  const result = await apiFetch<SkillContentUpdateResult>(`/repos/${repoId}/skills/${skillId}/content`, {
+    accessToken,
+    method: "PATCH",
+    body: JSON.stringify({ content }),
+    cache: "no-store",
+  });
+  if (!result) {
+    throw new Error("Unable to update skill content");
+  }
+  return result;
 }
 
 export async function getOrgSkillDebt(accessToken: string | null, orgId: string): Promise<SkillDebtResponse | null> {

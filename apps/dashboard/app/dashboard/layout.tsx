@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import {
   Bell,
+  BarChart2,
   BarChart3,
   BookOpen,
   Building2,
@@ -113,6 +114,7 @@ export default async function DashboardLayout({
     LayoutDashboard,
     GitBranch,
     BarChart3,
+    BarChart2,
     BookOpen,
     Package,
     Database,
@@ -148,8 +150,17 @@ export default async function DashboardLayout({
       icon: "BarChart3",
     });
   }
+  if (!workspaceItems.some((item) => item.href === "/dashboard/intelligence")) {
+    const heatmapIndex = workspaceItems.findIndex((item) => item.href === "/dashboard/heatmap");
+    workspaceItems.splice(heatmapIndex >= 0 ? heatmapIndex + 1 : 4, 0, {
+      href: "/dashboard/intelligence",
+      label: "Intelligence",
+      icon: "BarChart2",
+    });
+  }
   if (!workspaceItems.some((item) => item.href === "/dashboard/debt")) {
-    workspaceItems.splice(4, 0, {
+    const intelligenceIndex = workspaceItems.findIndex((item) => item.href === "/dashboard/intelligence");
+    workspaceItems.splice(intelligenceIndex >= 0 ? intelligenceIndex + 1 : 4, 0, {
       href: "/dashboard/debt",
       label: "Skill Debt",
       icon: "AlertTriangle",

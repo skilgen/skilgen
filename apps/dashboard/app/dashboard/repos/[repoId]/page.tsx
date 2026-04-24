@@ -344,6 +344,141 @@ const categoryMeta: Record<SkillCategory, { label: string; icon: string }> = {
   operational_knowledge: { label: "Operational Knowledge", icon: "📋" },
 };
 
+const categoryClasses: Record<string, string> = {
+  codebase_architecture: "bg-blue-900/30 text-blue-300",
+  code_style: "bg-purple-900/30 text-purple-300",
+  testing_conventions: "bg-green-900/30 text-green-300",
+  internal_tools: "bg-amber-900/30 text-amber-300",
+  security_compliance: "bg-red-900/30 text-red-300",
+  design_system: "bg-pink-900/30 text-pink-300",
+  data_schema: "bg-cyan-900/30 text-cyan-300",
+  operational_knowledge: "bg-orange-900/30 text-orange-300",
+};
+
+function titleizeCategory(value: string | null | undefined): string {
+  if (!value) return "Unknown";
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function scoreTextClass(score: number): string {
+  if (score <= 40) return "text-red-400";
+  if (score <= 70) return "text-amber-400";
+  return "text-green-400";
+}
+
+function dimensionTextClass(score: number): string {
+  if (score <= 6) return "text-red-300";
+  if (score <= 12) return "text-amber-300";
+  return "text-[color:var(--text-secondary)]";
+}
+
+function QualitySnapshotCard({ skills }: { skills: RepoSkill[] }) {
+  if (skills.length === 0) return null;
+
+  const averageScore = Math.round(skills.reduce((sum, skill) => sum + skill.score.total, 0) / skills.length);
+  const highQualityCount = skills.filter((skill) => skill.score.total > 70).length;
+  const needsWorkCount = skills.filter((skill) => skill.score.total <= 40).length;
+
+  return (
+    <article className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
+      <div className="mb-4 text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Quality snapshot</div>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[13px] text-[color:var(--text-secondary)]">Avg skill quality</span>
+          <span className={`text-[15px] font-semibold ${scoreTextClass(averageScore)}`}>{averageScore}/100</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[13px] text-[color:var(--text-secondary)]">High quality</span>
+          <span className="text-[15px] font-semibold text-green-300">{highQualityCount}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[13px] text-[color:var(--text-secondary)]">Needs work</span>
+          <span className="text-[15px] font-semibold text-red-300">{needsWorkCount}</span>
+        </div>
+      </div>
+      <div className="mt-4">
+        <Link className="text-[12px] font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]" href="#skill-quality">
+          View quality table ↓
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+function qualityTierDotClass(score: number): string {
+  if (score <= 40) return "bg-red-400";
+  if (score <= 70) return "bg-amber-400";
+  return "bg-green-400";
+}
+
+function SkillQualityTable({ skills }: { skills: RepoSkill[] }) {
+  const sortedSkills = [...skills].sort((left, right) => left.score.total - right.score.total);
+  const allSkillsAboveThreshold = skills.length > 0 && skills.every((skill) => skill.score.total > 70);
+
+  if (skills.length === 0) return null;
+
+  return (
+    <section className="mt-8" id="skill-quality">
+      <div className="mb-4">
+        <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">Skill Quality</h2>
+        <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Sorted by score — click any row to edit.</p>
+      </div>
+      {allSkillsAboveThreshold ? (
+        <div className="rounded-xl border border-green-500/20 bg-green-900/20 px-5 py-4 text-[13px] font-medium text-green-300">
+          🟢 All skills are high quality (score &gt; 70). Keep them fresh by re-analysing after major changes.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
+          <table className="w-full min-w-[900px] border-collapse text-left text-[13px]">
+            <thead className="text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
+              <tr>
+                <th className="border-b border-[color:var(--bg-border)] px-5 py-3 font-semibold">Domain</th>
+                <th className="border-b border-[color:var(--bg-border)] px-5 py-3 font-semibold">Category</th>
+                <th className="border-b border-[color:var(--bg-border)] px-5 py-3 font-semibold">Score</th>
+                <th className="border-b border-[color:var(--bg-border)] px-5 py-3 font-semibold">Groundedness</th>
+                <th className="border-b border-[color:var(--bg-border)] px-5 py-3 font-semibold">Coverage</th>
+                <th className="border-b border-[color:var(--bg-border)] px-5 py-3 font-semibold">Freshness</th>
+                <th className="border-b border-[color:var(--bg-border)] px-5 py-3 font-semibold">Structure</th>
+                <th className="border-b border-[color:var(--bg-border)] px-5 py-3 font-semibold">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedSkills.map((skill) => (
+                <tr className="border-b border-[color:var(--bg-elevated)] transition-colors last:border-b-0 hover:bg-white/5" key={skill.id}>
+                  <td className="px-5 py-4">
+                    <Link className="inline-flex items-center font-medium text-[color:var(--text-primary)] hover:text-[color:var(--accent-primary)]" href={`/dashboard/repos/${skill.repo_id}/skills/${skill.id}`}>
+                      <span className={`mr-2 inline-block h-2 w-2 rounded-full ${qualityTierDotClass(skill.score.total)}`} />
+                      {skill.domain}
+                    </Link>
+                  </td>
+                  <td className="px-5 py-4">
+                    <span className={`rounded-full px-2 py-0.5 text-[12px] font-semibold ${categoryClasses[skill.skill_category ?? ""] ?? "bg-white/10 text-[color:var(--text-secondary)]"}`}>
+                      {titleizeCategory(skill.skill_category)}
+                    </span>
+                  </td>
+                  <td className={`px-5 py-4 text-[12px] font-semibold ${scoreTextClass(skill.score.total)}`}>{skill.score.total}/100</td>
+                  <td className={`px-5 py-4 text-[12px] ${dimensionTextClass(skill.score.groundedness)}`}>{skill.score.groundedness}</td>
+                  <td className={`px-5 py-4 text-[12px] ${dimensionTextClass(skill.score.coverage)}`}>{skill.score.coverage}</td>
+                  <td className={`px-5 py-4 text-[12px] ${dimensionTextClass(skill.score.freshness)}`}>{skill.score.freshness}</td>
+                  <td className={`px-5 py-4 text-[12px] ${dimensionTextClass(skill.score.structure)}`}>{skill.score.structure}</td>
+                  <td className="px-5 py-4">
+                    <Link className="inline-flex rounded-full border border-[color:var(--bg-border)] px-3 py-1.5 text-[12px] font-semibold text-[color:var(--text-secondary)] transition-colors hover:border-[color:var(--accent-primary)] hover:text-[color:var(--accent-primary)]" href={`/dashboard/repos/${skill.repo_id}/skills/${skill.id}`}>
+                      Edit →
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function CoverageMap({ coverage }: { coverage: RepoSkillSources | null }) {
   if (!coverage) {
     return (
@@ -494,11 +629,12 @@ export default async function RepoDetailPage({ params }: PageProps) {
       <SectionErrorBoundary section="repository subscores">
         <ZeroScoreBanner score={score} />
         <ScoreInsight coverage={skillSources} score={score} />
-        <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <SubscoreCard label="Groundedness" value={score?.groundedness} />
           <SubscoreCard label="Coverage" value={score?.coverage} />
           <SubscoreCard label="Freshness" value={score?.freshness} />
           <SubscoreCard label="Structure" value={score?.structure} />
+          <QualitySnapshotCard skills={skills} />
         </div>
       </SectionErrorBoundary>
 
@@ -522,7 +658,10 @@ export default async function RepoDetailPage({ params }: PageProps) {
 
       <SectionErrorBoundary section="skills">
         {skills.length > 0 ? (
-          <RepoSkillsPanel repoId={repoId} skills={skills} />
+          <>
+            <RepoSkillsPanel repoId={repoId} skills={skills} />
+            <SkillQualityTable skills={skills} />
+          </>
         ) : (
           <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center text-[color:var(--text-secondary)]">
             No skills found for this repository.

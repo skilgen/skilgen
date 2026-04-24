@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
 
 from apps.api.api.auth import get_current_org_id, get_current_user
 from apps.api.api.routes.orgs import (
@@ -17,14 +21,12 @@ from apps.api.api.routes.orgs import (
     _score_response,
     _skill_alert,
 )
-from uuid import uuid4
 
 from apps.api.api.analysis import _skill_category_for_domain
 from apps.api.api.routes.webhook import _queue_analysis
 from packages.db.database import get_db
 from packages.db.models import AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillUsageEvent, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
-from sqlalchemy.exc import SQLAlchemyError
 from packages.db.schemas import (
     AnalysisRunResponse,
     AnalyzeSourceResponse,
@@ -104,6 +106,12 @@ class AnalyzeSourceRequest(BaseModel):
     path: str | None = Field(default=None, max_length=512)
 
 
+class SkillContentUpdate(BaseModel):
+    """Request body for manual skill content updates."""
+
+    content: str = Field(min_length=1, max_length=200_000)
+
+
 async def _repo_in_scope(db: AsyncSession, repo_id: str, org_id: str) -> Repo:
     repo = await db.get(Repo, repo_id)
     if repo is None:
@@ -127,6 +135,31 @@ def _coverage_score(coverage_map: dict[str, SkillCategoryCoverage]) -> int:
     """Compute the 0-100 category coverage score."""
     covered = sum(1 for item in coverage_map.values() if item.covered)
     return round((covered / len(SKILL_CATEGORIES)) * 100)
+
+
+def _compute_skill_score(content: str) -> dict[str, int]:
+    """Compute the lightweight 0-100 score used for manual content edits."""
+    word_count = len(content.split())
+    has_headings = bool(re.search(r"^#{1,3}\s", content, re.MULTILINE))
+    heading_count = len(re.findall(r"^#{1,3}\s", content, re.MULTILINE))
+    has_code_blocks = "```" in content
+    file_ref_count = len(re.findall(r"`[^`]+\.(py|ts|tsx|js|go|rs|java|cs|rb|php)`", content))
+    has_patterns_section = bool(re.search(r"pattern|example|usage|how.to", content, re.IGNORECASE))
+    has_version_hint = bool(re.search(r"v\d+\.\d+|version|last.verified|updated", content, re.IGNORECASE))
+    bullet_count = len(re.findall(r"^\s*[-*]\s", content, re.MULTILINE))
+
+    groundedness = min(25, file_ref_count * 4 + (8 if has_code_blocks else 0) + (5 if has_patterns_section else 0))
+    coverage = min(25, max(0, (word_count // 20)) + (heading_count * 3) + (bullet_count // 2))
+    freshness = min(25, 10 + (15 if has_version_hint else 0))
+    structure = min(25, (10 if has_headings else 0) + (heading_count * 3) + (5 if bullet_count >= 3 else 0))
+
+    return {
+        "total": groundedness + coverage + freshness + structure,
+        "groundedness": groundedness,
+        "coverage": coverage,
+        "freshness": freshness,
+        "structure": structure,
+    }
 
 
 async def _latest_repo_skills(db: AsyncSession, repo_id: str) -> list[Skill]:
@@ -383,6 +416,83 @@ async def get_repo_skill_usage_stats(
         daily_loads=[DailyLoadPointResponse(date=day, loads=daily_map.get(day, 0)) for day in _last_30_dates(now)],
         agent_runtimes=runtime_counts,
     )
+
+
+@router.patch("/{repo_id}/skills/{skill_id}/content")
+async def update_repo_skill_content(
+    repo_id: str,
+    skill_id: str,
+    payload: SkillContentUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    """Update stored skill content and create a new version for the edit."""
+    await _repo_in_scope(db, repo_id, current_org_id)
+    skill = await db.get(Skill, skill_id)
+    if skill is None or skill.repo_id != repo_id:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    content_hash = hashlib.sha256(payload.content.encode()).hexdigest()
+    score = _compute_skill_score(payload.content)
+
+    latest_version_number = (
+        await db.execute(
+            select(SkillVersion.version_number)
+            .where(SkillVersion.skill_id == skill.id, SkillVersion.is_latest.is_(True))
+            .order_by(desc(SkillVersion.version_number))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if content_hash == skill.content_hash:
+        return {
+            "updated": False,
+            "version_number": int(latest_version_number or 1),
+            "score": _score_response(skill).model_dump(),
+        }
+
+    try:
+        await db.execute(
+            update(SkillVersion)
+            .where(SkillVersion.skill_id == skill.id, SkillVersion.is_latest.is_(True))
+            .values(is_latest=False)
+        )
+        count_result = await db.execute(
+            select(func.count(SkillVersion.id)).where(SkillVersion.skill_id == skill.id)
+        )
+        version_number = int(count_result.scalar() or 0) + 1
+
+        skill.content = payload.content
+        skill.content_hash = content_hash
+        skill.score_total = score["total"]
+        skill.score_groundedness = score["groundedness"]
+        skill.score_coverage = score["coverage"]
+        skill.score_freshness = score["freshness"]
+        skill.score_structure = score["structure"]
+        skill.is_stale = False
+
+        db.add(
+            SkillVersion(
+                skill_id=skill.id,
+                run_id=skill.run_id or str(uuid4()),
+                repo_id=repo_id,
+                domain=skill.domain,
+                content=payload.content,
+                content_hash=content_hash,
+                version_number=version_number,
+                is_latest=True,
+            )
+        )
+        await db.commit()
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to update skill content") from exc
+
+    return {
+        "updated": True,
+        "version_number": version_number,
+        "score": _score_response(skill).model_dump(),
+    }
 
 
 @router.get("/{repo_id}/score-history")
