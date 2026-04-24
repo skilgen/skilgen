@@ -6,6 +6,7 @@ import {
   BookOpen,
   Building2,
   ChevronDown,
+  ClipboardList,
   CreditCard,
   Database,
   GitBranch,
@@ -14,13 +15,14 @@ import {
   Package,
   Plus,
   Settings,
+  Users2,
 } from "lucide-react";
 import { signOut, withAuth } from "@workos-inc/authkit-nextjs";
 import { redirect } from "next/navigation";
 
 import { dashboardNavItems, mockOrg, mockUser } from "@/lib/mock-data";
 import { DashboardNavLink } from "@/components/dashboard-nav-link";
-import { API_URL, getMyOrg, type Org } from "../../lib/data";
+import { getBootstrapOrg, getMyOrg, type Org } from "../../lib/data";
 
 type ShellUser = Pick<typeof mockUser, "email" | "firstName" | "lastName">;
 
@@ -61,10 +63,8 @@ async function loadShellOrg(): Promise<Pick<Org, "name" | "plan">> {
   }
 
   try {
-    const res = await fetch(`${API_URL}/orgs/bootstrap`, { next: { revalidate: 60 } });
-    if (res.ok) {
-      return ((await res.json()) as Org) || mockOrg;
-    }
+    const org = await getBootstrapOrg();
+    if (org) return org;
   } catch (error) {
     console.error("Dashboard shell org bootstrap failed:", error);
   }
@@ -115,6 +115,8 @@ export default async function DashboardLayout({
     BookOpen,
     Package,
     Database,
+    Users2,
+    ClipboardList,
     Settings,
     CreditCard,
   };
@@ -130,6 +132,13 @@ export default async function DashboardLayout({
   const workspaceItems: NavItem[] = dashboardNavItems
     .filter((item) => item.href !== "/dashboard/settings" && item.href !== "/dashboard/upgrade")
     .map((item) => ({ ...item, icon: item.icon as IconName }));
+  if (!workspaceItems.some((item) => item.href === "/dashboard/teams")) {
+    workspaceItems.splice(2, 0, {
+      href: "/dashboard/teams",
+      label: "Teams",
+      icon: "Users2",
+    });
+  }
   if (shellOrg.plan === "free") {
     workspaceItems.push({
       href: "/dashboard/upgrade",
@@ -141,6 +150,13 @@ export default async function DashboardLayout({
   const accountItems: NavItem[] = dashboardNavItems
     .filter((item) => item.href === "/dashboard/settings")
     .map((item) => ({ ...item, icon: item.icon as IconName }));
+  if (!accountItems.some((item) => item.href === "/dashboard/audit")) {
+    accountItems.unshift({
+      href: "/dashboard/audit",
+      label: "Audit",
+      icon: "ClipboardList",
+    });
+  }
   const initials = `${shellUser.firstName[0] ?? "S"}${shellUser.lastName[0] ?? "U"}`;
 
   return (
