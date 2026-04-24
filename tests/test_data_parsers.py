@@ -68,6 +68,20 @@ class SqlSchemaParserTests(unittest.TestCase):
         self.assertEqual({column.name for column in table.columns}, {"id", "customer_id", "status", "updated_at"})
         self.assertIn("foreign-key-coverage", {issue.category for issue in analysis.issues})
 
+    def test_parse_table_export_json_preserves_explicit_pk_fk_and_constraints(self) -> None:
+        analysis = parse_sql_schema(FIXTURES / "schema_table_export.json")
+
+        self.assertEqual(len(analysis.tables), 1)
+        table = analysis.tables[0]
+        self.assertEqual(table.name, "public.order_items")
+        self.assertEqual(table.primary_key, ["order_item_id"])
+        self.assertEqual(len(table.foreign_keys), 1)
+        self.assertEqual(table.foreign_keys[0].target_table, "public.orders")
+        self.assertEqual(table.foreign_keys[0].target_columns, ["order_id"])
+        self.assertTrue(any(constraint.kind == "unique" for constraint in table.constraints))
+        self.assertEqual(table.comment, "Line items for submitted orders")
+        self.assertNotIn("foreign-key-coverage", {issue.category for issue in analysis.issues})
+
     def test_sql_schema_parser_reports_malformed_sql(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "schema.sql"

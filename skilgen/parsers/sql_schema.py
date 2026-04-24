@@ -366,6 +366,20 @@ def _table_from_export(payload: dict[str, Any]) -> SqlTable:
         for column in raw_columns
         if isinstance(column, dict) and column.get("name")
     ]
+    explicit_primary_key = [_normalize_name(str(column)) for column in payload.get("primary_key", []) if str(column).strip()]
+    if explicit_primary_key:
+        columns = [
+            SqlColumn(
+                name=column.name,
+                data_type=column.data_type,
+                nullable=column.nullable,
+                primary_key=column.name in explicit_primary_key or column.primary_key,
+                foreign_key=column.foreign_key,
+                default=column.default,
+                comment=column.comment,
+            )
+            for column in columns
+        ]
     indexes = [
         SqlIndex(
             name=_normalize_name(str(index.get("name") or f"idx_{name}_{'_'.join(index.get('columns', []))}")),
@@ -376,18 +390,29 @@ def _table_from_export(payload: dict[str, Any]) -> SqlTable:
         for index in payload.get("indexes", [])
         if isinstance(index, dict)
     ]
+    foreign_keys = [
+        _foreign_key_constraint_from_export(item)
+        for item in payload.get("foreign_keys", [])
+        if isinstance(item, dict)
+    ]
+    foreign_keys.extend(
+        _column_foreign_key_constraint(column)
+        for column in columns
+        if column.foreign_key
+    )
+    constraints = [
+        _constraint_from_export(item)
+        for item in payload.get("constraints", [])
+        if isinstance(item, dict)
+    ]
     return SqlTable(
         name=name,
         columns=columns,
-        primary_key=[column.name for column in columns if column.primary_key],
-        foreign_keys=[
-            SqlConstraint(name=None, kind="foreign_key", columns=[column.name], target_table=_split_fk_target(column.foreign_key or "")[0])
-            for column in columns
-            if column.foreign_key
-        ],
+        primary_key=explicit_primary_key or [column.name for column in columns if column.primary_key],
+        foreign_keys=foreign_keys,
         indexes=indexes,
-        constraints=[],
-        comment=str(payload["comment"]) if payload.get("comment") else None,
+        constraints=constraints,
+        comment=str(payload.get("comment") or payload.get("description") or "") or None,
     )
 
 
@@ -491,3 +516,50 @@ def _split_fk_target(value: str) -> tuple[str, list[str]]:
     if not match:
         return value, []
     return _normalize_name(match.group(1)), [_normalize_name(column) for column in _split_identifier_list(match.group(2) or "")]
+
+
+def _column_foreign_key_constraint(column: SqlColumn) -> SqlConstraint:
+    target_table, target_columns = _split_fk_target(column.foreign_key or "")
+    return SqlConstraint(
+        name=None,
+        kind="foreign_key",
+        columns=[column.name],
+        target_table=target_table,
+        target_columns=target_columns,
+    )
+
+
+def _foreign_key_constraint_from_export(payload: dict[str, Any]) -> SqlConstraint:
+    reference = payload.get("references")
+    target_table = payload.get("target_table")
+    target_columns = payload.get("target_columns")
+    if isinstance(reference, str) and reference.strip():
+        parsed_target_table, parsed_target_columns = _split_fk_target(reference)
+    else:
+        parsed_target_table = _normalize_name(str(target_table or ""))
+        parsed_target_columns = [_normalize_name(str(column)) for column in target_columns or [] if str(column).strip()]
+    return SqlConstraint(
+        name=_optional_name(payload.get("name")),
+        kind="foreign_key",
+        columns=[_normalize_name(str(column)) for column in payload.get("columns", []) if str(column).strip()],
+        target_table=parsed_target_table or None,
+        target_columns=parsed_target_columns,
+    )
+
+
+def _constraint_from_export(payload: dict[str, Any]) -> SqlConstraint:
+    kind = _normalize_name(str(payload.get("kind") or payload.get("type") or "constraint"))
+    return SqlConstraint(
+        name=_optional_name(payload.get("name")),
+        kind=kind,
+        columns=[_normalize_name(str(column)) for column in payload.get("columns", []) if str(column).strip()],
+        target_table=_normalize_name(str(payload.get("target_table") or "")) or None,
+        target_columns=[_normalize_name(str(column)) for column in payload.get("target_columns", []) if str(column).strip()],
+    )
+
+
+def _optional_name(value: object) -> str | None:
+    if value is None:
+        return None
+    cleaned = _normalize_name(str(value))
+    return cleaned or None
