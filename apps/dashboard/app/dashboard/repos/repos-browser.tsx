@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useDeferredValue, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ClipboardCopy, Search, X } from "lucide-react";
 
@@ -64,8 +64,9 @@ function sortRepos(repos: RepoListItem[], sortMode: SortMode): RepoListItem[] {
 
 function displayLanguage(repo: RepoListItem): string {
   if (repo.language) return repo.language;
-  if (repo.display_language === "Multiple") return "Multi";
-  return "—";
+  if (repo.display_language === "Multiple") return "Multi-language";
+  if (repo.display_language && repo.display_language !== "Unknown") return repo.display_language;
+  return "Unknown";
 }
 
 export function CopyTextButton({
@@ -124,13 +125,26 @@ function RepoAnalyseAction({ disabled, label, onAnalyse }: RepoAnalyseActionProp
   );
 }
 
-export function ReposBrowser({ accessToken, repos }: { accessToken: string; repos: RepoListItem[] }) {
+export function ReposBrowser({ accessToken, repos, orgId }: { accessToken: string; repos: RepoListItem[]; orgId: string }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [sortMode, setSortMode] = useState<SortMode>("score-desc");
   const [langFilter, setLangFilter] = useState("All");
   const [rowStates, setRowStates] = useState<Record<string, RowAnalyseState>>({});
+
+  // Fire-and-forget: refresh language for repos where GitHub returned null.
+  // The API calls GitHub with the installation token so private repos are covered.
+  // The next full page navigation picks up the updated language from the DB.
+  useEffect(() => {
+    const hasNullLanguage = repos.some((r) => !r.language);
+    if (!hasNullLanguage || !orgId) return;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+    fetch(`${API_URL}/orgs/${orgId}/refresh-repo-languages`, { method: "POST", headers }).catch(() => undefined);
+  // Run only once on mount — orgId and accessToken are stable for the session.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const langs = useMemo(() => {
     const set = new Set<string>();
@@ -307,7 +321,13 @@ export function ReposBrowser({ accessToken, repos }: { accessToken: string; repo
                       </span>
                       <span className="mt-0.5 block font-mono text-[12px] text-[color:var(--text-tertiary)]">{repo.full_name}</span>
                     </td>
-                    <td className="px-5 py-4 text-[color:var(--text-secondary)]">{displayLanguage(repo)}</td>
+                    <td className="px-5 py-4">
+                      {repo.language ? (
+                        <span className="text-[color:var(--text-secondary)]">{repo.language}</span>
+                      ) : (
+                        <span className="italic text-[color:var(--text-tertiary)]">Unknown</span>
+                      )}
+                    </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
                         {typeof score === "number" ? (

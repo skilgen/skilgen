@@ -1077,6 +1077,68 @@ async def list_available_repos(
     return all_repos
 
 
+@router.post("/{org_id}/refresh-repo-languages")
+async def refresh_repo_languages(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> dict[str, int]:
+    """Fetch the primary language from GitHub for connected repos that have language=null.
+
+    Uses the GitHub App installation token so private repos are covered too.
+    Safe to call repeatedly — only touches repos with a null language column.
+    """
+    if current_org_id is not None:
+        _assert_org_scope(org_id, current_org_id)
+
+    repos_to_update = list(
+        (
+            await db.execute(
+                select(Repo).where(
+                    Repo.org_id == org_id,
+                    Repo.language.is_(None),
+                    Repo.github_installation_id.is_not(None),
+                    Repo.is_active.is_(True),
+                )
+            )
+        ).scalars().all()
+    )
+
+    if not repos_to_update:
+        return {"updated": 0}
+
+    installation_id = repos_to_update[0].github_installation_id
+    token = get_installation_token(int(installation_id))
+
+    updated = 0
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for repo in repos_to_update:
+            try:
+                resp = await client.get(
+                    f"https://api.github.com/repos/{repo.full_name}",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                )
+                if resp.is_success:
+                    language = resp.json().get("language")
+                    if language:
+                        repo.language = language
+                        updated += 1
+            except Exception:
+                continue
+
+    if updated:
+        try:
+            await db.commit()
+        except SQLAlchemyError:
+            await _rollback(db, "refresh repo languages")
+
+    return {"updated": updated}
+
+
 @router.post("/{org_id}/connect-repos")
 async def connect_repos(
     org_id: str,

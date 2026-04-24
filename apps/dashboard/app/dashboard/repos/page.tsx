@@ -94,7 +94,7 @@ export default async function ReposPage() {
         {reposError ? (
           <SectionFallback section="repositories" />
         ) : repos.length > 0 ? (
-          <ReposBrowser accessToken={accessToken} repos={repos} />
+          <ReposBrowser accessToken={accessToken} orgId={orgId} repos={repos} />
         ) : (
           <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[rgb(var(--accent-primary-rgb)/0.12)] text-[color:var(--accent-primary)]">
