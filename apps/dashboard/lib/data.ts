@@ -17,6 +17,8 @@ export type Org = {
   plan: string;
 };
 
+export type BootstrapOrg = Org;
+
 export type OrgSettings = {
   id: string;
   login: string;
@@ -43,6 +45,124 @@ export type OrgStats = {
   skill_count: number;
   active_agents: number;
   score_trend: { date: string; score: number }[];
+};
+
+export type SkillHeatmapSkill = {
+  skill_id: string;
+  domain: string;
+  repo_id: string;
+  repo_name: string;
+  skill_category: string | null;
+  source_type: string | null;
+  score_total: number;
+  is_stale: boolean;
+  loads_30d: number;
+  loads_7d: number;
+  criticality_score: number;
+  last_loaded_at: string | null;
+  agent_runtimes: string[];
+  alert: "stale_but_active" | "dead_skill" | "healthy";
+};
+
+export type SkillHeatmapSummary = {
+  total_skills: number;
+  dead_skills: number;
+  stale_but_active: number;
+  healthy: number;
+  avg_criticality: number;
+};
+
+export type SkillHeatmapResponse = {
+  skills: SkillHeatmapSkill[];
+  summary: SkillHeatmapSummary;
+};
+
+export type RuntimeBreakdownItem = {
+  runtime: string;
+  display_name: string;
+  loads_30d: number;
+  unique_skills: number;
+  top_skill_domain: string | null;
+};
+
+export type RuntimeBreakdownResponse = {
+  runtimes: RuntimeBreakdownItem[];
+  total_loads_30d: number;
+};
+
+export type TeamRollupRepo = {
+  id: string;
+  name: string;
+  score: number | null;
+};
+
+export type TeamRollupTeam = {
+  team_name: string;
+  repo_count: number;
+  avg_score: number | null;
+  worst_repo: TeamRollupRepo | null;
+  best_repo: TeamRollupRepo | null;
+  score_delta_7d: number | null;
+  skill_count: number;
+  coverage_score: number;
+  repos: TeamRollupRepo[];
+};
+
+export type TeamRollupResponse = {
+  teams: TeamRollupTeam[];
+  org_avg_score: number | null;
+  top_team: string | null;
+  needs_attention: string | null;
+};
+
+export type AuditLogEvent = {
+  id: string;
+  event_type: string;
+  repo_name: string | null;
+  repo_id: string | null;
+  actor: string | null;
+  status: string | null;
+  score_before: number | null;
+  score_after: number | null;
+  skill_count: number | null;
+  created_at: string | null;
+};
+
+export type AuditLogResponse = {
+  events: AuditLogEvent[];
+  limit?: number;
+  offset?: number;
+  total?: number;
+};
+
+export type GovernancePolicy = {
+  id: string;
+  name: string;
+  type: "min_score" | "max_staleness_days" | "required_categories" | "min_groundedness";
+  threshold: number | string[] | null;
+  scope: string;
+  action: "warn" | "block_pr" | "notify_slack";
+  enabled: boolean;
+  created_at?: string | null;
+};
+
+export type GovernancePoliciesResponse = {
+  policies: GovernancePolicy[];
+};
+
+export type SkillUsageDailyLoad = {
+  date: string;
+  loads: number;
+};
+
+export type SkillUsageStats = {
+  criticality_score: number;
+  loads_30d: number;
+  loads_7d: number;
+  last_loaded_at: string | null;
+  alert: "stale_but_active" | "dead_skill" | "healthy" | string;
+  daily_loads: SkillUsageDailyLoad[];
+  agent_runtimes: Record<string, number>;
 };
 
 export type Repo = {
@@ -216,18 +336,34 @@ export type RegistryList = {
   offset: number;
 };
 
-async function apiFetch<T>(path: string, accessToken?: string | null): Promise<T | null> {
-  const headers: HeadersInit = {
+type FetchOptions = {
+  accessToken?: string | null;
+  cache?: RequestCache;
+  revalidate?: number | false;
+  method?: string;
+  body?: BodyInit | null;
+  headers?: HeadersInit;
+};
+
+async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T | null> {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
-  if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
+  if (options.headers) {
+    Object.assign(headers, options.headers as Record<string, string>);
+  }
+  if (options.accessToken) {
+    headers.Authorization = `Bearer ${options.accessToken}`;
   }
 
   try {
     const res = await fetch(`${API_URL}${path}`, {
+      method: options.method ?? "GET",
+      body: options.body,
       headers,
-      next: { revalidate: 60 },
+      ...(options.cache ? { cache: options.cache } : {}),
+      ...(typeof options.revalidate === "number" ? { next: { revalidate: options.revalidate } } : {}),
+      ...(options.revalidate === false ? { cache: "no-store" } : {}),
     });
     if (!res.ok) return null;
     return res.json();
@@ -238,62 +374,91 @@ async function apiFetch<T>(path: string, accessToken?: string | null): Promise<T
 }
 
 export async function getMyOrg(accessToken: string | null): Promise<Org | null> {
-  return apiFetch<Org>("/me/org", accessToken);
+  return apiFetch<Org>("/me/org", { accessToken, cache: "no-store" });
+}
+
+export async function getBootstrapOrg(): Promise<BootstrapOrg | null> {
+  return apiFetch<BootstrapOrg>("/orgs/bootstrap", { cache: "no-store" });
 }
 
 export async function getOrgStats(accessToken: string | null, orgId: string): Promise<OrgStats | null> {
-  return apiFetch<OrgStats>(`/orgs/${orgId}/stats`, accessToken);
+  return apiFetch<OrgStats>(`/orgs/${orgId}/stats`, { accessToken, cache: "no-store" });
 }
 
 export async function getOrgRepos(accessToken: string | null, orgId: string): Promise<Repo[] | null> {
-  return apiFetch<Repo[]>(`/orgs/${orgId}/repos`, accessToken);
+  return apiFetch<Repo[]>(`/orgs/${orgId}/repos`, { accessToken, cache: "no-store" });
 }
 
 export async function getOrgAnalytics(accessToken: string | null, orgId: string): Promise<OrgAnalytics | null> {
-  return apiFetch<OrgAnalytics>(`/orgs/${orgId}/analytics`, accessToken);
+  return apiFetch<OrgAnalytics>(`/orgs/${orgId}/analytics`, { accessToken, cache: "no-store" });
 }
 
 export async function getOrgCoverageSummary(accessToken: string | null, orgId: string): Promise<OrgCoverageSummary | null> {
-  return apiFetch<OrgCoverageSummary>(`/orgs/${orgId}/coverage-summary`, accessToken);
+  return apiFetch<OrgCoverageSummary>(`/orgs/${orgId}/coverage-summary`, { accessToken, cache: "no-store" });
 }
 
 export async function getOrgSettings(accessToken: string | null, orgId: string): Promise<OrgSettings | null> {
-  return apiFetch<OrgSettings>(`/orgs/${orgId}/settings`, accessToken);
+  return apiFetch<OrgSettings>(`/orgs/${orgId}/settings`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgSkillHeatmap(accessToken: string | null, orgId: string): Promise<SkillHeatmapResponse | null> {
+  return apiFetch<SkillHeatmapResponse>(`/orgs/${orgId}/skill-heatmap`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgRuntimeBreakdown(accessToken: string | null, orgId: string): Promise<RuntimeBreakdownResponse | null> {
+  return apiFetch<RuntimeBreakdownResponse>(`/orgs/${orgId}/runtime-breakdown`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgTeamRollup(accessToken: string | null, orgId: string): Promise<TeamRollupResponse | null> {
+  return apiFetch<TeamRollupResponse>(`/orgs/${orgId}/team-rollup`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgAuditLog(accessToken: string | null, orgId: string, params?: URLSearchParams): Promise<AuditLogResponse | null> {
+  const query = params?.toString();
+  return apiFetch<AuditLogResponse>(`/orgs/${orgId}/audit-log${query ? `?${query}` : ""}`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgPolicies(accessToken: string | null, orgId: string): Promise<GovernancePoliciesResponse | null> {
+  return apiFetch<GovernancePoliciesResponse>(`/orgs/${orgId}/policies`, { accessToken, cache: "no-store" });
 }
 
 export async function getRepo(accessToken: string | null, repoId: string): Promise<Repo | null> {
-  return apiFetch<Repo>(`/repos/${repoId}`, accessToken);
+  return apiFetch<Repo>(`/repos/${repoId}`, { accessToken, cache: "no-store" });
 }
 
 export async function getRepoSkills(accessToken: string | null, repoId: string): Promise<Skill[] | null> {
-  return apiFetch<Skill[]>(`/repos/${repoId}/skills`, accessToken);
+  return apiFetch<Skill[]>(`/repos/${repoId}/skills`, { accessToken, cache: "no-store" });
 }
 
 export async function getRepoScoreHistory(accessToken: string | null, repoId: string): Promise<ScoreHistoryPoint[] | null> {
-  return apiFetch<ScoreHistoryPoint[]>(`/repos/${repoId}/score-history`, accessToken);
+  return apiFetch<ScoreHistoryPoint[]>(`/repos/${repoId}/score-history`, { accessToken, cache: "no-store" });
 }
 
 export async function getRepoDependencies(accessToken: string | null, repoId: string): Promise<DependencyReport | null> {
-  return apiFetch<DependencyReport>(`/repos/${repoId}/dependencies`, accessToken);
+  return apiFetch<DependencyReport>(`/repos/${repoId}/dependencies`, { accessToken, cache: "no-store" });
 }
 
 export async function getRepoSkillSources(accessToken: string | null, repoId: string): Promise<RepoSkillSources | null> {
-  return apiFetch<RepoSkillSources>(`/repos/${repoId}/skill-sources`, accessToken);
+  return apiFetch<RepoSkillSources>(`/repos/${repoId}/skill-sources`, { accessToken, cache: "no-store" });
+}
+
+export async function getRepoSkillUsageStats(accessToken: string | null, repoId: string, skillId: string): Promise<SkillUsageStats | null> {
+  return apiFetch<SkillUsageStats>(`/repos/${repoId}/skills/${skillId}/usage-stats`, { accessToken, cache: "no-store" });
 }
 
 export async function getSkill(accessToken: string | null, skillId: string): Promise<Skill | null> {
-  return apiFetch<Skill>(`/skills/${skillId}`, accessToken);
+  return apiFetch<Skill>(`/skills/${skillId}`, { accessToken, cache: "no-store" });
 }
 
 export async function getSkillVersions(accessToken: string | null, skillId: string): Promise<SkillVersionSummary[] | null> {
-  return apiFetch<SkillVersionSummary[]>(`/skills/${skillId}/versions`, accessToken);
+  return apiFetch<SkillVersionSummary[]>(`/skills/${skillId}/versions`, { accessToken, cache: "no-store" });
 }
 
 export async function getSkillVersion(accessToken: string | null, skillId: string, versionId: string): Promise<SkillVersion | null> {
-  return apiFetch<SkillVersion>(`/skills/${skillId}/versions/${versionId}`, accessToken);
+  return apiFetch<SkillVersion>(`/skills/${skillId}/versions/${versionId}`, { accessToken, cache: "no-store" });
 }
 
 export async function getRegistrySkills(params: URLSearchParams): Promise<RegistryList | null> {
   const query = params.toString();
-  return apiFetch<RegistryList>(`/registry${query ? `?${query}` : ""}`, null);
+  return apiFetch<RegistryList>(`/registry${query ? `?${query}` : ""}`, { revalidate: 60 });
 }
