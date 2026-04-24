@@ -6,11 +6,14 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+import httpx
+from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id
+from apps.api.api.github import get_installation_token
 from apps.api.api.notifications import build_test_notification_message, post_slack_message
 from packages.db.database import get_db
 from packages.db.models import AnalysisRun, Org, Repo, ScoreHistory, Skill, SkillUsageEvent
@@ -79,6 +82,19 @@ DEFAULT_POLICIES = [
         "enabled": False,
     },
 ]
+
+
+class ConnectRepoItem(BaseModel):
+    github_repo_id: int
+    full_name: str
+    name: str
+    language: str | None = None
+    default_branch: str = "main"
+    installation_id: int
+
+
+class ConnectReposPayload(BaseModel):
+    repos: list[ConnectRepoItem]
 
 
 def _last_30_score_dates() -> list[str]:
@@ -825,6 +841,107 @@ async def upsert_org_policies(
         await _rollback(db, "policy update")
         raise HTTPException(status_code=400, detail="Unable to update policies") from exc
     return GovernancePoliciesResponse(policies=policies)
+
+
+@router.get("/{org_id}/available-repos")
+async def list_available_repos(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, object]]:
+    """Return GitHub repos from the installation not yet connected to this org."""
+    installation_id = (
+        await db.execute(
+            select(Repo.github_installation_id)
+            .where(Repo.org_id == org_id, Repo.github_installation_id.is_not(None))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if not installation_id:
+        raise HTTPException(status_code=404, detail="No GitHub installation found for this org")
+
+    existing_ids = set(
+        (
+            await db.execute(
+                select(Repo.github_repo_id).where(Repo.org_id == org_id)
+            )
+        ).scalars().all()
+    )
+
+    token = get_installation_token(int(installation_id))
+
+    all_repos: list[dict[str, object]] = []
+    page = 1
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        while True:
+            resp = await client.get(
+                "https://api.github.com/installation/repositories",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                params={"per_page": 100, "page": page},
+            )
+            if not resp.is_success:
+                break
+            data = resp.json()
+            batch = data.get("repositories", [])
+            if not batch:
+                break
+            for repo in batch:
+                if repo["id"] not in existing_ids:
+                    all_repos.append(
+                        {
+                            "github_repo_id": repo["id"],
+                            "full_name": repo["full_name"],
+                            "name": repo["name"],
+                            "language": repo.get("language"),
+                            "default_branch": repo.get("default_branch", "main"),
+                            "private": repo.get("private", False),
+                            "installation_id": installation_id,
+                        }
+                    )
+            if len(batch) < 100:
+                break
+            page += 1
+
+    return all_repos
+
+
+@router.post("/{org_id}/connect-repos")
+async def connect_repos(
+    org_id: str,
+    payload: ConnectReposPayload,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, str]]:
+    """Idempotently create Repo rows for user-selected repos."""
+    created: list[dict[str, str]] = []
+    for item in payload.repos:
+        existing = (
+            await db.execute(select(Repo).where(Repo.github_repo_id == item.github_repo_id))
+        ).scalar_one_or_none()
+        if existing:
+            continue
+        repo = Repo(
+            org_id=org_id,
+            github_repo_id=item.github_repo_id,
+            github_installation_id=item.installation_id,
+            full_name=item.full_name,
+            name=item.name,
+            language=item.language,
+            default_branch=item.default_branch,
+            is_active=True,
+        )
+        db.add(repo)
+        created.append({"full_name": item.full_name, "name": item.name})
+    try:
+        await db.flush()
+        await db.commit()
+    except SQLAlchemyError as exc:
+        await _rollback(db, "connect repos")
+        raise HTTPException(status_code=400, detail="Failed to connect repos") from exc
+    return created
 
 
 @router.get("/{org_id}/coverage-summary", response_model=OrgCoverageSummaryResponse)
