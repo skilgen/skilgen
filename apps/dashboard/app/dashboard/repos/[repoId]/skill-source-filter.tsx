@@ -10,25 +10,36 @@ type RepoSkill = Skill & {
   last_updated_at?: string | null;
 };
 
-type SourceFilter = "all" | "code" | "api" | "infrastructure" | "data" | "security" | "operational";
+type SourceGroup = "All" | "Code" | "API Specs" | "Infrastructure" | "Data" | "Security" | "Operational";
 
-const sourceFilterLabels: Record<SourceFilter, string> = {
-  all: "All",
-  code: "Code",
-  api: "API Specs",
-  infrastructure: "Infrastructure",
-  data: "Data",
-  security: "Security",
-  operational: "Operational",
+const SOURCE_GROUPS: Record<SourceGroup, Array<string | null | undefined>> = {
+  All: [],
+  Code: ["code", null, undefined],
+  "API Specs": ["openapi", "graphql", "postman"],
+  Infrastructure: ["terraform", "kubernetes", "helm"],
+  Data: ["dbt", "sql_schema", "kafka"],
+  Security: ["sarif", "sbom", "security_policy"],
+  Operational: ["runbook", "confluence", "notion", "incident"],
 };
 
-const sourceGroups: Record<Exclude<SourceFilter, "all">, string[]> = {
-  code: ["code"],
-  api: ["openapi", "graphql", "postman"],
-  infrastructure: ["terraform", "kubernetes", "helm"],
-  data: ["dbt", "sql_schema", "kafka"],
-  security: ["sarif", "sbom", "security_policy"],
-  operational: ["runbook", "confluence", "notion", "incident", "pagerduty"],
+const SOURCE_LABELS: Record<string, string> = {
+  code: "Code",
+  openapi: "OpenAPI",
+  graphql: "GraphQL",
+  postman: "Postman",
+  terraform: "Terraform",
+  kubernetes: "Kubernetes",
+  helm: "Helm",
+  dbt: "dbt",
+  sql_schema: "SQL Schema",
+  kafka: "Kafka",
+  sarif: "SARIF",
+  sbom: "SBOM",
+  security_policy: "Security Policy",
+  runbook: "Runbook",
+  confluence: "Confluence",
+  notion: "Notion",
+  incident: "Incident",
 };
 
 function relativeTime(value: string | null | undefined): string {
@@ -56,44 +67,59 @@ function ScoreBadge({ score }: { score: number | null | undefined }) {
   return <span className={`inline-flex rounded-full px-2 py-0.5 text-[12px] font-semibold ${scoreBadgeClass(score)}`}>{score}/100</span>;
 }
 
-function matchesFilter(skill: RepoSkill, filter: SourceFilter): boolean {
-  if (filter === "all") return true;
+function matchesGroup(skill: RepoSkill, group: SourceGroup): boolean {
+  if (group === "All") return true;
   const sourceType = skill.source_type ?? "code";
-  return sourceGroups[filter].includes(sourceType);
+  return SOURCE_GROUPS[group].includes(sourceType);
 }
 
-export function SkillSourceFilter({ repoId, skills }: { repoId: string; skills: RepoSkill[] }) {
-  const [filter, setFilter] = useState<SourceFilter>("all");
-  const sortedSkills = useMemo(
-    () => [...skills].sort((left, right) => (right.score?.total ?? 0) - (left.score?.total ?? 0)),
-    [skills],
+export function SkillSourceFilter({
+  skills,
+  onChange,
+}: {
+  skills: RepoSkill[];
+  onChange: (filtered: RepoSkill[]) => void;
+}) {
+  const [activeGroup, setActiveGroup] = useState<SourceGroup>("All");
+
+  function selectGroup(group: SourceGroup): void {
+    setActiveGroup(group);
+    const filtered = group === "All" ? skills : skills.filter((skill) => matchesGroup(skill, group));
+    onChange(filtered);
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {(Object.keys(SOURCE_GROUPS) as SourceGroup[]).map((group) => (
+        <button
+          className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors ${
+            activeGroup === group
+              ? "bg-yellow-400 text-black"
+              : "border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]"
+          }`}
+          key={group}
+          onClick={() => selectGroup(group)}
+          type="button"
+        >
+          {group}
+        </button>
+      ))}
+    </div>
   );
-  const filteredSkills = useMemo(
-    () => sortedSkills.filter((skill) => matchesFilter(skill, filter)),
-    [filter, sortedSkills],
-  );
+}
+
+export function RepoSkillsPanel({ repoId, skills }: { repoId: string; skills: RepoSkill[] }) {
+  const sortedSkills = useMemo(() => [...skills].sort((left, right) => (right.score?.total ?? 0) - (left.score?.total ?? 0)), [skills]);
+  const [filteredSkills, setFilteredSkills] = useState<RepoSkill[]>(sortedSkills);
 
   return (
     <section className="overflow-hidden rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
-      <div className="flex flex-col gap-4 border-b border-[color:var(--bg-border)] px-5 py-4 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-4 border-b border-[color:var(--bg-border)] px-5 py-4">
         <div>
           <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">Skills</h2>
           <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">{filteredSkills.length} generated skill files</p>
         </div>
-        <label className="flex items-center gap-2 text-[12px] font-semibold text-[color:var(--text-secondary)]">
-          Source
-          <select
-            className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-elevated)] px-3 py-2 text-[13px] text-[color:var(--text-primary)]"
-            onChange={(event) => setFilter(event.target.value as SourceFilter)}
-            value={filter}
-          >
-            {Object.entries(sourceFilterLabels).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SkillSourceFilter onChange={setFilteredSkills} skills={sortedSkills} />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[820px] border-collapse text-left text-[13px]">
@@ -114,7 +140,7 @@ export function SkillSourceFilter({ repoId, skills }: { repoId: string; skills: 
                   <div className="font-medium text-[color:var(--text-primary)]">{skill.domain}</div>
                   <div className="mt-0.5 font-mono text-[12px] text-[color:var(--text-tertiary)]">{skill.skill_path}</div>
                 </td>
-                <td className="px-5 py-4 text-[color:var(--text-secondary)]">{skill.source_type ?? "code"}</td>
+                <td className="px-5 py-4 text-[color:var(--text-secondary)]">{SOURCE_LABELS[skill.source_type ?? "code"] ?? (skill.source_type ?? "Code")}</td>
                 <td className="px-5 py-4"><ScoreBadge score={skill.score?.total} /></td>
                 <td className="px-5 py-4">
                   {skill.is_stale ? (

@@ -11,7 +11,19 @@ from skilgen.parsers.sources import SOURCE_ALIASES, SOURCE_TYPES
 
 
 DEFAULT_SOURCE_PATTERNS: dict[str, tuple[str, ...]] = {
-    "openapi": ("openapi.yaml", "openapi.json", "swagger.yaml", "swagger.json", "api/openapi.yaml", "docs/openapi.yaml"),
+    "openapi": (
+        "openapi.yaml",
+        "openapi.json",
+        "openapi*.yaml",
+        "openapi*.json",
+        "swagger.yaml",
+        "swagger.json",
+        "swagger*.yaml",
+        "swagger*.json",
+        "api/openapi.yaml",
+        "docs/api.yaml",
+        "docs/openapi.yaml",
+    ),
     "graphql": ("schema.graphql", "src/**/*.graphql", "**/*.gql"),
     "postman": ("*.collection.json", "**/*.collection.json"),
     "terraform": ("terraform/*.tf", "*.tf"),

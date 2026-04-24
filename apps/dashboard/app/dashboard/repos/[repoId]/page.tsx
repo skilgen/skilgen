@@ -21,11 +21,11 @@ import {
   type Skill,
 } from "../../../../lib/data";
 import { AnalyseNowButton } from "./analyse-now-button";
-import { SkillSourceFilter } from "./skill-source-filter";
+import { RepoSkillsPanel } from "./skill-source-filter";
 
 export const dynamic = "force-dynamic";
 
-// SkillSourceFilter renders href={`/dashboard/repos/${repoId}/skills/${skill.id}`}.
+// RepoSkillsPanel renders href={`/dashboard/repos/${repoId}/skills/${skill.id}`}.
 
 type PageProps = {
   params: Promise<{ repoId: string }>;
@@ -241,7 +241,7 @@ function CoverageMap({ coverage }: { coverage: RepoSkillSources | null }) {
     <section className="mb-8 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
       <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
-          <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">Coverage Map</h2>
+          <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">Knowledge Coverage</h2>
           <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Knowledge categories generated for this repository</p>
         </div>
         <span className="text-[18px] font-bold text-[color:var(--accent-primary)]">{coverage.coverage_score}%</span>
@@ -392,7 +392,7 @@ export default async function RepoDetailPage({ params }: PageProps) {
 
       <SectionErrorBoundary section="skills">
         {skills.length > 0 ? (
-          <SkillSourceFilter repoId={repoId} skills={skills} />
+          <RepoSkillsPanel repoId={repoId} skills={skills} />
         ) : (
           <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center text-[color:var(--text-secondary)]">
             No skills found for this repository.

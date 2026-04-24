@@ -89,6 +89,11 @@ def parse_runbook_source(path: str | Path) -> list[ProcessSource]:
     return [parse_runbook_file(candidate) for candidate in files]
 
 
+def parse_runbook_dir(path: str | Path) -> list[ProcessSource]:
+    """Backward-compatible alias for runbook directory parsing."""
+    return parse_runbook_source(path)
+
+
 def _parse_markdown_document(path: Path, *, source_type: str, labels: list[str] | None = None) -> ProcessSource:
     raw = path.read_text(encoding="utf-8", errors="ignore")
     return _parse_markdown_text(raw, path, source_type=source_type, labels=labels)

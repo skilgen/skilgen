@@ -179,6 +179,11 @@ def parse_terraform_directory(path: str | Path) -> TerraformParseResult:
     )
 
 
+def parse_terraform_dir(path: str | Path) -> TerraformParseResult:
+    """Backward-compatible alias for Terraform directory parsing."""
+    return parse_terraform_directory(path)
+
+
 def _read_text(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8")

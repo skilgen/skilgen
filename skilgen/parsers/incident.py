@@ -172,6 +172,11 @@ def parse_incident_sources(source_paths: Sequence[str | Path]) -> IncidentSource
     return _analysis_from_incidents(files, incidents, pagerduty_metrics=pagerduty_metrics)
 
 
+def parse_incident_dir(path: str | Path) -> IncidentSourceAnalysis:
+    """Backward-compatible alias for incident directory parsing."""
+    return parse_incident_sources([path])
+
+
 def parse_markdown_postmortem(path: str | Path) -> IncidentRecord:
     """Parse a structured Markdown postmortem, incident report, or PIR file."""
 

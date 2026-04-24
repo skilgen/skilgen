@@ -86,25 +86,28 @@ export type SkillCategory =
   | "data_schema"
   | "operational_knowledge";
 
-export type SkillCategoryCoverage = {
+export type CategoryCoverage = {
   covered: boolean;
   skill_count: number;
-  avg_score: number;
+  avg_score: number | null;
 };
 
-export type RepoSkillSource = {
+export type SkillSourceEntry = {
   source_type: string;
-  detected: boolean;
+  skill_category: string;
   skill_count: number;
+  avg_score: number | null;
   last_analysed_at: string | null;
-  skills: { id: string; domain: string; score: number }[];
 };
 
 export type RepoSkillSources = {
-  sources: RepoSkillSource[];
-  coverage_map: Record<SkillCategory, SkillCategoryCoverage>;
+  sources: SkillSourceEntry[];
+  coverage_map: Record<string, CategoryCoverage>;
   coverage_score: number;
 };
+
+export type SkillCategoryCoverage = CategoryCoverage;
+export type RepoSkillSource = SkillSourceEntry;
 
 export type RepoCoverageSummary = {
   repo_id: string;
