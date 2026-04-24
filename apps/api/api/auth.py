@@ -112,6 +112,12 @@ async def _verify_oidc_token(token: str) -> dict[str, Any]:
 
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict[str, Any]:
+    if _deployment_mode() == "bootstrap":
+        return {
+            "email": "bootstrap@skillayer.com",
+            "sub": "bootstrap",
+            "org_id": None,
+        }
     token = credentials.credentials
     try:
         if _deployment_mode() == "selfhosted":
