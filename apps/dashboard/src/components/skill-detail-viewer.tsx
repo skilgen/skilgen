@@ -37,6 +37,8 @@ type SkillDetailViewerProps = {
   accessToken: string;
   skill: SkillSnapshot;
   versions: SkillVersionSummary[];
+  copyLabel?: string;
+  copyValue?: string;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
@@ -96,7 +98,7 @@ async function fetchSkillVersion(skillId: string, versionId: string, accessToken
 }
 
 /** Render raw skill content, client-side version switching, and usage metadata. */
-export function SkillDetailViewer({ accessToken, skill, versions }: SkillDetailViewerProps) {
+export function SkillDetailViewer({ accessToken, skill, versions, copyLabel = "Copy", copyValue }: SkillDetailViewerProps) {
   const currentContent = skill.content ?? "No SKILL.md content is available for this skill yet.";
   const [content, setContent] = useState(currentContent);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
@@ -152,7 +154,7 @@ export function SkillDetailViewer({ accessToken, skill, versions }: SkillDetailV
               {activeVersionDate ? `Viewing historical version from ${formatVersionDate(activeVersionDate)}` : "Viewing current generated content"}
             </p>
           </div>
-          <CopySkillButton content={content} domain={skill.domain} />
+          <CopySkillButton content={copyValue ?? content} domain={skill.domain} label={copyLabel} />
         </div>
 
         <pre className="max-h-[680px] overflow-auto whitespace-pre-wrap break-words bg-[#07070c] p-5 font-mono text-sm leading-6 text-gray-300">

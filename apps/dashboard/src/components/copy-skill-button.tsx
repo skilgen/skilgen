@@ -5,8 +5,16 @@ import { Check, Copy } from "lucide-react";
 
 import { captureDashboardEvent } from "@/lib/posthog";
 
-/** Copy the raw SKILL.md content and briefly confirm the action. */
-export function CopySkillButton({ content, domain }: { content: string; domain: string }) {
+/** Copy the provided value and briefly confirm the action. */
+export function CopySkillButton({
+  content,
+  domain,
+  label = "Copy",
+}: {
+  content: string;
+  domain: string;
+  label?: string;
+}) {
   const [copied, setCopied] = useState(false);
 
   /** Write the skill content to the clipboard and reset the success state. */
@@ -24,7 +32,7 @@ export function CopySkillButton({ content, domain }: { content: string; domain: 
       type="button"
     >
       {copied ? <Check className="mr-1.5 h-3.5 w-3.5" /> : <Copy className="mr-1.5 h-3.5 w-3.5" />}
-      {copied ? "Copied!" : "Copy"}
+      {copied ? "Copied!" : label}
     </button>
   );
 }

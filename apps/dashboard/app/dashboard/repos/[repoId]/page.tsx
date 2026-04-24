@@ -284,8 +284,8 @@ export default async function RepoDetailPage({ params }: PageProps) {
   let repoLoadFailed = false;
 
   try {
-    const session = await withAuth({ ensureSignedIn: true });
-    accessToken = session.accessToken || "";
+    const session = await withAuth({ ensureSignedIn: false });
+    accessToken = session?.accessToken || "";
   } catch (error) {
     console.error("Repo detail auth unavailable:", error);
   }
@@ -361,7 +361,7 @@ export default async function RepoDetailPage({ params }: PageProps) {
           </div>
 
           <div className="flex flex-col gap-5 md:flex-row md:items-center">
-            <AnalyseNowButton accessToken={accessToken} apiUrl={API_URL} repoId={repoId} />
+            <AnalyseNowButton accessToken={accessToken} apiUrl={API_URL} lastAnalysedAt={repo.last_analysed_at} repoId={repoId} />
             <ScoreRing score={score?.total} />
           </div>
         </section>

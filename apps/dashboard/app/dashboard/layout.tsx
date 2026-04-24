@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import {
   Bell,
   BarChart3,
@@ -20,6 +21,8 @@ import { redirect } from "next/navigation";
 import { dashboardNavItems, mockOrg, mockUser } from "@/lib/mock-data";
 import { DashboardNavLink } from "@/components/dashboard-nav-link";
 import { API_URL, getMyOrg, type Org } from "../../lib/data";
+
+type ShellUser = Pick<typeof mockUser, "email" | "firstName" | "lastName">;
 
 async function handleSignOut() {
   "use server";
@@ -69,6 +72,37 @@ async function loadShellOrg(): Promise<Pick<Org, "name" | "plan">> {
   return mockOrg;
 }
 
+function deriveShellName(email: string): { firstName: string; lastName: string } {
+  const local = email.split("@")[0]?.trim() || "Skillayer User";
+  const parts = local
+    .split(/[._-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const [firstName = "Skillayer", lastName = "User"] = parts;
+  return {
+    firstName: firstName.charAt(0).toUpperCase() + firstName.slice(1),
+    lastName: lastName.charAt(0).toUpperCase() + lastName.slice(1),
+  };
+}
+
+async function loadShellUser(): Promise<ShellUser> {
+  try {
+    const session = await withAuth({ ensureSignedIn: false });
+    if (session?.user?.email) {
+      const fallbackName = deriveShellName(session.user.email);
+      return {
+        email: session.user.email,
+        firstName: session.user.firstName || fallbackName.firstName,
+        lastName: session.user.lastName || fallbackName.lastName,
+      };
+    }
+  } catch (error) {
+    console.error("Dashboard shell user unavailable:", error);
+  }
+
+  return mockUser;
+}
+
 export default async function DashboardLayout({
   children,
 }: Readonly<{
@@ -92,6 +126,7 @@ export default async function DashboardLayout({
     badge?: string;
   };
   const shellOrg = await loadShellOrg();
+  const shellUser = await loadShellUser();
   const workspaceItems: NavItem[] = dashboardNavItems
     .filter((item) => item.href !== "/dashboard/settings" && item.href !== "/dashboard/upgrade")
     .map((item) => ({ ...item, icon: item.icon as IconName }));
@@ -106,7 +141,7 @@ export default async function DashboardLayout({
   const accountItems: NavItem[] = dashboardNavItems
     .filter((item) => item.href === "/dashboard/settings")
     .map((item) => ({ ...item, icon: item.icon as IconName }));
-  const initials = `${mockUser.firstName[0]}${mockUser.lastName[0]}`;
+  const initials = `${shellUser.firstName[0] ?? "S"}${shellUser.lastName[0] ?? "U"}`;
 
   return (
     <div className="min-h-screen bg-[color:var(--bg-base)] text-[color:var(--text-primary)]">
@@ -145,9 +180,9 @@ export default async function DashboardLayout({
             </div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] font-medium text-[color:var(--text-primary)]">
-                {mockUser.firstName} {mockUser.lastName}
+                {shellUser.firstName} {shellUser.lastName}
               </div>
-              <div className="truncate text-[11px] text-[color:var(--text-tertiary)]">{mockUser.email}</div>
+              <div className="truncate text-[11px] text-[color:var(--text-tertiary)]">{shellUser.email}</div>
             </div>
             <form action={handleSignOut}>
               <button
@@ -180,13 +215,13 @@ export default async function DashboardLayout({
               <Bell className="h-4 w-4" />
             </button>
             <div className="h-5 w-px bg-[color:var(--bg-surface)]" />
-            <button
+            <Link
               className="inline-flex items-center rounded-md bg-[color:var(--accent-primary)] px-3 py-1.5 text-[13px] font-semibold text-[color:var(--bg-base)] transition-colors hover:bg-[color:var(--accent-bright)]"
-              type="button"
+              href="/dashboard/repos"
             >
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               New analysis
-            </button>
+            </Link>
           </div>
         </header>
 

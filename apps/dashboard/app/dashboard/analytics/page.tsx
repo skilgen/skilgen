@@ -1,7 +1,8 @@
+import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
+import { BarChart3 } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
-import { SectionFallback } from "@/components/section-fallback";
 import { getMyOrg, getOrgAnalytics, type AnalyticsSkill, type OrgAnalytics } from "../../../lib/data";
 
 export const dynamic = "force-dynamic";
@@ -101,10 +102,28 @@ function NeverLoadedList({ skills }: { skills: AnalyticsSkill[] }) {
   );
 }
 
+function EmptyAnalyticsState() {
+  return (
+    <div className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-12 text-center">
+      <BarChart3 className="mx-auto mb-4 h-10 w-10 text-[color:var(--text-tertiary)]" />
+      <h2 className="text-[17px] font-semibold text-[color:var(--text-primary)]">No activity yet</h2>
+      <p className="mx-auto mt-2 max-w-md text-[14px] text-[color:var(--text-secondary)]">
+        Analytics appear once agents start loading skills from your repositories. Run your first analysis to get started.
+      </p>
+      <Link
+        className="mt-6 inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)]"
+        href="/dashboard/repos"
+      >
+        Go to Repos
+      </Link>
+    </div>
+  );
+}
+
 export default async function AnalyticsPage() {
   let analytics: OrgAnalytics | null = null;
   try {
-    const session = await withAuth({ ensureSignedIn: true });
+    const session = await withAuth({ ensureSignedIn: false });
     const accessToken = session.accessToken || "";
     const org = await getMyOrg(accessToken);
     if (org) {
@@ -121,28 +140,38 @@ export default async function AnalyticsPage() {
         <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Skill usage, agent activity, and adoption gaps.</p>
       </div>
 
-      {analytics ? (
-        <div className="space-y-6">
-          <SectionErrorBoundary section="analytics metrics">
-            <div className="grid gap-4 md:grid-cols-3">
-              <MetricPanel label="Total loads" value={analytics.total_loads_30d} sub="Last 30 days" />
-              <MetricPanel label="Most active repo" value={analytics.most_active_repo?.name ?? "-"} sub={`${analytics.most_active_repo?.loads ?? 0} loads`} />
-              <MetricPanel label="Most loaded skill" value={analytics.most_loaded_skill?.domain ?? "-"} sub={`${analytics.most_loaded_skill?.loads ?? 0} loads`} />
-            </div>
-          </SectionErrorBoundary>
-          <SectionErrorBoundary section="analytics activity">
-            <Sparkline points={analytics.daily_loads} />
-          </SectionErrorBoundary>
-          <SectionErrorBoundary section="analytics skills">
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-              <TopSkillsChart skills={analytics.top_skills} />
-              <NeverLoadedList skills={analytics.never_loaded} />
-            </div>
-          </SectionErrorBoundary>
-        </div>
-      ) : (
-        <SectionFallback section="analytics" />
-      )}
+      <div className="space-y-6">
+        <SectionErrorBoundary section="analytics metrics">
+          <div className="grid gap-4 md:grid-cols-3">
+            <MetricPanel label="Total loads" value={analytics?.total_loads_30d ?? "—"} sub={analytics ? "Last 30 days" : "No data yet"} />
+            <MetricPanel
+              label="Most active repo"
+              value={analytics?.most_active_repo?.name ?? "—"}
+              sub={analytics ? `${analytics.most_active_repo?.loads ?? 0} loads` : "No data yet"}
+            />
+            <MetricPanel
+              label="Most loaded skill"
+              value={analytics?.most_loaded_skill?.domain ?? "—"}
+              sub={analytics ? `${analytics.most_loaded_skill?.loads ?? 0} loads` : "No data yet"}
+            />
+          </div>
+        </SectionErrorBoundary>
+        {analytics ? (
+          <>
+            <SectionErrorBoundary section="analytics activity">
+              <Sparkline points={analytics.daily_loads} />
+            </SectionErrorBoundary>
+            <SectionErrorBoundary section="analytics skills">
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+                <TopSkillsChart skills={analytics.top_skills} />
+                <NeverLoadedList skills={analytics.never_loaded} />
+              </div>
+            </SectionErrorBoundary>
+          </>
+        ) : (
+          <EmptyAnalyticsState />
+        )}
+      </div>
     </div>
   );
 }

@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     ADMIN_SECRET: str = ""
 
-    DEPLOYMENT_MODE: str = "saas"
+    DEPLOYMENT_MODE: str = "workos"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

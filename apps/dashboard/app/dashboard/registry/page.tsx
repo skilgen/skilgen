@@ -87,6 +87,7 @@ export default async function RegistryPage({ searchParams }: RegistryPageProps) 
   }
   const registry = await getRegistrySkills(query);
   const skills = registry?.skills ?? [];
+  const hasActiveFilters = Boolean(search || tag || sort !== "imports");
 
   return (
     <div>
@@ -131,6 +132,26 @@ export default async function RegistryPage({ searchParams }: RegistryPageProps) 
             {skills.map((skill) => (
               <RegistryCard key={skill.id} skill={skill} />
             ))}
+          </section>
+        ) : !hasActiveFilters ? (
+          <section className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-12 text-center">
+            <BookOpen className="mx-auto mb-4 h-10 w-10 text-[color:var(--text-tertiary)]" />
+            <h2 className="text-[17px] font-semibold text-[color:var(--text-primary)]">No published skills</h2>
+            <p className="mx-auto mt-2 max-w-md text-[14px] text-[color:var(--text-secondary)]">
+              Publish a skill to the registry to share it with your team or the community. Skills are published from the repo detail page.
+            </p>
+            <div className="mt-6 flex justify-center gap-3">
+              <Link
+                className="inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)]"
+                href="/dashboard/repos"
+              >
+                Go to Repos
+              </Link>
+            </div>
+            <div className="mt-8 rounded-lg border border-[color:var(--bg-border)] bg-black/10 p-4 text-left">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Or publish via CLI</p>
+              <code className="mt-2 block font-mono text-[13px] text-[color:var(--accent-primary)]">skilgen publish --repo {"{repo}"} --skill {"{domain}"}</code>
+            </div>
           </section>
         ) : (
           <section className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center">
