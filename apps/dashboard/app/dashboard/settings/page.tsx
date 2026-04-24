@@ -4,7 +4,7 @@ import { withAuth } from "@workos-inc/authkit-nextjs";
 import { Bell, CreditCard, Github, Settings } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
-import { API_URL, getMyOrg, getOrgSettings, type OrgSettings } from "../../../lib/data";
+import { API_URL, getBootstrapOrg, getMyOrg, getOrgPolicies, getOrgSettings, type GovernancePoliciesResponse, type OrgSettings } from "../../../lib/data";
 import { ManageBillingButton } from "./billing/manage-billing-button";
 import { SettingsControls } from "./settings-controls";
 
@@ -93,16 +93,23 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
   let accessToken = "";
   let settings = fallbackSettings();
   let subscription: SubscriptionState | null = null;
+  let policies: GovernancePoliciesResponse = { policies: [] };
 
   try {
     const session = await withAuth({ ensureSignedIn: true });
     accessToken = session.accessToken || "";
-    const org = await getMyOrg(accessToken);
+    const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
     if (org) {
       settings = (await getOrgSettings(accessToken, org.id)) ?? { ...settings, ...org };
+      policies = (await getOrgPolicies(accessToken, org.id)) ?? policies;
     }
     subscription = await getSubscription(accessToken);
   } catch {
+    const org = await getBootstrapOrg();
+    if (org) {
+      settings = (await getOrgSettings("", org.id)) ?? { ...settings, ...org };
+      policies = (await getOrgPolicies("", org.id)) ?? policies;
+    }
     subscription = null;
   }
 
@@ -135,7 +142,9 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
       </div>
 
       <SectionErrorBoundary section={`${tab} settings`}>
-        {tab === "general" || tab === "notifications" ? <SettingsControls accessToken={accessToken} initialSettings={settings} orgId={settings.id} tab={tab} /> : null}
+        {tab === "general" || tab === "notifications" ? (
+          <SettingsControls accessToken={accessToken} initialPolicies={policies.policies} initialSettings={settings} orgId={settings.id} tab={tab} />
+        ) : null}
         {tab === "github" ? <GitHubSettingsPanel settings={settings} /> : null}
         {tab === "billing" ? <BillingPanel accessToken={accessToken} success={success} subscription={subscription} upgradedPlan={upgradedPlan} /> : null}
       </SectionErrorBoundary>
