@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { withAuth } from "@workos-inc/authkit-nextjs";
 import { Github, Plus } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
@@ -9,30 +10,66 @@ import { ReposBrowser, type RepoListItem } from "./repos-browser";
 export const dynamic = "force-dynamic";
 
 export default async function ReposPage() {
+  let accessToken = "";
   let repos: RepoListItem[] = [];
   let reposError = false;
 
   try {
-    const bootstrapRes = await fetch(`${API_URL}/orgs/bootstrap`, {
-      next: { revalidate: 60 },
-    });
-    if (bootstrapRes.ok) {
-      const org = (await bootstrapRes.json()) as Org;
-      const reposRes = await fetch(`${API_URL}/orgs/${org.id}/repos`, {
-        next: { revalidate: 60 },
+    const session = await withAuth({ ensureSignedIn: false });
+    accessToken = session?.accessToken || "";
+  } catch (error) {
+    console.error("Repos auth unavailable:", error);
+  }
+
+  try {
+    let orgId = "";
+
+    if (accessToken) {
+      const orgRes = await fetch(`${API_URL}/me/org`, {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+      if (orgRes.ok) {
+        const org = (await orgRes.json()) as Org;
+        orgId = org.id;
+      }
+    }
+
+    if (!orgId) {
+      const bootstrapRes = await fetch(`${API_URL}/orgs/bootstrap`, {
+        cache: "no-store",
+      });
+      if (bootstrapRes.ok) {
+        const org = (await bootstrapRes.json()) as Org;
+        orgId = org.id;
+      } else {
+        reposError = true;
+      }
+    }
+
+    if (orgId) {
+      const reposRes = await fetch(`${API_URL}/orgs/${orgId}/repos`, {
+        cache: "no-store",
+        headers: accessToken
+          ? {
+              Authorization: `Bearer ${accessToken}`,
+            }
+          : undefined,
       });
       if (reposRes.ok) {
         repos = (((await reposRes.json()) as Repo[]) ?? []) as RepoListItem[];
       } else {
         reposError = true;
       }
-    } else {
-      reposError = true;
     }
   } catch (error) {
     reposError = true;
     console.error("Failed to fetch repos:", error);
   }
+
+  const connectLabel = repos.length === 0 ? "Connect repo" : "Add more repos";
 
   return (
     <div>
@@ -55,7 +92,7 @@ export default async function ReposPage() {
           target="_blank"
         >
           <Github className="mr-2 h-4 w-4" />
-          Connect repo
+          {connectLabel}
         </Link>
       </div>
 
@@ -63,7 +100,7 @@ export default async function ReposPage() {
         {reposError ? (
           <SectionFallback section="repositories" />
         ) : repos.length > 0 ? (
-          <ReposBrowser repos={repos} />
+          <ReposBrowser accessToken={accessToken} repos={repos} />
         ) : (
           <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[rgb(var(--accent-primary-rgb)/0.12)] text-[color:var(--accent-primary)]">

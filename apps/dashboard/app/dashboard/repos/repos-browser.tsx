@@ -1,8 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
+
+import { API_URL } from "../../../lib/data";
+import { captureDashboardEvent } from "@/lib/posthog";
 
 type Score = {
   total: number;
@@ -18,11 +21,13 @@ export type RepoListItem = {
   full_name: string;
   language: string | null;
   last_analysed_at: string | null;
+  created_at?: string | null;
   score: Score | null;
   skill_count: number;
 };
 
 type SortMode = "score-desc" | "score-asc" | "name-asc" | "last-analysed";
+type RowAnalyseState = "idle" | "loading" | "queued" | "error";
 
 function scoreBadgeClass(score: number): string {
   if (score <= 40) return "bg-red-900/30 text-red-400";
@@ -55,6 +60,15 @@ function relativeTime(value: string | null): string {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(timestamp));
 }
 
+function isRecentlyConnected(createdAt: string | null | undefined, lastAnalysedAt: string | null): boolean {
+  if (lastAnalysedAt !== null || !createdAt) return false;
+
+  const createdTimestamp = new Date(createdAt).getTime();
+  if (Number.isNaN(createdTimestamp)) return false;
+
+  return Date.now() - createdTimestamp <= 5 * 60 * 1000;
+}
+
 function sortRepos(repos: RepoListItem[], sortMode: SortMode): RepoListItem[] {
   return [...repos].sort((left, right) => {
     if (sortMode === "name-asc") return left.full_name.localeCompare(right.full_name);
@@ -68,10 +82,33 @@ function sortRepos(repos: RepoListItem[], sortMode: SortMode): RepoListItem[] {
   });
 }
 
-export function ReposBrowser({ repos }: { repos: RepoListItem[] }) {
+type RepoAnalyseActionProps = {
+  disabled: boolean;
+  label: string;
+  onAnalyse: () => Promise<void>;
+};
+
+function RepoAnalyseAction({ disabled, label, onAnalyse }: RepoAnalyseActionProps) {
+  return (
+    <button
+      className="rounded-md border border-[rgb(var(--accent-primary-rgb)/0.45)] px-3 py-1.5 text-[12px] font-semibold text-[color:var(--accent-primary)] transition-colors hover:bg-[rgb(var(--accent-primary-rgb)/0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+      disabled={disabled}
+      onClick={(event) => {
+        event.stopPropagation();
+        void onAnalyse();
+      }}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
+export function ReposBrowser({ accessToken, repos }: { accessToken: string; repos: RepoListItem[] }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("score-desc");
+  const [rowStates, setRowStates] = useState<Record<string, RowAnalyseState>>({});
 
   const visibleRepos = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -80,6 +117,38 @@ export function ReposBrowser({ repos }: { repos: RepoListItem[] }) {
       : repos;
     return sortRepos(filtered, sortMode);
   }, [query, repos, sortMode]);
+
+  const handleAnalyse = useCallback(
+    async (repoId: string) => {
+      if (!accessToken) {
+        router.push("/sign-in");
+        return;
+      }
+
+      setRowStates((current) => ({ ...current, [repoId]: "loading" }));
+      captureDashboardEvent({ name: "repo_analyse_triggered", properties: {} });
+
+      try {
+        const response = await fetch(`${API_URL}/repos/${repoId}/analyse`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({}),
+        });
+        const data = (await response.json().catch(() => ({}))) as { detail?: string };
+        if (!response.ok) {
+          throw new Error(data.detail || `Request failed with ${response.status}`);
+        }
+        setRowStates((current) => ({ ...current, [repoId]: "queued" }));
+      } catch (error) {
+        console.error("Failed to queue analysis:", error);
+        setRowStates((current) => ({ ...current, [repoId]: "error" }));
+      }
+    },
+    [accessToken, router],
+  );
 
   return (
     <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
@@ -126,6 +195,18 @@ export function ReposBrowser({ repos }: { repos: RepoListItem[] }) {
           <tbody>
             {visibleRepos.map((repo) => {
               const score = repo.score?.total ?? null;
+              const analyseState = rowStates[repo.id] ?? "idle";
+              const recentlyConnected = isRecentlyConnected(repo.created_at, repo.last_analysed_at);
+              const analyseLabel =
+                analyseState === "loading"
+                  ? "Queueing..."
+                  : analyseState === "queued"
+                    ? "Queued"
+                    : analyseState === "error"
+                      ? "Retry analyse"
+                      : score === null
+                        ? "Analyse"
+                        : "Analyse again";
               return (
                 <tr
                   className="cursor-pointer border-b border-[color:var(--bg-elevated)] transition-colors last:border-b-0 hover:bg-white/5"
@@ -133,7 +214,14 @@ export function ReposBrowser({ repos }: { repos: RepoListItem[] }) {
                   onClick={() => router.push(`/dashboard/repos/${repo.id}`)}
                 >
                   <td className="px-5 py-4">
-                    <span className="block font-medium text-[color:var(--text-primary)]">{repo.name}</span>
+                    <span className="flex flex-wrap items-center gap-2 font-medium text-[color:var(--text-primary)]">
+                      <span>{repo.name}</span>
+                      {recentlyConnected ? (
+                        <span className="inline-flex rounded-full bg-[rgb(var(--accent-primary-rgb)/0.14)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--accent-primary)]">
+                          Recently connected
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="mt-0.5 block font-mono text-[12px] text-[color:var(--text-tertiary)]">{repo.full_name}</span>
                   </td>
                   <td className="px-5 py-4 text-[color:var(--text-secondary)]">{repo.language || "—"}</td>
@@ -149,16 +237,11 @@ export function ReposBrowser({ repos }: { repos: RepoListItem[] }) {
                   <td className="px-5 py-4 text-[color:var(--text-secondary)]">{repo.skill_count || "—"}</td>
                   <td className="px-5 py-4 text-[color:var(--text-secondary)]">{relativeTime(repo.last_analysed_at)}</td>
                   <td className="px-5 py-4">
-                    <button
-                      className="rounded-md border border-[rgb(var(--accent-primary-rgb)/0.45)] px-3 py-1.5 text-[12px] font-semibold text-[color:var(--accent-primary)] transition-colors hover:bg-[rgb(var(--accent-primary-rgb)/0.12)]"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        router.push(`/dashboard/repos/${repo.id}`);
-                      }}
-                      type="button"
-                    >
-                      {score === null ? "Analyse" : "View"}
-                    </button>
+                    <RepoAnalyseAction
+                      disabled={analyseState === "loading" || analyseState === "queued"}
+                      label={analyseLabel}
+                      onAnalyse={() => handleAnalyse(repo.id)}
+                    />
                   </td>
                 </tr>
               );
