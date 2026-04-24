@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
+import { Database } from "lucide-react";
 
 import { API_URL, type Org, getOrgCoverageSummary, type OrgCoverageSummary, type RepoCoverageSummary, type SkillCategory } from "../../../lib/data";
 
@@ -70,7 +71,7 @@ function missingRepoNames(category: SkillCategory, repos: RepoCoverageSummary[])
 export default async function SourcesPage() {
   let accessToken = "";
   try {
-    const session = await withAuth({ ensureSignedIn: true });
+    const session = await withAuth({ ensureSignedIn: false });
     accessToken = session.accessToken || "";
   } catch (error) {
     console.error("Sources page auth unavailable:", error);
@@ -87,8 +88,24 @@ export default async function SourcesPage() {
 
   if (!coverage) {
     return (
-      <div className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6 text-[color:var(--text-secondary)]">
-        Unable to load coverage data. Refresh or contact support.
+      <div>
+        <div className="mb-8">
+          <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">Knowledge Coverage</h1>
+          <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Which knowledge categories are covered across your org</p>
+        </div>
+        <div className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-12 text-center">
+          <Database className="mx-auto mb-4 h-10 w-10 text-[color:var(--text-tertiary)]" />
+          <h2 className="text-[17px] font-semibold text-[color:var(--text-primary)]">No coverage data yet</h2>
+          <p className="mx-auto mt-2 max-w-md text-[14px] text-[color:var(--text-secondary)]">
+            Coverage data appears after your first analysis run. Connect a repo and run an analysis to see which knowledge categories are covered.
+          </p>
+          <Link
+            className="mt-6 inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)]"
+            href="/dashboard/repos"
+          >
+            Analyse a repo
+          </Link>
+        </div>
       </div>
     );
   }

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Github } from "lucide-react";
 
 import type { OrgCoverageSummary, OrgStats, Repo, SkillCategory } from "../../lib/data";
@@ -29,12 +30,37 @@ function OnboardingCard() {
         </p>
         <a
           className="inline-flex items-center rounded-md bg-[color:var(--accent-primary)] px-5 py-2.5 text-[14px] font-semibold text-[color:var(--bg-base)] shadow-[0_0_20px_rgb(var(--accent-primary-rgb)/0.15)] transition-colors hover:bg-[color:var(--accent-bright)]"
-          href="#"
+          href="https://github.com/apps/skillayer/installations/new"
         >
           <Github className="mr-2 h-4 w-4" />
           Install GitHub App
         </a>
-        <p className="mt-3 text-[12px] text-[color:var(--text-tertiary)]">Free tier includes 3 private repos</p>
+        <div className="mt-3">
+          <Link className="text-[12px] font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]" href="/dashboard/onboarding">
+            See the getting started guide
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function GettingStartedCard() {
+  return (
+    <section className="mb-8 rounded-xl border border-[rgb(var(--accent-primary-rgb)/0.18)] bg-[rgb(var(--accent-primary-rgb)/0.08)] p-6">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Getting started with Skillayer</h2>
+          <p className="mt-1 max-w-2xl text-[14px] text-[color:var(--text-secondary)]">
+            Connect your first repo, run an analysis, and start browsing the skills your agents can actually use.
+          </p>
+        </div>
+        <Link
+          className="inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)]"
+          href="/dashboard/onboarding"
+        >
+          Open onboarding
+        </Link>
       </div>
     </section>
   );
@@ -143,9 +169,11 @@ export function OverviewLiveData({
   const showMetricSkeletons = stats === null;
   const statsErrorDetail = statsError ?? orgError;
   const reposErrorDetail = reposError ?? orgError;
+  const showGettingStarted = repos.length === 0 && (stats?.skill_count ?? 0) === 0;
 
   return (
     <>
+      {showGettingStarted ? <GettingStartedCard /> : null}
       <SectionErrorBoundary section="overview metrics">
         {statsErrorDetail ? (
           <div className="mb-8">

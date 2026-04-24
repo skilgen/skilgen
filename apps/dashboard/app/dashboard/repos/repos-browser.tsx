@@ -4,8 +4,9 @@ import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 
-import { API_URL } from "../../../lib/data";
 import { captureDashboardEvent } from "@/lib/posthog";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
 
 type Score = {
   total: number;

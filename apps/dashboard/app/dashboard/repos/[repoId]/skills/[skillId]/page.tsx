@@ -85,6 +85,61 @@ function SubscoreCard({ label, value }: { label: string; value: number }) {
   );
 }
 
+function ScoreRing({ score }: { score: number }) {
+  const clamped = Math.max(0, Math.min(100, score));
+  const radius = 42;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (clamped / 100) * circumference;
+  const tone = clamped <= 40 ? "text-red-400" : clamped <= 70 ? "text-amber-400" : "text-[color:var(--accent-green)]";
+
+  return (
+    <div className="relative flex h-28 w-28 items-center justify-center">
+      <svg className="-rotate-90 h-28 w-28" viewBox="0 0 120 120">
+        <circle cx="60" cy="60" fill="none" r={radius} stroke="rgba(255,255,255,0.08)" strokeWidth="10" />
+        <circle
+          cx="60"
+          cy="60"
+          fill="none"
+          r={radius}
+          stroke="currentColor"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          strokeWidth="10"
+          className={tone}
+        />
+      </svg>
+      <div className="absolute text-center">
+        <div className="text-2xl font-semibold text-[color:var(--text-primary)]">{clamped}</div>
+        <div className="text-[11px] uppercase tracking-wide text-[color:var(--text-tertiary)]">Score</div>
+      </div>
+    </div>
+  );
+}
+
+function formatRelativeTime(value: string | null): string {
+  if (!value) return "Never";
+  const date = new Date(value);
+  const timestamp = date.getTime();
+  if (Number.isNaN(timestamp)) return "Unknown";
+  const diffMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+  if (diffMinutes < 1) return "Just now";
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date);
+}
+
+function categoryLabel(category: string | null): string | null {
+  if (!category) return null;
+  return category
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export default async function SkillDetailPage({ params }: PageProps) {
   const { repoId, skillId } = await params;
   let accessToken = "";
@@ -95,7 +150,7 @@ export default async function SkillDetailPage({ params }: PageProps) {
   let skillLoadFailed = false;
 
   try {
-    const session = await withAuth({ ensureSignedIn: true });
+    const session = await withAuth({ ensureSignedIn: false });
     accessToken = session.accessToken || "";
   } catch (error) {
     console.error("Skill detail auth unavailable:", error);
@@ -152,22 +207,37 @@ export default async function SkillDetailPage({ params }: PageProps) {
 
       <SectionErrorBoundary section="skill header">
         <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <Link className="mb-4 inline-flex items-center gap-2 text-[13px] text-[color:var(--text-secondary)] hover:text-[color:var(--accent-primary)]" href={`/dashboard/repos/${repoId}`}>
-              <ArrowLeft className="h-4 w-4" />
-              Back to repository
-            </Link>
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-[rgb(var(--accent-primary-rgb)/0.2)] bg-[rgb(var(--accent-primary-rgb)/0.1)]">
-                <FileText className="h-5 w-5 text-[color:var(--accent-primary)]" />
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
+            <ScoreRing score={skill.score.total} />
+            <div>
+              <Link className="mb-4 inline-flex items-center gap-2 text-[13px] text-[color:var(--text-secondary)] hover:text-[color:var(--accent-primary)]" href={`/dashboard/repos/${repoId}`}>
+                <ArrowLeft className="h-4 w-4" />
+                Back to repository
+              </Link>
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-[rgb(var(--accent-primary-rgb)/0.2)] bg-[rgb(var(--accent-primary-rgb)/0.1)]">
+                  <FileText className="h-5 w-5 text-[color:var(--accent-primary)]" />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">{skill.domain}</h1>
+                  <p className="mt-1 font-mono text-[12px] text-[color:var(--text-secondary)]">{skill.skill_path}</p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">{skill.domain}</h1>
-                <p className="mt-1 font-mono text-[12px] text-[color:var(--text-secondary)]">{skill.skill_path}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <div className="inline-flex rounded-full border border-[rgb(var(--accent-primary-rgb)/0.28)] bg-[rgb(var(--accent-primary-rgb)/0.08)] px-3 py-1 text-[12px] font-semibold text-[color:var(--accent-primary)]">
+                  Source: {sourceDescription(skill.source_type)}
+                </div>
+                {categoryLabel(skill.skill_category) ? (
+                  <div className="inline-flex rounded-full border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-3 py-1 text-[12px] font-semibold text-[color:var(--text-secondary)]">
+                    Category: {categoryLabel(skill.skill_category)}
+                  </div>
+                ) : null}
               </div>
-            </div>
-            <div className="mt-4 inline-flex rounded-full border border-[rgb(var(--accent-primary-rgb)/0.28)] bg-[rgb(var(--accent-primary-rgb)/0.08)] px-3 py-1 text-[12px] font-semibold text-[color:var(--accent-primary)]">
-              Source: {sourceDescription(skill.source_type)}
+              <div className="mt-4 flex flex-wrap gap-4 text-[13px] text-[color:var(--text-secondary)]">
+                <span>{skill.load_count_30d} loads in 30d</span>
+                <span>Last loaded: {formatRelativeTime(skill.last_loaded_at)}</span>
+                <span>{versions.length || skill.version_count} version{(versions.length || skill.version_count) === 1 ? "" : "s"}</span>
+              </div>
             </div>
           </div>
 
@@ -189,7 +259,7 @@ export default async function SkillDetailPage({ params }: PageProps) {
       </SectionErrorBoundary>
 
       <SectionErrorBoundary section="skill content">
-        <SkillDetailViewer accessToken={accessToken} skill={skill} versions={versions} />
+        <SkillDetailViewer accessToken={accessToken} skill={skill} versions={versions} copyLabel="Copy skill path" copyValue={skill.skill_path} />
       </SectionErrorBoundary>
     </div>
   );
