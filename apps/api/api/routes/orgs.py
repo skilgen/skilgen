@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import logging
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -15,13 +16,25 @@ from packages.db.database import get_db
 from packages.db.models import AnalysisRun, Org, Repo, ScoreHistory, Skill, SkillUsageEvent
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
+    AuditLogEventResponse,
+    AuditLogResponse,
+    GovernancePoliciesResponse,
+    GovernancePolicyResponse,
     OrgCoverageSummaryResponse,
     OrgResponse,
     OrgSettingsResponse,
     OrgSettingsUpdate,
     RepoCoverageSummary,
     RepoResponse,
+    RuntimeBreakdownEntryResponse,
+    RuntimeBreakdownResponse,
     ScoreResponse,
+    SkillHeatmapResponse,
+    SkillHeatmapSkillResponse,
+    SkillHeatmapSummaryResponse,
+    TeamRepoScoreResponse,
+    TeamRollupResponse,
+    TeamRollupTeamResponse,
 )
 
 
@@ -39,11 +52,173 @@ SKILL_CATEGORIES = [
     "operational_knowledge",
 ]
 
+RUNTIME_DISPLAY_NAMES = {
+    "claude_code": "Claude Code",
+    "cursor": "Cursor",
+    "codex": "Codex",
+    "copilot": "Copilot",
+    "gemini_cli": "Gemini CLI",
+    "unknown": "Other",
+}
+
+DEFAULT_POLICIES = [
+    {
+        "name": "Minimum score gate",
+        "type": "min_score",
+        "threshold": 60,
+        "scope": "all_repos",
+        "action": "warn",
+        "enabled": True,
+    },
+    {
+        "name": "Freshness requirement",
+        "type": "max_staleness_days",
+        "threshold": 14,
+        "scope": "all_repos",
+        "action": "block_pr",
+        "enabled": False,
+    },
+]
+
 
 def _last_30_score_dates() -> list[str]:
     """Return the last 30 UTC score dates in chronological order."""
     today = datetime.now(UTC).date()
     return [(today - timedelta(days=offset)).isoformat() for offset in range(29, -1, -1)]
+
+
+def _utc_now_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _runtime_display_name(runtime: str | None) -> str:
+    normalized = str(runtime or "unknown")
+    return RUNTIME_DISPLAY_NAMES.get(normalized, normalized.replace("_", " ").title())
+
+
+def _criticality_score(loads_30d: int, last_loaded_at: datetime | None, is_stale: bool, max_loads: int) -> int:
+    freq_score = min(100, (loads_30d / max(max_loads, 1)) * 100)
+    recency_score = 0
+    if last_loaded_at is not None:
+        age = _utc_now_naive() - last_loaded_at.replace(tzinfo=None) if last_loaded_at.tzinfo else _utc_now_naive() - last_loaded_at
+        if age <= timedelta(days=7):
+            recency_score = 100
+        elif age <= timedelta(days=30):
+            recency_score = 50
+    staleness_penalty = 30 if is_stale else 0
+    return max(0, round(freq_score * 0.6 + recency_score * 0.4 - staleness_penalty))
+
+
+def _skill_alert(skill: Skill, loads_30d: int, now: datetime) -> str:
+    created_at = skill.created_at.replace(tzinfo=None) if skill.created_at.tzinfo else skill.created_at
+    if skill.is_stale and loads_30d > 0:
+        return "stale_but_active"
+    if loads_30d == 0 and created_at < now - timedelta(days=7):
+        return "dead_skill"
+    return "healthy"
+
+
+def _team_from_repo_name(name: str) -> str:
+    parts = name.replace("_", "-").split("-")
+    return parts[0] if len(parts) > 1 else name
+
+
+def _event_type_for_run(run: AnalysisRun) -> str:
+    trigger = str(run.trigger or "")
+    if run.status == "failed":
+        return "analysis_failed"
+    if trigger in {"pr", "pr_trigger"}:
+        return "pr_gate_triggered"
+    if run.status == "complete":
+        return "analysis_complete"
+    return "analysis_queued"
+
+
+def _actor_for_trigger(trigger: str | None) -> str:
+    if trigger in {"manual", "push", "pr_trigger", "webhook", "github_push"}:
+        return str(trigger)
+    if trigger and trigger.startswith("source:"):
+        return "webhook"
+    return "manual"
+
+
+def _normalize_policy(raw: object, index: int) -> GovernancePolicyResponse | None:
+    if not isinstance(raw, dict):
+        return None
+    policy_type = str(raw.get("type") or "").strip()
+    action = str(raw.get("action") or "").strip()
+    if policy_type not in {"min_score", "max_staleness_days", "required_categories", "min_groundedness"}:
+        return None
+    if action not in {"warn", "block_pr", "notify_slack"}:
+        return None
+    threshold = raw.get("threshold", 0)
+    if policy_type == "required_categories":
+        threshold = [str(item) for item in threshold] if isinstance(threshold, list) else []
+    else:
+        try:
+            threshold = int(threshold or 0)
+        except (TypeError, ValueError):
+            threshold = 0
+    created_at = raw.get("created_at")
+    if isinstance(created_at, str):
+        try:
+            created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        except ValueError:
+            created_at = None
+    elif not isinstance(created_at, datetime):
+        created_at = None
+    return GovernancePolicyResponse(
+        id=str(raw.get("id") or uuid4()),
+        name=str(raw.get("name") or f"Policy {index + 1}"),
+        type=policy_type,
+        threshold=threshold,
+        scope=str(raw.get("scope") or "all_repos"),
+        action=action,
+        enabled=bool(raw.get("enabled", True)),
+        created_at=created_at,
+    )
+
+
+def _get_policies(org: Org) -> list[GovernancePolicyResponse]:
+    settings = org.notification_settings if isinstance(org.notification_settings, dict) else {}
+    raw_policies = settings.get("policies")
+    source = raw_policies if isinstance(raw_policies, list) else DEFAULT_POLICIES
+    policies = [_normalize_policy(item, index) for index, item in enumerate(source)]
+    return [policy for policy in policies if policy is not None]
+
+
+async def _latest_repo_score(db: AsyncSession, repo_id: str) -> int:
+    latest_run = (
+        await db.execute(
+            select(AnalysisRun.score_total)
+            .where(AnalysisRun.repo_id == repo_id, AnalysisRun.status == "complete")
+            .order_by(desc(AnalysisRun.created_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest_run is not None:
+        return int(latest_run or 0)
+    latest_history = (
+        await db.execute(
+            select(ScoreHistory.score_total)
+            .where(ScoreHistory.repo_id == repo_id)
+            .order_by(desc(ScoreHistory.recorded_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return int(latest_history or 0)
+
+
+async def _repo_score_before(db: AsyncSession, repo_id: str, before: datetime) -> int | None:
+    previous = (
+        await db.execute(
+            select(ScoreHistory.score_total)
+            .where(ScoreHistory.repo_id == repo_id, ScoreHistory.recorded_at <= before)
+            .order_by(desc(ScoreHistory.recorded_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return int(previous) if previous is not None else None
 
 
 
@@ -290,6 +465,366 @@ async def get_org_stats(
         "active_agents": 0,
         "score_trend": trend,
     }
+
+
+@router.get("/{org_id}/skill-heatmap", response_model=SkillHeatmapResponse)
+async def get_skill_heatmap(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> SkillHeatmapResponse:
+    now = _utc_now_naive()
+    cutoff_30 = now - timedelta(days=30)
+    cutoff_7 = now - timedelta(days=7)
+    try:
+        skill_rows = (
+            await db.execute(
+                select(Skill, Repo.name.label("repo_name"))
+                .join(Repo, Repo.id == Skill.repo_id)
+                .where(Repo.org_id == org_id, Repo.is_active.is_(True))
+            )
+        ).all()
+        usage_rows = (
+            await db.execute(
+                select(
+                    SkillUsageEvent.skill_id,
+                    func.count(SkillUsageEvent.id).label("loads_30d"),
+                    func.count(SkillUsageEvent.id).filter(SkillUsageEvent.loaded_at >= cutoff_7).label("loads_7d"),
+                    func.max(SkillUsageEvent.loaded_at).label("last_loaded_at"),
+                )
+                .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff_30)
+                .group_by(SkillUsageEvent.skill_id)
+            )
+        ).all()
+        runtime_rows = (
+            await db.execute(
+                select(SkillUsageEvent.skill_id, SkillUsageEvent.agent_runtime)
+                .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff_30)
+                .distinct()
+            )
+        ).all()
+    except SQLAlchemyError as exc:
+        await _rollback(db, "skill heatmap lookup")
+        raise HTTPException(status_code=400, detail="Unable to load skill heatmap") from exc
+
+    usage_by_skill = {
+        str(row.skill_id): {
+            "loads_30d": int(row.loads_30d or 0),
+            "loads_7d": int(row.loads_7d or 0),
+            "last_loaded_at": row.last_loaded_at,
+        }
+        for row in usage_rows
+    }
+    runtimes_by_skill: dict[str, set[str]] = {}
+    for row in runtime_rows:
+        runtimes_by_skill.setdefault(str(row.skill_id), set()).add(str(row.agent_runtime or "unknown"))
+
+    max_loads = max((item["loads_30d"] for item in usage_by_skill.values()), default=1)
+    response_skills: list[SkillHeatmapSkillResponse] = []
+    dead_skills = 0
+    stale_but_active = 0
+    healthy = 0
+    for skill, repo_name in skill_rows:
+        usage = usage_by_skill.get(skill.id, {"loads_30d": 0, "loads_7d": 0, "last_loaded_at": skill.last_loaded_at})
+        last_loaded_at = usage["last_loaded_at"] or skill.last_loaded_at
+        loads_30d = int(usage["loads_30d"])
+        alert = _skill_alert(skill, loads_30d, now)
+        criticality = _criticality_score(loads_30d, last_loaded_at, bool(skill.is_stale), max_loads)
+        if alert == "dead_skill":
+            dead_skills += 1
+        elif alert == "stale_but_active":
+            stale_but_active += 1
+        else:
+            healthy += 1
+        response_skills.append(
+            SkillHeatmapSkillResponse(
+                skill_id=skill.id,
+                domain=skill.domain,
+                repo_id=skill.repo_id,
+                repo_name=str(repo_name),
+                skill_category=_skill_category(skill),
+                source_type=str(skill.source_type or "code"),
+                score_total=int(skill.score_total or 0),
+                is_stale=bool(skill.is_stale),
+                loads_30d=loads_30d,
+                loads_7d=int(usage["loads_7d"]),
+                criticality_score=criticality,
+                last_loaded_at=last_loaded_at,
+                agent_runtimes=sorted(runtimes_by_skill.get(skill.id, set())),
+                alert=alert,
+            )
+        )
+    response_skills.sort(key=lambda item: (-item.criticality_score, -item.loads_30d, item.domain))
+    avg_criticality = round(
+        sum(skill.criticality_score for skill in response_skills) / len(response_skills)
+    ) if response_skills else 0
+    return SkillHeatmapResponse(
+        skills=response_skills,
+        summary=SkillHeatmapSummaryResponse(
+            total_skills=len(response_skills),
+            dead_skills=dead_skills,
+            stale_but_active=stale_but_active,
+            healthy=healthy,
+            avg_criticality=avg_criticality,
+        ),
+    )
+
+
+@router.get("/{org_id}/runtime-breakdown", response_model=RuntimeBreakdownResponse)
+async def get_runtime_breakdown(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> RuntimeBreakdownResponse:
+    cutoff_30 = _utc_now_naive() - timedelta(days=30)
+    try:
+        runtime_rows = (
+            await db.execute(
+                select(
+                    SkillUsageEvent.agent_runtime.label("runtime"),
+                    func.count(SkillUsageEvent.id).label("loads_30d"),
+                    func.count(func.distinct(SkillUsageEvent.skill_id)).label("unique_skills"),
+                )
+                .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff_30)
+                .group_by(SkillUsageEvent.agent_runtime)
+                .order_by(desc(func.count(SkillUsageEvent.id)))
+            )
+        ).all()
+        domain_rows = (
+            await db.execute(
+                select(
+                    SkillUsageEvent.agent_runtime.label("runtime"),
+                    Skill.domain.label("domain"),
+                    func.count(SkillUsageEvent.id).label("loads"),
+                )
+                .join(Skill, Skill.id == SkillUsageEvent.skill_id)
+                .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff_30)
+                .group_by(SkillUsageEvent.agent_runtime, Skill.domain)
+            )
+        ).all()
+        top_domains: dict[str, tuple[str, int]] = {}
+        for row in domain_rows:
+            runtime = str(row.runtime or "unknown")
+            loads = int(row.loads or 0)
+            current = top_domains.get(runtime)
+            if current is None or loads > current[1]:
+                top_domains[runtime] = (str(row.domain), loads)
+        runtimes = [
+            RuntimeBreakdownEntryResponse(
+                runtime=str(row.runtime or "unknown"),
+                display_name=_runtime_display_name(row.runtime),
+                loads_30d=int(row.loads_30d or 0),
+                unique_skills=int(row.unique_skills or 0),
+                top_skill_domain=top_domains.get(str(row.runtime or "unknown"), (None, 0))[0],
+            )
+            for row in runtime_rows
+        ]
+        return RuntimeBreakdownResponse(
+            runtimes=runtimes,
+            total_loads_30d=sum(item.loads_30d for item in runtimes),
+        )
+    except SQLAlchemyError:
+        await _rollback(db, "runtime breakdown fallback")
+        total_loads = (
+            await db.execute(
+                select(func.count(SkillUsageEvent.id)).where(
+                    SkillUsageEvent.org_id == org_id,
+                    SkillUsageEvent.loaded_at >= cutoff_30,
+                )
+            )
+        ).scalar_one()
+        unique_skills = (
+            await db.execute(
+                select(func.count(func.distinct(SkillUsageEvent.skill_id))).where(
+                    SkillUsageEvent.org_id == org_id,
+                    SkillUsageEvent.loaded_at >= cutoff_30,
+                )
+            )
+        ).scalar_one()
+        top_domain_row = (
+            await db.execute(
+                select(Skill.domain, func.count(SkillUsageEvent.id).label("loads"))
+                .join(Skill, Skill.id == SkillUsageEvent.skill_id)
+                .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff_30)
+                .group_by(Skill.domain)
+                .order_by(desc(func.count(SkillUsageEvent.id)))
+                .limit(1)
+            )
+        ).first()
+        return RuntimeBreakdownResponse(
+            runtimes=[
+                RuntimeBreakdownEntryResponse(
+                    runtime="unknown",
+                    display_name=_runtime_display_name("unknown"),
+                    loads_30d=int(total_loads or 0),
+                    unique_skills=int(unique_skills or 0),
+                    top_skill_domain=(str(top_domain_row.domain) if top_domain_row else None),
+                )
+            ] if int(total_loads or 0) > 0 else [],
+            total_loads_30d=int(total_loads or 0),
+        )
+
+
+@router.get("/{org_id}/team-rollup", response_model=TeamRollupResponse)
+async def get_team_rollup(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> TeamRollupResponse:
+    now = _utc_now_naive()
+    seven_days_ago = now - timedelta(days=7)
+    try:
+        repos = (
+            await db.execute(
+                select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Repo.full_name)
+            )
+        ).scalars().all()
+        skills = (
+            await db.execute(
+                select(Skill).join(Repo, Repo.id == Skill.repo_id).where(Repo.org_id == org_id, Repo.is_active.is_(True))
+            )
+        ).scalars().all()
+    except SQLAlchemyError as exc:
+        await _rollback(db, "team rollup lookup")
+        raise HTTPException(status_code=400, detail="Unable to load team rollup") from exc
+
+    repo_name_by_id = {repo.id: repo.name for repo in repos}
+    team_map: dict[str, dict[str, object]] = {}
+    for repo in repos:
+        team = _team_from_repo_name(repo.name)
+        current_score = await _latest_repo_score(db, repo.id)
+        previous_score = await _repo_score_before(db, repo.id, seven_days_ago)
+        team_entry = team_map.setdefault(team, {"repos": [], "scores_7d": [], "skills": []})
+        team_entry["repos"].append({
+            "id": repo.id,
+            "name": repo.name,
+            "score": current_score,
+        })
+        if previous_score is not None:
+            team_entry["scores_7d"].append(previous_score)
+    for skill in skills:
+        team = _team_from_repo_name(repo_name_by_id.get(skill.repo_id, "unknown"))
+        team_map.setdefault(team, {"repos": [], "scores_7d": [], "skills": []})["skills"].append(skill)
+
+    teams: list[TeamRollupTeamResponse] = []
+    for team_name, payload in team_map.items():
+        repos_payload = [TeamRepoScoreResponse(**repo_payload) for repo_payload in payload["repos"]]
+        repos_payload.sort(key=lambda item: item.score, reverse=True)
+        team_skills = list(payload["skills"])
+        covered = {_skill_category(skill) for skill in team_skills if _skill_category(skill) in SKILL_CATEGORIES}
+        avg_score = round(sum(repo.score for repo in repos_payload) / len(repos_payload)) if repos_payload else 0
+        previous_avg = (
+            round(sum(payload["scores_7d"]) / len(payload["scores_7d"]))
+            if payload["scores_7d"] else None
+        )
+        teams.append(
+            TeamRollupTeamResponse(
+                team_name=team_name,
+                repo_count=len(repos_payload),
+                avg_score=avg_score,
+                worst_repo=min(repos_payload, key=lambda item: item.score, default=None),
+                best_repo=max(repos_payload, key=lambda item: item.score, default=None),
+                score_delta_7d=(avg_score - previous_avg) if previous_avg is not None else None,
+                skill_count=len(team_skills),
+                coverage_score=round((len(covered) / len(SKILL_CATEGORIES)) * 100) if SKILL_CATEGORIES else 0,
+                repos=repos_payload,
+            )
+        )
+    teams.sort(key=lambda item: (-item.avg_score, item.team_name))
+    org_avg_score = round(sum(team.avg_score for team in teams) / len(teams)) if teams else 0
+    needs_attention = min(teams, key=lambda item: item.avg_score).team_name if teams else None
+    top_team = max(teams, key=lambda item: item.avg_score).team_name if teams else None
+    return TeamRollupResponse(
+        teams=teams,
+        org_avg_score=org_avg_score,
+        top_team=top_team,
+        needs_attention=needs_attention,
+    )
+
+
+@router.get("/{org_id}/audit-log", response_model=AuditLogResponse)
+async def get_audit_log(
+    org_id: str,
+    event_type: str | None = Query(default=None),
+    repo_id: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> AuditLogResponse:
+    try:
+        query = (
+            select(AnalysisRun, Repo.name.label("repo_name"))
+            .join(Repo, Repo.id == AnalysisRun.repo_id)
+            .where(Repo.org_id == org_id)
+            .order_by(desc(AnalysisRun.created_at))
+        )
+        if repo_id:
+            query = query.where(Repo.id == repo_id)
+        rows = (await db.execute(query.limit(max(limit + offset + 100, 200)))).all()
+    except SQLAlchemyError as exc:
+        await _rollback(db, "audit log lookup")
+        raise HTTPException(status_code=400, detail="Unable to load audit log") from exc
+
+    events: list[AuditLogEventResponse] = []
+    for run, repo_name in rows:
+        derived_event_type = _event_type_for_run(run)
+        if event_type and derived_event_type != event_type:
+            continue
+        anchor = (run.created_at or _utc_now_naive()) - timedelta(seconds=1)
+        score_before = await _repo_score_before(db, run.repo_id, anchor)
+        score_after = int(run.score_total) if run.score_total is not None else None
+        events.append(
+            AuditLogEventResponse(
+                id=run.id,
+                event_type=derived_event_type,
+                repo_name=str(repo_name),
+                repo_id=run.repo_id,
+                actor=_actor_for_trigger(run.trigger),
+                status=run.status,
+                score_before=score_before,
+                score_after=score_after,
+                skill_count=int(run.skill_count) if run.skill_count is not None else None,
+                created_at=run.created_at,
+            )
+        )
+    return AuditLogResponse(events=events[offset:offset + limit], limit=limit, offset=offset)
+
+
+@router.get("/{org_id}/policies", response_model=GovernancePoliciesResponse)
+async def get_org_policies(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> GovernancePoliciesResponse:
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    return GovernancePoliciesResponse(policies=_get_policies(org))
+
+
+@router.post("/{org_id}/policies", response_model=GovernancePoliciesResponse)
+async def upsert_org_policies(
+    org_id: str,
+    payload: GovernancePoliciesResponse,
+    db: AsyncSession = Depends(get_db),
+) -> GovernancePoliciesResponse:
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    settings = dict(org.notification_settings or {})
+    normalized = [_normalize_policy(item.model_dump(), index) for index, item in enumerate(payload.policies)]
+    policies = [policy for policy in normalized if policy is not None]
+    settings["policies"] = [
+        {
+            **policy.model_dump(),
+            "created_at": policy.created_at.isoformat() if policy.created_at else datetime.now(UTC).isoformat(),
+        }
+        for policy in policies
+    ]
+    org.notification_settings = settings
+    try:
+        await db.flush()
+        await db.commit()
+    except SQLAlchemyError as exc:
+        await _rollback(db, "policy update")
+        raise HTTPException(status_code=400, detail="Unable to update policies") from exc
+    return GovernancePoliciesResponse(policies=policies)
 
 
 @router.get("/{org_id}/coverage-summary", response_model=OrgCoverageSummaryResponse)

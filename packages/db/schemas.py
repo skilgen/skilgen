@@ -166,6 +166,123 @@ class OrgCoverageSummaryResponse(BaseModel):
     most_missing_category: str | None
 
 
+class SkillHeatmapSkillResponse(BaseModel):
+    skill_id: str
+    domain: str
+    repo_id: str
+    repo_name: str
+    skill_category: str
+    source_type: str
+    score_total: int
+    is_stale: bool
+    loads_30d: int
+    loads_7d: int
+    criticality_score: int
+    last_loaded_at: datetime | None
+    agent_runtimes: list[str]
+    alert: str
+
+
+class SkillHeatmapSummaryResponse(BaseModel):
+    total_skills: int
+    dead_skills: int
+    stale_but_active: int
+    healthy: int
+    avg_criticality: int
+
+
+class SkillHeatmapResponse(BaseModel):
+    skills: list[SkillHeatmapSkillResponse]
+    summary: SkillHeatmapSummaryResponse
+
+
+class RuntimeBreakdownEntryResponse(BaseModel):
+    runtime: str
+    display_name: str
+    loads_30d: int
+    unique_skills: int
+    top_skill_domain: str | None
+
+
+class RuntimeBreakdownResponse(BaseModel):
+    runtimes: list[RuntimeBreakdownEntryResponse]
+    total_loads_30d: int
+
+
+class DailyLoadPointResponse(BaseModel):
+    date: str
+    loads: int
+
+
+class RepoSkillUsageStatsResponse(BaseModel):
+    criticality_score: int
+    loads_30d: int
+    loads_7d: int
+    last_loaded_at: datetime | None
+    alert: str
+    daily_loads: list[DailyLoadPointResponse]
+    agent_runtimes: dict[str, int]
+
+
+class TeamRepoScoreResponse(BaseModel):
+    id: str
+    name: str
+    score: int
+
+
+class TeamRollupTeamResponse(BaseModel):
+    team_name: str
+    repo_count: int
+    avg_score: int
+    worst_repo: TeamRepoScoreResponse | None
+    best_repo: TeamRepoScoreResponse | None
+    score_delta_7d: int | None
+    skill_count: int
+    coverage_score: int
+    repos: list[TeamRepoScoreResponse]
+
+
+class TeamRollupResponse(BaseModel):
+    teams: list[TeamRollupTeamResponse]
+    org_avg_score: int
+    top_team: str | None
+    needs_attention: str | None
+
+
+class AuditLogEventResponse(BaseModel):
+    id: str
+    event_type: str
+    repo_name: str
+    repo_id: str
+    actor: str
+    status: str
+    score_before: int | None
+    score_after: int | None
+    skill_count: int | None
+    created_at: datetime | None
+
+
+class AuditLogResponse(BaseModel):
+    events: list[AuditLogEventResponse]
+    limit: int
+    offset: int
+
+
+class GovernancePolicyResponse(BaseModel):
+    id: str
+    name: str
+    type: str
+    threshold: int | list[str]
+    scope: str
+    action: str
+    enabled: bool = True
+    created_at: datetime | None = None
+
+
+class GovernancePoliciesResponse(BaseModel):
+    policies: list[GovernancePolicyResponse]
+
+
 class RegistrySkillSummaryResponse(BaseModel):
     id: str
     org_id: str

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, String
+from sqlalchemy import JSON, BigInteger, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from packages.db.models.base import Base, new_uuid, utcnow
@@ -29,6 +29,7 @@ class Org(Base):
     slack_webhook_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     notify_on_pr: Mapped[bool] = mapped_column(default=True)
     notify_on_stale: Mapped[bool] = mapped_column(default=True)
+    notification_settings: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True, default=dict)
     workos_org_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
