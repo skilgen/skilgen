@@ -12,7 +12,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.api.auth import get_current_org_id
+from apps.api.api.auth import get_current_org_id, get_current_org_id_optional
 from apps.api.api.github import get_installation_token
 from apps.api.api.notifications import build_test_notification_message, post_slack_message
 from packages.db.database import get_db
@@ -971,10 +971,11 @@ async def upsert_org_policies(
 async def list_available_repos(
     org_id: str,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
 ) -> list[dict[str, object]]:
     """Return GitHub repos from the installation not yet connected to this org."""
-    _assert_org_scope(org_id, current_org_id)
+    if current_org_id is not None:
+        _assert_org_scope(org_id, current_org_id)
     installation_id = (
         await db.execute(
             select(Repo.github_installation_id)
@@ -1040,10 +1041,11 @@ async def connect_repos(
     org_id: str,
     payload: ConnectReposPayload,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
 ) -> list[dict[str, str]]:
     """Idempotently create Repo rows for user-selected repos."""
-    _assert_org_scope(org_id, current_org_id)
+    if current_org_id is not None:
+        _assert_org_scope(org_id, current_org_id)
     created: list[dict[str, str]] = []
     for item in payload.repos:
         existing = (

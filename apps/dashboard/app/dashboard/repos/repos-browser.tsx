@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
@@ -21,6 +22,7 @@ export type RepoListItem = {
   id: string;
   name: string;
   full_name: string;
+  installation_id?: number | null;
   language: string | null;
   last_analysed_at: string | null;
   created_at?: string | null;
@@ -203,13 +205,22 @@ export function ReposBrowser({ accessToken, repos }: { accessToken: string; repo
                   </td>
                   <td className="px-5 py-4 text-[color:var(--text-secondary)]">{repo.language || "—"}</td>
                   <td className="px-5 py-4">
-                    {typeof score === "number" ? (
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[12px] font-semibold ${scoreBadgeClass(score)}`}>
-                        {score}/100
-                      </span>
-                    ) : (
-                      <span className="text-gray-600">Not analysed</span>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {typeof score === "number" ? (
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[12px] font-semibold ${scoreBadgeClass(score)}`}>
+                          {score}/100
+                        </span>
+                      ) : (
+                        <span className="text-gray-600">Not analysed</span>
+                      )}
+                      <Link
+                        className="inline-flex h-8 items-center rounded-md border border-[color:var(--bg-border)] px-3 text-[12px] font-semibold text-[color:var(--text-secondary)] hover:bg-[color:var(--bg-elevated)]"
+                        href={`/dashboard/repos/${repo.id}`}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        Analyse
+                      </Link>
+                    </div>
                   </td>
                   <td className="px-5 py-4 text-[color:var(--text-secondary)]">{repo.skill_count || "—"}</td>
                   <td className="px-5 py-4 text-[color:var(--text-secondary)]">{relativeTime(repo.last_analysed_at)}</td>

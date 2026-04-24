@@ -149,3 +149,24 @@ async def get_current_org_id(
     if org is None:
         raise HTTPException(status_code=403, detail="No org found")
     return org.id
+
+
+optional_bearer = HTTPBearer(auto_error=False)
+
+
+async def get_current_org_id_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_bearer),
+    db: AsyncSession = Depends(get_db),
+) -> str | None:
+    """Like get_current_org_id but returns None instead of 401 when no credentials.
+    In bootstrap mode, returns the first org without any token."""
+    if _deployment_mode() == "bootstrap":
+        result = await db.execute(select(Org).limit(1))
+        org = result.scalar_one_or_none()
+        return org.id if org is not None else None
+    if credentials is None:
+        return None
+    try:
+        return await get_current_org_id(credentials, db)
+    except HTTPException:
+        return None

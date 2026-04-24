@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Square, SquareCheckBig, X } from "lucide-react";
+import { Github, Loader2, Square, SquareCheckBig, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -120,7 +120,20 @@ export function AddReposModal({
               <p className="text-[14px]">Loading your repositories…</p>
             </div>
           ) : error ? (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-[14px] text-red-200">{error}</div>
+            <div className="space-y-3">
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-[14px] text-red-200">{error}</div>
+              {error.toLowerCase().includes("installation") || error.toLowerCase().includes("authenticated") ? (
+                <a
+                  className="inline-flex items-center gap-2 text-[13px] font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]"
+                  href="https://github.com/apps/skillayer/installations/new"
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <Github className="h-4 w-4" />
+                  Open GitHub App installer →
+                </a>
+              ) : null}
+            </div>
           ) : repos.length === 0 ? (
             <div className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-elevated)] px-4 py-8 text-center text-[14px] text-[color:var(--text-secondary)]">
               All repos are already connected

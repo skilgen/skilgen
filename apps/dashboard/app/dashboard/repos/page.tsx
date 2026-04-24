@@ -70,6 +70,7 @@ export default async function ReposPage() {
   }
 
   const connectLabel = repos.length === 0 ? "Connect repo" : "Add more repos";
+  const hasInstallation = repos.some((repo) => repo.installation_id != null) || repos.length > 0;
 
   return (
     <div>
@@ -86,7 +87,7 @@ export default async function ReposPage() {
           <p className="mt-1 text-sm text-[color:var(--text-secondary)]">{repos.length} repos connected</p>
         </div>
 
-        <AddReposButton accessToken={accessToken} hasRepos={repos.length > 0} label={connectLabel} orgId={orgId} />
+        <AddReposButton accessToken={accessToken} hasInstallation={hasInstallation} label={connectLabel} orgId={orgId} />
       </div>
 
       <SectionErrorBoundary section="repositories">
@@ -104,7 +105,7 @@ export default async function ReposPage() {
               Install the Skillayer GitHub App to analyse repositories, generate skills, and track score history.
             </p>
             <div className="mt-6 flex justify-center">
-              <AddReposButton accessToken={accessToken} hasRepos={false} label="Connect repo" orgId={orgId} />
+              <AddReposButton accessToken={accessToken} hasInstallation={hasInstallation} label="Connect repo" orgId={orgId} />
             </div>
           </section>
         )}
