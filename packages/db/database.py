@@ -14,6 +14,10 @@ _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 def _database_url_and_connect_args() -> tuple[str, dict[str, object]]:
     database_url = settings.DATABASE_URL or settings.DATABASE_URL_UNPOOLED
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     connect_args: dict[str, object] = {}
     if "neon.tech" in database_url or "ssl" in database_url:
         ssl_context = ssl.create_default_context()
