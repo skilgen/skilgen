@@ -4,6 +4,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 import hashlib
 import logging
+import secrets
 from typing import Literal
 from uuid import uuid4
 
@@ -13,7 +14,10 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-import httpx
+try:
+    import httpx
+except ImportError:  # pragma: no cover - optional provider client dependency
+    httpx = None  # type: ignore[assignment]
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -28,7 +32,7 @@ from apps.api.api.services.llm_config import decrypt_key, encrypt_key, key_hint
 from apps.api.api.services.policy import POLICY_RULE_TYPES, PolicyViolation, evaluate_policies
 from apps.api.api.services.redflags import compute_repo_red_flags
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AnalysisRun, AuditEvent, Org, OrgLLMConfig, OrgPolicy, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillUsageEvent, SkillVersion
+from packages.db.models import AgentSession, AnalysisRun, AuditEvent, Org, OrgLLMConfig, OrgPolicy, Repo, ScoreHistory, Skill, SkillHalfLife, SkillMemoryStub, SkillUsageEvent, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
     AuditLogEventResponse,
@@ -348,6 +352,41 @@ class LLMConfigTestResponse(BaseModel):
     ok: bool
     latency_ms: int
     error: str | None
+
+
+class SetupStatusStep(BaseModel):
+    id: str
+    title: str
+    done: bool
+    action_url: str | None = None
+    description: str | None = None
+    cli_command: str | None = None
+
+
+class SetupStatusResponse(BaseModel):
+    has_repos: bool
+    has_skills: bool
+    has_agent_loads: bool
+    has_high_score_skills: bool
+    setup_steps: list[SetupStatusStep]
+    completion_percent: int
+
+
+class OrgApiKeyResponse(BaseModel):
+    api_key: str
+
+
+class OrgActionItemResponse(BaseModel):
+    id: str
+    type: str
+    title: str
+    description: str
+    action_url: str
+    priority: Literal["urgent", "recommended", "suggested"]
+
+
+class OrgActionItemsResponse(BaseModel):
+    items: list[OrgActionItemResponse]
 
 
 def _last_30_score_dates() -> list[str]:
@@ -771,6 +810,11 @@ async def _rollback(db: AsyncSession, context: str) -> None:
         logger.exception("Org route rollback failed during %s", context)
 
 
+def _generate_org_api_key() -> str:
+    """Return a new Skillayer org API key."""
+    return f"sk-{secrets.token_urlsafe(32)}"
+
+
 def _org_settings_response(org: Org, installation_id: int | None, recent_runs: list[AnalysisRun]) -> OrgSettingsResponse:
     """Convert an org and its GitHub state into a settings response."""
     return OrgSettingsResponse(
@@ -834,6 +878,271 @@ async def bootstrap_org(
         "name": org.name,
         "plan": org.plan,
     }
+
+
+@router.get("/{org_id}/setup-status", response_model=SetupStatusResponse)
+async def get_org_setup_status(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> SetupStatusResponse:
+    """Return onboarding setup progress for the product loop."""
+    _assert_org_scope(org_id, current_org_id)
+    repo_count = int(
+        (
+            await db.execute(select(func.count(Repo.id)).where(Repo.org_id == org_id, Repo.is_active.is_(True)))
+        ).scalar()
+        or 0
+    )
+    skill_count = int(
+        (
+            await db.execute(
+                select(func.count(Skill.id)).join(Repo, Repo.id == Skill.repo_id).where(Repo.org_id == org_id, Repo.is_active.is_(True))
+            )
+        ).scalar()
+        or 0
+    )
+    high_score_count = int(
+        (
+            await db.execute(
+                select(func.count(Skill.id)).join(Repo, Repo.id == Skill.repo_id).where(Repo.org_id == org_id, Repo.is_active.is_(True), Skill.score_total >= 70)
+            )
+        ).scalar()
+        or 0
+    )
+    cutoff = _utc_now_naive() - timedelta(days=30)
+    load_count = int(
+        (
+            await db.execute(select(func.count(SkillUsageEvent.id)).where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff))
+        ).scalar()
+        or 0
+    )
+
+    has_repos = repo_count > 0
+    has_skills = skill_count > 0
+    has_agent_loads = load_count > 0
+    has_high_score_skills = high_score_count > 0
+
+    steps = [
+        SetupStatusStep(
+            id="connect_repo",
+            title="Connect a repository",
+            done=has_repos,
+            action_url="/dashboard/repos",
+        ),
+        SetupStatusStep(
+            id="generate_skills",
+            title="Generate your first skills",
+            done=has_skills,
+            description="Run skilgen deliver in your repo",
+            cli_command="skilgen deliver --project-root .",
+        ),
+        SetupStatusStep(
+            id="connect_agent",
+            title="Connect your AI agent",
+            done=has_agent_loads,
+            description="Configure Claude Code, Cursor, or Codex to load your skills",
+        ),
+        SetupStatusStep(
+            id="improve_skills",
+            title="Improve skill quality to 70+",
+            done=has_high_score_skills,
+            description="Use the improvement plan to boost your lowest-scoring skills",
+        ),
+    ]
+    completed = sum(1 for step in steps if step.done)
+    return SetupStatusResponse(
+        has_repos=has_repos,
+        has_skills=has_skills,
+        has_agent_loads=has_agent_loads,
+        has_high_score_skills=has_high_score_skills,
+        setup_steps=steps,
+        completion_percent=completed * 25,
+    )
+
+
+@router.get("/{org_id}/api-key", response_model=OrgApiKeyResponse)
+async def get_org_api_key(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgApiKeyResponse | JSONResponse:
+    """Return the org API key used by local agents."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        result = await db.execute(select(Org).where(Org.id == org_id))
+        org = result.scalar_one_or_none()
+        if org is None:
+            return _error(404, "Org not found", "ORG_NOT_FOUND")
+        if not org.api_key:
+            org.api_key = _generate_org_api_key()
+            await db.flush()
+            await db.commit()
+        return OrgApiKeyResponse(api_key=org.api_key)
+    except SQLAlchemyError:
+        await _rollback(db, "org api key lookup")
+        return _error(400, "Could not load org API key", "ORG_API_KEY_LOOKUP_FAILED")
+
+
+@router.post("/{org_id}/api-key/rotate", response_model=OrgApiKeyResponse)
+async def rotate_org_api_key(
+    org_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgApiKeyResponse | JSONResponse:
+    """Rotate the org API key used by local agents."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        result = await db.execute(select(Org).where(Org.id == org_id))
+        org = result.scalar_one_or_none()
+        if org is None:
+            return _error(404, "Org not found", "ORG_NOT_FOUND")
+        org.api_key = _generate_org_api_key()
+        await db.flush()
+        await audit.emit(
+            db,
+            org_id,
+            "api_key_rotated",
+            "rotated",
+            "Rotated org API key",
+            actor_login=get_actor_login(request),
+            resource_type="org",
+            resource_id=org_id,
+        )
+        await db.commit()
+        return OrgApiKeyResponse(api_key=org.api_key)
+    except SQLAlchemyError:
+        await _rollback(db, "org api key rotation")
+        return _error(400, "Could not rotate org API key", "ORG_API_KEY_ROTATE_FAILED")
+
+
+@router.get("/{org_id}/action-items", response_model=OrgActionItemsResponse)
+async def get_org_action_items(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgActionItemsResponse:
+    """Return prioritized setup and skill-health actions for an org."""
+    _assert_org_scope(org_id, current_org_id)
+    repos = (
+        await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Repo.full_name))
+    ).scalars().all()
+    repo_ids = [repo.id for repo in repos]
+    skills = (
+        await db.execute(select(Skill).where(Skill.repo_id.in_(repo_ids)).order_by(Skill.repo_id, Skill.domain))
+    ).scalars().all() if repo_ids else []
+    items: list[OrgActionItemResponse] = []
+    if not repos:
+        items.append(
+            OrgActionItemResponse(
+                id="connect-repo",
+                type="generate",
+                title="Connect a repository",
+                description="Connect at least one repository so Skillayer can generate skills.",
+                action_url="/dashboard/repos",
+                priority="urgent",
+            )
+        )
+        return OrgActionItemsResponse(items=items)
+
+    repo_by_id = {repo.id: repo for repo in repos}
+    cutoff = _utc_now_naive() - timedelta(days=30)
+    load_rows = (
+        await db.execute(
+            select(SkillUsageEvent.skill_id, func.count(SkillUsageEvent.id).label("loads"), func.max(SkillUsageEvent.loaded_at).label("last_loaded_at"))
+            .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff)
+            .group_by(SkillUsageEvent.skill_id)
+        )
+    ).all()
+    loads_by_skill = {str(row.skill_id): int(row.loads or 0) for row in load_rows}
+    loaded_low_scores = [skill for skill in skills if loads_by_skill.get(skill.id, 0) > 0]
+    if loaded_low_scores:
+        skill = sorted(loaded_low_scores, key=lambda item: (int(item.score_total or 0), -loads_by_skill.get(item.id, 0)))[0]
+        repo = repo_by_id.get(skill.repo_id)
+        items.append(
+            OrgActionItemResponse(
+                id=f"improve-{skill.id}",
+                type="improve",
+                title=f"Improve {skill.domain} in {repo.name if repo else 'repo'}",
+                description=f"Agents are loading it but it only scores {int(skill.score_total or 0)}/100.",
+                action_url=f"/dashboard/repos/{skill.repo_id}/skills/{skill.id}",
+                priority="urgent" if int(skill.score_total or 0) < 40 else "recommended",
+            )
+        )
+
+    categories_by_repo: dict[str, set[str]] = {repo.id: set() for repo in repos}
+    for skill in skills:
+        categories_by_repo.setdefault(skill.repo_id, set()).add(_skill_category(skill))
+    missing_counts: dict[str, int] = {}
+    for category in SKILL_CATEGORIES:
+        missing_counts[category] = sum(1 for repo in repos if category not in categories_by_repo.get(repo.id, set()))
+    missing_category, missing_count = max(missing_counts.items(), key=lambda item: item[1]) if missing_counts else ("codebase_architecture", 0)
+    if missing_count > 0:
+        label = missing_category.replace("_", " ")
+        items.append(
+            OrgActionItemResponse(
+                id=f"generate-{missing_category}",
+                type="generate",
+                title=f"Generate {label} skills",
+                description=f"Missing from {missing_count} repos.",
+                action_url="/dashboard/repos",
+                priority="recommended",
+            )
+        )
+
+    decay_rows = (
+        await db.execute(
+            select(SkillHalfLife, Skill, Repo)
+            .join(Skill, Skill.id == SkillHalfLife.skill_id)
+            .join(Repo, Repo.id == SkillHalfLife.repo_id)
+            .where(SkillHalfLife.org_id == org_id, SkillHalfLife.predicted_decay_date.is_not(None))
+            .order_by(SkillHalfLife.predicted_decay_date)
+        )
+    ).all()
+    threshold = _utc_now_naive() + timedelta(days=3)
+    for half_life, skill, repo in decay_rows:
+        if half_life.predicted_decay_date and half_life.predicted_decay_date <= threshold:
+            items.append(
+                OrgActionItemResponse(
+                    id=f"refresh-{skill.id}",
+                    type="refresh",
+                    title=f"Regenerate {skill.domain} before it goes stale",
+                    description=f"{repo.name} is predicted to decay within 3 days.",
+                    action_url=f"/dashboard/repos/{skill.repo_id}/skills/{skill.id}",
+                    priority="urgent",
+                )
+            )
+            break
+
+    if not items:
+        low_score_count = sum(1 for skill in skills if int(skill.score_total or 0) < 40)
+        if low_score_count > 0:
+            items.append(
+                OrgActionItemResponse(
+                    id="review-low-score",
+                    type="review",
+                    title=f"Review {low_score_count} skills with score under 40",
+                    description="Start with the lowest scoring skills and use their improvement plans.",
+                    action_url="/dashboard/skills",
+                    priority="recommended",
+                )
+            )
+        else:
+            items.append(
+                OrgActionItemResponse(
+                    id="review-healthy-skills",
+                    type="review",
+                    title="Review your healthiest skills",
+                    description="No urgent score or decay risks found. Spot-check your strongest skills for drift.",
+                    action_url="/dashboard/skills",
+                    priority="suggested",
+                )
+            )
+
+    priority_order = {"urgent": 0, "recommended": 1, "suggested": 2}
+    items.sort(key=lambda item: priority_order[item.priority])
+    return OrgActionItemsResponse(items=items[:3])
 
 
 @router.get("/{org_id}", response_model=OrgResponse)

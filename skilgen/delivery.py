@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
+import json
+import os
 import time
+import uuid
 from pathlib import Path
 from typing import Callable
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from skilgen.agents import build_agent_decision, fingerprint_project
 from skilgen.agents.codebase_signals import clear_codebase_signal_caches, is_ignored_path_parts, is_internal_skillayer_monorepo
@@ -34,6 +40,158 @@ ProgressCallback = Callable[[str], None]
 def _emit(progress_callback: ProgressCallback | None, message: str) -> None:
     if progress_callback is not None:
         progress_callback(message)
+
+
+def _write_claude_code_hook(project_root: str | Path) -> Path | None:
+    """Write Claude Code hook config so skill reads are auto-tracked."""
+    root = Path(project_root).resolve()
+    settings_path = root / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    hook_command = 'python -m skilgen.hooks.claude_code_hook "$CLAUDE_TOOL_INPUT_FILE_PATH"'
+
+    existing: dict[str, object] = {}
+    if settings_path.exists():
+        try:
+            loaded = json.loads(settings_path.read_text(encoding="utf-8"))
+            existing = loaded if isinstance(loaded, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+
+    hooks = existing.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+    post_tool_use = hooks.get("PostToolUse")
+    if not isinstance(post_tool_use, list):
+        post_tool_use = []
+
+    skilgen_hook_exists = any(
+        isinstance(entry, dict)
+        and entry.get("matcher") == "Read"
+        and any(
+            isinstance(hook, dict) and "skilgen.hooks.claude_code_hook" in str(hook.get("command", ""))
+            for hook in entry.get("hooks", [])
+        )
+        for entry in post_tool_use
+    )
+    if skilgen_hook_exists:
+        return None
+
+    post_tool_use.append(
+        {
+            "matcher": "Read",
+            "hooks": [{"type": "command", "command": hook_command}],
+        }
+    )
+    hooks["PostToolUse"] = post_tool_use
+    existing["hooks"] = hooks
+    settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+    print("✓ Configured Claude Code skill load tracking (.claude/settings.json)")
+    return settings_path
+
+
+def _local_analytics_events(project_root: Path) -> list[dict[str, object]]:
+    usage_path = project_root / ".skilgen" / "analytics" / "usage.jsonl"
+    if not usage_path.exists():
+        return []
+    events: list[dict[str, object]] = []
+    for line in usage_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        skill = str(entry.get("skill", "")).strip()
+        if not skill or str(entry.get("context", "")) == "decision_planner":
+            continue
+        events.append(
+            {
+                "skill_path": skill,
+                "agent_runtime": str(entry.get("agent_runtime", "unknown")).strip() or "unknown",
+                "session_id": str(entry.get("session_id") or ""),
+                "timestamp": str(entry.get("timestamp", "")),
+            }
+        )
+    return events
+
+
+async def _upload_analytics(api_url: str, repo_id: str, api_key: str, project_root: str | Path = ".") -> dict[str, int]:
+    """Upload local analytics events to Skillayer without blocking callers on sync I/O."""
+    root = Path(project_root).resolve()
+    body = json.dumps({"repo_id": repo_id, "events": _local_analytics_events(root)}).encode("utf-8")
+    request = Request(
+        f"{api_url.rstrip('/')}/repos/{repo_id}/sync-analytics",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+
+    def _send() -> dict[str, int]:
+        with urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return {"synced": int(payload.get("synced", 0)), "skipped": int(payload.get("skipped", 0))}
+
+    return await asyncio.to_thread(_send)
+
+
+async def _auto_sync_to_skillayer(repo_root: str | Path, skills_delivered: list[str | Path]) -> bool:
+    """
+    After delivery, auto-upload fresh skill events to Skillayer.
+
+    Silently no-ops if SKILLAYER_API_KEY or SKILLAYER_REPO_ID is not set.
+    """
+    api_key = os.environ.get("SKILLAYER_API_KEY")
+    repo_id = os.environ.get("SKILLAYER_REPO_ID")
+    api_url = os.environ.get("SKILLAYER_API_URL", "https://api.skillayer.com")
+    if not api_key or not repo_id:
+        return False
+
+    root = Path(repo_root).resolve()
+    skill_paths = []
+    for skill_path in skills_delivered:
+        path = Path(skill_path)
+        if path.name != "SKILL.md":
+            continue
+        try:
+            skill_paths.append(path.resolve().relative_to(root).as_posix())
+        except ValueError:
+            skill_paths.append(path.as_posix())
+    if not skill_paths:
+        return False
+
+    for skill_path in skill_paths:
+        log_skill_usage(
+            root,
+            [skill_path],
+            event="delivered",
+            context="skilgen_deliver",
+            session_id=str(uuid.uuid4()),
+        )
+
+    try:
+        await _upload_analytics(api_url, repo_id, api_key, root)
+    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return False
+    return True
+
+
+def sync_to_skillayer_after_delivery(repo_root: str | Path, skills_delivered: list[str | Path]) -> bool:
+    """Synchronous wrapper used by the CLI after a successful deliver."""
+    if not os.environ.get("SKILLAYER_API_KEY") or not os.environ.get("SKILLAYER_REPO_ID"):
+        return False
+    _write_claude_code_hook(repo_root)
+    try:
+        return asyncio.run(_auto_sync_to_skillayer(repo_root, skills_delivered))
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_auto_sync_to_skillayer(repo_root, skills_delivered))
+        finally:
+            loop.close()
 
 
 def run_delivery(

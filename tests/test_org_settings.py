@@ -87,6 +87,7 @@ def _org(**overrides: object) -> SimpleNamespace:
         "slack_webhook_url": "https://hooks.slack.com/services/T/B/C",
         "notify_on_pr": True,
         "notify_on_stale": True,
+        "api_key": "sk-existing",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -183,6 +184,44 @@ def test_update_org_settings_rolls_back_on_db_failure() -> None:
     assert response.status_code == 400
     assert response.json() == {"detail": "Could not update org settings", "code": "ORG_SETTINGS_UPDATE_FAILED"}
     assert db.rollback_count == 1
+
+
+def test_get_org_api_key_returns_existing_key() -> None:
+    """GET api-key returns the current org API key."""
+    response = _client(FakeDb(None, [FakeResult(scalar_one_or_none_value=_org(api_key="sk-existing"))])).get("/orgs/org_123/api-key")
+
+    assert response.status_code == 200
+    assert response.json() == {"api_key": "sk-existing"}
+
+
+def test_get_org_api_key_generates_missing_key(monkeypatch) -> None:
+    """GET api-key initializes missing org API keys."""
+    org = _org(api_key=None)
+    db = FakeDb(None, [FakeResult(scalar_one_or_none_value=org)])
+    monkeypatch.setattr(orgs, "_generate_org_api_key", lambda: "sk-generated")
+
+    response = _client(db).get("/orgs/org_123/api-key")
+
+    assert response.status_code == 200
+    assert response.json() == {"api_key": "sk-generated"}
+    assert org.api_key == "sk-generated"
+    assert db.flush_count == 1
+    assert db.commit_count == 1
+
+
+def test_rotate_org_api_key_replaces_key(monkeypatch) -> None:
+    """POST api-key rotate replaces the current org API key."""
+    org = _org(api_key="sk-old")
+    db = FakeDb(None, [FakeResult(scalar_one_or_none_value=org)])
+    monkeypatch.setattr(orgs, "_generate_org_api_key", lambda: "sk-new")
+
+    response = _client(db).post("/orgs/org_123/api-key/rotate")
+
+    assert response.status_code == 200
+    assert response.json() == {"api_key": "sk-new"}
+    assert org.api_key == "sk-new"
+    assert db.flush_count == 1
+    assert db.commit_count == 1
 
 
 def test_test_notification_posts_to_slack(monkeypatch) -> None:

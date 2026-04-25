@@ -5,11 +5,13 @@ import json
 import os
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 import threading
 import time
 import uuid
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from skilgen.api.server import run_server
@@ -34,8 +36,16 @@ from skilgen.core.enterprise_policy import (
 from skilgen.core.score import ci_result, score_badge_markdown
 from skilgen.parsers.runner import run_source_parsers
 from skilgen.parsers.sources import SOURCE_TYPES
-from skilgen.registry_client import RegistryClientError, import_skill as import_registry_skill, publish_skill as publish_registry_skill
-from skilgen.delivery import run_delivery, watch_delivery
+from skilgen.registry_client import (
+    RegistryClientError,
+    import_skill as import_registry_skill,
+    publish_skill as publish_registry_skill,
+    registry_import_file,
+    registry_install,
+    registry_list,
+    registry_publish,
+)
+from skilgen.delivery import run_delivery, sync_to_skillayer_after_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
 from skilgen.enterprise_skills import (
     activate_mcp_connector,
@@ -145,6 +155,73 @@ def _upload_memory_sessions(project_root: Path, repo_id: str, api_url: str, sess
             uploaded += 1
             print("✓ Queued for extraction (0 prior discoveries)")
     print(f"{uploaded} session(s) uploaded, {skipped} skipped.")
+
+
+def _eval_api_request(api_url: str, path: str, api_key: str, *, method: str = "GET", payload: dict[str, object] | None = None) -> dict[str, object] | list[object]:
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = Request(
+        f"{api_url.rstrip('/')}{path}",
+        data=body,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    with urlopen(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _eval_org_id(args: argparse.Namespace) -> str:
+    return getattr(args, "org_id", "") or os.getenv("SKILLAYER_ORG_ID", "current")
+
+
+def _eval_api_url(args: argparse.Namespace) -> str:
+    return getattr(args, "api_url", "") or os.getenv("SKILLAYER_API_URL", "https://api.skillayer.com")
+
+
+def _eval_api_key() -> str:
+    api_key = os.getenv("SKILLAYER_API_KEY", "")
+    if not api_key:
+        print("error: SKILLAYER_API_KEY environment variable is required", file=sys.stderr)
+        sys.exit(1)
+    return api_key
+
+
+def _print_eval_status(payload: dict[str, object]) -> None:
+    total = int(payload.get("total_tasks", 0) or 0)
+    success_rate = payload.get("success_rate")
+    high_rate = payload.get("high_skill_success_rate")
+    low_rate = payload.get("low_skill_success_rate")
+    multiplier = payload.get("multiplier")
+    print(f"Tasks (30d): {total}")
+    print(f"Success rate: {round(float(success_rate) * 100) if success_rate is not None else 0}%")
+    print(f"With high-quality skills (>=70): {round(float(high_rate) * 100) if high_rate is not None else 'n/a'}%")
+    print(f"With low-quality skills (<40):  {round(float(low_rate) * 100) if low_rate is not None else 'n/a'}%")
+    print(f"Multiplier: {multiplier}x better outcomes with high-quality skills" if multiplier else "Multiplier: insufficient data")
+    print("")
+    print("Open skill gaps:")
+    gaps = payload.get("skill_gaps", [])
+    if isinstance(gaps, list) and gaps:
+        for gap in gaps:
+            if isinstance(gap, dict):
+                score = gap.get("existing_score")
+                score_text = f", score: {int(float(score))}/100" if score is not None else ""
+                print(f"- {gap.get('domain')} ({gap.get('failure_count')} failures) - {gap.get('gap_type')}{score_text}")
+    else:
+        print("- none")
+
+
+def _print_eval_gaps(gaps: list[object]) -> None:
+    if not gaps:
+        print("No open skill gaps.")
+        return
+    for gap in gaps:
+        if not isinstance(gap, dict):
+            continue
+        print(f"{gap.get('domain')} - {gap.get('failure_count')} failures - {gap.get('gap_type')}")
+        print(f"  Fix: {gap.get('suggested_action')}")
 
 
 @dataclass(frozen=True)
@@ -425,7 +502,14 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--dry-run", action="store_true")
     scan.add_argument("--skip-index", action="store_true")
 
-    deliver = subparsers.add_parser("deliver", help="Alias for scan for now; intended to grow into full delivery automation.")
+    deliver = subparsers.add_parser(
+        "deliver",
+        help="Generate docs and skills, with optional Skillayer auto-sync when integration env vars are set.",
+        epilog=(
+            "After delivery, set SKILLAYER_API_KEY and SKILLAYER_REPO_ID to enable auto-sync. "
+            "For Claude Code, load tracking is configured automatically in .claude/settings.json."
+        ),
+    )
     deliver.add_argument("--requirements")
     deliver.add_argument("--project-root", default=".")
     deliver.add_argument("--target", choices=["all", "docs", "skills"], default="all")
@@ -442,12 +526,14 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--dry-run", action="store_true")
     update.add_argument("--skip-index", action="store_true")
 
-    watch = subparsers.add_parser("watch", help="Watch the project and rerun generation when files change.")
+    watch = subparsers.add_parser("watch", help="Watch the project, or track SKILL.md loads when --repo-id is supplied.")
     watch.add_argument("--requirements")
     watch.add_argument("--project-root", default=".")
     watch.add_argument("--target", choices=["all", "docs", "skills"], default="all")
     watch.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     watch.add_argument("--interval", type=float, default=2.0)
+    watch.add_argument("--repo-id", help="Skillayer repo UUID for Cursor/agent load tracking mode.")
+    watch.add_argument("--poll-interval", type=int, default=5, help="Polling interval for agent load tracking mode.")
     watch.add_argument("--cycles", type=int, default=0)
     watch.add_argument("--once", action="store_true")
 
@@ -575,6 +661,33 @@ def build_parser() -> argparse.ArgumentParser:
     skills_publish.add_argument("--private", action="store_true")
     skills_publish.add_argument("--api-url", default="https://api.skillayer.com")
 
+    registry = subparsers.add_parser("registry", help="Publish, list, install, and import Skillayer registry entries.")
+    registry_subparsers = registry.add_subparsers(dest="registry_command", required=True)
+    registry_publish_cmd = registry_subparsers.add_parser("publish", help="Publish a skill to the org registry.")
+    registry_publish_cmd.add_argument("--org-id", required=True)
+    registry_publish_cmd.add_argument("--repo-id")
+    registry_publish_cmd.add_argument("--skill-id", required=True)
+    registry_publish_cmd.add_argument("--version", default="1.0.0")
+    registry_publish_cmd.add_argument("--visibility", choices=["private", "org", "public"], default="private")
+    registry_publish_cmd.add_argument("--tags", default="")
+    registry_publish_cmd.add_argument("--description", required=True)
+    registry_publish_cmd.add_argument("--api-url", default="https://api.skillayer.com")
+    registry_list_cmd = registry_subparsers.add_parser("list", help="List org registry entries.")
+    registry_list_cmd.add_argument("--org-id", required=True)
+    registry_list_cmd.add_argument("--visibility")
+    registry_list_cmd.add_argument("--api-url", default="https://api.skillayer.com")
+    registry_install_cmd = registry_subparsers.add_parser("install", help="Install a registry entry into a repo.")
+    registry_install_cmd.add_argument("entry")
+    registry_install_cmd.add_argument("--org-id", required=True)
+    registry_install_cmd.add_argument("--repo-id")
+    registry_install_cmd.add_argument("--api-url", default="https://api.skillayer.com")
+    registry_import_cmd = registry_subparsers.add_parser("import", help="Import a local skill file into the private registry.")
+    registry_import_cmd.add_argument("--file", required=True)
+    registry_import_cmd.add_argument("--org-id", required=True)
+    registry_import_cmd.add_argument("--repo-id", required=True)
+    registry_import_cmd.add_argument("--name", required=True)
+    registry_import_cmd.add_argument("--api-url", default="https://api.skillayer.com")
+
     skills_sync = skills_subparsers.add_parser("sync", help="Sync an installed external skill source with its upstream repository.")
     skills_sync.add_argument("slug", nargs="?")
     skills_sync.add_argument("--project-root", default=".")
@@ -677,6 +790,28 @@ def build_parser() -> argparse.ArgumentParser:
     eval_compare = eval_subparsers.add_parser("compare", help="Compare baseline and Skilgen eval results.")
     eval_compare.add_argument("--baseline", required=True)
     eval_compare.add_argument("--skilgen", required=True)
+    eval_record = eval_subparsers.add_parser("record", help="Record an agent task outcome in Skillayer.")
+    eval_record.add_argument("--outcome", required=True, choices=["success", "failure", "partial", "abandoned"])
+    eval_record.add_argument("--repo-id", required=True)
+    eval_record.add_argument("--org-id", default="")
+    eval_record.add_argument("--api-url", default="")
+    eval_record.add_argument("--task")
+    eval_record.add_argument("--type", choices=["code_generation", "debugging", "refactoring", "documentation", "testing", "review", "other"])
+    eval_record.add_argument("--failure-reason")
+    eval_record.add_argument("--skills-loaded", default="")
+    eval_record.add_argument("--tokens", type=int)
+    eval_record.add_argument("--duration", type=int)
+    eval_record.add_argument("--session-id", default="")
+    eval_record.add_argument("--agent-runtime", default=os.getenv("SKILGEN_AGENT_RUNTIME", "unknown"))
+    eval_status = eval_subparsers.add_parser("status", help="Show Skillayer agent performance ROI.")
+    eval_status.add_argument("--repo-id", required=True)
+    eval_status.add_argument("--org-id", default="")
+    eval_status.add_argument("--api-url", default="")
+    eval_status.add_argument("--days", type=int, default=30)
+    eval_gaps = eval_subparsers.add_parser("gaps", help="List open Skillayer skill gaps.")
+    eval_gaps.add_argument("--repo-id", required=True)
+    eval_gaps.add_argument("--org-id", default="")
+    eval_gaps.add_argument("--api-url", default="")
 
     status = subparsers.add_parser("status", help="Show the current generated output status for a project root.")
     status.add_argument("--project-root", default=".")
@@ -1061,6 +1196,52 @@ def main() -> None:
             emit_progress(f"Deactivating the external skill source '{args.slug}' for agent loading.")
             print(json.dumps({"deactivated_skill": deactivate_external_skill(project_root=root, slug=args.slug)}, indent=2))
             return
+    if args.command == "registry":
+        try:
+            if args.registry_command == "publish":
+                tags = [tag.strip() for tag in str(args.tags or "").split(",") if tag.strip()]
+                result = registry_publish(
+                    api_url=args.api_url,
+                    org_id=args.org_id,
+                    skill_id=args.skill_id,
+                    version=args.version,
+                    visibility=args.visibility,
+                    tags=tags,
+                    description=args.description,
+                )
+                print(f"✓ Published {result.get('name', args.skill_id)} v{result.get('version', args.version)} to {args.visibility} registry")
+                return
+            if args.registry_command == "list":
+                result = registry_list(api_url=args.api_url, org_id=args.org_id, visibility=args.visibility)
+                print("Name | Version | Score | Installs | Decays In")
+                for entry in result.get("entries", []):
+                    if isinstance(entry, dict):
+                        print(
+                            f"{entry.get('name', '—')} | {entry.get('version', '—')} | "
+                            f"{entry.get('score_total', '—')} | {entry.get('install_count', 0)} | "
+                            f"{entry.get('predicted_decay_days', '—')}"
+                        )
+                return
+            if args.registry_command == "install":
+                registry_install(api_url=args.api_url, org_id=args.org_id, entry_id=args.entry, repo_id=args.repo_id)
+                print(f"✓ Installed {args.entry} into repo")
+                return
+            if args.registry_command == "import":
+                result = registry_import_file(
+                    api_url=args.api_url,
+                    org_id=args.org_id,
+                    repo_id=args.repo_id,
+                    name=args.name,
+                    file_path=Path(args.file).resolve(),
+                )
+                entry = result.get("entry") if isinstance(result.get("entry"), dict) else {}
+                score = result.get("score") if isinstance(result.get("score"), dict) else {}
+                print(f"Score: {score.get('total', entry.get('score_total', '—'))}/100")
+                print(f"✓ Imported as private registry entry {entry.get('id', '')}")
+                return
+        except RegistryClientError as exc:
+            print(f"skilgen registry failed: {exc}", file=sys.stderr)
+            sys.exit(1)
     if args.command == "enterprise":
         root = Path(args.project_root).resolve()
         if args.enterprise_command == "list":
@@ -1237,6 +1418,42 @@ def main() -> None:
             emit_progress("Comparing baseline and Skilgen eval results.")
             print(json.dumps(compare_eval_results(args.baseline, args.skilgen), indent=2))
             return
+        api_key = _eval_api_key()
+        org_id = _eval_org_id(args)
+        api_url = _eval_api_url(args)
+        if args.eval_command == "record":
+            started_at = datetime.now(UTC).isoformat()
+            skills_loaded = [item.strip() for item in str(args.skills_loaded or "").split(",") if item.strip()]
+            payload = {
+                "repo_id": args.repo_id,
+                "session_id": args.session_id or os.getenv("SKILGEN_SESSION_ID") or str(uuid.uuid4()),
+                "agent_runtime": args.agent_runtime,
+                "task_description": args.task,
+                "task_type": args.type,
+                "outcome": args.outcome,
+                "failure_reason": args.failure_reason,
+                "skills_loaded": skills_loaded,
+                "duration_seconds": args.duration,
+                "token_count": args.tokens,
+                "started_at": started_at,
+                "completed_at": datetime.now(UTC).isoformat(),
+            }
+            result = _eval_api_request(api_url, f"/eval/orgs/{org_id}/tasks", api_key, method="POST", payload=payload)
+            gaps = bool(isinstance(result, dict) and result.get("gaps_detected"))
+            if args.outcome == "failure" and gaps:
+                print(f"⚠ Task recorded ({args.outcome}). New skill gap detected.")
+            else:
+                print(f"✓ Task recorded ({args.outcome}). Gap detection: no new gaps.")
+            return
+        if args.eval_command == "status":
+            result = _eval_api_request(api_url, f"/eval/orgs/{org_id}/roi?repo_id={quote(args.repo_id)}&days={args.days}", api_key)
+            if isinstance(result, dict):
+                _print_eval_status(result)
+            return
+        if args.eval_command == "gaps":
+            result = _eval_api_request(api_url, f"/eval/orgs/{org_id}/skill-gaps?status=open", api_key)
+            _print_eval_gaps(result if isinstance(result, list) else [])
+            return
     if args.command == "status":
         print(json.dumps(status_payload(Path(args.project_root).resolve()), indent=2))
         return
@@ -1392,6 +1609,22 @@ def main() -> None:
 
     if args.command == "watch":
         root = Path(args.project_root).resolve()
+        if getattr(args, "repo_id", None):
+            api_key = os.getenv("SKILLAYER_API_KEY", "")
+            if not api_key:
+                print("error: SKILLAYER_API_KEY environment variable is required", file=sys.stderr)
+                sys.exit(1)
+            from skilgen.hooks.cursor_watcher import watch_skills
+
+            print("👁  Watching for agent loads. Use this while working with Cursor or any agent.")
+            watch_skills(
+                str(root),
+                args.repo_id,
+                api_key,
+                api_url=os.getenv("SKILLAYER_API_URL", "https://api.skillayer.com"),
+                poll_interval=args.poll_interval,
+            )
+            return
         watch_progress = CliProgressReporter()
         emit_progress(
             f"Starting watch mode with the {current_runtime_mode(root)} runtime. Skilgen will explain each refresh as changes are detected."
@@ -1416,6 +1649,7 @@ def main() -> None:
     ensure_auto_update_worker(root, requirements_path=Path(args.requirements).resolve() if args.requirements else None)
     diagnostics = runtime_diagnostics(root)
     progress = CliProgressReporter()
+    skillayer_synced = False
     try:
         progress.emit(
             f"Starting delivery with the {current_runtime_mode(root)} runtime. This may take a bit while Skilgen builds project context and generates the final skill tree."
@@ -1435,6 +1669,10 @@ def main() -> None:
         if getattr(args, "auto_detect", False) and not args.dry_run and "skills" in targets:
             progress.emit("Scanning non-code sources for API, infrastructure, data, security, and operational knowledge.")
             source_result = run_source_parsers(root, None)
+        if not args.dry_run:
+            skillayer_synced = sync_to_skillayer_after_delivery(root, generated)
+            if skillayer_synced:
+                print("↑ Synced to Skillayer", file=sys.stderr)
     finally:
         progress.stop()
     source_payload: dict[str, object] | None = None
@@ -1450,6 +1688,7 @@ def main() -> None:
                 "runtime": current_runtime_mode(root),
                 "runtime_diagnostics": diagnostics,
                 "generated_files": [str(path) for path in generated],
+                "skillayer_synced": skillayer_synced,
                 "non_code_sources": source_payload,
             },
             indent=2,

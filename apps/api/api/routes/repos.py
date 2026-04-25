@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
@@ -12,7 +13,7 @@ from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 
-from apps.api.api.auth import get_current_org_id, get_current_user
+from apps.api.api.auth import get_current_org_id, get_current_org_id_optional, get_current_user
 from apps.api.api.routes.orgs import (
     _criticality_score,
     _last_30_dates,
@@ -115,24 +116,68 @@ class SkillContentUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=200_000)
 
 
+class SkillImproveRequest(BaseModel):
+    """Request body for the skill improvement loop."""
+
+    mode: Literal["regenerate", "enhance"]
+
+
+class SkillImprovementIssue(BaseModel):
+    dimension: str
+    score: int
+    max: int
+    reason: str
+    fix: str
+    impact: Literal["high", "medium"]
+    points_available: int
+
+
+class ImprovementPlanResponse(BaseModel):
+    skill_id: str
+    current_score: int
+    potential_score: int
+    score_gap: int
+    issues: list[SkillImprovementIssue]
+    word_count: int
+    code_block_count: int
+    is_improvable: bool
+    quick_win: SkillImprovementIssue | None
+
+
+class SkillImproveResponse(BaseModel):
+    improved: bool
+    queued: bool | None = None
+    task_id: str | None = None
+    reason: str | None = None
+    new_score: float | None = None
+    score_delta: float | None = None
+    new_version: int | None = None
+    content: str | None = None
+
+
 class SessionMessage(BaseModel):
     role: Literal["user", "assistant", "tool"]
     content: str
 
 
 class SessionIngestionPayload(BaseModel):
-    session_id: str = Field(max_length=128)
+    session_id: str = Field(default_factory=lambda: str(uuid4()), max_length=128)
     agent_runtime: Literal["claude_code", "codex", "cursor", "copilot", "gemini", "other"]
     task_description: str | None = Field(default=None, max_length=1000)
     engineer_login: str | None = Field(default=None, max_length=128)
     duration_minutes: int | None = None
     files_touched: list[str] = Field(default_factory=list, max_length=500)
     skill_paths_loaded: list[str] = Field(default_factory=list, max_length=200)
+    skills_loaded: list[str] = Field(default_factory=list, max_length=200)
+    code_produced: str | None = None
+    outcome: str | None = None
+    notes: str | None = None
     messages: list[SessionMessage] = Field(default_factory=list, max_length=500)
 
 
 class SessionIngestionResponse(BaseModel):
     session_db_id: str
+    session_id: str | None = None
     status: Literal["created", "duplicate"]
     extraction_queued: bool
 
@@ -157,7 +202,8 @@ class KnowledgeVelocityPoint(BaseModel):
 
 
 async def _repo_in_scope(db: AsyncSession, repo_id: str, org_id: str) -> Repo:
-    repo = await db.get(Repo, repo_id)
+    repo_result = await db.execute(select(Repo).where(Repo.id == repo_id))
+    repo = repo_result.scalar_one_or_none()
     if repo is None:
         raise HTTPException(status_code=404, detail="Repo not found")
     if repo.org_id != org_id:
@@ -204,6 +250,212 @@ def _compute_skill_score(content: str) -> dict[str, int]:
         "freshness": freshness,
         "structure": structure,
     }
+
+
+def _score_dict(skill: Skill) -> dict[str, int]:
+    return {
+        "total": int(skill.score_total or 0),
+        "groundedness": int(skill.score_groundedness or 0),
+        "coverage": int(skill.score_coverage or 0),
+        "freshness": int(skill.score_freshness or 0),
+        "structure": int(skill.score_structure or 0),
+    }
+
+
+def _skill_word_count(content: str | None) -> int:
+    return len((content or "").split())
+
+
+def _skill_code_block_count(content: str | None) -> int:
+    return len(re.findall(r"```", content or "")) // 2
+
+
+def _skill_improvement_issues(skill: Skill, content: str) -> list[SkillImprovementIssue]:
+    """Build the requested quality diagnosis from persisted skill health and content."""
+    issues: list[SkillImprovementIssue] = []
+    lines = content.splitlines()
+    words = len(content.split())
+    code_block_count = content.count("```")
+    file_ref_count = len([line for line in lines if "/" in line and "." in line])
+    groundedness = int(skill.score_groundedness or 0)
+    coverage = int(skill.score_coverage or 0)
+    freshness = int(skill.score_freshness or 0)
+    structure = int(skill.score_structure or 0)
+    if groundedness < 15:
+        issues.append(
+            SkillImprovementIssue(
+                dimension="Groundedness",
+                score=groundedness,
+                max=25,
+                reason=f"Only {code_block_count // 2} code examples found. Skills need concrete examples from your actual codebase.",
+                fix="Add 3-5 real code snippets from your repo showing how this domain is actually used.",
+                impact="high",
+                points_available=25 - groundedness,
+            )
+        )
+    elif groundedness < 20:
+        issues.append(
+            SkillImprovementIssue(
+                dimension="Groundedness",
+                score=groundedness,
+                max=25,
+                reason=f"Only {file_ref_count} file path references found. More specific file references help agents navigate.",
+                fix="Add specific file paths (e.g. src/payments/checkout.py) where key logic lives.",
+                impact="medium",
+                points_available=25 - groundedness,
+            )
+        )
+
+    has_antipatterns = "anti-pattern" in content.lower() or "avoid" in content.lower() or "don't" in content.lower()
+    if coverage < 15:
+        issues.append(
+            SkillImprovementIssue(
+                dimension="Coverage",
+                score=coverage,
+                max=25,
+                reason="Missing patterns and anti-patterns. Agents need to know both what TO do and what NOT to do.",
+                fix="Add a 'Key Patterns' section (3-5 patterns) and a 'Common Mistakes' or 'Anti-patterns' section.",
+                impact="high",
+                points_available=25 - coverage,
+            )
+        )
+    elif not has_antipatterns:
+        issues.append(
+            SkillImprovementIssue(
+                dimension="Coverage",
+                score=coverage,
+                max=25,
+                reason="No anti-patterns documented. Agents frequently make mistakes that could be prevented.",
+                fix="Add an 'Anti-patterns' or 'Common Mistakes' section with 2-3 things to avoid.",
+                impact="medium",
+                points_available=25 - coverage,
+            )
+        )
+
+    updated_at = getattr(skill, "updated_at", None) or getattr(skill, "created_at", None)
+    days_since_update = (datetime.utcnow() - updated_at).days if updated_at else 999
+    if freshness < 15:
+        issues.append(
+            SkillImprovementIssue(
+                dimension="Freshness",
+                score=freshness,
+                max=25,
+                reason=f"Skill content is {days_since_update} days old. Stale skills mislead agents about current code structure.",
+                fix="Run `skilgen deliver --project-root .` to regenerate from current source, then review and save.",
+                impact="high",
+                points_available=25 - freshness,
+            )
+        )
+
+    header_count = len([line for line in lines if line.startswith("#")])
+    if structure < 15:
+        issues.append(
+            SkillImprovementIssue(
+                dimension="Structure",
+                score=structure,
+                max=25,
+                reason=f"Only {header_count} sections found, {words} words total. Skills need clear sections and sufficient depth.",
+                fix="Organise with headers: Overview, Key Patterns, Anti-patterns, File Map, Check Paths. Target 300-800 words.",
+                impact="medium" if words > 100 else "high",
+                points_available=25 - structure,
+            )
+        )
+    issues.sort(key=lambda item: (0 if item.impact == "high" else 1, -item.points_available))
+    return issues
+
+
+def _improvement_plan(skill: Skill, version: SkillVersion | None) -> dict[str, object]:
+    content = (version.content if version else skill.content) or ""
+    issues = _skill_improvement_issues(skill, content)
+    current_score = int(skill.score_total or 0)
+    potential_score = min(100, current_score + sum(issue.points_available for issue in issues))
+    return {
+        "skill_id": str(skill.id),
+        "current_score": current_score,
+        "potential_score": potential_score,
+        "score_gap": potential_score - current_score,
+        "issues": issues,
+        "word_count": len(content.split()),
+        "code_block_count": content.count("```") // 2,
+        "is_improvable": len(issues) > 0,
+        "quick_win": issues[0] if issues else None,
+    }
+
+
+def _skill_improvement_plan(skill: Skill, version: SkillVersion | None = None) -> ImprovementPlanResponse:
+    plan = _improvement_plan(skill, version)
+    return ImprovementPlanResponse(
+        skill_id=str(plan["skill_id"]),
+        current_score=int(plan["current_score"]),
+        potential_score=int(plan["potential_score"]),
+        score_gap=int(plan["score_gap"]),
+        issues=plan["issues"],  # type: ignore[arg-type]
+        word_count=int(plan["word_count"]),
+        code_block_count=int(plan["code_block_count"]),
+        is_improvable=bool(plan["is_improvable"]),
+        quick_win=plan["quick_win"],  # type: ignore[arg-type]
+    )
+
+
+async def _anthropic_skill_improvement(
+    *,
+    content: str,
+    issues: list[SkillImprovementIssue],
+    score: int,
+    api_key: str | None,
+) -> str | None:
+    """Return AI-improved content, or None when Anthropic is unavailable."""
+    if not api_key:
+        return None
+    try:
+        import httpx
+    except ImportError:
+        return None
+    issues_summary = ", ".join(f"{issue.dimension} ({issue.score}/{issue.max})" for issue in issues) or "none"
+    specific_fixes = "\n".join(f"- {issue.fix}" for issue in issues) or "- Preserve and clarify the existing guidance."
+    user_prompt = f"""You are improving a software skill document for AI agents. The current skill scored
+{score}/100. The weakest areas are: {issues_summary}.
+
+Current content:
+{content or ""}
+
+Improve this skill by:
+{specific_fixes}
+
+Rules:
+- Keep all existing correct information
+- Add code examples if missing (use realistic placeholder syntax matching the domain)
+- Add anti-patterns section if missing
+- Improve structure with clear headers
+- Target 400-600 words
+- Return ONLY the improved skill content, no explanation
+"""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-3-5-haiku-20241022",
+                    "max_tokens": 2000,
+                    "temperature": 0.3,
+                    "messages": [{"role": "user", "content": user_prompt}],
+                },
+            )
+        if response.status_code >= 400:
+            return None
+        payload: dict[str, Any] = response.json()
+        parts = payload.get("content")
+        if not isinstance(parts, list):
+            return None
+        text = "\n".join(str(part.get("text", "")) for part in parts if isinstance(part, dict) and part.get("type") == "text").strip()
+        return text or None
+    except Exception:
+        return None
 
 
 async def _latest_repo_skills(db: AsyncSession, repo_id: str) -> list[Skill]:
@@ -462,6 +714,182 @@ async def get_repo_skill_usage_stats(
     )
 
 
+@router.get("/{repo_id}/skills/{skill_id}/improvement-plan", response_model=ImprovementPlanResponse)
+async def get_skill_improvement_plan(
+    repo_id: str,
+    skill_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> ImprovementPlanResponse:
+    """Return a deterministic plan for improving a skill."""
+    await _repo_in_scope(db, repo_id, current_org_id)
+    skill = await db.get(Skill, skill_id)
+    if skill is None or skill.repo_id != repo_id:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    latest_version = (
+        await db.execute(
+            select(SkillVersion)
+            .where(SkillVersion.skill_id == skill.id, SkillVersion.is_latest.is_(True))
+            .order_by(desc(SkillVersion.version_number))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return _skill_improvement_plan(skill, latest_version)
+
+
+@router.post("/{repo_id}/skills/{skill_id}/improve", response_model=SkillImproveResponse)
+async def improve_skill(
+    repo_id: str,
+    skill_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    payload: SkillImproveRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> SkillImproveResponse:
+    """Improve stored skill content and create a new version."""
+    repo = await _repo_in_scope(db, repo_id, current_org_id)
+    skill = await db.get(Skill, skill_id)
+    if skill is None or skill.repo_id != repo_id:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    body = payload
+    latest_version = (
+        await db.execute(
+            select(SkillVersion)
+            .where(SkillVersion.skill_id == skill.id, SkillVersion.is_latest.is_(True))
+            .order_by(desc(SkillVersion.version_number))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    plan = _skill_improvement_plan(skill, latest_version)
+    if body.mode == "regenerate":
+        installation_id = repo.github_installation_id
+        if not installation_id:
+            raise HTTPException(status_code=400, detail="Repo installation id is not available")
+        run = AnalysisRun(
+            repo_id=repo_id,
+            trigger="manual",
+            status="queued",
+            branch=repo.default_branch,
+            created_at=datetime.utcnow(),
+        )
+        db.add(run)
+        await db.flush()
+        await db.commit()
+        await _queue_analysis(
+            request,
+            background_tasks,
+            {
+                "run_id": run.id,
+                "repo_id": repo.id,
+                "installation_id": int(installation_id),
+                "full_name": repo.full_name,
+                "ref": repo.default_branch,
+                "domain": skill.domain,
+            },
+        )
+        return SkillImproveResponse(improved=False, queued=True, task_id=str(run.id))
+
+    current_content = skill.content or ""
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return SkillImproveResponse(
+            improved=False,
+            reason="AI improvement requires ANTHROPIC_API_KEY to be configured",
+        )
+
+    new_content = await _anthropic_skill_improvement(
+        content=current_content,
+        issues=plan.issues,
+        score=plan.current_score,
+        api_key=api_key,
+    )
+    if not new_content:
+        return SkillImproveResponse(
+            improved=False,
+            reason="Anthropic did not return improved content",
+        )
+
+    content_hash = hashlib.sha256(new_content.encode()).hexdigest()
+    latest_version_number = (
+        await db.execute(
+            select(SkillVersion.version_number)
+            .where(SkillVersion.skill_id == skill.id, SkillVersion.is_latest.is_(True))
+            .order_by(desc(SkillVersion.version_number))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if content_hash == skill.content_hash:
+        return SkillImproveResponse(
+            improved=False,
+            reason="Skill content is already up to date.",
+            new_version=int(latest_version_number or 1),
+            new_score=float(plan.current_score),
+            score_delta=0,
+        )
+
+    score = _compute_skill_score(new_content)
+    try:
+        await db.execute(
+            update(SkillVersion)
+            .where(SkillVersion.skill_id == skill.id, SkillVersion.is_latest.is_(True))
+            .values(is_latest=False)
+        )
+        count_result = await db.execute(select(func.count(SkillVersion.id)).where(SkillVersion.skill_id == skill.id))
+        version_number = int(count_result.scalar() or 0) + 1
+
+        skill.content = new_content
+        skill.content_hash = content_hash
+        skill.score_total = score["total"]
+        skill.score_groundedness = score["groundedness"]
+        skill.score_coverage = score["coverage"]
+        skill.score_freshness = score["freshness"]
+        skill.score_structure = score["structure"]
+        skill.is_stale = False
+
+        db.add(
+            SkillVersion(
+                skill_id=skill.id,
+                run_id=skill.run_id or str(uuid4()),
+                repo_id=repo_id,
+                domain=skill.domain,
+                content=new_content,
+                content_hash=content_hash,
+                version_number=version_number,
+                is_latest=True,
+            )
+        )
+        await audit.emit(
+            db,
+            current_org_id,
+            "skill.improved",
+            "updated",
+            f"Improved skill content for {skill.domain}",
+            actor_login=get_actor_login(request),
+            repo_id=repo_id,
+            repo_name=repo.name,
+            skill_id=skill.id,
+            skill_domain=skill.domain,
+            resource_type="skill",
+            resource_id=skill.id,
+            metadata={"version_number": version_number, "score_total": score["total"], "mode": body.mode},
+        )
+        await db.commit()
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to improve skill") from exc
+
+    return SkillImproveResponse(
+        improved=True,
+        reason=None,
+        new_version=version_number,
+        new_score=float(skill.score_total or 0),
+        score_delta=float(int(skill.score_total or 0) - plan.current_score),
+        content=new_content,
+    )
+
+
 @router.patch("/{repo_id}/skills/{skill_id}/content")
 async def update_repo_skill_content(
     repo_id: str,
@@ -579,7 +1007,7 @@ async def ingest_agent_session(
         )
     ).scalar_one_or_none()
     if existing is not None:
-        return SessionIngestionResponse(session_db_id=existing.id, status="duplicate", extraction_queued=False)
+        return SessionIngestionResponse(session_db_id=existing.id, session_id=existing.id, status="duplicate", extraction_queued=False)
 
     session = AgentSession(
         repo_id=repo_id,
@@ -590,7 +1018,11 @@ async def ingest_agent_session(
         engineer_login=payload.engineer_login,
         duration_minutes=payload.duration_minutes,
         files_touched=list(payload.files_touched),
-        skill_paths_loaded=list(payload.skill_paths_loaded),
+        skill_paths_loaded=list(payload.skill_paths_loaded or payload.skills_loaded),
+        skills_loaded=list(payload.skills_loaded or payload.skill_paths_loaded),
+        code_produced=payload.code_produced,
+        outcome=payload.outcome,
+        notes=payload.notes,
         raw_message_count=len(payload.messages),
         extraction_status="pending",
         discoveries_found=0,
@@ -616,7 +1048,7 @@ async def ingest_agent_session(
         raise HTTPException(status_code=400, detail="Unable to capture session") from exc
 
     background_tasks.add_task(run_session_knowledge_extraction, session.id, payload.messages, repo_id)
-    return SessionIngestionResponse(session_db_id=session.id, status="created", extraction_queued=True)
+    return SessionIngestionResponse(session_db_id=session.id, session_id=session.id, status="created", extraction_queued=True)
 
 
 @router.get("/{repo_id}/sessions", response_model=list[AgentSessionResponse])
@@ -1158,3 +1590,135 @@ async def sync_repo_analytics(
         raise HTTPException(status_code=400, detail="Unable to sync analytics") from exc
 
     return {"synced": synced, "skipped": skipped}
+
+
+# ---------------------------------------------------------------------------
+# GET /{repo_id}/skills/load  — agent skill loader
+# Called by Claude Code, Codex, Cursor via the API-Key header.
+# Returns all skill content concatenated for the repo, and records a load event.
+# ---------------------------------------------------------------------------
+
+@router.get("/{repo_id}/skills/load")
+async def load_skills_for_agent(
+    repo_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> dict:
+    """
+    Primary endpoint called by AI agents (Claude Code, Codex, Cursor).
+    Returns all skills for the repo as structured text the agent can read.
+    Records a SkillUsageEvent for every skill returned so analytics populate.
+    Accepts auth via:
+      - Authorization: Bearer sk-...
+      - API-Key: sk-...   (header used in CLAUDE.md / AGENTS.md snippets)
+    """
+    # Also accept API-Key header (used in CLAUDE.md / AGENTS.md instructions)
+    api_key_header = request.headers.get("api-key") or request.headers.get("API-Key")
+    if api_key_header and not current_org_id:
+        # Resolve org from api_key_header directly
+        from packages.db.models import Org
+        result = await db.execute(select(Org).where(Org.api_key == api_key_header))
+        org = result.scalar_one_or_none()
+        if org:
+            current_org_id = str(org.id)
+
+    # Load repo + skills
+    repo_result = await db.execute(
+        select(Repo).where(Repo.id == repo_id)
+    )
+    repo = repo_result.scalar_one_or_none()
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    skills_result = await db.execute(
+        select(Skill, SkillVersion)
+        .join(SkillVersion, Skill.id == SkillVersion.skill_id)
+        .where(
+            Skill.repo_id == repo_id,
+            SkillVersion.version_number == select(
+                func.max(SkillVersion.version_number)
+            ).where(SkillVersion.skill_id == Skill.id).scalar_subquery(),
+        )
+        .order_by(Skill.domain)
+    )
+    rows = skills_result.all()
+
+    if not rows:
+        return {
+            "repo": repo.name,
+            "skills": [],
+            "content": f"# {repo.name} — No skills generated yet\nRun `skilgen deliver --project-root .` to generate skills.",
+        }
+
+    # Build agent-readable content block + record load events
+    agent = _detect_agent_runtime(request)
+    session_id = request.headers.get("x-session-id") or str(uuid4())
+    now = datetime.now(UTC)
+
+    skill_blocks: list[str] = []
+    skill_summaries: list[dict] = []
+
+    for skill, version in rows:
+        content = version.content or ""
+        skill_blocks.append(
+            f"## {skill.domain}\n"
+            f"Score: {skill.score_total or 0:.0f}/100 | "
+            f"Freshness: {skill.score_freshness or 0:.0f}/25\n\n"
+            f"{content}\n"
+        )
+        skill_summaries.append({
+            "id": str(skill.id),
+            "domain": skill.domain,
+            "score": skill.score_total,
+            "version": version.version_number,
+        })
+
+        # Record load event
+        skill.load_count_30d = int(skill.load_count_30d or 0) + 1
+        skill.last_loaded_at = now
+        db.add(SkillUsageEvent(
+            org_id=current_org_id or str(repo.org_id),
+            repo_id=repo_id,
+            skill_id=skill.id,
+            agent_runtime=agent,
+            session_id=session_id,
+            loaded_at=now,
+        ))
+
+    try:
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        # Non-fatal — still return skills even if event recording failed
+
+    full_content = (
+        f"# {repo.name} — Skillayer Skills\n"
+        f"{len(rows)} skills loaded. Use these as authoritative guidance for this codebase.\n\n"
+        + "\n---\n\n".join(skill_blocks)
+    )
+
+    return {
+        "repo": repo.name,
+        "skill_count": len(rows),
+        "skills": skill_summaries,
+        "content": full_content,
+    }
+
+
+def _detect_agent_runtime(request: Request) -> str:
+    """Infer which agent is calling based on headers / user-agent."""
+    ua = (request.headers.get("user-agent") or "").lower()
+    if "claude" in ua or "anthropic" in ua:
+        return "claude_code"
+    if "codex" in ua or "openai" in ua:
+        return "codex"
+    if "cursor" in ua:
+        return "cursor"
+    if "copilot" in ua or "github" in ua:
+        return "copilot"
+    # Check x-agent header (set by skilgen hooks)
+    agent_header = (request.headers.get("x-agent") or "").lower()
+    if agent_header:
+        return agent_header
+    return "unknown"

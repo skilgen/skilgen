@@ -1,16 +1,22 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { AlertTriangle, ArrowRight, BookOpen, ChevronRight, GitBranch, Play, TrendingUp } from "lucide-react";
+import { AlertTriangle, ArrowRight, BookOpen, ChevronRight, Eye, GitBranch, Play, PlusCircle, RefreshCw, TrendingUp, Wrench } from "lucide-react";
 
 import {
+  getOrgActionItems,
   getBootstrapOrg,
+  getEvalROI,
+  getEvalSkillGaps,
   getMyOrg,
   getOrgRepos,
+  getOrgSetupStatus,
   getOrgSkillHeatmap,
   getOrgStats,
+  type ActionItem,
   type Org,
   type Repo,
 } from "../../lib/data";
+import { AgentSetupBanner } from "./agent-setup-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -87,16 +93,26 @@ function MetricCard({
   return href ? <Link href={href}>{content}</Link> : content;
 }
 
-function ScoreTrend({ points }: { points: { date: string; score: number }[] }) {
+function ScoreTrend({ points, avgScore, skillsBelowThreshold }: { points: { date: string; score: number }[]; avgScore: number; skillsBelowThreshold: number }) {
   const width = 920;
-  const height = 180;
+  const height = 210;
+  const chartHeight = 176;
   const safe = points.length ? points : [{ date: "", score: 0 }];
   const coordinates = safe.map((point, index) => {
     const x = safe.length === 1 ? width / 2 : (index / (safe.length - 1)) * width;
-    const y = height - (Math.max(0, Math.min(100, point.score)) / 100) * (height - 16) - 8;
+    const y = chartHeight - (Math.max(0, Math.min(100, point.score)) / 100) * (chartHeight - 16) - 8;
     return `${x},${y}`;
   });
-  const areaPoints = [`0,${height}`, ...coordinates, `${width},${height}`].join(" ");
+  const areaPoints = [`0,${chartHeight}`, ...coordinates, `${width},${chartHeight}`].join(" ");
+  const targetY = chartHeight - 0.7 * (chartHeight - 16) - 8;
+  const weekLabels = safe.map((_, index) => ({
+    x: safe.length === 1 ? width / 2 : (index / (safe.length - 1)) * width,
+    label: `Week ${index + 1}`,
+  }));
+  const caption =
+    avgScore < 70
+      ? `You're ${Math.max(0, 70 - avgScore)} points from the 70+ threshold where agents perform best.`
+      : `Your skills are performing well. ${skillsBelowThreshold} skills still below threshold.`;
 
   return (
     <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[radial-gradient(circle_at_top,rgba(201,151,58,0.18),rgba(16,16,24,0.96)_50%)] p-6">
@@ -111,7 +127,7 @@ function ScoreTrend({ points }: { points: { date: string; score: number }[] }) {
         </div>
       </div>
       {points.some((point) => point.score > 0) ? (
-        <svg aria-label="Org score trend" className="h-[180px] w-full" preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`}>
+        <svg aria-label="Org score trend" className="h-[210px] w-full" preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`}>
           <defs>
             <linearGradient id="overview-line" x1="0" x2="1" y1="0" y2="1">
               <stop offset="0%" stopColor="#f5d07a" />
@@ -122,14 +138,71 @@ function ScoreTrend({ points }: { points: { date: string; score: number }[] }) {
               <stop offset="100%" stopColor="rgba(201,151,58,0)" />
             </linearGradient>
           </defs>
+          <line stroke="#f59e0b" strokeDasharray="8 8" strokeOpacity="0.7" strokeWidth="2" x1="0" x2={width} y1={targetY} y2={targetY} />
+          <text fill="#f59e0b" fontSize="12" fontWeight="600" x={width - 58} y={targetY - 8}>
+            Target
+          </text>
           <polygon fill="url(#overview-fill)" points={areaPoints} />
           <polyline fill="none" points={coordinates.join(" ")} stroke="url(#overview-line)" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
+          {weekLabels.map((week) => (
+            <text fill="rgba(238,238,245,0.48)" fontSize="11" key={`${week.label}-${week.x}`} textAnchor="middle" x={week.x} y={height - 8}>
+              {week.label}
+            </text>
+          ))}
         </svg>
       ) : (
         <div className="rounded-2xl border border-dashed border-[color:var(--bg-border)] p-8 text-[14px] text-[color:var(--text-secondary)]">
           Analyse repos regularly to build score history.
         </div>
       )}
+      <p className="mt-3 text-[13px] text-[color:var(--text-secondary)]">{caption}</p>
+    </section>
+  );
+}
+
+function actionIcon(type: string) {
+  if (type === "improve") return Wrench;
+  if (type === "generate") return PlusCircle;
+  if (type === "refresh") return RefreshCw;
+  return Eye;
+}
+
+function priorityClass(priority: string) {
+  if (priority === "urgent") return "border-red-500/30 bg-red-500/10 text-red-200";
+  if (priority === "recommended") return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+  return "border-white/10 bg-white/5 text-[color:var(--text-secondary)]";
+}
+
+function TodayActions({ items }: { items: ActionItem[] }) {
+  if (items.length === 0) return null;
+
+  return (
+    <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
+      <div className="mb-5">
+        <h2 className="text-[20px] font-semibold text-[color:var(--text-primary)]">What to do today</h2>
+        <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Prioritised actions based on score, coverage, freshness, and agent activity.</p>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        {items.slice(0, 3).map((item) => {
+          const Icon = actionIcon(item.type);
+          return (
+            <article className="rounded-lg border border-[color:var(--bg-border)] bg-black/15 p-4" key={item.id}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[rgb(var(--accent-primary-rgb)/0.24)] bg-[rgb(var(--accent-primary-rgb)/0.08)] text-[color:var(--accent-primary)]">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold capitalize ${priorityClass(item.priority)}`}>{item.priority}</span>
+              </div>
+              <h3 className="mt-4 text-[15px] font-semibold text-[color:var(--text-primary)]">{item.title}</h3>
+              <p className="mt-2 min-h-[44px] text-[13px] leading-6 text-[color:var(--text-secondary)]">{item.description}</p>
+              <Link className="mt-4 inline-flex items-center gap-2 rounded-md border border-[rgb(var(--accent-primary-rgb)/0.28)] px-3 py-2 text-[12px] font-semibold text-[color:var(--accent-primary)] hover:bg-[rgb(var(--accent-primary-rgb)/0.08)]" href={item.action_url}>
+                Fix it
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </article>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -237,8 +310,8 @@ async function resolveOrg(): Promise<{ accessToken: string; org: Org | null; fir
     const session = await withAuth({ ensureSignedIn: false });
     accessToken = session?.accessToken || "";
     firstName = session?.user?.firstName || firstName;
-  } catch (error) {
-    console.error("Overview auth unavailable:", error);
+  } catch {
+    // Auth can be unavailable in local preview; continue with bootstrap data.
   }
   const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   return { accessToken, org, firstName };
@@ -246,9 +319,17 @@ async function resolveOrg(): Promise<{ accessToken: string; org: Org | null; fir
 
 export default async function OverviewPage() {
   const { accessToken, org, firstName } = await resolveOrg();
-  const [stats, heatmap, repos] = org
-    ? await Promise.all([getOrgStats(accessToken, org.id), getOrgSkillHeatmap(accessToken, org.id), getOrgRepos(accessToken, org.id)])
-    : [null, null, null];
+  const [stats, heatmap, repos, setupStatus, actionItems, roi, skillGaps] = org
+    ? await Promise.all([
+        getOrgStats(accessToken, org.id),
+        getOrgSkillHeatmap(accessToken, org.id),
+        getOrgRepos(accessToken, org.id),
+        getOrgSetupStatus(accessToken, org.id),
+        getOrgActionItems(accessToken, org.id),
+        getEvalROI(accessToken, org.id),
+        getEvalSkillGaps(accessToken, org.id, "open"),
+      ])
+    : [null, null, null, null, null, null, null];
 
   const repoList = repos ?? [];
   const attentionRepos = [...repoList]
@@ -256,6 +337,11 @@ export default async function OverviewPage() {
     .slice(0, 3);
   const staleActive = heatmap?.summary.stale_but_active ?? 0;
   const deadSkills = heatmap?.summary.dead_skills ?? 0;
+  const skillsBelowThreshold = heatmap?.skills.filter((skill) => skill.score_total < 70).length ?? 0;
+  const showSetupBanner = Boolean(setupStatus?.has_skills && !setupStatus.has_agent_loads);
+  const showTodayActions = (actionItems?.items.length ?? 0) > 0;
+  const showPerformance = (roi?.total_tasks ?? 0) >= 10 && roi?.multiplier;
+  const gapDomains = (skillGaps ?? []).map((gap) => gap.domain).slice(0, 3);
 
   return (
     <div className="space-y-6">
@@ -279,15 +365,24 @@ export default async function OverviewPage() {
         <EmptyState />
       ) : (
         <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          {showSetupBanner ? <AgentSetupBanner /> : null}
+          {(skillGaps?.length ?? 0) > 0 ? (
+            <Link className="flex items-center justify-between gap-4 rounded-xl border border-[#f59e0b]/30 bg-[#f59e0b]/10 p-4 text-sm text-amber-100" href="/dashboard/eval/gaps">
+              <span>⚠ {skillGaps?.length} skill gaps — agents failing on {gapDomains.join(", ")}</span>
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          ) : null}
+          {showTodayActions ? <TodayActions items={actionItems?.items ?? []} /> : null}
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
             <MetricCard label="Repos Connected" value={stats?.repo_count ?? repoList.length} sub="Connected repositories" />
             <MetricCard label="Skills Generated" value={stats?.skill_count ?? heatmap?.summary.total_skills ?? 0} sub="Tracked skill inventory" />
             <MetricCard label="Avg Skilgen Score" value={`${stats?.avg_score ?? 0}/100`} sub="Org-wide average" ringScore={stats?.avg_score ?? 0} />
+            {showPerformance ? <MetricCard label="Performance" value={`${roi?.multiplier}x`} sub="Agent task improvement" href="/dashboard/eval" /> : null}
             <MetricCard label="Dead Skills" value={deadSkills} sub="Skills with no recent usage" tone={deadSkills > 0 ? "danger" : "default"} href="/dashboard/analytics" />
             <MetricCard label="Stale + Active" value={staleActive} sub="Agents still loading outdated context" tone={staleActive > 0 ? "warning" : "default"} href="/dashboard/analytics" />
           </section>
 
-          <ScoreTrend points={stats?.score_trend ?? []} />
+          <ScoreTrend avgScore={stats?.avg_score ?? 0} points={stats?.score_trend ?? []} skillsBelowThreshold={skillsBelowThreshold} />
           <AttentionTable repos={attentionRepos} />
           <QuickActions />
         </>

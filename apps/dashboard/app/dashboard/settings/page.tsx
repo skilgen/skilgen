@@ -1,25 +1,32 @@
 import Link from "next/link";
 import type { ReactElement } from "react";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { Bell, Brain, CreditCard, Github, RadioTower, Settings, ShieldAlert } from "lucide-react";
+import { Bell, Brain, CreditCard, Github, KeyRound, RadioTower, Settings, ShieldAlert } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import {
   API_URL,
   getBootstrapOrg,
+  getOrgApiKey,
   getLLMConfig,
   getMyOrg,
   getOrgPolicies,
+  getOrgRepos,
   getOrgSettings,
+  getOrgSetupStatus,
   getPolicies,
   getPolicyTemplates,
   runPolicyCheck,
   type GovernancePoliciesResponse,
   type LLMConfig,
   type OrgSettings,
+  type Repo,
+  type SetupStatus,
   type PolicyCheckResult,
   type PolicyRule,
 } from "../../../lib/data";
+import { AgentIntegrationPanel } from "./agent-integration-panel";
+import { ApiAccessPanel } from "./api-access-panel";
 import { ManageBillingButton } from "./billing/manage-billing-button";
 import { LlmSettingsPanel, PolicySettingsPanel, SiemSettingsPanel } from "./enterprise-settings";
 import { SettingsControls } from "./settings-controls";
@@ -44,6 +51,7 @@ const tabs = [
   { key: "llm", label: "LLM", icon: Brain },
   { key: "policies", label: "Policies", icon: ShieldAlert },
   { key: "siem", label: "SIEM", icon: RadioTower },
+  { key: "agents", label: "Agent Integration", icon: KeyRound },
   { key: "github", label: "GitHub App", icon: Github },
   { key: "billing", label: "Billing", icon: CreditCard },
 ] as const;
@@ -117,6 +125,9 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
   let policyTemplates: PolicyRule[] = [];
   let policyCheck: PolicyCheckResult | null = null;
   let llmConfig: LLMConfig | null = null;
+  let apiKey = "";
+  let repos: Repo[] = [];
+  let setupStatus: SetupStatus | null = null;
 
   try {
     const session = await withAuth({ ensureSignedIn: true });
@@ -129,6 +140,9 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
       policyTemplates = await getPolicyTemplates(accessToken, org.id);
       policyCheck = await runPolicyCheck(accessToken, org.id);
       llmConfig = await getLLMConfig(accessToken, org.id);
+      apiKey = (await getOrgApiKey(accessToken, org.id))?.api_key ?? "";
+      repos = (await getOrgRepos(accessToken, org.id)) ?? [];
+      setupStatus = await getOrgSetupStatus(accessToken, org.id);
     }
     subscription = await getSubscription(accessToken);
   } catch {
@@ -139,6 +153,9 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
       policyRules = await getPolicies("", org.id);
       policyTemplates = await getPolicyTemplates("", org.id);
       llmConfig = await getLLMConfig("", org.id);
+      apiKey = (await getOrgApiKey("", org.id))?.api_key ?? "";
+      repos = (await getOrgRepos("", org.id)) ?? [];
+      setupStatus = await getOrgSetupStatus("", org.id);
     }
     subscription = null;
   }
@@ -149,6 +166,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
         <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">Settings</h1>
         <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Manage workspace quality gates, notifications, integrations, and billing.</p>
       </div>
+
+      <ApiAccessPanel accessToken={accessToken} apiKey={apiKey} orgId={settings.id} repos={repos} />
 
       <div className="mb-6 flex flex-wrap gap-2 border-b border-[color:var(--bg-border)] pb-2">
         {tabs.map((item) => {
@@ -178,6 +197,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
         {tab === "llm" ? <LlmSettingsPanel accessToken={accessToken} initialConfig={llmConfig} orgId={settings.id} /> : null}
         {tab === "policies" ? <PolicySettingsPanel accessToken={accessToken} initialCheck={policyCheck} initialPolicies={policyRules} orgId={settings.id} templates={policyTemplates} /> : null}
         {tab === "siem" ? <SiemSettingsPanel accessToken={accessToken} orgId={settings.id} /> : null}
+        {tab === "agents" ? <AgentIntegrationPanel accessToken={accessToken} apiKey={apiKey} orgId={settings.id} repos={repos} setupStatus={setupStatus} /> : null}
         {tab === "github" ? <GitHubSettingsPanel settings={settings} /> : null}
         {tab === "billing" ? <BillingPanel accessToken={accessToken} success={success} subscription={subscription} upgradedPlan={upgradedPlan} /> : null}
       </SectionErrorBoundary>

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, Terminal } from "lucide-react";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
-import { getBootstrapOrg, getOrgSkillHeatmap } from "../../../lib/data";
+import { getBootstrapOrg, getMyOrg, getOrgSkillHeatmap } from "../../../lib/data";
 import { HeatmapClient } from "./heatmap-client";
 
 export const dynamic = "force-dynamic";
@@ -14,11 +14,11 @@ export default async function HeatmapPage() {
   try {
     const session = await withAuth({ ensureSignedIn: false });
     accessToken = session?.accessToken || "";
-  } catch (error) {
-    console.error("Heatmap auth unavailable:", error);
+  } catch {
+    // Auth can be unavailable in local preview; continue with bootstrap data.
   }
 
-  const org = await getBootstrapOrg();
+  const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   orgId = org?.id ?? "";
   const heatmap = orgId ? await getOrgSkillHeatmap(accessToken, orgId) : null;
   const summary = heatmap?.summary ?? { total_skills: 0, dead_skills: 0, stale_but_active: 0, healthy: 0, avg_criticality: 0 };
@@ -64,8 +64,11 @@ export default async function HeatmapPage() {
       </section>
 
       {summary.dead_skills > 0 ? (
-        <section className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-5 py-4 text-[14px] text-amber-200">
-          ⚠ {summary.dead_skills} skill{summary.dead_skills === 1 ? "" : "s"} haven&apos;t been loaded in 30+ days. Consider pruning or re-analysing.
+        <section className="mb-6 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-5 py-4 text-[14px] text-amber-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            {summary.dead_skills} skill{summary.dead_skills === 1 ? "" : "s"} haven&apos;t been loaded in 30+ days. Consider pruning or re-analysing.
+          </p>
         </section>
       ) : null}
 

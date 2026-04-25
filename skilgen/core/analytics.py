@@ -10,6 +10,40 @@ import re
 from skilgen.external_skills import active_external_skills
 
 
+def _compute_richness_score(content: str, spec: object) -> dict[str, int]:
+    lines = content.splitlines()
+    words = len(content.split())
+
+    code_blocks = content.count("```") // 2
+    file_refs = sum(
+        1
+        for line in lines
+        if "/" in line
+        and any(line.strip().rstrip("`").endswith(ext) for ext in [".py", ".ts", ".js", ".go", ".rb", ".java"])
+    )
+    groundedness = min(25, code_blocks * 8 + file_refs * 2)
+
+    has_antipatterns = "anti-pattern" in content.lower() or "## anti" in content.lower()
+    pattern_count = len(getattr(spec, "patterns", []))
+    howto_steps = len([line for line in lines if line.strip().startswith(("1.", "2.", "3."))])
+    coverage = min(25, pattern_count * 3 + howto_steps * 2 + (10 if has_antipatterns else 0))
+
+    freshness = 25
+
+    headers = sum(1 for line in lines if line.startswith("#"))
+    word_score = min(15, words // 30)
+    structure = min(25, headers * 3 + word_score)
+
+    total = groundedness + coverage + freshness + structure
+    return {
+        "groundedness": groundedness,
+        "coverage": coverage,
+        "freshness": freshness,
+        "structure": structure,
+        "total": total,
+    }
+
+
 def _analytics_path(project_root: str | Path) -> Path:
     return Path(project_root).resolve() / ".skilgen" / "analytics" / "usage.jsonl"
 
@@ -88,13 +122,60 @@ def _skill_content_metrics(path: Path) -> dict[str, int]:
     headings = sum(1 for line in lines if line.strip().startswith("#"))
     bullets = sum(1 for line in lines if line.strip().startswith(("- ", "* ")))
     references = text.count("`")
+    code_fences = sum(1 for line in lines if line.strip().startswith("```")) // 2
+    file_refs = sum(
+        1
+        for line in lines
+        if "/" in line and any(line.strip().rstrip("`").endswith(ext) for ext in [".py", ".ts", ".js", ".go", ".rb", ".java"])
+    )
+    anti_patterns = 1 if "## Anti-patterns" in text else 0
+    code_examples = 1 if "## Code Examples" in text else 0
+    howto_steps = sum(1 for line in lines if line.strip().startswith(("1.", "2.", "3.")))
     words = len(re.findall(r"\w+", text))
     return {
         "headings": headings,
         "bullets": bullets,
         "references": references,
+        "code_fences": code_fences,
+        "file_refs": file_refs,
+        "anti_patterns": anti_patterns,
+        "code_examples": code_examples,
+        "howto_steps": howto_steps,
         "words": words,
     }
+
+
+def _frontmatter_int(path: Path, field: str) -> int | None:
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    prefix = f"{field}:"
+    for line in lines[1:40]:
+        stripped = line.strip()
+        if stripped == "---":
+            return None
+        if stripped.startswith(prefix):
+            raw = stripped[len(prefix):].strip().strip("'\"")
+            try:
+                return int(float(raw))
+            except ValueError:
+                return None
+    return None
+
+
+def _richness_score(metrics: dict[str, int], *, frontmatter_score: int | None = None) -> int:
+    if frontmatter_score is not None:
+        return max(0, min(100, frontmatter_score))
+    groundedness = min(25, int(metrics.get("code_fences", 0)) * 8 + int(metrics.get("file_refs", 0)) * 2)
+    coverage = min(
+        25,
+        int(metrics.get("bullets", 0)) * 2
+        + int(metrics.get("howto_steps", 0)) * 2
+        + (10 if int(metrics.get("anti_patterns", 0)) else 0),
+    )
+    freshness = 25
+    structure = min(25, int(metrics.get("headings", 0)) * 3 + min(15, int(metrics.get("words", 0)) // 30))
+    return max(0, min(100, groundedness + coverage + freshness + structure))
 
 
 def _modeled_attention_score(*, depth: int, richness: int, metrics: dict[str, int], kind: str) -> int:
@@ -102,7 +183,7 @@ def _modeled_attention_score(*, depth: int, richness: int, metrics: dict[str, in
     score = (
         base
         + depth * 18
-        + richness * 4
+        + max(1, richness // 4) * 4
         + int(metrics.get("headings", 0)) * 6
         + int(metrics.get("bullets", 0)) * 2
         + max(0, int(metrics.get("references", 0)) // 2)
@@ -201,7 +282,7 @@ def analytics_summary(project_root: str | Path, *, limit: int = 10) -> dict[str,
         parts = Path(rel).parts
         family = parts[1] if len(parts) > 2 else "other"
         depth = max(1, len(parts) - 2)
-        richness = metrics["headings"] + metrics["bullets"] + max(1, metrics["references"] // 4)
+        richness = _richness_score(metrics, frontmatter_score=_frontmatter_int(skill_path, "richness_score"))
         modeled_loads = _modeled_attention_score(depth=depth, richness=richness, metrics=metrics, kind="repo")
         skill_usage.append(
             {

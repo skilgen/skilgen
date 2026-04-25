@@ -47,6 +47,41 @@ export type OrgStats = {
   score_trend: { date: string; score: number }[];
 };
 
+export type SetupStep = {
+  id: "connect_repo" | "generate_skills" | "connect_agent" | "improve_skills" | string;
+  title: string;
+  done: boolean;
+  action_url?: string | null;
+  description?: string | null;
+  cli_command?: string | null;
+};
+
+export type SetupStatus = {
+  has_repos: boolean;
+  has_skills: boolean;
+  has_agent_loads: boolean;
+  has_high_score_skills: boolean;
+  setup_steps: SetupStep[];
+  completion_percent: number;
+};
+
+export type OrgApiKey = {
+  api_key: string;
+};
+
+export type ActionItem = {
+  id: string;
+  type: "improve" | "generate" | "refresh" | "review" | string;
+  title: string;
+  description: string;
+  action_url: string;
+  priority: "urgent" | "recommended" | "suggested" | string;
+};
+
+export type ActionItemsResponse = {
+  items: ActionItem[];
+};
+
 export type SkillHeatmapSkill = {
   skill_id: string;
   domain: string;
@@ -472,6 +507,75 @@ export type SkillContentUpdateResult = {
   score: Score;
 };
 
+export type EvalBucket = {
+  bucket: string;
+  task_count: number;
+  success_rate: number | null;
+};
+
+export type EvalRuntimeRow = {
+  runtime: string;
+  task_count: number;
+  success_rate: number | null;
+  avg_token_count: number | null;
+  best_domain?: string | null;
+};
+
+export type EvalTrendPoint = {
+  week: string;
+  success_rate: number | null;
+  avg_skill_score: number | null;
+};
+
+export type EvalSkillGap = {
+  id?: string;
+  domain: string;
+  failure_count: number;
+  gap_type: string;
+  existing_skill_id?: string | null;
+  existing_skill_score?: number | null;
+  existing_score?: number | null;
+  status?: string;
+  suggested_action?: string;
+  detected_at?: string;
+  task_ids?: string[];
+  failed_tasks?: Array<{ id: string; description: string | null; outcome: string; failure_reason: string | null; started_at: string }>;
+};
+
+export type EvalROI = {
+  total_tasks: number;
+  success_rate: number | null;
+  multiplier: number | null;
+  high_skill_success_rate: number | null;
+  low_skill_success_rate: number | null;
+  by_skill_score_bucket: EvalBucket[];
+  by_agent_runtime: EvalRuntimeRow[];
+  skill_gaps: EvalSkillGap[];
+  trend: EvalTrendPoint[];
+  benchmark: Record<string, unknown>;
+};
+
+export type ABTest = {
+  id: string;
+  skill_id: string;
+  skill_name?: string;
+  repo_name?: string;
+  name: string;
+  status: string;
+  winner: string | null;
+  control_success_rate: number | null;
+  treatment_success_rate: number | null;
+  improvement_pct: number | null;
+  confidence: string | null;
+  recommendation: string | null;
+  control_task_count?: number;
+  treatment_task_count?: number;
+  control_session_id?: string | null;
+  treatment_session_id?: string | null;
+  created_at: string;
+  completed_at: string | null;
+};
+
 export type ScoreHistoryPoint = {
   date: string;
   score_total: number;
@@ -584,6 +688,76 @@ export type RegistrySkill = {
   score_total: number;
 };
 
+export type SkillRegistryEntry = {
+  id: string;
+  name: string;
+  domain: string;
+  version: string;
+  visibility: "private" | "org" | "public" | string;
+  tags: string[];
+  description: string;
+  publisher_login: string;
+  compatible_runtimes: string[];
+  install_count: number;
+  score_total: number;
+  score_groundedness: number;
+  score_coverage: number;
+  score_freshness: number;
+  score_structure: number;
+  is_verified: boolean;
+  is_deprecated: boolean;
+  deprecation_message: string | null;
+  successor_entry_id: string | null;
+  content_preview: string | null;
+  predicted_decay_date: string | null;
+  predicted_decay_days: number | null;
+  decay_confidence: number | null;
+  regen_queued: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RegistryEntriesResponse = {
+  entries: SkillRegistryEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type HalfLifeSummary = {
+  critical: HalfLifeSkill[];
+  warning: HalfLifeSkill[];
+  healthy: HalfLifeSkill[];
+  total_skills: number;
+  regen_queued_count: number;
+};
+
+export type HalfLifeSkill = {
+  skill_id: string;
+  name: string;
+  domain: string;
+  repo_id: string;
+  repo_name: string;
+  freshness: number;
+  commits_30d: number;
+  predicted_decay_date: string | null;
+  predicted_decay_days: number;
+  decay_confidence: number;
+  regen_queued: boolean;
+};
+
+export type DependencyGraph = {
+  nodes: { skill_id: string; name: string; domain: string; repo_id: string; repo_name: string; score_total: number }[];
+  edges: { source_skill_id: string; target_entry_id: string; target_name: string }[];
+  stale_upstream_count: number;
+};
+
+export type CompatibilityMatrix = {
+  skills: { skill_id: string; name: string; domain: string }[];
+  runtimes: string[];
+  matrix: Record<string, Record<string, "compatible" | "untested" | "incompatible" | string>>;
+};
+
 export type RegistryList = {
   skills: RegistrySkill[];
   total: number;
@@ -646,6 +820,18 @@ export async function getBootstrapOrg(): Promise<BootstrapOrg | null> {
 
 export async function getOrgStats(accessToken: string | null, orgId: string): Promise<OrgStats | null> {
   return apiFetch<OrgStats>(`/orgs/${orgId}/stats`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgSetupStatus(accessToken: string | null, orgId: string, revalidate?: number): Promise<SetupStatus | null> {
+  return apiFetch<SetupStatus>(`/orgs/${orgId}/setup-status`, { accessToken, ...(revalidate ? { revalidate } : { cache: "no-store" }) });
+}
+
+export async function getOrgApiKey(accessToken: string | null, orgId: string): Promise<OrgApiKey | null> {
+  return apiFetch<OrgApiKey>(`/orgs/${orgId}/api-key`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgActionItems(accessToken: string | null, orgId: string): Promise<ActionItemsResponse | null> {
+  return apiFetch<ActionItemsResponse>(`/orgs/${orgId}/action-items`, { accessToken, cache: "no-store" });
 }
 
 export async function getOrgRepos(accessToken: string | null, orgId: string): Promise<Repo[] | null> {
@@ -873,6 +1059,19 @@ export async function getOrgSkillDebt(accessToken: string | null, orgId: string)
   return apiFetch<SkillDebtResponse>(`/orgs/${orgId}/skill-debt`, { accessToken, cache: "no-store" });
 }
 
+export async function getEvalROI(accessToken: string | null, orgId: string, params?: URLSearchParams): Promise<EvalROI | null> {
+  const query = params?.toString();
+  return apiFetch<EvalROI>(`/eval/orgs/${orgId}/roi${query ? `?${query}` : ""}`, { accessToken, cache: "no-store" });
+}
+
+export async function getEvalSkillGaps(accessToken: string | null, orgId: string, status = "open"): Promise<EvalSkillGap[] | null> {
+  return apiFetch<EvalSkillGap[]>(`/eval/orgs/${orgId}/skill-gaps?status=${encodeURIComponent(status)}`, { accessToken, cache: "no-store" });
+}
+
+export async function getABTests(accessToken: string | null, orgId: string): Promise<ABTest[] | null> {
+  return apiFetch<ABTest[]>(`/eval/orgs/${orgId}/ab-tests`, { accessToken, cache: "no-store" });
+}
+
 export async function getRegistrySkills(params: URLSearchParams): Promise<RegistryList | null> {
   const query = params.toString();
   return apiFetch<RegistryList>(`/registry${query ? `?${query}` : ""}`, { revalidate: 60 });
@@ -880,4 +1079,30 @@ export async function getRegistrySkills(params: URLSearchParams): Promise<Regist
 
 export async function getRegistrySkillDetail(registryId: string): Promise<RegistrySkillDetail | null> {
   return apiFetch<RegistrySkillDetail>(`/registry/${registryId}`, { cache: "no-store" });
+}
+
+export async function getOrgRegistryEntries(accessToken: string | null, orgId: string, params?: URLSearchParams): Promise<RegistryEntriesResponse | null> {
+  const query = params?.toString();
+  return apiFetch<RegistryEntriesResponse>(`/registry/orgs/${orgId}/entries${query ? `?${query}` : ""}`, { accessToken, cache: "no-store" });
+}
+
+export async function getMarketplaceEntries(params?: URLSearchParams): Promise<RegistryEntriesResponse | null> {
+  const query = params?.toString();
+  return apiFetch<RegistryEntriesResponse>(`/registry/marketplace${query ? `?${query}` : ""}`, { cache: "no-store" });
+}
+
+export async function getHalfLifeSummary(accessToken: string | null, orgId: string): Promise<HalfLifeSummary | null> {
+  return apiFetch<HalfLifeSummary>(`/registry/orgs/${orgId}/half-life`, { accessToken, cache: "no-store" });
+}
+
+export async function refreshHalfLife(accessToken: string, orgId: string): Promise<{ queued: boolean; skill_count: number } | null> {
+  return apiFetch<{ queued: boolean; skill_count: number }>(`/registry/orgs/${orgId}/half-life/refresh`, { accessToken, method: "POST", cache: "no-store" });
+}
+
+export async function getDependencyGraph(accessToken: string | null, orgId: string): Promise<DependencyGraph | null> {
+  return apiFetch<DependencyGraph>(`/registry/orgs/${orgId}/dependency-graph`, { accessToken, cache: "no-store" });
+}
+
+export async function getCompatibilityMatrix(accessToken: string | null, orgId: string): Promise<CompatibilityMatrix | null> {
+  return apiFetch<CompatibilityMatrix>(`/registry/orgs/${orgId}/compatibility-matrix`, { accessToken, cache: "no-store" });
 }

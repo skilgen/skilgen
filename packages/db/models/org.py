@@ -36,6 +36,7 @@ class Org(Base):
     siem_event_filter: Mapped[str | None] = mapped_column(String(32), nullable=True)
     workos_org_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     github_installation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    api_key: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 

@@ -47,6 +47,7 @@ EVENT_TYPES = {
     "settings.slack_configured",
     "settings.llm_configured",
     "settings.gate_configured",
+    "api_key_rotated",
     "member.invited",
     "member.removed",
     "member.role_changed",

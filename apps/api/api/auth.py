@@ -133,6 +133,13 @@ async def get_current_org_id(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> str:
+    token = credentials.credentials.strip()
+    if token.startswith("sk-"):
+        result = await db.execute(select(Org).where(Org.api_key == token))
+        org = result.scalar_one_or_none()
+        if org is not None:
+            return org.id
+
     user = await get_current_user(credentials)
     workos_org_id = user.get("org_id") or user.get("organization_id")
 

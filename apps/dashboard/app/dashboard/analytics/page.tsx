@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { AlertTriangle, ArrowRight, BarChart3 } from "lucide-react";
+import { AlertTriangle, ArrowRight, BarChart3, Github, Radio, Sparkles } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import {
   getBootstrapOrg,
   getMyOrg,
   getOrgAnalytics,
+  getOrgApiKey,
   getOrgRuntimeBreakdown,
   getOrgSkillHeatmap,
   type AnalyticsSkill,
@@ -16,6 +17,7 @@ import {
   type SkillHeatmapResponse,
   type SkillHeatmapSkill,
 } from "../../../lib/data";
+import { LiveFeed } from "./LiveFeed";
 
 export const dynamic = "force-dynamic";
 
@@ -286,21 +288,71 @@ function RuntimeBreakdownSection({ runtimeBreakdown }: { runtimeBreakdown: Runti
   );
 }
 
-function EmptyAnalyticsState() {
+function EmptyAnalyticsState({
+  hasSkills = false,
+  hasRepos = false,
+}: {
+  hasSkills?: boolean;
+  hasRepos?: boolean;
+}) {
+  const title = !hasRepos ? "Connect a repository to start analytics" : !hasSkills ? "Run analysis to create measurable skills" : "No agent activity yet";
+  const body = !hasRepos
+    ? "Analytics starts after Skillayer can see at least one repository."
+    : !hasSkills
+      ? "Skill usage appears after a connected repository has generated SKILL.md files."
+      : "Analytics appears once coding agents load generated skills from your repositories.";
+  const href = !hasRepos ? "/dashboard/connect" : !hasSkills ? "/dashboard/repos" : "/dashboard/heatmap";
+  const label = !hasRepos ? "Connect repos" : !hasSkills ? "Open Repos" : "Open Heatmap";
+  const Icon = !hasRepos ? Github : !hasSkills ? Sparkles : Radio;
+
   return (
-    <div className="rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-12 text-center">
-      <BarChart3 className="mx-auto mb-4 h-10 w-10 text-[color:var(--text-tertiary)]" />
-      <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">No activity yet</h2>
+    <div className="rounded-[28px] border border-[color:var(--bg-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-12 text-center">
+      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-[rgb(var(--accent-primary-rgb)/0.2)] bg-[rgb(var(--accent-primary-rgb)/0.1)] text-[color:var(--accent-primary)]">
+        <Icon className="h-6 w-6" />
+      </div>
+      <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">{title}</h2>
       <p className="mx-auto mt-2 max-w-md text-[14px] text-[color:var(--text-secondary)]">
-        Analytics appear once agents start loading skills from your repositories. Run your first analysis to get started.
+        {body}
       </p>
       <Link
         className="mt-6 inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)]"
-        href="/dashboard/repos"
+        href={hasRepos && hasSkills ? "/dashboard/connect" : href}
       >
-        Go to Repos
+        {hasRepos && hasSkills ? "Connect Claude Code" : label}
       </Link>
+      {hasRepos && hasSkills ? (
+        <div className="mt-3 flex flex-wrap justify-center gap-2">
+          <Link className="rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-[12px] font-semibold text-[color:var(--text-primary)] hover:bg-white/5" href="/dashboard/connect">Connect Cursor</Link>
+          <Link className="rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-[12px] font-semibold text-[color:var(--text-primary)] hover:bg-white/5" href="/dashboard/connect">Connect Codex</Link>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function PredictedCriticality({ heatmap }: { heatmap: SkillHeatmapResponse | null }) {
+  const skills = [...(heatmap?.skills ?? [])].sort((left, right) => left.score_total - right.score_total).slice(0, 6);
+  if (skills.length === 0) return null;
+  return (
+    <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
+      <div className="mb-5">
+        <h2 className="text-[20px] font-semibold text-[color:var(--text-primary)]">Predicted criticality</h2>
+        <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Estimated by score — connect your agent to see actual load-based criticality.</p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {skills.map((skill) => (
+          <Link className="rounded-lg border border-[color:var(--bg-border)] bg-black/15 p-4 hover:border-[rgb(var(--accent-primary-rgb)/0.32)]" href={`/dashboard/repos/${skill.repo_id}/skills/${skill.skill_id}`} key={skill.skill_id}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-[15px] font-semibold text-[color:var(--text-primary)]">{skill.domain}</div>
+                <div className="truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">{skill.repo_name}</div>
+              </div>
+              <span className="rounded-full px-2.5 py-1 text-[12px] font-semibold" style={{ color: toneForScore(skill.score_total), backgroundColor: "rgba(255,255,255,0.06)" }}>{skill.score_total}/100</span>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -309,8 +361,8 @@ async function resolveOrgAndToken() {
   try {
     const session = await withAuth({ ensureSignedIn: false });
     accessToken = session?.accessToken || "";
-  } catch (error) {
-    console.error("Unable to load analytics auth:", error);
+  } catch {
+    // Auth can be unavailable in local preview; continue with bootstrap data.
   }
 
   const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
@@ -319,16 +371,20 @@ async function resolveOrgAndToken() {
 
 export default async function AnalyticsPage() {
   const { accessToken, org } = await resolveOrgAndToken();
-  const [analytics, heatmap, runtimeBreakdown] = org
+  const [analytics, heatmap, runtimeBreakdown, orgApiKey] = org
     ? await Promise.all([
         getOrgAnalytics(accessToken, org.id),
         getOrgSkillHeatmap(accessToken, org.id),
         getOrgRuntimeBreakdown(accessToken, org.id),
+        getOrgApiKey(accessToken, org.id),
       ])
-    : [null, null, null];
+    : [null, null, null, null];
 
   const summary = heatmap?.summary;
   const showAlertBar = (summary?.stale_but_active ?? 0) > 0;
+  const hasRepos = Boolean(analytics) || (summary?.total_skills ?? 0) > 0;
+  const hasSkills = (analytics?.total_skills ?? summary?.total_skills ?? 0) > 0;
+  const hasActivity = (analytics?.total_loads_30d ?? 0) > 0;
 
   return (
     <div className="space-y-6">
@@ -356,7 +412,15 @@ export default async function AnalyticsPage() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricPanel label="Total loads" value={analytics?.total_loads_30d ?? 0} sub="Observed in the last 30 days" />
           <MetricPanel label="Critical skills" value={summary?.total_skills ?? 0} sub={`${summary?.healthy ?? 0} healthy, ${summary?.dead_skills ?? 0} dead`} />
-          <MetricPanel label="Most active repo" value={analytics?.most_active_repo?.name ?? "—"} sub={analytics?.most_active_repo ? `${analytics.most_active_repo.loads} loads this month` : "No repo activity yet"} />
+          {hasActivity ? (
+            <MetricPanel label="Most active repo" value={analytics?.most_active_repo?.name ?? "—"} sub={analytics?.most_active_repo ? `${analytics.most_active_repo.loads} loads this month` : "No repo activity yet"} />
+          ) : (
+            <Link className="rounded-[24px] border border-amber-500/30 bg-amber-500/10 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.18)]" href="/dashboard/connect">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">Agent Setup</div>
+              <div className="text-[28px] font-semibold leading-none text-amber-200">Not connected</div>
+              <div className="mt-4 border-t border-white/6 pt-3 text-[12px] text-[color:var(--text-secondary)]">Connect your agent</div>
+            </Link>
+          )}
           <MetricPanel
             label="Most loaded skill"
             value={analytics?.most_loaded_skill?.domain ?? "—"}
@@ -365,14 +429,14 @@ export default async function AnalyticsPage() {
         </div>
       </SectionErrorBoundary>
 
-      {analytics ? (
+      {analytics && hasActivity ? (
         <>
           <SectionErrorBoundary section="analytics activity">
             <Sparkline points={analytics.daily_loads} />
           </SectionErrorBoundary>
 
           <SectionErrorBoundary section="analytics heatmap">
-            {heatmap ? <CriticalityHeatmap heatmap={heatmap} /> : <EmptyAnalyticsState />}
+            {heatmap ? <CriticalityHeatmap heatmap={heatmap} /> : <EmptyAnalyticsState hasRepos={hasRepos} hasSkills={hasSkills} />}
           </SectionErrorBoundary>
 
           <SectionErrorBoundary section="analytics runtimes">
@@ -382,9 +446,31 @@ export default async function AnalyticsPage() {
           <SectionErrorBoundary section="analytics top skills">
             <TopSkillsChart skills={analytics.top_skills} />
           </SectionErrorBoundary>
+
+          {org?.id && orgApiKey?.api_key ? <LiveFeed apiKey={orgApiKey.api_key} orgId={org.id} /> : null}
         </>
       ) : (
-        <EmptyAnalyticsState />
+        <>
+          <EmptyAnalyticsState hasRepos={hasRepos} hasSkills={hasSkills} />
+          <PredictedCriticality heatmap={heatmap} />
+          {analytics && hasSkills ? (
+            <SectionErrorBoundary section="analytics inventory">
+              <section className="grid gap-4 md:grid-cols-2">
+                <TopSkillsChart skills={analytics.top_skills} />
+                <div className="rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
+                  <div className="mb-4 flex items-center gap-2">
+                    <BarChart3 className="h-4 w-4 text-[color:var(--accent-primary)]" />
+                    <h2 className="text-[16px] font-semibold text-[color:var(--text-primary)]">Inventory ready</h2>
+                  </div>
+                  <p className="text-[13px] leading-6 text-[color:var(--text-secondary)]">
+                    {analytics.total_skills} generated skill{analytics.total_skills === 1 ? "" : "s"} are ready for agent usage tracking. Once agents load them, this page will fill with runtime and activity charts.
+                  </p>
+                </div>
+              </section>
+            </SectionErrorBoundary>
+          ) : null}
+          {org?.id && orgApiKey?.api_key ? <LiveFeed apiKey={orgApiKey.api_key} orgId={org.id} /> : null}
+        </>
       )}
     </div>
   );

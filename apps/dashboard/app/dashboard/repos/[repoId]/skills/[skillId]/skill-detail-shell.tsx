@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, FileText } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Copy, FileText, Lightbulb, Loader2, Sparkles } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SkillDetailViewer } from "@/components/skill-detail-viewer";
@@ -24,6 +24,28 @@ type Dimension = "groundedness" | "coverage" | "freshness" | "structure";
 type ScoreHint = {
   why: string;
   improve: string | null;
+};
+
+type ImprovementIssue = {
+  dimension: string;
+  score: number;
+  max: number;
+  reason: string;
+  fix: string;
+  impact: "high" | "medium";
+  points_available: number;
+};
+
+type ImprovementPlan = {
+  skill_id: string;
+  current_score: number;
+  potential_score: number;
+  score_gap: number;
+  issues: ImprovementIssue[];
+  word_count: number;
+  code_block_count: number;
+  is_improvable: boolean;
+  quick_win: ImprovementIssue | null;
 };
 
 function scoreBadgeClass(score: number) {
@@ -218,6 +240,147 @@ function ScoreIntelligenceGrid({ score, content }: { score: Score; content: stri
         );
       })}
     </div>
+  );
+}
+
+function ImprovementPlanPanel({
+  accessToken,
+  repoId,
+  skillId,
+  score,
+  onImproved,
+}: {
+  accessToken: string;
+  repoId: string;
+  skillId: string;
+  score: Score;
+  onImproved: (newScore: number, content: string | null, newVersion: number | null) => void;
+}) {
+  const [plan, setPlan] = useState<ImprovementPlan | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [improving, setImproving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  async function loadPlan() {
+    setLoading(true);
+    const response = await fetch(`${apiUrl}/repos/${repoId}/skills/${skillId}/improvement-plan`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (response.ok) {
+      setPlan((await response.json()) as ImprovementPlan);
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    void loadPlan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoId, skillId]);
+
+  async function improveWithAi() {
+    setImproving(true);
+    setMessage(null);
+    const before = plan?.current_score ?? score.total;
+    const response = await fetch(`${apiUrl}/repos/${repoId}/skills/${skillId}/improve`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ mode: "enhance" }),
+    });
+    const payload = await response.json().catch(() => null);
+    setImproving(false);
+    if (!response.ok || !payload?.improved) {
+      setMessage(payload?.reason || "Unable to improve this skill right now.");
+      return;
+    }
+    const nextScore = Math.round(Number(payload.new_score ?? before));
+    const delta = Math.round(Number(payload.score_delta ?? nextScore - before));
+    setMessage(`Score improved from ${before} -> ${nextScore} (+${delta} points!)`);
+    onImproved(nextScore, payload.content ?? null, payload.new_version ?? null);
+    await loadPlan();
+  }
+
+  async function copySuggestions() {
+    if (!plan) return;
+    const text = plan.issues.map((issue) => `${issue.dimension} (${issue.score}/${issue.max}, +${issue.points_available} pts)\nReason: ${issue.reason}\nFix: ${issue.fix}`).join("\n\n");
+    await navigator.clipboard.writeText(text);
+    setMessage("Suggestions copied.");
+  }
+
+  if (loading) {
+    return (
+      <section className="mb-8 rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6 text-[14px] text-[color:var(--text-secondary)]">
+        Loading improvement plan...
+      </section>
+    );
+  }
+
+  if (!plan) return null;
+
+  if (!plan.is_improvable && score.total >= 70) {
+    return (
+      <section className="mb-8 rounded-[24px] border border-[rgb(var(--accent-green-rgb)/0.28)] bg-[rgb(var(--accent-green-rgb)/0.1)] p-6">
+        <div className="flex items-center gap-2 text-[16px] font-semibold text-[color:var(--accent-green)]">
+          <CheckCircle2 className="h-5 w-5" />
+          This skill is in great shape
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mb-8 rounded-[24px] border border-[rgb(var(--accent-primary-rgb)/0.22)] bg-[linear-gradient(180deg,rgb(var(--accent-primary-rgb)/0.08),rgba(255,255,255,0.02))] p-6">
+      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[rgb(var(--accent-primary-rgb)/0.24)] bg-[rgb(var(--accent-primary-rgb)/0.1)] px-3 py-1 text-[12px] font-semibold text-[color:var(--accent-primary)]">
+            <Lightbulb className="h-3.5 w-3.5" />
+            Improvement Plan
+          </div>
+          <h2 className="text-[20px] font-semibold text-[color:var(--text-primary)]">This skill can reach {plan.potential_score}/100 with fixes</h2>
+          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">{plan.word_count} words · {plan.code_block_count} code examples · +{plan.score_gap} points available</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="inline-flex items-center gap-2 rounded-md bg-[color:var(--accent-primary)] px-4 py-2 text-[13px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)] disabled:cursor-not-allowed disabled:opacity-70"
+            disabled={improving}
+            onClick={improveWithAi}
+            title="Configure ANTHROPIC_API_KEY in settings to enable AI improvement"
+            type="button"
+          >
+            {improving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {improving ? "Improving..." : "Improve with AI"}
+          </button>
+          <button className="inline-flex items-center gap-2 rounded-md border border-[color:var(--bg-border)] px-4 py-2 text-[13px] font-semibold text-[color:var(--text-primary)] hover:bg-white/5" onClick={copySuggestions} type="button">
+            <Copy className="h-4 w-4" />
+            Copy suggestions
+          </button>
+        </div>
+      </div>
+
+      {message ? <div className={`mb-4 rounded-lg border px-4 py-3 text-[13px] ${message.includes("improved") || message.includes("copied") ? "border-green-500/30 bg-green-500/10 text-green-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}`}>{message}</div> : null}
+
+      <div className="grid gap-3">
+        {plan.issues.map((issue) => (
+          <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4" key={`${issue.dimension}-${issue.reason}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${issue.impact === "high" ? "bg-red-500/15 text-red-200" : "bg-amber-500/15 text-amber-200"}`}>
+                  {issue.impact === "high" ? "HIGH IMPACT" : "MEDIUM"}
+                </span>
+                <h3 className="text-[14px] font-semibold text-[color:var(--text-primary)]">{issue.dimension}</h3>
+                <span className="text-[13px] text-[color:var(--text-secondary)]">{issue.score}/{issue.max}</span>
+              </div>
+              <span className="text-[13px] font-semibold text-[color:var(--accent-primary)]">+{issue.points_available} pts</span>
+            </div>
+            <p className="mt-3 text-[13px] leading-5 text-[color:var(--text-secondary)]">{issue.reason}</p>
+            <p className="mt-3 text-[13px] leading-5 text-[color:var(--text-primary)]">→ Fix: {issue.fix}</p>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -518,6 +681,17 @@ export function SkillDetailShell({ accessToken, repo, repoId, skill, usageStats,
 
       <SectionErrorBoundary section="skill subscores">
         <ZeroSubscoreWarning score={score} />
+        <ImprovementPlanPanel
+          accessToken={accessToken}
+          onImproved={(newScore, improvedContent, newVersion) => {
+            setScore((current) => ({ ...current, total: newScore }));
+            if (improvedContent) setContent(improvedContent);
+            if (newVersion) setVersionNumber(newVersion);
+          }}
+          repoId={repoId}
+          score={score}
+          skillId={skill.id}
+        />
         <ScoreIntelligenceGrid content={content} score={score} />
       </SectionErrorBoundary>
 

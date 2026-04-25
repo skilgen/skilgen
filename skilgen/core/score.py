@@ -180,6 +180,27 @@ def _skill_content(skill: Path) -> str:
     return skill.read_text(encoding="utf-8").lower()
 
 
+def _frontmatter_number(skill: Path, field: str) -> float | None:
+    try:
+        lines = skill.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return None
+    if not lines or lines[0].strip() != "---":
+        return None
+    prefix = f"{field}:"
+    for line in lines[1:40]:
+        stripped = line.strip()
+        if stripped == "---":
+            return None
+        if stripped.startswith(prefix):
+            raw = stripped[len(prefix):].strip().strip("'\"")
+            try:
+                return float(raw)
+            except ValueError:
+                return None
+    return None
+
+
 def _evidence_hits_for_skill(skill: Path, project_root: Path, key_files: list[str]) -> dict[str, int]:
     content = _skill_content(skill)
     references = _parse_references(skill)
@@ -803,6 +824,7 @@ def _skill_scorecards(project_root: Path) -> list[dict[str, object]]:
                 extra={
                     "path": skill.relative_to(project_root).as_posix(),
                     "domain": domain,
+                    "richness_score": _frontmatter_number(skill, "richness_score"),
                 },
             )
         )

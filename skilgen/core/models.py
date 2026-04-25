@@ -17,6 +17,9 @@ class SkillSpec:
     patterns: list[tuple[str, list[str]]]
     how_to: list[str]
     references: list[str]
+    anti_patterns: list[str] = field(default_factory=list)
+    code_examples: list[tuple[str, str]] = field(default_factory=list)
+    score: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

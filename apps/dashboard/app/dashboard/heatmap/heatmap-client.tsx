@@ -1,14 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen, Zap } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, Zap } from "lucide-react";
 
 import { relativeTime } from "../../../lib/relative-time";
 
 type AlertFilter = "all" | "healthy" | "stale_but_active" | "dead_skill";
 type SortMode = "criticality" | "loads" | "score" | "alpha";
+type GroupMode = "domain" | "repo" | "category";
 
 type HeatmapClientProps = {
   skills: SkillHeatmapSkill[];
@@ -68,6 +69,8 @@ export function HeatmapClient({ skills, summary: _summary, hasSkills }: HeatmapC
   const [query, setQuery] = useState("");
   const [alert, setAlert] = useState<AlertFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("criticality");
+  const [groupMode, setGroupMode] = useState<GroupMode>("domain");
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
 
   const filteredSkills = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -85,6 +88,26 @@ export function HeatmapClient({ skills, summary: _summary, hasSkills }: HeatmapC
       return right.criticality_score - left.criticality_score;
     });
   }, [alert, query, skills, sortMode]);
+
+  const groupedSkills = useMemo(() => {
+    const groups = new Map<string, SkillHeatmapSkill[]>();
+    filteredSkills.forEach((skill) => {
+      const key = groupMode === "repo" ? skill.repo_name : groupMode === "category" ? titleize(skill.skill_category) : skill.domain;
+      groups.set(key, [...(groups.get(key) ?? []), skill]);
+    });
+    return [...groups.entries()].map(([name, items]) => ({
+      name,
+      items,
+      loads: items.reduce((sum, item) => sum + item.loads_30d, 0),
+      avgScore: Math.round(items.reduce((sum, item) => sum + item.score_total, 0) / Math.max(1, items.length)),
+      repoCount: new Set(items.map((item) => item.repo_id)).size,
+      worstAlert: items.some((item) => item.alert === "stale_but_active") ? "stale_but_active" : items.some((item) => item.alert === "dead_skill") ? "dead_skill" : "healthy",
+    }));
+  }, [filteredSkills, groupMode]);
+
+  function toggleGroup(name: string) {
+    setCollapsedGroups((current) => (current.includes(name) ? current.filter((item) => item !== name) : [...current, name]));
+  }
 
   return (
     <div className="space-y-5">
@@ -129,6 +152,18 @@ export function HeatmapClient({ skills, summary: _summary, hasSkills }: HeatmapC
               <option value="score">Score ↓</option>
               <option value="alpha">A–Z</option>
             </select>
+            <select
+              className="h-10 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 text-[14px] text-[color:var(--text-primary)] outline-none focus:border-[color:var(--accent-primary)]"
+              onChange={(event) => {
+                setGroupMode(event.target.value as GroupMode);
+                setCollapsedGroups([]);
+              }}
+              value={groupMode}
+            >
+              <option value="domain">Group by domain</option>
+              <option value="repo">Group by repo</option>
+              <option value="category">Group by category</option>
+            </select>
           </div>
         </div>
       </section>
@@ -149,45 +184,72 @@ export function HeatmapClient({ skills, summary: _summary, hasSkills }: HeatmapC
               </tr>
             </thead>
             <tbody>
-              {filteredSkills.map((skill) => (
-                <tr className="border-b border-[color:var(--bg-elevated)] transition-colors last:border-b-0 hover:bg-white/5" key={skill.skill_id}>
-                  <td className="px-5 py-4">
-                    <button
-                      className="font-medium text-[color:var(--text-primary)] hover:text-[color:var(--accent-primary)]"
-                      onClick={() => router.push(`/dashboard/repos/${skill.repo_id}`)}
-                      type="button"
-                    >
-                      {skill.domain}
-                    </button>
-                  </td>
-                  <td className="px-5 py-4 font-mono text-[12px] text-[color:var(--text-tertiary)]">{skill.repo_name}</td>
-                  <td className="px-5 py-4">
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${categoryClasses[skill.skill_category ?? ""] ?? "bg-white/10 text-[color:var(--text-secondary)]"}`}>
-                      {titleize(skill.skill_category)}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4">
-                    <span className={`rounded-full px-2 py-0.5 text-[12px] font-semibold ${scoreBadgeClass(skill.score_total)}`}>{skill.score_total}/100</span>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="font-semibold text-[color:var(--text-primary)]">{skill.criticality_score}</div>
-                    <div className="mt-2 h-1 w-full rounded-full bg-white/8">
-                      <div className={`h-full rounded-full ${skill.criticality_score <= 40 ? "bg-red-400" : skill.criticality_score <= 70 ? "bg-amber-400" : "bg-green-400"}`} style={{ width: `${Math.max(6, skill.criticality_score)}%` }} />
-                    </div>
-                  </td>
-                  <td className={`px-5 py-4 ${skill.loads_30d === 0 ? "text-[color:var(--text-tertiary)]" : "text-[color:var(--text-primary)]"}`}>{skill.loads_30d}</td>
-                  <td className="px-5 py-4">
-                    {skill.alert === "healthy" ? (
-                      <span className="text-green-400">• Healthy</span>
-                    ) : skill.alert === "stale_but_active" ? (
-                      <span className="text-amber-400">⚠ Stale &amp; active</span>
-                    ) : (
-                      <span className="text-red-400">✕ Dead skill</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-4 text-[color:var(--text-secondary)]">{relativeTime(skill.last_loaded_at)}</td>
-                </tr>
-              ))}
+              {groupedSkills.map((group) => {
+                const collapsed = collapsedGroups.includes(group.name);
+                return (
+                  <Fragment key={group.name}>
+                    <tr className="border-b border-[color:var(--bg-border)] bg-[color:var(--bg-elevated)]/55">
+                      <td className="px-5 py-3" colSpan={8}>
+                        <button className="flex w-full items-center justify-between gap-4 text-left" onClick={() => toggleGroup(group.name)} type="button">
+                          <span className="flex min-w-0 items-center gap-2">
+                            {collapsed ? <ChevronRight className="h-4 w-4 text-[color:var(--text-tertiary)]" /> : <ChevronDown className="h-4 w-4 text-[color:var(--text-tertiary)]" />}
+                            <span className="truncate text-[13px] font-semibold text-[color:var(--text-primary)]">{group.name}</span>
+                            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-[color:var(--text-secondary)]">
+                              {group.repoCount} repo{group.repoCount === 1 ? "" : "s"}
+                            </span>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-3 text-[12px] text-[color:var(--text-secondary)]">
+                            <span className={scoreBadgeClass(group.avgScore)}>{group.avgScore}/100 avg</span>
+                            <span>{group.loads} loads</span>
+                            {group.worstAlert === "stale_but_active" ? <span className="text-amber-300">Stale &amp; active</span> : group.worstAlert === "dead_skill" ? <span className="text-red-300">Dead skill</span> : <span className="text-green-300">Healthy</span>}
+                          </span>
+                        </button>
+                      </td>
+                    </tr>
+                    {collapsed
+                      ? null
+                      : group.items.map((skill) => (
+                          <tr className="border-b border-[color:var(--bg-elevated)] transition-colors last:border-b-0 hover:bg-white/5" key={skill.skill_id}>
+                            <td className="px-5 py-4">
+                              <button
+                                className="font-medium text-[color:var(--text-primary)] hover:text-[color:var(--accent-primary)]"
+                                onClick={() => router.push(`/dashboard/repos/${skill.repo_id}`)}
+                                type="button"
+                              >
+                                {skill.domain}
+                              </button>
+                            </td>
+                            <td className="px-5 py-4 font-mono text-[12px] text-[color:var(--text-tertiary)]">{skill.repo_name}</td>
+                            <td className="px-5 py-4">
+                              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${categoryClasses[skill.skill_category ?? ""] ?? "bg-white/10 text-[color:var(--text-secondary)]"}`}>
+                                {titleize(skill.skill_category)}
+                              </span>
+                            </td>
+                            <td className="px-5 py-4">
+                              <span className={`rounded-full px-2 py-0.5 text-[12px] font-semibold ${scoreBadgeClass(skill.score_total)}`}>{skill.score_total}/100</span>
+                            </td>
+                            <td className="px-5 py-4">
+                              <div className="font-semibold text-[color:var(--text-primary)]">{skill.criticality_score}</div>
+                              <div className="mt-2 h-1 w-full rounded-full bg-white/8">
+                                <div className={`h-full rounded-full ${skill.criticality_score <= 40 ? "bg-red-400" : skill.criticality_score <= 70 ? "bg-amber-400" : "bg-green-400"}`} style={{ width: `${Math.max(6, skill.criticality_score)}%` }} />
+                              </div>
+                            </td>
+                            <td className={`px-5 py-4 ${skill.loads_30d === 0 ? "text-[color:var(--text-tertiary)]" : "text-[color:var(--text-primary)]"}`}>{skill.loads_30d}</td>
+                            <td className="px-5 py-4">
+                              {skill.alert === "healthy" ? (
+                                <span className="text-green-400">• Healthy</span>
+                              ) : skill.alert === "stale_but_active" ? (
+                                <span className="text-amber-400">! Stale &amp; active</span>
+                              ) : (
+                                <span className="text-red-400">x Dead skill</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-4 text-[color:var(--text-secondary)]">{relativeTime(skill.last_loaded_at)}</td>
+                          </tr>
+                        ))}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         ) : !hasSkills ? (

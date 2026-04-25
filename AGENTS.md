@@ -11,6 +11,10 @@ The current input mode was: `codebase only`.
 4. Keep generated references relative so the skill tree stays portable across repos.
 5. When backend behavior changes, test every touched endpoint before closing the task.
 
+## Skillayer Integration
+Before coding, load skills from `https://api.skillayer.com/repos/65c1eff3-a026-4185-bf2c-e9291ac52eeb/skills/load` using `API-Key: $SKILLAYER_API_KEY`.
+Use loaded skills as repo-specific operating guidance.
+
 ## Inferred Domains
 - `platform` (0.90): Tooling and runtime domain covering Skilgen's internal engine, CLI, planners, generators, and maintenance scripts.
 - `roadmap` (0.84): Delivery sequencing domain that keeps phases, next steps, and implementation order explicit for agents.

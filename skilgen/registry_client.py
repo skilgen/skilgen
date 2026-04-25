@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import cast
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
@@ -30,13 +31,13 @@ def _api_url(api_url: str) -> str:
     return normalized
 
 
-def _request_json(api_url: str, path: str, body: dict[str, object]) -> dict[str, object]:
+def _request_json(api_url: str, path: str, body: dict[str, object], method: str = "POST") -> dict[str, object]:
     """Send an authenticated JSON POST to the Skillayer API."""
-    payload = json.dumps(body).encode("utf-8")
+    payload = json.dumps(body).encode("utf-8") if method != "GET" else None
     request = Request(
         f"{_api_url(api_url)}{path}",
         data=payload,
-        method="POST",
+        method=method,
         headers={
             "Authorization": f"Bearer {_api_key()}",
             "Content-Type": "application/json",
@@ -81,6 +82,25 @@ def publish_skill(
             "is_public": is_public,
         },
     )
+
+
+def registry_publish(*, api_url: str, org_id: str, skill_id: str, version: str, visibility: str, tags: list[str], description: str) -> dict[str, object]:
+    return _request_json(api_url, f"/registry/orgs/{org_id}/publish", {"skill_id": skill_id, "version": version, "visibility": visibility, "tags": tags, "description": description, "compatible_runtimes": ["claude-code", "codex", "cursor", "copilot", "gemini-cli"]})
+
+
+def registry_list(*, api_url: str, org_id: str, visibility: str | None = None) -> dict[str, object]:
+    query = urlencode({"visibility": visibility} if visibility else {})
+    return _request_json(api_url, f"/registry/orgs/{org_id}/entries{f'?{query}' if query else ''}", {}, method="GET")
+
+
+def registry_install(*, api_url: str, org_id: str, entry_id: str, repo_id: str | None) -> dict[str, object]:
+    return _request_json(api_url, f"/registry/orgs/{org_id}/entries/{entry_id}/install", {"repo_id": repo_id})
+
+
+def registry_import_file(*, api_url: str, org_id: str, repo_id: str, name: str, file_path: Path) -> dict[str, object]:
+    if not file_path.exists():
+        raise RegistryClientError(f"Import file does not exist: {file_path}")
+    return _request_json(api_url, f"/registry/orgs/{org_id}/import", {"content": file_path.read_text(encoding="utf-8"), "source": file_path.name, "repo_id": repo_id, "name": name})
 
 
 def import_skill(*, api_url: str, registry_id: str, target_dir: Path) -> dict[str, object]:

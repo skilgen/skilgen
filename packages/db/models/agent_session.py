@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -36,6 +36,12 @@ class AgentSession(Base):
     raw_message_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     extraction_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
     discoveries_found: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    session_start: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    session_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    skills_loaded: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    code_produced: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)
 
     repo: Mapped["Repo"] = relationship()

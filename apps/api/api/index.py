@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import uuid
+import importlib
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,7 +15,10 @@ from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 from packages.db.config import settings
-from apps.api.api.routes import admin, health, me, metrics, orgs, registry, repos, skills, stripe, webhook, worker
+from apps.api.api.routes import admin, digest, feed, health, me, metrics, orgs, registry, repos, review, sessions, skills, stripe, webhook, worker
+
+
+eval_router = importlib.import_module("apps.api.api.routes.eval")
 
 
 LOGGER = logging.getLogger("skillayer.api")
@@ -124,8 +128,13 @@ app.include_router(webhook.router)
 app.include_router(worker.router)
 app.include_router(me.router)
 app.include_router(orgs.router)
+app.include_router(digest.router)
+app.include_router(feed.router)
+app.include_router(eval_router.router, prefix="/eval")
 app.include_router(registry.router)
 app.include_router(repos.router)
+app.include_router(review.router)
+app.include_router(sessions.router)
 app.include_router(skills.router)
 app.include_router(stripe.router)
 app.include_router(metrics.router)

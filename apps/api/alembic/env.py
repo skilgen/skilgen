@@ -41,11 +41,15 @@ from packages.db.models.analysis_run import AnalysisRun
 from packages.db.models.skill import Skill
 from packages.db.models.agent_session import AgentSession
 from packages.db.models.audit_event import AuditEvent
+from packages.db.models.half_life import SkillHalfLife
 from packages.db.models.org_llm_config import OrgLLMConfig
 from packages.db.models.org_policy import OrgPolicy
 from packages.db.models.skill_memory_stub import SkillMemoryStub
 from packages.db.models.skill_version import SkillVersion
+from packages.db.models.registry import MarketplaceInstall, SkillDependency, SkillRegistryEntry
 from packages.db.models.score_history import ScoreHistory
+from packages.db.models.skill_usage_event import SkillUsageEvent
+from packages.db.models.review_run import ReviewRun
 
 target_metadata = Base.metadata
 
