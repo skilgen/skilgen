@@ -3,58 +3,94 @@
 This file maps requirements and detected code evidence to the generated Skilgen outputs.
 
 ## Requirements Source
-- Source file: `codebase-only input`
-- Source hash: `2b845af34337`
+- Source file: `README.md`
+- Source hash: `2837441a1025`
 
 ## Intent To Output Mapping
 ### Endpoints
-- Intent: Detected route: skilgen/api/__init__.py
+- Intent: # Export a provider key, or point Skilgen at a private model endpoint below.
   Domain: `backend`
-  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/core/auth_tokens.py`
+  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
-- Intent: Detected route: skilgen/api/jobs.py
+- Intent: export OPENAI_API_KEY="your_key"
   Domain: `backend`
-  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/core/auth_tokens.py`
+  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
-- Intent: Detected route: skilgen/api/server.py
+- Intent: # or ANTHROPIC_API_KEY / GOOGLE_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY
   Domain: `backend`
-  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/core/auth_tokens.py`
+  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
-- Intent: Detected route: skilgen/api/service.py
+- Intent: Current v0.6.0 breadth: `58` CLI entry points spanning delivery, architecture, dashboard, score, diff, analytics, enterprise skills, external skills, MCP connectors, and server APIs.
   Domain: `backend`
-  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/core/auth_tokens.py`
+  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
+  Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
+- Intent: Skilgen indexes every non-excluded file in the repo, not just files that happen to match route, service, or model naming patterns. Phase 1 builds a cached structural and text index across the full corpus without using an LLM. Phase 2 uses importance scoring plus cluster-aware sampling to choose the most architecturally significant files for deeper analysis.
+  Domain: `backend`
+  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
+  Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
+- Intent: Phase 1 corpus indexing never touches an LLM. For model-backed synthesis, Skilgen can target private endpoints so the source leaves only the network boundary you choose.
+  Domain: `backend`
+  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
 
 ### UI Flows
-- No items extracted for this category.
+- Intent: <a href="https://github.com/skilgen/skilgen/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/skilgen/skilgen/ci.yml?branch=main&color=8fd9a8&labelColor=0d1117" alt="CI" /></a>
+  Domain: `frontend`
+  Evidence: requirements-driven only
+  Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
+- Intent: ## Dashboard
+  Domain: `frontend`
+  Evidence: requirements-driven only
+  Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
+- Intent: Run `skilgen dashboard` and get a branded HTML surface for score health, architecture domains, evidence graph, dependency signals, freshness, analytics, and agent readiness in one place.
+  Domain: `frontend`
+  Evidence: requirements-driven only
+  Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
+- Intent: skilgen dashboard --project-root . --requirements docs/requirements.docx
+  Domain: `frontend`
+  Evidence: requirements-driven only
+  Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
+- Intent: `skilgen deliver --project-root .` already writes `skilgen-dashboard.html` automatically. Use `skilgen dashboard` when you want to regenerate or inspect the dashboard separately from a full delivery run.
+  Domain: `frontend`
+  Evidence: requirements-driven only
+  Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
+- Intent: - [Anthropic claude-code dashboard](docs/examples/README.md#anthropic-claude-code)
+  Domain: `frontend`
+  Evidence: requirements-driven only
+  Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
 
 ### Feature Planning
-- Intent: Codebase-only scan
+- Intent: - `5` inferred child or subordinate surfaces such as `plugins/hookify` and roadmap phase skills.
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
-- Intent: Generate skills from the current repository structure
+- Intent: - `FEATURES.md`
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
-- Intent: Backend route: skilgen/api/__init__.py
+- Intent: Skilgen indexes every non-excluded file in the repo, not just files that happen to match route, service, or model naming patterns. Phase 1 builds a cached structural and text index across the full corpus without using an LLM. Phase 2 uses importance scoring plus cluster-aware sampling to choose the most architecturally significant files for deeper analysis.
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
-- Intent: Backend route: skilgen/api/jobs.py
+- Intent: Phase 1 corpus indexing never touches an LLM. For model-backed synthesis, Skilgen can target private endpoints so the source leaves only the network boundary you choose.
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
-- Intent: Backend route: skilgen/api/server.py
+- Intent: ├── FEATURES.md
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
-- Intent: Backend route: skilgen/api/service.py
+- Intent: 1. **Index**: Phase 1 reads every non-excluded file with AST and text extraction. No LLM. Cached.
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
 
 ## Domain Evidence
+
+### requirements
+- Key files: `README.md`
+- Key patterns: requirements-first planning, skill scaffolding, agent operating guidance
+- Sub-domains: none
 
 ### platform
 - Key files: `skilgen/__init__.py`, `skilgen/autoupdate.py`, `skilgen/agents/__init__.py`, `skilgen/agents/architecture_planner.py`, `skilgen/cli/__init__.py`, `skilgen/cli/main.py`, `skilgen/core/__init__.py`, `skilgen/core/analytics.py`
@@ -87,7 +123,7 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 - Sub-domains: none
 
 ### platform-scripts
-- Key files: `scripts/bump_version.py`, `scripts/deploy_api.py`, `scripts/deploy_dashboard.py`, `scripts/run_requirements_pipeline.py`
+- Key files: `scripts/bump_version.py`, `scripts/deploy_api.py`, `scripts/deploy_dashboard.py`, `scripts/deploy_web.py`, `scripts/run_requirements_pipeline.py`
 - Key patterns: maintenance automation, release helpers, pipeline scripts
 - Sub-domains: none
 
@@ -118,6 +154,11 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 
 ## Architecture Traceability
 
+### requirements
+- Summary: Planning and product-intent domain used to keep the skill tree aligned with requirements and changing scope.
+- Evidence paths: `README.md`
+- Recommended skill path: `skills/requirements/SKILL.md`
+
 ### platform
 - Summary: Tooling and runtime domain covering Skilgen's internal engine, CLI, planners, generators, and maintenance scripts.
 - Evidence paths: `skilgen/__init__.py`, `skilgen/autoupdate.py`, `skilgen/agents/__init__.py`, `skilgen/agents/architecture_planner.py`, `skilgen/cli/__init__.py`, `skilgen/cli/main.py`
@@ -144,24 +185,13 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 - Installed `anthropic-skills` from `https://github.com/anthropics/skills.git`
   Trust: `official` score `7`
   License: `unknown`
-- Installed `huggingface-skills` from `https://github.com/huggingface/skills.git`
-  Trust: `official` score `8`
-  License: `Apache License`
-- Installed `huggingface-upskill` from `https://github.com/huggingface/upskill.git`
-  Trust: `official` score `8`
-  License: `Apache License`
 - Installed `langchain-skills` from `https://github.com/langchain-ai/langchain-skills.git`
-  Trust: `official` score `7`
-  License: `unknown`
-- Installed `langsmith-skills` from `https://github.com/langchain-ai/langsmith-skills.git`
   Trust: `official` score `7`
   License: `unknown`
 
 ### Preferred External Packs
 - `anthropic-skills`: Detected Claude/Anthropic repo hints.
-- `huggingface-skills`: Trust level `official` and ecosystem fit for this repo.
-- `langchain-skills`: Trust level `official` and ecosystem fit for this repo.
-- `huggingface-upskill`: Trust level `official` and ecosystem fit for this repo.
+- `langchain-skills`: Detected LangChain/LangGraph/Deep Agents dependencies.
 - `agentskills-spec`: Detected SKILL.md-style files or an existing skills tree.
 
 ## Enterprise Skill Traceability
@@ -172,6 +202,10 @@ This file maps requirements and detected code evidence to the generated Skilgen 
   Source status: `official`; auth: `oauth2`; official source verified: `True`
   Authorization status: `pending_oauth`
   Official source: `https://github.com/Azure/azure-mcp`
+- Active connector `azure-kubernetes` (Microsoft Azure): Inspect Kubernetes clusters through Microsoft's official Azure-backed Kubernetes MCP server.
+  Source status: `official`; auth: `oauth2`; official source verified: `True`
+  Authorization status: `pending_oauth`
+  Official source: `https://github.com/Azure/mcp-kubernetes`
 - Active connector `compass` (Atlassian): Use the Atlassian MCP server to access Compass service ownership and software catalog context.
   Source status: `official`; auth: `oauth2`; official source verified: `True`
   Authorization status: `pending_oauth`
@@ -180,6 +214,14 @@ This file maps requirements and detected code evidence to the generated Skilgen 
   Source status: `official`; auth: `oauth2`; official source verified: `True`
   Authorization status: `pending_oauth`
   Official source: `https://www.atlassian.com/platform/remote-mcp-server`
+- Active connector `datadog` (Datadog): Inspect metrics, traces, monitors, and production signals.
+  Source status: `official`; auth: `oauth2`; official source verified: `True`
+  Authorization status: `pending_oauth`
+  Official source: `https://docs.datadoghq.com/llm_observability/instrumentation/mcp/`
+- Active connector `figma` (Figma): Bring design context directly into coding workflows through Figma's official MCP server.
+  Source status: `official`; auth: `oauth2`; official source verified: `True`
+  Authorization status: `pending_oauth`
+  Official source: `https://github.com/mcp/com.figma.mcp/mcp`
 - Active connector `github-enterprise` (GitHub): Read enterprise repositories, pull requests, and actions state.
   Source status: `official`; auth: `oauth2`; official source verified: `True`
   Authorization status: `pending_oauth`
@@ -188,26 +230,14 @@ This file maps requirements and detected code evidence to the generated Skilgen 
   Source status: `official`; auth: `oauth2`; official source verified: `True`
   Authorization status: `pending_oauth`
   Official source: `https://www.atlassian.com/platform/remote-mcp-server`
-- Active connector `slack` (Slack): Read team communication context and incident coordination threads.
-  Source status: `official`; auth: `oauth2`; official source verified: `True`
-  Authorization status: `pending_oauth`
-  Official source: `https://api.slack.com/automation/mcp`
-- Active connector `stripe` (Stripe): Work with customers, products, payments, and billing through Stripe's official MCP endpoints.
-  Source status: `official`; auth: `oauth2`; official source verified: `True`
-  Authorization status: `pending_oauth`
-  Official source: `https://github.com/mcp/com.stripe/mcp`
-- Active connector `terraform` (HashiCorp): Inspect infrastructure definitions, plans, and cloud rollout workflows.
-  Source status: `official`; auth: `oauth2`; official source verified: `True`
-  Authorization status: `pending_oauth`
-  Official source: `https://github.com/mcp/hashicorp/terraform-mcp-server`
 
 ### Recommended MCP Connectors
 - `jira` (`official`, oauth `True`): Detected connector keywords: jira, atlassian.
 - `confluence` (`official`, oauth `True`): Detected connector keywords: confluence.
 - `compass` (`official`, oauth `True`): Detected connector keywords: atlassian compass, compass.
+- `slack` (`official`, oauth `True`): Detected connector keywords: slack.
+- `datadog` (`official`, oauth `True`): Detected connector keywords: datadog.
 - `github-enterprise` (`official`, oauth `True`): Detected connector keywords: github.
-- `azure` (`official`, oauth `True`): Detected connector keywords: azure.
-- `stripe` (`official`, oauth `True`): Detected connector keywords: stripe.
 
 ## Gaps And Next Actions
-- This run was codebase-only, so roadmap and intent guidance came from implementation signals rather than a product spec.
+- No major delivery gaps were inferred from the current codebase and requirement inputs.

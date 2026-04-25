@@ -1,20 +1,20 @@
 # Report
 
 ## Summary
-- Detected domains: platform, platform-runtime, platform-agents, platform-cli, platform-core, platform-generators, platform-scripts, roadmap, roadmap-phase-0, roadmap-phase-1, roadmap-phase-2, roadmap-phase-3
-- Feature inventory entries: 9
+- Detected domains: requirements, platform, platform-runtime, platform-agents, platform-cli, platform-core, platform-generators, platform-scripts, roadmap, roadmap-phase-0, roadmap-phase-1, roadmap-phase-2, roadmap-phase-3
+- Feature inventory entries: 18
 - Backend route files: 4
 - Frontend route files: 0
 - Component files: 0
 - Service files: 1
-- Test files: 64
-- Data model files: 0
-- Persistence files: 0
+- Test files: 87
+- Data model files: 1
+- Persistence files: 2
 - Background job files: 2
-- Auth files: 3
+- Auth files: 5
 - State files: 0
 - Design system files: 0
-- Architecture domains: 2
+- Architecture domains: 3
 
 ## Generated Outputs
 - ANALYSIS.md
@@ -32,23 +32,19 @@
 - Services: start from `skilgen/api/service.py`
 
 ## Architecture Highlights
+- `requirements`: Planning and product-intent domain used to keep the skill tree aligned with requirements and changing scope.
 - `platform`: Tooling and runtime domain covering Skilgen's internal engine, CLI, planners, generators, and maintenance scripts.
 - `roadmap`: Delivery sequencing domain that keeps phases, next steps, and implementation order explicit for agents.
 
 ## External Skill Packs
-- Installed packs: 6
-- Active packs: 6
+- Installed packs: 3
+- Active packs: 3
 - Preferred packs to load first:
   - `anthropic-skills` (score 87, trust `official`, license `unknown`)
-  - `huggingface-skills` (score 75, trust `official`, license `Apache License`)
-  - `langchain-skills` (score 63, trust `official`, license `unknown`)
-  - `huggingface-upskill` (score 61, trust `official`, license `Apache License`)
+  - `langchain-skills` (score 80, trust `official`, license `unknown`)
   - `agentskills-spec` (score 58, trust `spec`, license `Apache License`)
 
 ## External Skill Provenance
-- `agentskills-spec` from `https://github.com/agentskills/agentskills.git` at `8d8fcbc69e0c42e05922c2ffc287a3bbdef7b0a3`
-- `anthropic-skills` from `https://github.com/anthropics/skills.git` at `2c7ec5e78b8e5d43ea02e90bb8826f6b9f147b0c`
-- `huggingface-skills` from `https://github.com/huggingface/skills.git` at `061ab494cb145f43ae8f218939b99160e2c61c58`
-- `huggingface-upskill` from `https://github.com/huggingface/upskill.git` at `2663c2141002b9bd0d1e342302f21b8f127be35d`
+- `agentskills-spec` from `https://github.com/agentskills/agentskills.git` at `2d3e01f590f68bee2cb76a3200823e93b2cc9eaa`
+- `anthropic-skills` from `https://github.com/anthropics/skills.git` at `5128e1865d670f5d6c9cef000e6dfc4e951fb5b9`
 - `langchain-skills` from `https://github.com/langchain-ai/langchain-skills.git` at `f8115670953680937e66fd50923dff54d748c7f3`
-- `langsmith-skills` from `https://github.com/langchain-ai/langsmith-skills.git` at `68c8bb6b4b7cb5b20870b7b6afb340f6c958b0e6`

@@ -4,29 +4,27 @@
 {
   "framework_fingerprint": {
     "frontend": {
-      "name": "nextjs",
+      "name": "react",
       "confidence": 0.99,
       "evidence": [
-        "next.config",
-        "app/",
-        "pages/"
+        "package.json",
+        "src/",
+        ".tsx"
       ]
     },
     "backend": {
       "name": "fastapi",
-      "confidence": 0.99,
+      "confidence": 0.8500000000000001,
       "evidence": [
-        "fastapi",
         "main.py",
         "pyproject.toml"
       ]
     },
     "test_framework": {
       "name": "unittest",
-      "confidence": 0.8500000000000001,
+      "confidence": 0.65,
       "evidence": [
-        "test_",
-        "unittest"
+        "test_"
       ]
     },
     "build_tool": {
@@ -53,20 +51,26 @@
       "tests/__init__.py",
       "tests/oidc_test_utils.py",
       "tests/test_analytics.py",
+      "tests/test_api_key.py",
       "tests/test_api_smoke.py",
+      "tests/test_api_spec_parsers.py",
       "tests/test_architecture_cli.py",
       "tests/test_architecture_planner.py",
       "tests/test_audit.py",
+      "tests/test_audit_log.py",
       "tests/test_auth_claim_mapping.py",
       "tests/test_auth_tokens.py",
       "tests/test_autoupdate.py",
       "tests/test_cli.py",
+      "tests/test_cli_sources.py",
       "tests/test_codebase_signals.py",
       "tests/test_config.py",
       "tests/test_context.py",
       "tests/test_corpus_cli.py",
       "tests/test_corpus_index.py",
       "tests/test_dashboard_cli.py",
+      "tests/test_dashboard_error_boundaries.py",
+      "tests/test_data_parsers.py",
       "tests/test_decision_planner.py",
       "tests/test_delivery.py",
       "tests/test_dependency_risk.py",
@@ -76,18 +80,33 @@
       "tests/test_domain_graph_planner.py",
       "tests/test_enterprise_document_formats.py",
       "tests/test_enterprise_policy_cli.py",
+      "tests/test_eval.py",
+      "tests/test_eval_cli.py",
       "tests/test_feature_extractor.py",
       "tests/test_framework_fingerprint.py",
+      "tests/test_generation_quality.py",
+      "tests/test_half_life.py",
       "tests/test_identity_policy_store.py",
+      "tests/test_improvement_loop.py",
+      "tests/test_incident_parsers.py",
+      "tests/test_infra_parsers.py",
       "tests/test_jobs.py",
+      "tests/test_llm_config.py",
+      "tests/test_memory_capture.py",
+      "tests/test_memory_cli.py",
       "tests/test_model_registry.py",
+      "tests/test_org_intelligence_api.py",
       "tests/test_org_settings.py",
       "tests/test_overview_data.py",
       "tests/test_packaging.py",
       "tests/test_plan_cli.py",
+      "tests/test_policy_engine.py",
       "tests/test_pr_comment.py",
       "tests/test_pr_comment_dedup.py",
+      "tests/test_process_parsers.py",
       "tests/test_rate_limit_store.py",
+      "tests/test_red_flags.py",
+      "tests/test_registry.py",
       "tests/test_registry_api.py",
       "tests/test_registry_cli.py",
       "tests/test_registry_dashboard.py",
@@ -103,7 +122,9 @@
       "tests/test_score.py",
       "tests/test_score_quality_system.py",
       "tests/test_sdk.py",
+      "tests/test_security_parsers.py",
       "tests/test_skill_detail.py",
+      "tests/test_skill_sources_api.py",
       "tests/test_skill_usage_analytics.py",
       "tests/test_skillayer_api_infra.py",
       "tests/test_source_graphs.py",
@@ -115,23 +136,30 @@
       "tests/test_vercel_dashboard_deploy.py",
       "tests/test_workspace_graph.py"
     ],
-    "data_models": [],
-    "persistence_layers": [],
+    "data_models": [
+      "skilgen/parsers/sql_schema.py"
+    ],
+    "persistence_layers": [
+      "skilgen/parsers/dbt.py",
+      "skilgen/parsers/sql_schema.py"
+    ],
     "background_jobs": [
       "skilgen/api/jobs.py",
       "tests/test_jobs.py"
     ],
     "auth_files": [
       "skilgen/core/auth_tokens.py",
+      "skilgen/parsers/security_policy.py",
       "tests/test_auth_claim_mapping.py",
-      "tests/test_auth_tokens.py"
+      "tests/test_auth_tokens.py",
+      "tests/test_security_parsers.py"
     ],
     "state_files": [],
     "design_system_files": [],
     "legacy_programs": [],
     "copybooks": [],
     "language_inventory": {
-      "python": 128
+      "python": 177
     }
   },
   "repo_archetype": "skilgen-platform",
@@ -286,6 +314,27 @@
   },
   "domain_graph": {
     "nodes": [
+      {
+        "name": "requirements",
+        "summary": "Planning and product-intent domain used to keep the skill tree aligned with requirements and changing scope.",
+        "confidence": 0.99,
+        "key_files": [
+          "README.md"
+        ],
+        "key_patterns": [
+          "requirements-first planning",
+          "skill scaffolding",
+          "agent operating guidance"
+        ],
+        "parent_domain": null,
+        "child_domains": [],
+        "related_domains": [
+          "backend",
+          "frontend",
+          "roadmap"
+        ],
+        "skill_path": "skills/requirements/SKILL.md"
+      },
       {
         "name": "platform",
         "summary": "Tooling and runtime domain covering Skilgen's internal engine, CLI, planners, generators, and maintenance scripts.",
@@ -453,6 +502,7 @@
           "scripts/bump_version.py",
           "scripts/deploy_api.py",
           "scripts/deploy_dashboard.py",
+          "scripts/deploy_web.py",
           "scripts/run_requirements_pipeline.py"
         ],
         "key_patterns": [
@@ -580,6 +630,19 @@
   },
   "detected_domains": [
     {
+      "name": "requirements",
+      "confidence": 0.99,
+      "key_files": [
+        "README.md"
+      ],
+      "key_patterns": [
+        "requirements-first planning",
+        "skill scaffolding",
+        "agent operating guidance"
+      ],
+      "sub_domains": []
+    },
+    {
       "name": "platform",
       "confidence": 0.9,
       "key_files": [
@@ -696,6 +759,7 @@
         "scripts/bump_version.py",
         "scripts/deploy_api.py",
         "scripts/deploy_dashboard.py",
+        "scripts/deploy_web.py",
         "scripts/run_requirements_pipeline.py"
       ],
       "key_patterns": [
@@ -775,6 +839,15 @@
   ],
   "skill_tree": [
     {
+      "path": "skills/requirements/SKILL.md",
+      "domain": "requirements",
+      "parent_skill": null,
+      "child_skills": [],
+      "cross_references": [
+        "skills/roadmap/SKILL.md"
+      ]
+    },
+    {
       "path": "skills/platform/SKILL.md",
       "domain": "platform",
       "parent_skill": null,
@@ -787,6 +860,7 @@
         "skills/platform/scripts/SKILL.md"
       ],
       "cross_references": [
+        "skills/requirements/SKILL.md",
         "skills/roadmap/SKILL.md"
       ]
     },
@@ -796,6 +870,7 @@
       "parent_skill": "skills/platform/SKILL.md",
       "child_skills": [],
       "cross_references": [
+        "skills/requirements/SKILL.md",
         "skills/roadmap/SKILL.md"
       ]
     },
@@ -805,6 +880,7 @@
       "parent_skill": "skills/platform/SKILL.md",
       "child_skills": [],
       "cross_references": [
+        "skills/requirements/SKILL.md",
         "skills/roadmap/SKILL.md"
       ]
     },
@@ -814,6 +890,7 @@
       "parent_skill": "skills/platform/SKILL.md",
       "child_skills": [],
       "cross_references": [
+        "skills/requirements/SKILL.md",
         "skills/roadmap/SKILL.md"
       ]
     },
@@ -823,6 +900,7 @@
       "parent_skill": "skills/platform/SKILL.md",
       "child_skills": [],
       "cross_references": [
+        "skills/requirements/SKILL.md",
         "skills/roadmap/SKILL.md"
       ]
     },
@@ -832,6 +910,7 @@
       "parent_skill": "skills/platform/SKILL.md",
       "child_skills": [],
       "cross_references": [
+        "skills/requirements/SKILL.md",
         "skills/roadmap/SKILL.md"
       ]
     },
@@ -841,6 +920,7 @@
       "parent_skill": "skills/platform/SKILL.md",
       "child_skills": [],
       "cross_references": [
+        "skills/requirements/SKILL.md",
         "skills/roadmap/SKILL.md"
       ]
     },
@@ -854,35 +934,45 @@
         "skills/roadmap/phase-2/SKILL.md",
         "skills/roadmap/phase-3/SKILL.md"
       ],
-      "cross_references": []
+      "cross_references": [
+        "skills/requirements/SKILL.md"
+      ]
     },
     {
       "path": "skills/roadmap/phase-0/SKILL.md",
       "domain": "roadmap-phase-0",
       "parent_skill": "skills/roadmap/SKILL.md",
       "child_skills": [],
-      "cross_references": []
+      "cross_references": [
+        "skills/requirements/SKILL.md"
+      ]
     },
     {
       "path": "skills/roadmap/phase-1/SKILL.md",
       "domain": "roadmap-phase-1",
       "parent_skill": "skills/roadmap/SKILL.md",
       "child_skills": [],
-      "cross_references": []
+      "cross_references": [
+        "skills/requirements/SKILL.md"
+      ]
     },
     {
       "path": "skills/roadmap/phase-2/SKILL.md",
       "domain": "roadmap-phase-2",
       "parent_skill": "skills/roadmap/SKILL.md",
       "child_skills": [],
-      "cross_references": []
+      "cross_references": [
+        "skills/requirements/SKILL.md"
+      ]
     },
     {
       "path": "skills/roadmap/phase-3/SKILL.md",
       "domain": "roadmap-phase-3",
       "parent_skill": "skills/roadmap/SKILL.md",
       "child_skills": [],
-      "cross_references": []
+      "cross_references": [
+        "skills/requirements/SKILL.md"
+      ]
     }
   ],
   "import_graph": {
@@ -903,6 +993,15 @@
       "subprocess"
     ],
     "scripts/deploy_dashboard.py": [
+      "__future__",
+      "argparse",
+      "collections.abc",
+      "contextlib",
+      "json",
+      "pathlib",
+      "subprocess"
+    ],
+    "scripts/deploy_web.py": [
       "__future__",
       "argparse",
       "collections.abc",
@@ -1147,7 +1246,9 @@
       "__future__",
       "argparse",
       "dataclasses",
+      "datetime",
       "json",
+      "os",
       "pathlib",
       "skilgen/__init__.py",
       "skilgen/agents/__init__.py",
@@ -1167,10 +1268,17 @@
       "skilgen/delivery.py",
       "skilgen/enterprise_skills.py",
       "skilgen/external_skills.py",
+      "skilgen/hooks/cursor_watcher.py",
+      "skilgen/parsers/runner.py",
+      "skilgen/parsers/sources.py",
       "skilgen/registry_client.py",
       "sys",
       "threading",
-      "time"
+      "time",
+      "urllib.error",
+      "urllib.parse",
+      "urllib.request",
+      "uuid"
     ],
     "skilgen/core/__init__.py": [],
     "skilgen/core/analytics.py": [
@@ -1458,7 +1566,10 @@
     ],
     "skilgen/delivery.py": [
       "__future__",
+      "asyncio",
       "dataclasses",
+      "json",
+      "os",
       "pathlib",
       "skilgen/agents/__init__.py",
       "skilgen/agents/codebase_signals.py",
@@ -1482,7 +1593,10 @@
       "skilgen/generators/package.py",
       "skilgen/generators/skills.py",
       "time",
-      "typing"
+      "typing",
+      "urllib.error",
+      "urllib.request",
+      "uuid"
     ],
     "skilgen/enterprise_skills.py": [
       "__future__",
@@ -1538,16 +1652,225 @@
       "datetime",
       "os",
       "pathlib",
+      "re",
       "skilgen/agents/architecture_planner.py",
       "skilgen/agents/codebase_signals.py",
       "skilgen/agents/requirements_parser.py",
       "skilgen/agents/roadmap_planner.py",
+      "skilgen/core/analytics.py",
       "skilgen/core/config.py",
       "skilgen/core/context.py",
       "skilgen/core/dependency_risk.py",
       "skilgen/core/models.py",
       "skilgen/deep_agents_core.py",
       "typing"
+    ],
+    "skilgen/hooks/__init__.py": [],
+    "skilgen/hooks/claude_code.py": [
+      "__future__",
+      "pathlib"
+    ],
+    "skilgen/hooks/claude_code_hook.py": [
+      "__future__",
+      "os",
+      "sys",
+      "time",
+      "urllib.request"
+    ],
+    "skilgen/hooks/cursor.py": [
+      "__future__",
+      "pathlib"
+    ],
+    "skilgen/hooks/cursor_watcher.py": [
+      "__future__",
+      "os",
+      "pathlib",
+      "skilgen/core/analytics.py",
+      "subprocess",
+      "sys",
+      "time"
+    ],
+    "skilgen/parsers/__init__.py": [
+      "__future__",
+      "dataclasses",
+      "skilgen/parsers/dbt.py",
+      "skilgen/parsers/helm.py",
+      "skilgen/parsers/kafka.py",
+      "skilgen/parsers/kubernetes.py",
+      "skilgen/parsers/runbook.py",
+      "skilgen/parsers/sarif.py",
+      "skilgen/parsers/sbom.py",
+      "skilgen/parsers/security_policy.py",
+      "skilgen/parsers/sql_schema.py",
+      "skilgen/parsers/terraform.py"
+    ],
+    "skilgen/parsers/auto_detect.py": [
+      "__future__",
+      "pathlib",
+      "skilgen/core/config.py",
+      "skilgen/core/models.py",
+      "skilgen/parsers/sources.py",
+      "typing"
+    ],
+    "skilgen/parsers/confluence.py": [
+      "__future__",
+      "html.parser",
+      "pathlib",
+      "re",
+      "skilgen/parsers/runbook.py",
+      "tempfile",
+      "xml.etree.ElementTree",
+      "zipfile"
+    ],
+    "skilgen/parsers/dbt.py": [
+      "__future__",
+      "dataclasses",
+      "pathlib",
+      "re",
+      "typing",
+      "yaml"
+    ],
+    "skilgen/parsers/graphql.py": [
+      "__future__",
+      "json",
+      "pathlib",
+      "re",
+      "skilgen/parsers/__init__.py",
+      "typing"
+    ],
+    "skilgen/parsers/helm.py": [
+      "__future__",
+      "collections",
+      "dataclasses",
+      "pathlib",
+      "re",
+      "typing",
+      "yaml"
+    ],
+    "skilgen/parsers/incident.py": [
+      "__future__",
+      "collections",
+      "dataclasses",
+      "datetime",
+      "json",
+      "os",
+      "pathlib",
+      "re",
+      "time",
+      "typing",
+      "urllib.error",
+      "urllib.parse",
+      "urllib.request"
+    ],
+    "skilgen/parsers/kafka.py": [
+      "__future__",
+      "dataclasses",
+      "json",
+      "pathlib",
+      "typing",
+      "yaml"
+    ],
+    "skilgen/parsers/kubernetes.py": [
+      "__future__",
+      "collections",
+      "dataclasses",
+      "pathlib",
+      "typing",
+      "yaml"
+    ],
+    "skilgen/parsers/notion.py": [
+      "__future__",
+      "httpx",
+      "json",
+      "os",
+      "pathlib",
+      "skilgen/parsers/runbook.py",
+      "time",
+      "typing"
+    ],
+    "skilgen/parsers/openapi.py": [
+      "__future__",
+      "collections.abc",
+      "json",
+      "pathlib",
+      "re",
+      "skilgen/parsers/__init__.py",
+      "typing",
+      "yaml"
+    ],
+    "skilgen/parsers/postman.py": [
+      "__future__",
+      "json",
+      "pathlib",
+      "re",
+      "skilgen/parsers/__init__.py",
+      "typing"
+    ],
+    "skilgen/parsers/runbook.py": [
+      "__future__",
+      "dataclasses",
+      "pathlib",
+      "re"
+    ],
+    "skilgen/parsers/runner.py": [
+      "__future__",
+      "pathlib",
+      "skilgen/core/models.py",
+      "skilgen/parsers/auto_detect.py",
+      "skilgen/parsers/sources.py",
+      "typing"
+    ],
+    "skilgen/parsers/sarif.py": [
+      "__future__",
+      "dataclasses",
+      "json",
+      "pathlib",
+      "re",
+      "typing"
+    ],
+    "skilgen/parsers/sbom.py": [
+      "__future__",
+      "dataclasses",
+      "json",
+      "pathlib",
+      "re",
+      "skilgen/core/dependency_risk.py",
+      "typing",
+      "urllib.parse",
+      "xml.etree"
+    ],
+    "skilgen/parsers/security_policy.py": [
+      "__future__",
+      "dataclasses",
+      "json",
+      "pathlib",
+      "re",
+      "typing",
+      "yaml"
+    ],
+    "skilgen/parsers/sources.py": [
+      "__future__",
+      "dataclasses",
+      "importlib",
+      "pathlib",
+      "re",
+      "typing"
+    ],
+    "skilgen/parsers/sql_schema.py": [
+      "__future__",
+      "dataclasses",
+      "json",
+      "pathlib",
+      "re",
+      "typing"
+    ],
+    "skilgen/parsers/terraform.py": [
+      "__future__",
+      "collections",
+      "dataclasses",
+      "hcl2",
+      "pathlib",
+      "re"
     ],
     "skilgen/registry_client.py": [
       "__future__",
@@ -1556,6 +1879,7 @@
       "pathlib",
       "typing",
       "urllib.error",
+      "urllib.parse",
       "urllib.request"
     ],
     "skilgen/sdk.py": [
@@ -1589,6 +1913,17 @@
       "tempfile",
       "unittest"
     ],
+    "tests/test_api_key.py": [
+      "__future__",
+      "apps/api/api/auth.py",
+      "apps/api/api/routes/orgs.py",
+      "asyncio",
+      "fastapi",
+      "fastapi.testclient",
+      "packages/db/database.py",
+      "types",
+      "typing"
+    ],
     "tests/test_api_smoke.py": [
       "__future__",
       "io",
@@ -1607,6 +1942,16 @@
       "urllib.error",
       "urllib.parse",
       "urllib.request"
+    ],
+    "tests/test_api_spec_parsers.py": [
+      "__future__",
+      "pathlib",
+      "skilgen/parsers/__init__.py",
+      "skilgen/parsers/graphql.py",
+      "skilgen/parsers/openapi.py",
+      "skilgen/parsers/postman.py",
+      "tempfile",
+      "unittest"
     ],
     "tests/test_architecture_cli.py": [
       "json",
@@ -1631,6 +1976,14 @@
       "tempfile",
       "unittest",
       "unittest.mock"
+    ],
+    "tests/test_audit_log.py": [
+      "__future__",
+      "apps/api/api/routes/orgs.py",
+      "apps/api/api/services/audit.py",
+      "datetime",
+      "types",
+      "unittest"
     ],
     "tests/test_auth_claim_mapping.py": [
       "__future__",
@@ -1663,6 +2016,15 @@
       "sys",
       "tempfile",
       "unittest"
+    ],
+    "tests/test_cli_sources.py": [
+      "__future__",
+      "apps/api/api/analysis.py",
+      "pathlib",
+      "skilgen/cli/main.py",
+      "skilgen/parsers/auto_detect.py",
+      "skilgen/parsers/runner.py",
+      "tempfile"
     ],
     "tests/test_codebase_signals.py": [
       "pathlib",
@@ -1714,6 +2076,18 @@
       "tempfile",
       "unittest",
       "unittest.mock"
+    ],
+    "tests/test_dashboard_error_boundaries.py": [
+      "__future__",
+      "pathlib"
+    ],
+    "tests/test_data_parsers.py": [
+      "pathlib",
+      "skilgen/parsers/dbt.py",
+      "skilgen/parsers/kafka.py",
+      "skilgen/parsers/sql_schema.py",
+      "tempfile",
+      "unittest"
     ],
     "tests/test_decision_planner.py": [
       "pathlib",
@@ -1799,6 +2173,24 @@
       "sys",
       "tempfile"
     ],
+    "tests/test_eval.py": [
+      "__future__",
+      "apps/api/api/auth.py",
+      "datetime",
+      "fastapi",
+      "fastapi.testclient",
+      "importlib",
+      "packages/db/database.py",
+      "pytest",
+      "types",
+      "typing"
+    ],
+    "tests/test_eval_cli.py": [
+      "__future__",
+      "pytest",
+      "skilgen/cli/main.py",
+      "sys"
+    ],
     "tests/test_feature_extractor.py": [
       "pathlib",
       "skilgen/agents/feature_extractor.py",
@@ -1811,11 +2203,59 @@
       "tempfile",
       "unittest"
     ],
+    "tests/test_generation_quality.py": [
+      "__future__",
+      "asyncio",
+      "json",
+      "os",
+      "pathlib",
+      "skilgen/core/analytics.py",
+      "skilgen/core/models.py",
+      "skilgen/delivery.py",
+      "skilgen/generators/skills.py",
+      "skilgen/hooks/claude_code_hook.py",
+      "skilgen/hooks/cursor_watcher.py",
+      "tempfile",
+      "time",
+      "unittest",
+      "unittest.mock"
+    ],
+    "tests/test_half_life.py": [
+      "__future__",
+      "apps/api/api/services/half_life.py",
+      "datetime",
+      "pathlib",
+      "types"
+    ],
     "tests/test_identity_policy_store.py": [
       "__future__",
       "os",
       "pathlib",
       "skilgen/core/identity_policy_store.py",
+      "tempfile",
+      "unittest"
+    ],
+    "tests/test_improvement_loop.py": [
+      "__future__",
+      "apps/api/api/routes/repos.py",
+      "datetime",
+      "pathlib",
+      "types"
+    ],
+    "tests/test_incident_parsers.py": [
+      "__future__",
+      "pathlib",
+      "skilgen/parsers/incident.py",
+      "tempfile",
+      "unittest",
+      "unittest.mock"
+    ],
+    "tests/test_infra_parsers.py": [
+      "__future__",
+      "pathlib",
+      "skilgen/parsers/helm.py",
+      "skilgen/parsers/kubernetes.py",
+      "skilgen/parsers/terraform.py",
       "tempfile",
       "unittest"
     ],
@@ -1829,11 +2269,47 @@
       "time",
       "unittest"
     ],
+    "tests/test_llm_config.py": [
+      "__future__",
+      "apps/api/api/services/llm_config.py",
+      "unittest"
+    ],
+    "tests/test_memory_capture.py": [
+      "__future__",
+      "apps/api/api/services/memory.py",
+      "asyncio",
+      "dataclasses",
+      "datetime",
+      "packages/db/models/__init__.py",
+      "pathlib",
+      "pytest"
+    ],
+    "tests/test_memory_cli.py": [
+      "__future__",
+      "http.server",
+      "json",
+      "os",
+      "pathlib",
+      "subprocess",
+      "sys",
+      "threading"
+    ],
     "tests/test_model_registry.py": [
       "os",
       "skilgen/agents/model_registry.py",
       "skilgen/core/models.py",
       "unittest"
+    ],
+    "tests/test_org_intelligence_api.py": [
+      "__future__",
+      "apps/api/api/auth.py",
+      "apps/api/api/routes/orgs.py",
+      "datetime",
+      "fastapi",
+      "fastapi.testclient",
+      "packages/db/database.py",
+      "packages/db/models/__init__.py",
+      "typing"
     ],
     "tests/test_org_settings.py": [
       "__future__",
@@ -1873,6 +2349,13 @@
       "tempfile",
       "unittest"
     ],
+    "tests/test_policy_engine.py": [
+      "__future__",
+      "apps/api/api/services/policy.py",
+      "datetime",
+      "types",
+      "unittest"
+    ],
     "tests/test_pr_comment.py": [
       "__future__",
       "apps/api/api/pr_comment.py",
@@ -1885,12 +2368,42 @@
       "pytest",
       "typing"
     ],
+    "tests/test_process_parsers.py": [
+      "__future__",
+      "json",
+      "pathlib",
+      "skilgen/parsers/confluence.py",
+      "skilgen/parsers/notion.py",
+      "skilgen/parsers/runbook.py",
+      "tempfile",
+      "unittest",
+      "zipfile"
+    ],
     "tests/test_rate_limit_store.py": [
       "__future__",
       "pathlib",
       "skilgen/core/rate_limit_store.py",
       "tempfile",
       "unittest"
+    ],
+    "tests/test_red_flags.py": [
+      "__future__",
+      "apps/api/api/auth.py",
+      "apps/api/api/routes/orgs.py",
+      "apps/api/api/services/redflags.py",
+      "datetime",
+      "fastapi",
+      "fastapi.testclient",
+      "packages/db/database.py",
+      "packages/db/models/__init__.py",
+      "typing"
+    ],
+    "tests/test_registry.py": [
+      "__future__",
+      "apps/api/api/routes/registry.py",
+      "datetime",
+      "pathlib",
+      "types"
     ],
     "tests/test_registry_api.py": [
       "__future__",
@@ -2018,10 +2531,27 @@
       "unittest",
       "unittest.mock"
     ],
+    "tests/test_security_parsers.py": [
+      "__future__",
+      "json",
+      "pathlib",
+      "skilgen/parsers/sarif.py",
+      "skilgen/parsers/sbom.py",
+      "skilgen/parsers/security_policy.py",
+      "tempfile",
+      "unittest"
+    ],
     "tests/test_skill_detail.py": [
       "__future__",
       "apps/api/api/routes/skills.py",
       "asyncio",
+      "pathlib",
+      "types"
+    ],
+    "tests/test_skill_sources_api.py": [
+      "__future__",
+      "apps/api/api/routes/repos.py",
+      "packages/db/models/skill.py",
       "pathlib",
       "types"
     ],
@@ -2052,9 +2582,7 @@
       "hashlib",
       "hmac",
       "packages/db/config.py",
-      "packages/db/models/Base.py",
-      "packages/db/models/Org.py",
-      "packages/db/models/Repo.py",
+      "packages/db/models/__init__.py",
       "pytest"
     ],
     "tests/test_source_graphs.py": [
@@ -2083,7 +2611,7 @@
       "fastapi.testclient",
       "json",
       "packages/db/database.py",
-      "packages/db/models/Org.py",
+      "packages/db/models/__init__.py",
       "pytest",
       "types",
       "typing"
@@ -2119,7 +2647,7 @@
   },
   "evidence_graph": {
     "language_inventory": {
-      "python": 128
+      "python": 177
     },
     "dominant_languages": [
       "python"
@@ -2142,6 +2670,15 @@
         "subprocess"
       ],
       "scripts/deploy_dashboard.py": [
+        "__future__",
+        "argparse",
+        "collections.abc",
+        "contextlib",
+        "json",
+        "pathlib",
+        "subprocess"
+      ],
+      "scripts/deploy_web.py": [
         "__future__",
         "argparse",
         "collections.abc",
@@ -2386,7 +2923,9 @@
         "__future__",
         "argparse",
         "dataclasses",
+        "datetime",
         "json",
+        "os",
         "pathlib",
         "skilgen/__init__.py",
         "skilgen/agents/__init__.py",
@@ -2406,10 +2945,17 @@
         "skilgen/delivery.py",
         "skilgen/enterprise_skills.py",
         "skilgen/external_skills.py",
+        "skilgen/hooks/cursor_watcher.py",
+        "skilgen/parsers/runner.py",
+        "skilgen/parsers/sources.py",
         "skilgen/registry_client.py",
         "sys",
         "threading",
-        "time"
+        "time",
+        "urllib.error",
+        "urllib.parse",
+        "urllib.request",
+        "uuid"
       ],
       "skilgen/core/__init__.py": [],
       "skilgen/core/analytics.py": [
@@ -2697,7 +3243,10 @@
       ],
       "skilgen/delivery.py": [
         "__future__",
+        "asyncio",
         "dataclasses",
+        "json",
+        "os",
         "pathlib",
         "skilgen/agents/__init__.py",
         "skilgen/agents/codebase_signals.py",
@@ -2721,7 +3270,10 @@
         "skilgen/generators/package.py",
         "skilgen/generators/skills.py",
         "time",
-        "typing"
+        "typing",
+        "urllib.error",
+        "urllib.request",
+        "uuid"
       ],
       "skilgen/enterprise_skills.py": [
         "__future__",
@@ -2777,16 +3329,225 @@
         "datetime",
         "os",
         "pathlib",
+        "re",
         "skilgen/agents/architecture_planner.py",
         "skilgen/agents/codebase_signals.py",
         "skilgen/agents/requirements_parser.py",
         "skilgen/agents/roadmap_planner.py",
+        "skilgen/core/analytics.py",
         "skilgen/core/config.py",
         "skilgen/core/context.py",
         "skilgen/core/dependency_risk.py",
         "skilgen/core/models.py",
         "skilgen/deep_agents_core.py",
         "typing"
+      ],
+      "skilgen/hooks/__init__.py": [],
+      "skilgen/hooks/claude_code.py": [
+        "__future__",
+        "pathlib"
+      ],
+      "skilgen/hooks/claude_code_hook.py": [
+        "__future__",
+        "os",
+        "sys",
+        "time",
+        "urllib.request"
+      ],
+      "skilgen/hooks/cursor.py": [
+        "__future__",
+        "pathlib"
+      ],
+      "skilgen/hooks/cursor_watcher.py": [
+        "__future__",
+        "os",
+        "pathlib",
+        "skilgen/core/analytics.py",
+        "subprocess",
+        "sys",
+        "time"
+      ],
+      "skilgen/parsers/__init__.py": [
+        "__future__",
+        "dataclasses",
+        "skilgen/parsers/dbt.py",
+        "skilgen/parsers/helm.py",
+        "skilgen/parsers/kafka.py",
+        "skilgen/parsers/kubernetes.py",
+        "skilgen/parsers/runbook.py",
+        "skilgen/parsers/sarif.py",
+        "skilgen/parsers/sbom.py",
+        "skilgen/parsers/security_policy.py",
+        "skilgen/parsers/sql_schema.py",
+        "skilgen/parsers/terraform.py"
+      ],
+      "skilgen/parsers/auto_detect.py": [
+        "__future__",
+        "pathlib",
+        "skilgen/core/config.py",
+        "skilgen/core/models.py",
+        "skilgen/parsers/sources.py",
+        "typing"
+      ],
+      "skilgen/parsers/confluence.py": [
+        "__future__",
+        "html.parser",
+        "pathlib",
+        "re",
+        "skilgen/parsers/runbook.py",
+        "tempfile",
+        "xml.etree.ElementTree",
+        "zipfile"
+      ],
+      "skilgen/parsers/dbt.py": [
+        "__future__",
+        "dataclasses",
+        "pathlib",
+        "re",
+        "typing",
+        "yaml"
+      ],
+      "skilgen/parsers/graphql.py": [
+        "__future__",
+        "json",
+        "pathlib",
+        "re",
+        "skilgen/parsers/__init__.py",
+        "typing"
+      ],
+      "skilgen/parsers/helm.py": [
+        "__future__",
+        "collections",
+        "dataclasses",
+        "pathlib",
+        "re",
+        "typing",
+        "yaml"
+      ],
+      "skilgen/parsers/incident.py": [
+        "__future__",
+        "collections",
+        "dataclasses",
+        "datetime",
+        "json",
+        "os",
+        "pathlib",
+        "re",
+        "time",
+        "typing",
+        "urllib.error",
+        "urllib.parse",
+        "urllib.request"
+      ],
+      "skilgen/parsers/kafka.py": [
+        "__future__",
+        "dataclasses",
+        "json",
+        "pathlib",
+        "typing",
+        "yaml"
+      ],
+      "skilgen/parsers/kubernetes.py": [
+        "__future__",
+        "collections",
+        "dataclasses",
+        "pathlib",
+        "typing",
+        "yaml"
+      ],
+      "skilgen/parsers/notion.py": [
+        "__future__",
+        "httpx",
+        "json",
+        "os",
+        "pathlib",
+        "skilgen/parsers/runbook.py",
+        "time",
+        "typing"
+      ],
+      "skilgen/parsers/openapi.py": [
+        "__future__",
+        "collections.abc",
+        "json",
+        "pathlib",
+        "re",
+        "skilgen/parsers/__init__.py",
+        "typing",
+        "yaml"
+      ],
+      "skilgen/parsers/postman.py": [
+        "__future__",
+        "json",
+        "pathlib",
+        "re",
+        "skilgen/parsers/__init__.py",
+        "typing"
+      ],
+      "skilgen/parsers/runbook.py": [
+        "__future__",
+        "dataclasses",
+        "pathlib",
+        "re"
+      ],
+      "skilgen/parsers/runner.py": [
+        "__future__",
+        "pathlib",
+        "skilgen/core/models.py",
+        "skilgen/parsers/auto_detect.py",
+        "skilgen/parsers/sources.py",
+        "typing"
+      ],
+      "skilgen/parsers/sarif.py": [
+        "__future__",
+        "dataclasses",
+        "json",
+        "pathlib",
+        "re",
+        "typing"
+      ],
+      "skilgen/parsers/sbom.py": [
+        "__future__",
+        "dataclasses",
+        "json",
+        "pathlib",
+        "re",
+        "skilgen/core/dependency_risk.py",
+        "typing",
+        "urllib.parse",
+        "xml.etree"
+      ],
+      "skilgen/parsers/security_policy.py": [
+        "__future__",
+        "dataclasses",
+        "json",
+        "pathlib",
+        "re",
+        "typing",
+        "yaml"
+      ],
+      "skilgen/parsers/sources.py": [
+        "__future__",
+        "dataclasses",
+        "importlib",
+        "pathlib",
+        "re",
+        "typing"
+      ],
+      "skilgen/parsers/sql_schema.py": [
+        "__future__",
+        "dataclasses",
+        "json",
+        "pathlib",
+        "re",
+        "typing"
+      ],
+      "skilgen/parsers/terraform.py": [
+        "__future__",
+        "collections",
+        "dataclasses",
+        "hcl2",
+        "pathlib",
+        "re"
       ],
       "skilgen/registry_client.py": [
         "__future__",
@@ -2795,6 +3556,7 @@
         "pathlib",
         "typing",
         "urllib.error",
+        "urllib.parse",
         "urllib.request"
       ],
       "skilgen/sdk.py": [
@@ -2828,6 +3590,17 @@
         "tempfile",
         "unittest"
       ],
+      "tests/test_api_key.py": [
+        "__future__",
+        "apps/api/api/auth.py",
+        "apps/api/api/routes/orgs.py",
+        "asyncio",
+        "fastapi",
+        "fastapi.testclient",
+        "packages/db/database.py",
+        "types",
+        "typing"
+      ],
       "tests/test_api_smoke.py": [
         "__future__",
         "io",
@@ -2846,6 +3619,16 @@
         "urllib.error",
         "urllib.parse",
         "urllib.request"
+      ],
+      "tests/test_api_spec_parsers.py": [
+        "__future__",
+        "pathlib",
+        "skilgen/parsers/__init__.py",
+        "skilgen/parsers/graphql.py",
+        "skilgen/parsers/openapi.py",
+        "skilgen/parsers/postman.py",
+        "tempfile",
+        "unittest"
       ],
       "tests/test_architecture_cli.py": [
         "json",
@@ -2870,6 +3653,14 @@
         "tempfile",
         "unittest",
         "unittest.mock"
+      ],
+      "tests/test_audit_log.py": [
+        "__future__",
+        "apps/api/api/routes/orgs.py",
+        "apps/api/api/services/audit.py",
+        "datetime",
+        "types",
+        "unittest"
       ],
       "tests/test_auth_claim_mapping.py": [
         "__future__",
@@ -2902,6 +3693,15 @@
         "sys",
         "tempfile",
         "unittest"
+      ],
+      "tests/test_cli_sources.py": [
+        "__future__",
+        "apps/api/api/analysis.py",
+        "pathlib",
+        "skilgen/cli/main.py",
+        "skilgen/parsers/auto_detect.py",
+        "skilgen/parsers/runner.py",
+        "tempfile"
       ],
       "tests/test_codebase_signals.py": [
         "pathlib",
@@ -2953,6 +3753,18 @@
         "tempfile",
         "unittest",
         "unittest.mock"
+      ],
+      "tests/test_dashboard_error_boundaries.py": [
+        "__future__",
+        "pathlib"
+      ],
+      "tests/test_data_parsers.py": [
+        "pathlib",
+        "skilgen/parsers/dbt.py",
+        "skilgen/parsers/kafka.py",
+        "skilgen/parsers/sql_schema.py",
+        "tempfile",
+        "unittest"
       ],
       "tests/test_decision_planner.py": [
         "pathlib",
@@ -3038,6 +3850,24 @@
         "sys",
         "tempfile"
       ],
+      "tests/test_eval.py": [
+        "__future__",
+        "apps/api/api/auth.py",
+        "datetime",
+        "fastapi",
+        "fastapi.testclient",
+        "importlib",
+        "packages/db/database.py",
+        "pytest",
+        "types",
+        "typing"
+      ],
+      "tests/test_eval_cli.py": [
+        "__future__",
+        "pytest",
+        "skilgen/cli/main.py",
+        "sys"
+      ],
       "tests/test_feature_extractor.py": [
         "pathlib",
         "skilgen/agents/feature_extractor.py",
@@ -3050,11 +3880,59 @@
         "tempfile",
         "unittest"
       ],
+      "tests/test_generation_quality.py": [
+        "__future__",
+        "asyncio",
+        "json",
+        "os",
+        "pathlib",
+        "skilgen/core/analytics.py",
+        "skilgen/core/models.py",
+        "skilgen/delivery.py",
+        "skilgen/generators/skills.py",
+        "skilgen/hooks/claude_code_hook.py",
+        "skilgen/hooks/cursor_watcher.py",
+        "tempfile",
+        "time",
+        "unittest",
+        "unittest.mock"
+      ],
+      "tests/test_half_life.py": [
+        "__future__",
+        "apps/api/api/services/half_life.py",
+        "datetime",
+        "pathlib",
+        "types"
+      ],
       "tests/test_identity_policy_store.py": [
         "__future__",
         "os",
         "pathlib",
         "skilgen/core/identity_policy_store.py",
+        "tempfile",
+        "unittest"
+      ],
+      "tests/test_improvement_loop.py": [
+        "__future__",
+        "apps/api/api/routes/repos.py",
+        "datetime",
+        "pathlib",
+        "types"
+      ],
+      "tests/test_incident_parsers.py": [
+        "__future__",
+        "pathlib",
+        "skilgen/parsers/incident.py",
+        "tempfile",
+        "unittest",
+        "unittest.mock"
+      ],
+      "tests/test_infra_parsers.py": [
+        "__future__",
+        "pathlib",
+        "skilgen/parsers/helm.py",
+        "skilgen/parsers/kubernetes.py",
+        "skilgen/parsers/terraform.py",
         "tempfile",
         "unittest"
       ],
@@ -3068,11 +3946,47 @@
         "time",
         "unittest"
       ],
+      "tests/test_llm_config.py": [
+        "__future__",
+        "apps/api/api/services/llm_config.py",
+        "unittest"
+      ],
+      "tests/test_memory_capture.py": [
+        "__future__",
+        "apps/api/api/services/memory.py",
+        "asyncio",
+        "dataclasses",
+        "datetime",
+        "packages/db/models/__init__.py",
+        "pathlib",
+        "pytest"
+      ],
+      "tests/test_memory_cli.py": [
+        "__future__",
+        "http.server",
+        "json",
+        "os",
+        "pathlib",
+        "subprocess",
+        "sys",
+        "threading"
+      ],
       "tests/test_model_registry.py": [
         "os",
         "skilgen/agents/model_registry.py",
         "skilgen/core/models.py",
         "unittest"
+      ],
+      "tests/test_org_intelligence_api.py": [
+        "__future__",
+        "apps/api/api/auth.py",
+        "apps/api/api/routes/orgs.py",
+        "datetime",
+        "fastapi",
+        "fastapi.testclient",
+        "packages/db/database.py",
+        "packages/db/models/__init__.py",
+        "typing"
       ],
       "tests/test_org_settings.py": [
         "__future__",
@@ -3112,6 +4026,13 @@
         "tempfile",
         "unittest"
       ],
+      "tests/test_policy_engine.py": [
+        "__future__",
+        "apps/api/api/services/policy.py",
+        "datetime",
+        "types",
+        "unittest"
+      ],
       "tests/test_pr_comment.py": [
         "__future__",
         "apps/api/api/pr_comment.py",
@@ -3124,12 +4045,42 @@
         "pytest",
         "typing"
       ],
+      "tests/test_process_parsers.py": [
+        "__future__",
+        "json",
+        "pathlib",
+        "skilgen/parsers/confluence.py",
+        "skilgen/parsers/notion.py",
+        "skilgen/parsers/runbook.py",
+        "tempfile",
+        "unittest",
+        "zipfile"
+      ],
       "tests/test_rate_limit_store.py": [
         "__future__",
         "pathlib",
         "skilgen/core/rate_limit_store.py",
         "tempfile",
         "unittest"
+      ],
+      "tests/test_red_flags.py": [
+        "__future__",
+        "apps/api/api/auth.py",
+        "apps/api/api/routes/orgs.py",
+        "apps/api/api/services/redflags.py",
+        "datetime",
+        "fastapi",
+        "fastapi.testclient",
+        "packages/db/database.py",
+        "packages/db/models/__init__.py",
+        "typing"
+      ],
+      "tests/test_registry.py": [
+        "__future__",
+        "apps/api/api/routes/registry.py",
+        "datetime",
+        "pathlib",
+        "types"
       ],
       "tests/test_registry_api.py": [
         "__future__",
@@ -3257,10 +4208,27 @@
         "unittest",
         "unittest.mock"
       ],
+      "tests/test_security_parsers.py": [
+        "__future__",
+        "json",
+        "pathlib",
+        "skilgen/parsers/sarif.py",
+        "skilgen/parsers/sbom.py",
+        "skilgen/parsers/security_policy.py",
+        "tempfile",
+        "unittest"
+      ],
       "tests/test_skill_detail.py": [
         "__future__",
         "apps/api/api/routes/skills.py",
         "asyncio",
+        "pathlib",
+        "types"
+      ],
+      "tests/test_skill_sources_api.py": [
+        "__future__",
+        "apps/api/api/routes/repos.py",
+        "packages/db/models/skill.py",
         "pathlib",
         "types"
       ],
@@ -3291,9 +4259,7 @@
         "hashlib",
         "hmac",
         "packages/db/config.py",
-        "packages/db/models/Base.py",
-        "packages/db/models/Org.py",
-        "packages/db/models/Repo.py",
+        "packages/db/models/__init__.py",
         "pytest"
       ],
       "tests/test_source_graphs.py": [
@@ -3322,7 +4288,7 @@
         "fastapi.testclient",
         "json",
         "packages/db/database.py",
-        "packages/db/models/Org.py",
+        "packages/db/models/__init__.py",
         "pytest",
         "types",
         "typing"
@@ -3358,1050 +4324,1564 @@
     },
     "items": [
       {
-        "path": "CODEBASE_ONLY",
+        "path": "README.md",
         "kind": "requirements",
         "language": null,
         "tags": [
           "requirements"
         ],
         "snippet": [
-          "Codebase-only mode: no requirements file supplied.",
-          "Detected backend-oriented structure from routes, services, or server files.",
-          "Detected frontend-oriented structure from routes, pages, or component files.",
-          "Scanned 543 files from the project root.",
-          "Observed: .env.example",
-          "Observed: .env.local",
-          "Observed: .github/CODEOWNERS",
-          "Observed: .github/ISSUE_TEMPLATE/bug_report.yml"
+          "<h2 align=\"center\">The living skill system for AI coding agents</h2>",
+          "Every agent session starts from zero. Skilgen ends that.<br/>",
+          "Generate, govern, and keep your codebase's agent knowledge current automatically.",
+          "A hand-written `CLAUDE.md` captures what you remember about your codebase on the day you write it. Skilgen generates repo-local agent context from actual code evidence, requirements inputs, architecture domains, and config signals, then refreshes that context as the code changes. A hand-written file drifts silently. Skilgen gives you generated artifacts, freshness tracking, and a score that tells you when the skill system is no longer trustworthy.",
+          "Every agent session starts from zero. It reads files, infers structure, guesses patterns, and then the session ends. The next session repeats the same exploration. Skilgen captures that understanding once, stores it as versioned repo-local skills and docs grounded in real repository evidence, and makes it available to every session, every tool, and every engineer on the team.",
+          "Run `skilgen dashboard` and get a branded HTML surface for score health, architecture domains, evidence graph, dependency signals, freshness, analytics, and agent readiness in one place.",
+          "skilgen dashboard --project-root . --requirements docs/requirements.docx",
+          "- [Anthropic claude-agent-sdk-python dashboard](docs/examples/README.md#anthropic-claude-agent-sdk-python)"
         ],
         "related_imports": []
       },
       {
-        "path": ".venv-api/lib/python3.13/site-packages/langgraph/typing.py",
+        "path": "skilgen/core/models.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
           "from __future__ import annotations",
-          "from typing_extensions import TypeVar",
-          "from langgraph._internal._typing import StateLike",
-          "__all__ = (",
-          "\"StateT\",",
-          "\"StateT_co\",",
-          "\"StateT_contra\",",
-          "\"InputT\",",
-          "\"OutputT\",",
-          "\"ContextT\",",
-          ")",
-          "StateT = TypeVar(\"StateT\", bound=StateLike)"
+          "from dataclasses import dataclass, field",
+          "from pathlib import Path",
+          "SourceConfigValue = bool | str | list[str]",
+          "@dataclass(frozen=True)",
+          "class SkillSpec:",
+          "path: str",
+          "name: str",
+          "domain: str",
+          "sub_domain: str",
+          "overview: str",
+          "checks: list[str]"
         ],
-        "related_imports": []
+        "related_imports": [
+          "__future__",
+          "dataclasses",
+          "pathlib"
+        ]
       },
       {
-        "path": ".venv-api/lib/python3.13/site-packages/typing_extensions.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "import abc",
-          "import builtins",
-          "import collections",
-          "import collections.abc",
-          "import contextlib",
-          "import enum",
-          "import functools",
-          "import inspect",
-          "import io",
-          "import keyword",
-          "import operator",
-          "import sys"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/openai/_models.py",
+        "path": "packages/db/database.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
           "from __future__ import annotations",
-          "import os",
-          "import inspect",
-          "import weakref",
-          "from typing import (",
-          "IO,",
-          "TYPE_CHECKING,",
-          "Any,",
-          "Type,",
-          "Tuple,",
-          "Union,",
-          "Generic,"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/_pytest/logging.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# mypy: allow-untyped-defs",
-          "\"\"\"Access and control log capturing.\"\"\"",
-          "from __future__ import annotations",
-          "from collections.abc import Generator",
-          "from collections.abc import Mapping",
-          "from collections.abc import Set as AbstractSet",
-          "from contextlib import contextmanager",
-          "from contextlib import nullcontext",
-          "from datetime import datetime",
-          "from datetime import timedelta",
-          "from datetime import timezone",
-          "import io"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/anyio/functools.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "__all__ = (",
-          "\"AsyncCacheInfo\",",
-          "\"AsyncCacheParameters\",",
-          "\"AsyncLRUCacheWrapper\",",
-          "\"cache\",",
-          "\"lru_cache\",",
-          "\"reduce\",",
-          ")",
-          "import functools",
-          "import sys",
-          "from collections import OrderedDict"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/openpyxl/utils/datetime.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# Copyright (c) 2010-2024 openpyxl",
-          "\"\"\"Manage Excel date weirdness.\"\"\"",
-          "# Python stdlib imports",
-          "import datetime",
-          "from math import isnan",
-          "import re",
-          "MAC_EPOCH = datetime.datetime(1904, 1, 1)",
-          "WINDOWS_EPOCH = datetime.datetime(1899, 12, 30)",
-          "CALENDAR_WINDOWS_1900 = 2415018.5   # Julian date of WINDOWS_EPOCH",
-          "CALENDAR_MAC_1904 = 2416480.5       # Julian date of MAC_EPOCH",
-          "CALENDAR_WINDOWS_1900 = WINDOWS_EPOCH",
-          "CALENDAR_MAC_1904 = MAC_EPOCH"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/_pytest/pathlib.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import atexit",
-          "from collections.abc import Callable",
-          "from collections.abc import Iterable",
-          "from collections.abc import Iterator",
-          "import contextlib",
-          "from enum import Enum",
-          "from errno import EBADF",
-          "from errno import ELOOP",
-          "from errno import ENOENT",
-          "from errno import ENOTDIR",
-          "import fnmatch"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/_pytest/warnings.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# mypy: allow-untyped-defs",
-          "from __future__ import annotations",
-          "from collections.abc import Generator",
-          "from contextlib import contextmanager",
-          "from contextlib import ExitStack",
-          "import sys",
-          "from typing import Literal",
-          "import warnings",
-          "from _pytest.config import apply_warning_filters",
-          "from _pytest.config import Config",
-          "from _pytest.config import parse_warning_filter",
-          "from _pytest.main import Session"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/anthropic/_models.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import os",
-          "import inspect",
-          "import weakref",
-          "from typing import (",
-          "IO,",
-          "TYPE_CHECKING,",
-          "Any,",
-          "Type,",
-          "Union,",
-          "Generic,",
-          "TypeVar,"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/celery/utils/collections.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "\"\"\"Custom maps, sets, sequences, and other data structures.\"\"\"",
-          "import time",
-          "from collections import OrderedDict as _OrderedDict",
-          "from collections import deque",
-          "from collections.abc import Callable, Mapping, MutableMapping, MutableSet, Sequence",
-          "from heapq import heapify, heappop, heappush",
-          "from itertools import chain, count",
-          "from queue import Empty",
-          "from typing import Any, Dict, Iterable, List  # noqa",
-          "from .functional import first, uniq",
-          "from .text import match_case",
-          "try:"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/fsspec/json.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "import json",
-          "from collections.abc import Callable, Mapping, Sequence",
-          "from contextlib import suppress",
-          "from pathlib import PurePath",
-          "from typing import Any, ClassVar",
-          "from .registry import _import_class, get_filesystem_class",
-          "from .spec import AbstractFileSystem",
-          "class FilesystemJSONEncoder(json.JSONEncoder):",
-          "include_password: ClassVar[bool] = True",
-          "def default(self, o: Any) -> Any:",
-          "if isinstance(o, AbstractFileSystem):",
-          "return o.to_dict(include_password=self.include_password)"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/huggingface_hub/dataclasses.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "import collections.abc",
-          "import inspect",
-          "import types",
-          "from collections.abc import Callable",
-          "from dataclasses import _MISSING_TYPE, MISSING, Field, field, fields, make_dataclass",
-          "from functools import lru_cache, wraps",
-          "from typing import (",
-          "Annotated,",
-          "Any,",
-          "ForwardRef,",
-          "Literal,",
-          "Type,"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/celery/utils/time.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "\"\"\"Utilities related to dates, times, intervals, and timezones.\"\"\"",
-          "from __future__ import annotations",
-          "import logging",
-          "import numbers",
-          "import os",
-          "import random",
-          "import sys",
-          "import time as _time",
-          "from calendar import monthrange",
-          "from datetime import date, datetime, timedelta",
-          "from datetime import timezone as datetime_timezone",
-          "from datetime import tzinfo"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/alembic/autogenerate/compare/types.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import logging",
-          "from typing import Any",
-          "from typing import Optional",
-          "from typing import TYPE_CHECKING",
-          "from typing import Union",
-          "from sqlalchemy import types as sqltypes",
-          "from ...util import DispatchPriority",
-          "from ...util import PriorityDispatchResult",
-          "if TYPE_CHECKING:",
-          "from sqlalchemy.sql.elements import quoted_name",
-          "from sqlalchemy.sql.schema import Column"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/pip/_internal/commands/inspect.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "import logging",
-          "from optparse import Values",
-          "from typing import Any",
-          "from pip._vendor.packaging.markers import default_environment",
-          "from pip._vendor.rich import print_json",
-          "from pip import __version__",
-          "from pip._internal.cli import cmdoptions",
-          "from pip._internal.cli.base_command import Command",
-          "from pip._internal.cli.status_codes import SUCCESS",
-          "from pip._internal.metadata import BaseDistribution, get_environment",
-          "from pip._internal.utils.compat import stdlib_pkgs",
-          "from pip._internal.utils.urls import path_to_url"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/langchain_core/output_parsers/pydantic.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "\"\"\"Output parsers using Pydantic.\"\"\"",
-          "import json",
-          "from typing import Annotated, Generic, Literal, overload",
-          "import pydantic",
-          "from pydantic import SkipValidation",
-          "from typing_extensions import override",
-          "from langchain_core.exceptions import OutputParserException",
-          "from langchain_core.output_parsers import JsonOutputParser",
-          "from langchain_core.outputs import Generation",
-          "from langchain_core.utils.pydantic import (",
-          "PydanticBaseModel,",
-          "TBaseModel,"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/openpyxl/compat/abc.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# Copyright (c) 2010-2024 openpyxl",
-          "try:",
-          "from abc import ABC",
-          "except ImportError:",
-          "from abc import ABCMeta",
-          "ABC = ABCMeta('ABC', (object, ), {})"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/filelock/asyncio.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "\"\"\"An asyncio-based implementation of the file lock.\"\"\"",
-          "from __future__ import annotations",
-          "import asyncio",
-          "import contextlib",
-          "import logging",
-          "import os",
-          "import time",
-          "from dataclasses import dataclass",
-          "from inspect import iscoroutinefunction",
-          "from threading import local",
-          "from typing import TYPE_CHECKING, Any, NoReturn, TypeVar",
-          "from ._api import _UNSET_FILE_MODE, BaseFileLock, FileLockContext, FileLockMeta"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/tqdm/contrib/itertools.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "\"\"\"",
-          "Thin wrappers around `itertools`.",
-          "\"\"\"",
-          "import itertools",
-          "from ..auto import tqdm as tqdm_auto",
-          "__author__ = {\"github.com/\": [\"casperdcl\"]}",
-          "__all__ = ['product']",
-          "def product(*iterables, **tqdm_kwargs):",
-          "\"\"\"",
-          "Equivalent of `itertools.product`.",
-          "Parameters",
-          "tqdm_class  : [default: tqdm.auto.tqdm]."
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/celery/contrib/pytest.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "\"\"\"Fixtures and testing utilities for :pypi:`pytest <pytest>`.\"\"\"",
-          "import os",
-          "from contextlib import contextmanager",
-          "from typing import TYPE_CHECKING, Any, Mapping, Sequence, Union  # noqa",
-          "import pytest",
-          "if TYPE_CHECKING:",
-          "from celery import Celery",
-          "from ..worker import WorkController",
-          "else:",
-          "Celery = WorkController = object",
-          "NO_WORKER = os.environ.get('NO_WORKER')",
-          "def pytest_configure(config):"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/openai/_utils/__init__.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from ._logs import SensitiveHeadersFilter as SensitiveHeadersFilter",
-          "from ._path import path_template as path_template",
-          "from ._sync import asyncify as asyncify",
-          "from ._proxy import LazyProxy as LazyProxy",
-          "from ._utils import (",
-          "flatten as flatten,",
-          "is_dict as is_dict,",
-          "is_list as is_list,",
-          "is_given as is_given,",
-          "is_tuple as is_tuple,",
-          "json_safe as json_safe,",
-          "lru_cache as lru_cache,"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/anthropic/_utils/__init__.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from ._path import path_template as path_template",
-          "from ._sync import asyncify as asyncify",
-          "from ._proxy import LazyProxy as LazyProxy",
-          "from ._utils import (",
-          "flatten as flatten,",
-          "is_dict as is_dict,",
-          "is_list as is_list,",
-          "is_given as is_given,",
-          "is_tuple as is_tuple,",
-          "json_safe as json_safe,",
-          "lru_cache as lru_cache,",
-          "is_mapping as is_mapping,"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/openai/_types.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from os import PathLike",
-          "from typing import (",
-          "IO,",
-          "TYPE_CHECKING,",
-          "Any,",
-          "Dict,",
-          "List,",
-          "Type,",
-          "Tuple,",
-          "Union,",
-          "Mapping,"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/redis/_parsers/socket.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "import errno",
-          "import io",
-          "import socket",
-          "from io import SEEK_END",
-          "from typing import Optional, Union",
-          "from ..exceptions import ConnectionError, TimeoutError",
-          "from ..utils import SSL_AVAILABLE",
-          "NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {BlockingIOError: errno.EWOULDBLOCK}",
-          "if SSL_AVAILABLE:",
+          "from collections.abc import AsyncGenerator",
           "import ssl",
-          "if hasattr(ssl, \"SSLWantReadError\"):",
-          "NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantReadError] = 2"
+          "from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine",
+          "from packages.db.config import settings",
+          "_engine: AsyncEngine | None = None",
+          "_sessionmaker: async_sessionmaker[AsyncSession] | None = None",
+          "def _database_url_and_connect_args() -> tuple[str, dict[str, object]]:",
+          "database_url = settings.DATABASE_URL or settings.DATABASE_URL_UNPOOLED",
+          "if database_url.startswith(\"postgres://\"):",
+          "database_url = database_url.replace(\"postgres://\", \"postgresql+asyncpg://\", 1)",
+          "elif database_url.startswith(\"postgresql://\"):"
         ],
         "related_imports": []
       },
       {
-        "path": ".venv-api/lib/python3.13/site-packages/fsspec/tests/abstract/copy.py",
+        "path": "skilgen/agents/codebase_signals.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
-          "from hashlib import md5",
-          "from itertools import product",
-          "import pytest",
-          "from fsspec.tests.abstract.common import GLOB_EDGE_CASES_TESTS",
-          "class AbstractCopyTests:",
-          "def test_copy_file_to_existing_directory(",
-          "self,",
-          "fs,",
-          "fs_join,",
-          "fs_bulk_operations_scenario_0,",
-          "fs_target,",
-          "supports_empty_directories,"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/sqlalchemy/util/typing.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# util/typing.py",
-          "# Copyright (C) 2022-2026 the SQLAlchemy authors and contributors",
-          "# <see AUTHORS file>",
           "from __future__ import annotations",
-          "import builtins",
-          "from collections import deque",
-          "import collections.abc as collections_abc",
+          "import ast",
+          "from functools import lru_cache",
           "import re",
-          "import sys",
-          "import typing",
-          "from typing import Any",
-          "from typing import Callable"
+          "from pathlib import Path",
+          "from skilgen.core.config import load_config",
+          "from skilgen.core.corpus_index import load_corpus_index",
+          "from skilgen.core.deep_sampler import select_deep_read_targets",
+          "from skilgen.core.document_ingestion import extract_document_text",
+          "from skilgen.core.models import CodebaseSignals",
+          "CODE_EXTENSIONS = {",
+          "\".py\","
         ],
-        "related_imports": []
+        "related_imports": [
+          "__future__",
+          "ast",
+          "functools",
+          "pathlib",
+          "re",
+          "skilgen/core/config.py",
+          "skilgen/core/corpus_index.py",
+          "skilgen/core/deep_sampler.py",
+          "skilgen/core/document_ingestion.py",
+          "skilgen/core/models.py"
+        ]
       },
       {
-        "path": ".venv-api/lib/python3.13/site-packages/pip/_internal/utils/subprocess.py",
+        "path": "apps/api/api/auth.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
           "from __future__ import annotations",
-          "import logging",
-          "import os",
-          "import shlex",
-          "import subprocess",
-          "from collections.abc import Iterable, Mapping",
-          "from typing import Any, Callable, Literal, Union",
-          "from pip._vendor.rich.markup import escape",
-          "from pip._internal.cli.spinners import SpinnerInterface, open_spinner",
-          "from pip._internal.exceptions import InstallationSubprocessError",
-          "from pip._internal.utils.logging import VERBOSE, subprocess_logger",
-          "from pip._internal.utils.misc import HiddenText"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/kombu/utils/uuid.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "\"\"\"UUID utilities.\"\"\"",
-          "from __future__ import annotations",
-          "from typing import Callable",
-          "from uuid import UUID, uuid4",
-          "def uuid(_uuid: Callable[[], UUID] = uuid4) -> str:",
-          "\"\"\"Generate unique id in UUID4 format.",
-          "See Also",
-          "For now this is provided by :func:`uuid.uuid4`.",
-          "\"\"\"",
-          "return str(_uuid())"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/_pytest/unittest.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# mypy: allow-untyped-defs",
-          "\"\"\"Discover and run std-library \"unittest\" style tests.\"\"\"",
-          "from __future__ import annotations",
-          "from collections.abc import Callable",
-          "from collections.abc import Generator",
-          "from collections.abc import Iterable",
-          "from collections.abc import Iterator",
-          "from enum import auto",
-          "from enum import Enum",
-          "import inspect",
-          "import sys",
-          "import traceback"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/google/genai/_interactions/_models.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# Copyright 2025 Google LLC",
-          "#",
-          "# Licensed under the Apache License, Version 2.0 (the \"License\");",
-          "from __future__ import annotations",
-          "import os",
-          "import inspect",
-          "import weakref",
-          "from typing import (",
-          "IO,",
-          "TYPE_CHECKING,",
-          "Any,",
-          "Type,"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/pygments/lexers/math.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "\"\"\"",
-          "pygments.lexers.math",
-          "~~~~~~~~~~~~~~~~~~~~",
-          "Just export lexers that were contained in this module.",
-          ":copyright: Copyright 2006-present by the Pygments team, see AUTHORS.",
-          ":license: BSD, see LICENSE for details.",
-          "\"\"\"",
-          "from pygments.lexers.python import NumPyLexer",
-          "from pygments.lexers.matlab import MatlabLexer, MatlabSessionLexer, \\",
-          "OctaveLexer, ScilabLexer",
-          "from pygments.lexers.julia import JuliaLexer, JuliaConsoleLexer",
-          "from pygments.lexers.r import RConsoleLexer, SLexer, RdLexer"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/sqlalchemy/sql/__init__.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# sql/__init__.py",
-          "# Copyright (C) 2005-2026 the SQLAlchemy authors and contributors",
-          "# <see AUTHORS file>",
-          "from typing import Any",
-          "from typing import TYPE_CHECKING",
-          "from ._typing import ColumnExpressionArgument as ColumnExpressionArgument",
-          "from ._typing import NotNullable as NotNullable",
-          "from ._typing import Nullable as Nullable",
-          "from .base import Executable as Executable",
-          "from .compiler import COLLECT_CARTESIAN_PRODUCTS as COLLECT_CARTESIAN_PRODUCTS",
-          "from .compiler import FROM_LINTING as FROM_LINTING",
-          "from .compiler import NO_LINTING as NO_LINTING"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/sqlalchemy/sql/elements.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# sql/elements.py",
-          "# Copyright (C) 2005-2026 the SQLAlchemy authors and contributors",
-          "# <see AUTHORS file>",
-          "\"\"\"Core SQL expression elements, including :class:`_expression.ClauseElement`,",
-          ":class:`_expression.ColumnElement`, and derived classes.",
-          "\"\"\"",
-          "from __future__ import annotations",
-          "from decimal import Decimal",
-          "from enum import Enum",
-          "import itertools",
-          "import operator",
-          "import re"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/requests_toolbelt/adapters/ssl.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# -*- coding: utf-8 -*-",
-          "\"\"\"",
-          "requests_toolbelt.ssl_adapter",
-          "=============================",
-          "This file contains an implementation of the SSLAdapter originally demonstrated",
-          "in this blog post:",
-          "https://lukasa.co.uk/2013/01/Choosing_SSL_Version_In_Requests/",
-          "\"\"\"",
-          "import requests",
-          "from requests.adapters import HTTPAdapter",
-          "from .._compat import poolmanager",
-          "class SSLAdapter(HTTPAdapter):"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/anthropic/_types.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from os import PathLike",
-          "from typing import (",
-          "IO,",
-          "TYPE_CHECKING,",
-          "Any,",
-          "Dict,",
-          "List,",
-          "Type,",
-          "Tuple,",
-          "Union,",
-          "Mapping,"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/openai/_compat.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from typing import TYPE_CHECKING, Any, Union, Generic, TypeVar, Callable, cast, overload",
-          "from datetime import date, datetime",
-          "from typing_extensions import Self, Literal, TypedDict",
-          "import pydantic",
-          "from pydantic.fields import FieldInfo",
-          "from ._types import IncEx, StrBytesIntFloat",
-          "_T = TypeVar(\"_T\")",
-          "_ModelT = TypeVar(\"_ModelT\", bound=pydantic.BaseModel)",
-          "PYDANTIC_V1 = pydantic.VERSION.startswith(\"1.\")",
-          "if TYPE_CHECKING:",
-          "def parse_date(value: date | StrBytesIntFloat) -> date:  # noqa: ARG001"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/sqlalchemy/engine/interfaces.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# engine/interfaces.py",
-          "# Copyright (C) 2005-2026 the SQLAlchemy authors and contributors",
-          "# <see AUTHORS file>",
-          "\"\"\"Define core interfaces used by the engine system.\"\"\"",
-          "from __future__ import annotations",
-          "from enum import Enum",
-          "from typing import Any",
-          "from typing import Awaitable",
-          "from typing import Callable",
-          "from typing import ClassVar",
-          "from typing import Collection",
-          "from typing import Dict"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/sqlalchemy/sql/_typing.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# sql/_typing.py",
-          "# Copyright (C) 2022-2026 the SQLAlchemy authors and contributors",
-          "# <see AUTHORS file>",
-          "from __future__ import annotations",
-          "import operator",
-          "from typing import Any",
-          "from typing import Callable",
-          "from typing import Dict",
-          "from typing import Generic",
-          "from typing import Iterable",
-          "from typing import Mapping",
-          "from typing import NoReturn"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/openai/_base_client.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import sys",
-          "import json",
           "import time",
-          "import uuid",
-          "import email",
-          "import asyncio",
-          "import inspect",
-          "import logging",
-          "import platform",
-          "import warnings",
-          "import email.utils"
+          "from typing import Any",
+          "import httpx",
+          "from fastapi import Depends, HTTPException",
+          "from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer",
+          "from jose import JWTError, jwk, jwt",
+          "from jose.utils import base64url_decode",
+          "from sqlalchemy import select",
+          "from sqlalchemy.ext.asyncio import AsyncSession",
+          "from packages.db.database import get_db",
+          "from packages.db.config import settings"
         ],
         "related_imports": []
       },
       {
-        "path": ".venv-api/lib/python3.13/site-packages/sqlalchemy/sql/base.py",
+        "path": "packages/db/models/base.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
-          "# sql/base.py",
-          "# Copyright (C) 2005-2026 the SQLAlchemy authors and contributors",
-          "# <see AUTHORS file>",
-          "\"\"\"Foundational utilities common to many sql modules.\"\"\"",
           "from __future__ import annotations",
-          "import collections",
-          "from enum import Enum",
-          "import itertools",
-          "from itertools import zip_longest",
-          "import operator",
-          "import re",
-          "from typing import Any"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/openpyxl/chartsheet/chartsheet.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# Copyright (c) 2010-2024 openpyxl",
-          "from openpyxl.descriptors import Typed, Set, Alias",
-          "from openpyxl.descriptors.excel import ExtensionList",
-          "from openpyxl.descriptors.serialisable import Serialisable",
-          "from openpyxl.drawing.spreadsheet_drawing import (",
-          "AbsoluteAnchor,",
-          "SpreadsheetDrawing,",
-          ")",
-          "from openpyxl.worksheet.page import (",
-          "PageMargins,",
-          "PrintPageSetup",
-          ")"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/openpyxl/comments/comments.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# Copyright (c) 2010-2024 openpyxl",
-          "class Comment:",
-          "_parent = None",
-          "def __init__(self, text, author, height=79, width=144):",
-          "self.content = text",
-          "self.author = author",
-          "self.height = height",
-          "self.width = width",
-          "@property",
-          "def parent(self):",
-          "return self._parent",
-          "def __eq__(self, other):"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/openpyxl/formula/tokenizer.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "\"\"\"",
-          "This module contains a tokenizer for Excel formulae.",
-          "The tokenizer is based on the Javascript tokenizer found at",
-          "http://ewbi.blogs.com/develops/2004/12/excel_formula_p.html written by Eric",
-          "Bachtal",
-          "\"\"\"",
-          "import re",
-          "class TokenizerError(Exception):",
-          "\"\"\"Base class for all Tokenizer errors.\"\"\"",
-          "class Tokenizer:",
-          "\"\"\"",
-          "A tokenizer for Excel worksheet formulae."
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/shellingham/_core.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "SHELL_NAMES = (",
-          "{\"sh\", \"bash\", \"dash\", \"ash\"}  # Bourne.",
-          "| {\"csh\", \"tcsh\"}  # C.",
-          "| {\"ksh\", \"zsh\", \"fish\"}  # Common alternatives.",
-          "| {\"cmd\", \"powershell\", \"pwsh\"}  # Microsoft.",
-          "| {\"elvish\", \"xonsh\", \"nu\"}  # More exotic.",
-          ")",
-          "class ShellDetectionFailure(EnvironmentError):",
+          "from datetime import datetime",
+          "import uuid",
+          "from sqlalchemy.orm import DeclarativeBase",
+          "def utcnow() -> datetime:",
+          "return datetime.utcnow()",
+          "def new_uuid() -> str:",
+          "return str(uuid.uuid4())",
+          "class Base(DeclarativeBase):",
           "pass"
         ],
         "related_imports": []
       },
       {
-        "path": ".venv-api/lib/python3.13/site-packages/openpyxl/chartsheet/custom.py",
+        "path": "skilgen/core/config.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
-          "# Copyright (c) 2010-2024 openpyxl",
-          "from openpyxl.worksheet.header_footer import HeaderFooter",
-          "from openpyxl.descriptors import (",
-          "Bool,",
-          "Integer,",
-          "Set,",
-          "Typed,",
-          "Sequence",
-          ")",
-          "from openpyxl.descriptors.excel import Guid",
-          "from openpyxl.descriptors.serialisable import Serialisable",
-          "from openpyxl.worksheet.page import ("
+          "from __future__ import annotations",
+          "from pathlib import Path",
+          "from skilgen.core.models import CorpusSettings, SkilgenConfig, SourceConfigValue",
+          "DEFAULT_CONFIG = SkilgenConfig(",
+          "include_paths=[\".\"],",
+          "exclude_paths=[\".git\", \"__pycache__\", \".venv\", \"node_modules\", \".skilgen\"],",
+          "domains_override=[],",
+          "skill_depth=2,",
+          "update_trigger=\"auto\",",
+          "langsmith_project=None,",
+          "model_provider=\"openai\",",
+          "model=\"gpt-4.1-mini\","
+        ],
+        "related_imports": [
+          "__future__",
+          "pathlib",
+          "skilgen/core/models.py"
+        ]
+      },
+      {
+        "path": "skilgen/core/requirements.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import json",
+          "import hashlib",
+          "from pathlib import Path",
+          "from skilgen.agents.codebase_signals import is_ignored_path_parts, is_internal_skillayer_monorepo",
+          "from skilgen.core.document_ingestion import extract_document_text",
+          "from skilgen.core.models import ProjectIntent, RequirementsContext",
+          "def extract_text(path: Path) -> str:",
+          "return extract_document_text(path)",
+          "def normalize_lines(text: str) -> list[str]:",
+          "return [line.strip() for line in text.splitlines() if line.strip()]",
+          "def detect_domains(lines: list[str]) -> dict[str, bool]:"
+        ],
+        "related_imports": [
+          "__future__",
+          "hashlib",
+          "json",
+          "pathlib",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/core/document_ingestion.py",
+          "skilgen/core/models.py"
+        ]
+      },
+      {
+        "path": "packages/db/models/skill.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "from typing import TYPE_CHECKING",
+          "from sqlalchemy import ForeignKey, JSON, String, Text",
+          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
+          "from packages.db.models.base import Base, new_uuid, utcnow",
+          "if TYPE_CHECKING:",
+          "from packages.db.models.repo import Repo",
+          "from packages.db.models.skill_version import SkillVersion",
+          "SOURCE_TYPE_TO_CATEGORY: dict[str, str] = {",
+          "\"code\": \"codebase_architecture\",",
+          "\"openapi\": \"internal_tools\","
         ],
         "related_imports": []
       },
       {
-        "path": ".venv-api/lib/python3.13/site-packages/openpyxl/comments/comment_sheet.py",
+        "path": "skilgen/delivery.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
-          "# Copyright (c) 2010-2024 openpyxl",
-          "## Incomplete!",
-          "from openpyxl.descriptors.serialisable import Serialisable",
-          "from openpyxl.descriptors import (",
-          "Typed,",
-          "Integer,",
-          "Set,",
-          "String,",
-          "Bool,",
-          ")",
-          "from openpyxl.descriptors.excel import Guid, ExtensionList",
-          "from openpyxl.descriptors.sequence import NestedSequence"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/openpyxl/formula/__init__.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "# Copyright (c) 2010-2024 openpyxl",
-          "from .tokenizer import Tokenizer"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/shellingham/__init__.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "import importlib",
+          "from __future__ import annotations",
+          "import asyncio",
+          "from dataclasses import replace",
+          "import json",
           "import os",
-          "from ._core import ShellDetectionFailure",
-          "__version__ = \"1.5.4\"",
-          "def detect_shell(pid=None, max_depth=10):",
-          "name = os.name",
-          "try:",
-          "impl = importlib.import_module(\".{}\".format(name), __name__)",
-          "except ImportError:",
-          "message = \"Shell detection not implemented for {0!r}\".format(name)",
-          "raise RuntimeError(message)",
+          "import time",
+          "import uuid",
+          "from pathlib import Path",
+          "from typing import Callable",
+          "from urllib.error import HTTPError, URLError",
+          "from urllib.request import Request, urlopen",
+          "from skilgen.agents import build_agent_decision, fingerprint_project"
+        ],
+        "related_imports": [
+          "__future__",
+          "asyncio",
+          "dataclasses",
+          "json",
+          "os",
+          "pathlib",
+          "skilgen/agents/__init__.py",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/agents/source_graphs.py",
+          "skilgen/core/analytics.py",
+          "skilgen/core/audit.py",
+          "skilgen/core/config.py",
+          "skilgen/core/context.py",
+          "skilgen/core/corpus_index.py",
+          "skilgen/core/freshness.py",
+          "skilgen/core/generated_outputs.py",
+          "skilgen/core/models.py",
+          "skilgen/core/repo_state.py",
+          "skilgen/core/requirements.py",
+          "skilgen/core/run_memory.py",
+          "skilgen/core/runtime_data.py",
+          "skilgen/core/score.py",
+          "skilgen/deep_agents_core.py",
+          "skilgen/enterprise_skills.py",
+          "skilgen/external_skills.py",
+          "skilgen/generators/package.py",
+          "skilgen/generators/skills.py",
+          "time",
+          "typing",
+          "urllib.error",
+          "urllib.request",
+          "uuid"
+        ]
+      },
+      {
+        "path": "skilgen/api/service.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [
+          "backend_routes",
+          "services"
+        ],
+        "snippet": [
+          "from __future__ import annotations",
+          "from pathlib import Path",
+          "from typing import Callable",
+          "from skilgen.api.jobs import get_job, job_payload, list_jobs, request_cancel, submit_job",
+          "from skilgen.agents.decision_planner import build_agent_decision",
+          "from skilgen.autoupdate import auto_update_status",
+          "from skilgen.core.diff import compute_diff",
+          "from skilgen.core.analytics import analytics_summary",
+          "from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics",
+          "from skilgen.deep_agents_runtime import (",
+          "DeepAgentsRuntime,",
+          "native_analyze_payload,"
+        ],
+        "related_imports": [
+          "__future__",
+          "pathlib",
+          "skilgen/agents/decision_planner.py",
+          "skilgen/api/jobs.py",
+          "skilgen/autoupdate.py",
+          "skilgen/core/analytics.py",
+          "skilgen/core/context.py",
+          "skilgen/core/diff.py",
+          "skilgen/core/freshness.py",
+          "skilgen/core/identity_policy_store.py",
+          "skilgen/core/requirements.py",
+          "skilgen/core/run_memory.py",
+          "skilgen/core/score.py",
+          "skilgen/deep_agents_core.py",
+          "skilgen/deep_agents_runtime.py",
+          "skilgen/delivery.py",
+          "skilgen/enterprise_skills.py",
+          "skilgen/external_skills.py",
+          "typing"
+        ]
+      },
+      {
+        "path": "packages/db/config.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from pydantic_settings import BaseSettings, SettingsConfigDict",
+          "class Settings(BaseSettings):",
+          "DATABASE_URL: str = \"\"",
+          "DATABASE_URL_UNPOOLED: str = \"\"",
+          "DEBUG: bool = False",
+          "GITHUB_APP_ID: str = \"\"",
+          "GITHUB_APP_PRIVATE_KEY: str = \"\"",
+          "GITHUB_WEBHOOK_SECRET: str = \"\"",
+          "WORKOS_API_KEY: str = \"\"",
+          "WORKOS_CLIENT_ID: str = \"\"",
+          "OIDC_ISSUER_URL: str = \"\""
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "packages/db/models/repo.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "from typing import TYPE_CHECKING",
+          "from sqlalchemy import BigInteger, ForeignKey, String",
+          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
+          "from packages.db.models.base import Base, new_uuid, utcnow",
+          "if TYPE_CHECKING:",
+          "from packages.db.models.analysis_run import AnalysisRun",
+          "from packages.db.models.dependency import Dependency",
+          "from packages.db.models.org import Org",
+          "from packages.db.models.skill import Skill",
+          "class Repo(Base):"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "apps/api/api/analysis.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "import hashlib",
+          "import logging",
+          "from pathlib import Path",
+          "import shutil",
+          "import sys",
+          "import tempfile",
+          "import traceback",
+          "from typing import Any",
+          "import httpx",
+          "from sqlalchemy import delete, func, select, update"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "skilgen/deep_agents_core.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import asyncio",
+          "import json",
+          "import os",
+          "import queue",
+          "import threading",
+          "import time",
+          "from typing import Callable",
+          "from pathlib import Path",
+          "from skilgen.agents.model_registry import provider_supported, resolve_model_settings",
+          "from skilgen.core.config import DEFAULT_CONFIG, load_config",
           "try:"
         ],
-        "related_imports": []
+        "related_imports": [
+          "__future__",
+          "asyncio",
+          "deepagents",
+          "json",
+          "langchain.chat_models",
+          "os",
+          "pathlib",
+          "queue",
+          "skilgen/agents/model_registry.py",
+          "skilgen/core/config.py",
+          "threading",
+          "time",
+          "typing"
+        ]
       },
       {
-        "path": ".venv-api/lib/python3.13/site-packages/_pytest/_version.py",
+        "path": "skilgen/core/context.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
-          "# file generated by vcs-versioning",
-          "# don't change, don't track in version control",
           "from __future__ import annotations",
-          "__all__ = [",
-          "\"__version__\",",
-          "\"__version_tuple__\",",
-          "\"version\",",
-          "\"version_tuple\",",
-          "\"__commit_id__\",",
-          "\"commit_id\",",
-          "]",
-          "version: str"
+          "from pathlib import Path",
+          "from skilgen.agents.domain_graph_planner import _top_level_app_surfaces, build_domain_graph, detect_repo_archetype",
+          "from skilgen.agents.framework_fingerprint import fingerprint_project",
+          "from skilgen.agents.codebase_signals import analyze_codebase, is_ignored_path_parts, is_internal_skillayer_monorepo",
+          "from skilgen.agents.workspace_graph import build_workspace_graph",
+          "from skilgen.core.models import (",
+          "CodebaseContext,",
+          "DomainGraph,",
+          "DomainGraphNode,",
+          "DomainRecord,",
+          "RequirementsContext,"
+        ],
+        "related_imports": [
+          "__future__",
+          "pathlib",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/agents/domain_graph_planner.py",
+          "skilgen/agents/framework_fingerprint.py",
+          "skilgen/agents/workspace_graph.py",
+          "skilgen/core/models.py"
+        ]
+      },
+      {
+        "path": "apps/api/api/routes/repos.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import hashlib",
+          "import os",
+          "import re",
+          "from datetime import UTC, datetime, timedelta",
+          "from typing import Any, Literal",
+          "from uuid import uuid4",
+          "from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response",
+          "from pydantic import BaseModel, Field",
+          "from sqlalchemy import desc, func, select, update",
+          "from sqlalchemy.ext.asyncio import AsyncSession",
+          "from sqlalchemy.exc import SQLAlchemyError"
         ],
         "related_imports": []
       },
       {
-        "path": ".venv-api/lib/python3.13/site-packages/annotated_doc/main.py",
+        "path": "packages/db/models/__init__.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
-          "class Doc:",
-          "\"\"\"Define the documentation of a type annotation using `Annotated`, to be",
-          "used in class attributes, function and method parameters, return values,",
-          "and variables.",
-          "The value should be a positional-only string literal to allow static tools",
-          "like editors and documentation generators to use it.",
-          "This complements docstrings.",
-          "The string value passed is available in the attribute `documentation`.",
-          "Example:",
-          "```Python",
-          "from typing import Annotated",
-          "from annotated_doc import Doc"
+          "from packages.db.models.agent_session import AgentSession",
+          "from packages.db.models.analysis_run import AnalysisRun",
+          "from packages.db.models.audit_event import AuditEvent",
+          "from packages.db.models.base import Base",
+          "from packages.db.models.dependency import Dependency",
+          "from packages.db.models.eval import ABTest, AgentTask, EvalSession, SkillGap",
+          "from packages.db.models.half_life import SkillHalfLife",
+          "from packages.db.models.org import Org",
+          "from packages.db.models.org_llm_config import OrgLLMConfig",
+          "from packages.db.models.org_policy import OrgPolicy",
+          "from packages.db.models.repo import Repo",
+          "from packages.db.models.registry_skill import RegistrySkill"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "skilgen/agents/requirements_parser.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from pathlib import Path",
+          "from skilgen.agents.codebase_signals import analyze_codebase",
+          "from skilgen.deep_agents_core import run_deep_json",
+          "from skilgen.core.models import ProjectIntent",
+          "from skilgen.core.requirements import extract_project_intent, extract_text, normalize_lines",
+          "def parse_requirements_file_native(path: Path) -> ProjectIntent:",
+          "return extract_project_intent(normalize_lines(extract_text(path)))",
+          "def parse_requirements_file(path: Path) -> ProjectIntent:",
+          "resolved = path.resolve()",
+          "text = extract_text(resolved)",
+          "native_intent = extract_project_intent(normalize_lines(text))"
+        ],
+        "related_imports": [
+          "__future__",
+          "pathlib",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/core/models.py",
+          "skilgen/core/requirements.py",
+          "skilgen/deep_agents_core.py"
+        ]
+      },
+      {
+        "path": "skilgen/autoupdate.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import json",
+          "import os",
+          "import signal",
+          "import subprocess",
+          "import sys",
+          "import time",
+          "from datetime import UTC, datetime",
+          "from pathlib import Path",
+          "from skilgen.agents.codebase_signals import is_ignored_path_parts, is_internal_skillayer_monorepo",
+          "from skilgen.core.config import load_config",
+          "from skilgen.core.generated_outputs import is_generated_output_path"
+        ],
+        "related_imports": [
+          "__future__",
+          "datetime",
+          "json",
+          "os",
+          "pathlib",
+          "signal",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/core/config.py",
+          "skilgen/core/generated_outputs.py",
+          "skilgen/core/repo_state.py",
+          "skilgen/delivery.py",
+          "subprocess",
+          "sys",
+          "time"
+        ]
+      },
+      {
+        "path": "skilgen/core/score.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import json",
+          "import re",
+          "import subprocess",
+          "from datetime import UTC, datetime",
+          "from html import escape",
+          "from pathlib import Path",
+          "from threading import Lock",
+          "from urllib.parse import quote",
+          "from skilgen.agents.codebase_signals import CODE_EXTENSIONS, is_ignored_path_parts, is_internal_skillayer_monorepo",
+          "from skilgen.core.context import build_codebase_context",
+          "from skilgen.core.freshness import compute_freshness_report, load_freshness_state"
+        ],
+        "related_imports": [
+          "__future__",
+          "datetime",
+          "html",
+          "json",
+          "pathlib",
+          "re",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/core/context.py",
+          "skilgen/core/freshness.py",
+          "skilgen/core/requirements.py",
+          "skilgen/core/validation.py",
+          "subprocess",
+          "threading",
+          "urllib.parse"
+        ]
+      },
+      {
+        "path": "skilgen/core/dependency_risk.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import json",
+          "from pathlib import Path",
+          "import re",
+          "try:",
+          "import tomllib",
+          "except ImportError:  # pragma: no cover",
+          "tomllib = None  # type: ignore[assignment]",
+          "from skilgen.agents.relationship_mapper import build_import_graph",
+          "from skilgen.agents.workspace_graph import build_workspace_graph",
+          "from skilgen.core.models import (",
+          "DependencyFinding,"
+        ],
+        "related_imports": [
+          "__future__",
+          "json",
+          "pathlib",
+          "re",
+          "skilgen/agents/relationship_mapper.py",
+          "skilgen/agents/workspace_graph.py",
+          "skilgen/core/models.py",
+          "tomllib"
+        ]
+      },
+      {
+        "path": "apps/api/alembic/env.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "import os",
+          "from logging.config import fileConfig",
+          "from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit",
+          "from sqlalchemy import engine_from_config, pool",
+          "from alembic import context",
+          "from dotenv import load_dotenv",
+          "load_dotenv(\".env.local\")",
+          "load_dotenv(\"../../.env.local\")",
+          "config = context.config",
+          "if config.config_file_name is not None:",
+          "fileConfig(config.config_file_name)",
+          "DATABASE_URL = os.getenv(\"DATABASE_URL\", \"\")"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "skilgen/deep_agents_runtime.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import json",
+          "import os",
+          "from dataclasses import asdict, is_dataclass",
+          "from pathlib import Path",
+          "from typing import Any, Callable",
+          "from skilgen.agents.codebase_signals import analyze_codebase",
+          "from skilgen.agents.domain_graph_planner import _top_level_app_surfaces, detect_repo_archetype",
+          "from skilgen.agents.evidence_graph import build_evidence_graph",
+          "from skilgen.agents.feature_extractor import extract_features, extract_features_native",
+          "from skilgen.agents.framework_fingerprint import fingerprint_project",
+          "from skilgen.agents.model_registry import resolve_model_settings"
+        ],
+        "related_imports": [
+          "__future__",
+          "dataclasses",
+          "deepagents",
+          "json",
+          "langchain.chat_models",
+          "langchain_core.tools",
+          "os",
+          "pathlib",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/agents/decision_planner.py",
+          "skilgen/agents/domain_graph_planner.py",
+          "skilgen/agents/evidence_graph.py",
+          "skilgen/agents/feature_extractor.py",
+          "skilgen/agents/framework_fingerprint.py",
+          "skilgen/agents/model_registry.py",
+          "skilgen/agents/relationship_mapper.py",
+          "skilgen/agents/requirements_parser.py",
+          "skilgen/agents/roadmap_planner.py",
+          "skilgen/agents/workspace_graph.py",
+          "skilgen/autoupdate.py",
+          "skilgen/core/analytics.py",
+          "skilgen/core/config.py",
+          "skilgen/core/context.py",
+          "skilgen/core/corpus_index.py",
+          "skilgen/core/diff.py",
+          "skilgen/core/freshness.py",
+          "skilgen/core/requirements.py",
+          "skilgen/core/score.py",
+          "skilgen/core/validation.py",
+          "skilgen/deep_agents_core.py",
+          "skilgen/enterprise_skills.py",
+          "skilgen/external_skills.py",
+          "skilgen/generators/package.py",
+          "skilgen/generators/skills.py",
+          "typing"
+        ]
+      },
+      {
+        "path": "skilgen/agents/domain_graph_planner.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from pathlib import Path",
+          "from skilgen.agents.codebase_signals import (",
+          "analyze_codebase,",
+          "collect_code_evidence,",
+          "collect_structural_evidence,",
+          "is_internal_skillayer_monorepo,",
+          ")",
+          "from skilgen.agents.requirements_parser import parse_project_intent_native",
+          "from skilgen.agents.workspace_graph import build_workspace_graph",
+          "from skilgen.deep_agents_core import run_deep_json",
+          "from skilgen.core.models import CodebaseSignals, DomainGraph, DomainGraphNode, RequirementsContext, WorkspaceGraph, WorkspacePackage"
+        ],
+        "related_imports": [
+          "__future__",
+          "pathlib",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/agents/requirements_parser.py",
+          "skilgen/agents/workspace_graph.py",
+          "skilgen/core/models.py",
+          "skilgen/deep_agents_core.py"
+        ]
+      },
+      {
+        "path": "skilgen/api/server.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [
+          "backend_routes"
+        ],
+        "snippet": [
+          "from __future__ import annotations",
+          "from dataclasses import dataclass",
+          "import hmac",
+          "import hashlib",
+          "import ipaddress",
+          "import json",
+          "import logging",
+          "import os",
+          "import socket",
+          "import threading",
+          "import time",
+          "import uuid"
+        ],
+        "related_imports": [
+          "__future__",
+          "concurrent.futures",
+          "dataclasses",
+          "hashlib",
+          "hmac",
+          "http.server",
+          "ipaddress",
+          "json",
+          "logging",
+          "os",
+          "pathlib",
+          "skilgen/api/service.py",
+          "skilgen/core/audit.py",
+          "skilgen/core/auth_tokens.py",
+          "skilgen/core/identity_policy_store.py",
+          "skilgen/core/rate_limit_store.py",
+          "skilgen/core/runtime_data.py",
+          "socket",
+          "threading",
+          "time",
+          "urllib.parse",
+          "uuid"
+        ]
+      },
+      {
+        "path": "skilgen/cli/main.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import argparse",
+          "import json",
+          "import os",
+          "import sys",
+          "from dataclasses import dataclass",
+          "from datetime import UTC, datetime",
+          "from pathlib import Path",
+          "import threading",
+          "import time",
+          "import uuid",
+          "from urllib.error import HTTPError, URLError"
+        ],
+        "related_imports": [
+          "__future__",
+          "argparse",
+          "dataclasses",
+          "datetime",
+          "json",
+          "os",
+          "pathlib",
+          "skilgen/__init__.py",
+          "skilgen/agents/__init__.py",
+          "skilgen/agents/requirements_parser.py",
+          "skilgen/api/server.py",
+          "skilgen/api/service.py",
+          "skilgen/autoupdate.py",
+          "skilgen/core/analytics.py",
+          "skilgen/core/config.py",
+          "skilgen/core/corpus_index.py",
+          "skilgen/core/dependency_risk.py",
+          "skilgen/core/enterprise_policy.py",
+          "skilgen/core/evals.py",
+          "skilgen/core/runtime_data.py",
+          "skilgen/core/score.py",
+          "skilgen/deep_agents_core.py",
+          "skilgen/delivery.py",
+          "skilgen/enterprise_skills.py",
+          "skilgen/external_skills.py",
+          "skilgen/hooks/cursor_watcher.py",
+          "skilgen/parsers/runner.py",
+          "skilgen/parsers/sources.py",
+          "skilgen/registry_client.py",
+          "sys",
+          "threading",
+          "time",
+          "urllib.error",
+          "urllib.parse",
+          "urllib.request",
+          "uuid"
+        ]
+      },
+      {
+        "path": "skilgen/external_skills.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from dataclasses import asdict, dataclass",
+          "from datetime import UTC, datetime",
+          "import json",
+          "import os",
+          "import re",
+          "import shutil",
+          "import subprocess",
+          "from pathlib import Path",
+          "from skilgen.core.config import load_config",
+          "TRUST_SCORES = {",
+          "\"official\": 5,"
+        ],
+        "related_imports": [
+          "__future__",
+          "dataclasses",
+          "datetime",
+          "json",
+          "os",
+          "pathlib",
+          "re",
+          "shutil",
+          "skilgen/core/config.py",
+          "subprocess"
+        ]
+      },
+      {
+        "path": "skilgen/agents/__init__.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence",
+          "from skilgen.agents.architecture_planner import build_architecture_blueprint",
+          "from skilgen.agents.evidence_graph import build_evidence_graph",
+          "from skilgen.agents.language_parsers import parse_language_evidence",
+          "from skilgen.agents.decision_planner import build_agent_decision",
+          "from skilgen.agents.domain_graph_planner import build_domain_graph",
+          "from skilgen.agents.feature_extractor import extract_features",
+          "from skilgen.agents.framework_fingerprint import fingerprint_project",
+          "from skilgen.agents.model_registry import resolve_model_settings",
+          "from skilgen.agents.relationship_mapper import build_import_graph",
+          "from skilgen.agents.requirements_parser import parse_requirements_file",
+          "from skilgen.agents.roadmap_planner import build_roadmap_plan"
+        ],
+        "related_imports": [
+          "skilgen/agents/architecture_planner.py",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/agents/decision_planner.py",
+          "skilgen/agents/domain_graph_planner.py",
+          "skilgen/agents/evidence_graph.py",
+          "skilgen/agents/feature_extractor.py",
+          "skilgen/agents/framework_fingerprint.py",
+          "skilgen/agents/language_parsers.py",
+          "skilgen/agents/model_registry.py",
+          "skilgen/agents/relationship_mapper.py",
+          "skilgen/agents/requirements_parser.py",
+          "skilgen/agents/roadmap_planner.py",
+          "skilgen/agents/source_graphs.py",
+          "skilgen/agents/workspace_graph.py"
+        ]
+      },
+      {
+        "path": "skilgen/agents/evidence_graph.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from pathlib import Path",
+          "from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence",
+          "from skilgen.agents.relationship_mapper import build_import_graph",
+          "from skilgen.agents.source_graphs import (",
+          "build_call_graph,",
+          "build_config_runtime_graph,",
+          "build_parser_summary,",
+          "build_symbol_graph,",
+          "build_symbol_relationships,",
+          "build_test_mapping,",
+          ")"
+        ],
+        "related_imports": [
+          "__future__",
+          "pathlib",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/agents/relationship_mapper.py",
+          "skilgen/agents/source_graphs.py",
+          "skilgen/agents/workspace_graph.py",
+          "skilgen/core/dependency_risk.py",
+          "skilgen/core/models.py",
+          "skilgen/core/runtime_signals.py"
+        ]
+      },
+      {
+        "path": "skilgen/generators/skills.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import os",
+          "import re",
+          "from datetime import date",
+          "from pathlib import Path",
+          "from typing import Callable",
+          "from skilgen.agents.architecture_planner import build_architecture_blueprint",
+          "from skilgen.agents.codebase_signals import analyze_codebase",
+          "from skilgen.agents.requirements_parser import parse_project_intent",
+          "from skilgen.agents.roadmap_planner import build_roadmap_plan",
+          "from skilgen.core.config import load_config",
+          "from skilgen.core.analytics import _compute_richness_score"
+        ],
+        "related_imports": [
+          "__future__",
+          "datetime",
+          "os",
+          "pathlib",
+          "re",
+          "skilgen/agents/architecture_planner.py",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/agents/requirements_parser.py",
+          "skilgen/agents/roadmap_planner.py",
+          "skilgen/core/analytics.py",
+          "skilgen/core/config.py",
+          "skilgen/core/context.py",
+          "skilgen/core/dependency_risk.py",
+          "skilgen/core/models.py",
+          "skilgen/deep_agents_core.py",
+          "typing"
+        ]
+      },
+      {
+        "path": "skilgen/agents/decision_planner.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from pathlib import Path",
+          "from skilgen.deep_agents_core import run_deep_json",
+          "from skilgen.core.freshness import compute_freshness_report, load_freshness_state",
+          "from skilgen.core.models import AgentDecision, RequirementsContext, RunMemory",
+          "from skilgen.core.run_memory import load_current_run_memory",
+          "from skilgen.enterprise_skills import active_enterprise_skills, active_mcp_connectors",
+          "from skilgen.external_skills import external_skill_policy, ranked_external_skills",
+          "def build_agent_decision_native(",
+          "project_root: Path,",
+          "requirements: RequirementsContext,",
+          "domain_graph,"
+        ],
+        "related_imports": [
+          "__future__",
+          "pathlib",
+          "skilgen/core/freshness.py",
+          "skilgen/core/models.py",
+          "skilgen/core/run_memory.py",
+          "skilgen/deep_agents_core.py",
+          "skilgen/enterprise_skills.py",
+          "skilgen/external_skills.py"
+        ]
+      },
+      {
+        "path": "skilgen/agents/workspace_graph.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import json",
+          "import re",
+          "from pathlib import Path",
+          "try:",
+          "import yaml",
+          "except ImportError:  # pragma: no cover - dependency is declared in pyproject",
+          "yaml = None",
+          "from skilgen.core.models import WorkspaceDependency, WorkspaceGraph, WorkspacePackage",
+          "_IGNORED_DIRS = {",
+          "\".git\",",
+          "\".skilgen\","
+        ],
+        "related_imports": [
+          "__future__",
+          "json",
+          "pathlib",
+          "re",
+          "skilgen/core/models.py",
+          "yaml"
+        ]
+      },
+      {
+        "path": "skilgen/core/analytics.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import json",
+          "import os",
+          "from collections import Counter, defaultdict",
+          "from datetime import UTC, datetime",
+          "from pathlib import Path",
+          "import re",
+          "from skilgen.external_skills import active_external_skills",
+          "def _compute_richness_score(content: str, spec: object) -> dict[str, int]:",
+          "lines = content.splitlines()",
+          "words = len(content.split())",
+          "code_blocks = content.count(\"```\") // 2"
+        ],
+        "related_imports": [
+          "__future__",
+          "collections",
+          "datetime",
+          "json",
+          "os",
+          "pathlib",
+          "re",
+          "skilgen/external_skills.py"
+        ]
+      },
+      {
+        "path": "apps/api/api/routes/orgs.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from dataclasses import asdict",
+          "from datetime import UTC, datetime, timedelta",
+          "import hashlib",
+          "import logging",
+          "import secrets",
+          "from typing import Literal",
+          "from uuid import uuid4",
+          "import csv",
+          "from io import StringIO",
+          "import time",
+          "from fastapi import APIRouter, Depends, HTTPException, Query, Request"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "skilgen/generators/package.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from dataclasses import asdict, dataclass",
+          "from datetime import datetime",
+          "from html import escape",
+          "import json",
+          "import re",
+          "import sys",
+          "from pathlib import Path",
+          "from typing import Callable",
+          "from skilgen.agents import analyze_codebase, build_agent_decision, build_architecture_blueprint, build_evidence_graph, build_import_graph, fingerprint_project",
+          "from skilgen.agents.feature_extractor import extract_features",
+          "from skilgen.agents.requirements_parser import parse_project_intent"
+        ],
+        "related_imports": [
+          "__future__",
+          "dataclasses",
+          "datetime",
+          "html",
+          "json",
+          "pathlib",
+          "re",
+          "skilgen/agents/__init__.py",
+          "skilgen/agents/feature_extractor.py",
+          "skilgen/agents/requirements_parser.py",
+          "skilgen/core/config.py",
+          "skilgen/core/context.py",
+          "skilgen/core/models.py",
+          "skilgen/deep_agents_core.py",
+          "skilgen/deep_agents_runtime.py",
+          "skilgen/enterprise_skills.py",
+          "skilgen/external_skills.py",
+          "sys",
+          "typing"
+        ]
+      },
+      {
+        "path": "skilgen/core/freshness.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import hashlib",
+          "import json",
+          "from dataclasses import asdict",
+          "from pathlib import Path",
+          "from skilgen.core.generated_outputs import is_generated_output_path",
+          "from skilgen.core.models import DomainGraph, FreshnessReport, FreshnessState, RequirementsContext",
+          "IGNORED_PARTS = {",
+          "\".git\",",
+          "\".skilgen\",",
+          "\".vercel\",",
+          "\".venv\","
+        ],
+        "related_imports": [
+          "__future__",
+          "dataclasses",
+          "hashlib",
+          "json",
+          "pathlib",
+          "skilgen/core/generated_outputs.py",
+          "skilgen/core/models.py"
+        ]
+      },
+      {
+        "path": "skilgen/enterprise_skills.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from dataclasses import asdict, dataclass",
+          "from datetime import UTC, datetime",
+          "import json",
+          "import os",
+          "import re",
+          "import shutil",
+          "import subprocess",
+          "from pathlib import Path",
+          "from urllib.parse import urlparse",
+          "from urllib.request import urlopen",
+          "from skilgen.core.config import load_config"
+        ],
+        "related_imports": [
+          "__future__",
+          "dataclasses",
+          "datetime",
+          "json",
+          "os",
+          "pathlib",
+          "re",
+          "shutil",
+          "skilgen/core/config.py",
+          "skilgen/core/document_ingestion.py",
+          "subprocess",
+          "urllib.parse",
+          "urllib.request"
+        ]
+      },
+      {
+        "path": "skilgen/core/corpus_index.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import fnmatch",
+          "import hashlib",
+          "import json",
+          "import re",
+          "from collections import defaultdict",
+          "from pathlib import Path, PurePosixPath",
+          "from typing import Any",
+          "from skilgen.agents.language_parsers import ParsedLanguageEvidence, parse_language_evidence",
+          "from skilgen.core.config import load_config",
+          "from skilgen.core.document_ingestion import extract_document_text",
+          "from skilgen.core.models import CorpusSettings, SkilgenConfig"
+        ],
+        "related_imports": [
+          "__future__",
+          "collections",
+          "fnmatch",
+          "hashlib",
+          "json",
+          "pathlib",
+          "re",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/agents/language_parsers.py",
+          "skilgen/core/config.py",
+          "skilgen/core/document_ingestion.py",
+          "skilgen/core/models.py",
+          "typing"
+        ]
+      },
+      {
+        "path": "skilgen/agents/relationship_mapper.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import ast",
+          "import re",
+          "import warnings",
+          "from pathlib import Path",
+          "from skilgen.agents.codebase_signals import _iter_code_files",
+          "IGNORED_PARTS = {\".git\", \".skilgen\", \"external-skills\", \"__pycache__\", \".venv\", \"venv\", \"node_modules\"}",
+          "_JS_IMPORT_RE = re.compile(r\"\"\"(?:import|export)\\s+(?:[^;]*?\\s+from\\s+)?[\"']([^\"']+)[\"']\"\"\")",
+          "_JS_REQUIRE_RE = re.compile(r\"\"\"require\\(\\s*[\"']([^\"']+)[\"']\\s*\\)\"\"\")",
+          "_JAVA_IMPORT_RE = re.compile(r\"\"\"^\\s*import\\s+([a-zA-Z0-9_.*]+)\\s*;\"\"\", re.MULTILINE)",
+          "_GO_IMPORT_BLOCK_RE = re.compile(r'import\\s*\\((.*?)\\)', re.DOTALL)",
+          "_GO_IMPORT_LINE_RE = re.compile(r'\"([^\"]+)\"')"
+        ],
+        "related_imports": [
+          "__future__",
+          "ast",
+          "pathlib",
+          "re",
+          "skilgen/agents/codebase_signals.py",
+          "warnings"
+        ]
+      },
+      {
+        "path": "skilgen/agents/feature_extractor.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from pathlib import Path",
+          "from skilgen.agents.codebase_signals import analyze_codebase",
+          "from skilgen.agents.requirements_parser import parse_project_intent, parse_project_intent_native",
+          "from skilgen.deep_agents_core import run_deep_json",
+          "from skilgen.core.models import FeatureRecord",
+          "def extract_features_native(requirements_path: Path | None, project_root: Path) -> list[FeatureRecord]:",
+          "intent = parse_project_intent_native(project_root, requirements_path)",
+          "signals = analyze_codebase(project_root)",
+          "features: list[FeatureRecord] = []",
+          "if requirements_path is not None:",
+          "features.append("
+        ],
+        "related_imports": [
+          "__future__",
+          "pathlib",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/agents/requirements_parser.py",
+          "skilgen/core/models.py",
+          "skilgen/deep_agents_core.py"
+        ]
+      },
+      {
+        "path": "tests/test_api_spec_parsers.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [
+          "tests"
+        ],
+        "snippet": [
+          "from __future__ import annotations",
+          "from pathlib import Path",
+          "from tempfile import TemporaryDirectory",
+          "import unittest",
+          "from skilgen.parsers import ApiSpecParserError",
+          "from skilgen.parsers.graphql import parse_graphql_schema",
+          "from skilgen.parsers.openapi import parse_openapi_spec",
+          "from skilgen.parsers.postman import parse_postman_collection",
+          "FIXTURES = Path(__file__).parent / \"fixtures\"",
+          "class ApiSpecParserTests(unittest.TestCase):",
+          "def test_openapi_parser_extracts_enterprise_signals(self) -> None:",
+          "result = parse_openapi_spec(FIXTURES / \"openapi_petstore.yaml\")"
+        ],
+        "related_imports": [
+          "__future__",
+          "pathlib",
+          "skilgen/parsers/__init__.py",
+          "skilgen/parsers/graphql.py",
+          "skilgen/parsers/openapi.py",
+          "skilgen/parsers/postman.py",
+          "tempfile",
+          "unittest"
+        ]
+      },
+      {
+        "path": "skilgen/parsers/graphql.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "\"\"\"Parser for GraphQL SDL, .gql files, and introspection schema JSON.\"\"\"",
+          "from __future__ import annotations",
+          "import json",
+          "import re",
+          "from pathlib import Path",
+          "from typing import Any",
+          "from skilgen.parsers import ApiSpecFinding, ApiSpecItem, ApiSpecParseResult, ApiSpecParserError",
+          "TYPE_BLOCK_RE = re.compile(",
+          "r\"\\b(?P<kind>type|interface|input|enum)\\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\"",
+          "r\"(?:\\s+implements\\s+[^{]+)?\\s*(?P<directives>(?:@[A-Za-z_][A-Za-z0-9_]*(?:\\([^)]*\\))?\\s*)*)\\{(?P<body>.*?)\\}\",",
+          "re.DOTALL,",
+          ")"
+        ],
+        "related_imports": [
+          "__future__",
+          "json",
+          "pathlib",
+          "re",
+          "skilgen/parsers/__init__.py",
+          "typing"
+        ]
+      },
+      {
+        "path": "apps/web/components/HexGrid.tsx",
+        "kind": "source",
+        "language": "typescript",
+        "tags": [],
+        "snippet": [
+          "\"use client\";",
+          "import { useCallback, useEffect, useRef } from \"react\";",
+          "type CellState = \"incoming\" | \"locking\" | \"locked\" | \"active\" | \"departing\";",
+          "type Slot = {",
+          "id: number;",
+          "label: string;",
+          "targetX: number;",
+          "targetY: number;",
+          "};",
+          "type Cell = Slot & {",
+          "activeUntil: number;",
+          "activationAt: number;"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "scripts/deploy_api.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "\"\"\"Deploy the Skillayer API from the monorepo root with shared packages bundled.\"\"\"",
+          "from __future__ import annotations",
+          "import argparse",
+          "import json",
+          "import shutil",
+          "import subprocess",
+          "from collections.abc import Iterator",
+          "from contextlib import contextmanager",
+          "from pathlib import Path",
+          "ROOT = Path(__file__).resolve().parents[1]",
+          "API_PROJECT_LINK = ROOT / \"apps\" / \"api\" / \".vercel\" / \"project.json\"",
+          "ROOT_PROJECT_LINK = ROOT / \".vercel\" / \"project.json\""
+        ],
+        "related_imports": [
+          "__future__",
+          "argparse",
+          "collections.abc",
+          "contextlib",
+          "json",
+          "pathlib",
+          "shutil",
+          "subprocess"
+        ]
+      },
+      {
+        "path": "scripts/deploy_dashboard.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "\"\"\"Deploy the Skillayer dashboard from the monorepo root.\"\"\"",
+          "from __future__ import annotations",
+          "import argparse",
+          "import json",
+          "import subprocess",
+          "from collections.abc import Iterator",
+          "from contextlib import contextmanager",
+          "from pathlib import Path",
+          "ROOT = Path(__file__).resolve().parents[1]",
+          "DASHBOARD_PROJECT_LINK = ROOT / \"apps\" / \"dashboard\" / \".vercel\" / \"project.json\"",
+          "ROOT_PROJECT_LINK = ROOT / \".vercel\" / \"project.json\"",
+          "DASHBOARD_VERCEL_CONFIG = ROOT / \"vercel.dashboard.json\""
+        ],
+        "related_imports": [
+          "__future__",
+          "argparse",
+          "collections.abc",
+          "contextlib",
+          "json",
+          "pathlib",
+          "subprocess"
+        ]
+      },
+      {
+        "path": "skilgen/parsers/incident.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "\"\"\"Parsers for incident, PIR, and postmortem source artifacts.",
+          "The parser keeps incident evidence structured enough for downstream skill",
+          "generation without assuming a single enterprise template. It supports Markdown",
+          "postmortems/PIRs and PagerDuty JSON exports, plus a small GitHub issue helper",
+          "that only uses the ``GITHUB_TOKEN`` environment variable when available.",
+          "\"\"\"",
+          "from __future__ import annotations",
+          "from collections import Counter, defaultdict",
+          "from dataclasses import dataclass, field",
+          "from datetime import datetime, timezone",
+          "from json import JSONDecodeError",
+          "import json"
+        ],
+        "related_imports": [
+          "__future__",
+          "collections",
+          "dataclasses",
+          "datetime",
+          "json",
+          "os",
+          "pathlib",
+          "re",
+          "time",
+          "typing",
+          "urllib.error",
+          "urllib.parse",
+          "urllib.request"
+        ]
+      },
+      {
+        "path": "tests/__init__.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [
+          "tests"
+        ],
+        "snippet": [
+          "# Test package marker for shared fixtures."
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "tests/test_architecture_cli.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [
+          "tests"
+        ],
+        "snippet": [
+          "from pathlib import Path",
+          "from tempfile import TemporaryDirectory",
+          "import json",
+          "import subprocess",
+          "import sys",
+          "import unittest",
+          "class ArchitectureCliTests(unittest.TestCase):",
+          "def test_architecture_command_outputs_markdown_and_json_export(self) -> None:",
+          "with TemporaryDirectory() as tmp:",
+          "root = Path(tmp)",
+          "requirements = root / \"requirements.md\"",
+          "requirements.write_text(\"Support COBOL transaction flows and backend services.\\n\", encoding=\"utf-8\")"
+        ],
+        "related_imports": [
+          "json",
+          "pathlib",
+          "subprocess",
+          "sys",
+          "tempfile",
+          "unittest"
+        ]
+      },
+      {
+        "path": "tests/test_audit_log.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [
+          "tests"
+        ],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "from types import SimpleNamespace",
+          "import unittest",
+          "from apps.api.api.services import audit",
+          "from apps.api.api.routes import orgs",
+          "class _FakeDb:",
+          "def __init__(self, fail: bool = False) -> None:",
+          "self.fail = fail",
+          "self.added: list[object] = []",
+          "def add(self, value: object) -> None:",
+          "if self.fail:"
+        ],
+        "related_imports": [
+          "__future__",
+          "apps/api/api/routes/orgs.py",
+          "apps/api/api/services/audit.py",
+          "datetime",
+          "types",
+          "unittest"
+        ]
+      },
+      {
+        "path": "tests/test_cli.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [
+          "tests"
+        ],
+        "snippet": [
+          "from pathlib import Path",
+          "from tempfile import TemporaryDirectory",
+          "import json",
+          "import subprocess",
+          "import sys",
+          "import unittest",
+          "class CliTests(unittest.TestCase):",
+          "def test_init_creates_config(self) -> None:",
+          "with TemporaryDirectory() as tmp:",
+          "result = subprocess.run(",
+          "[sys.executable, \"-m\", \"skilgen.cli.main\", \"init\", \"--project-root\", tmp],",
+          "text=True,"
+        ],
+        "related_imports": [
+          "json",
+          "pathlib",
+          "subprocess",
+          "sys",
+          "tempfile",
+          "unittest"
+        ]
+      },
+      {
+        "path": ".env.example",
+        "kind": "source",
+        "language": "config",
+        "tags": [
+          "config"
+        ],
+        "snippet": [
+          "# Self-hosted root environment file used by Docker Compose and local container runs.",
+          "# -- Database / cache ------------------",
+          "DATABASE_URL=postgresql+asyncpg://skillayer:change-me@postgres:5432/skillayer",
+          "POSTGRES_PASSWORD=change-me",
+          "REDIS_URL=redis://redis:6379/0",
+          "DEPLOYMENT_MODE=selfhosted",
+          "NEXT_PUBLIC_DASHBOARD_URL=http://localhost:3000",
+          "NEXT_PUBLIC_API_URL=http://localhost:8000",
+          "API_URL=http://localhost:8000",
+          "NEXT_PUBLIC_APP_URL=http://localhost:3000",
+          "GITHUB_APP_ID=",
+          "GITHUB_APP_PRIVATE_KEY="
         ],
         "related_imports": []
       },
@@ -4452,71 +5932,48 @@
         "related_imports": []
       },
       {
-        "path": ".env.example",
+        "path": "infra/helm/skillayer/values.yaml",
         "kind": "source",
         "language": "config",
         "tags": [
           "config"
         ],
         "snippet": [
-          "# -- Database --------------------------",
-          "DATABASE_URL=postgresql+asyncpg://user:pass@host/db",
-          "# -- GitHub App ------------------------",
-          "GITHUB_APP_ID=",
-          "GITHUB_APP_PRIVATE_KEY=",
-          "GITHUB_WEBHOOK_SECRET=",
-          "WORKOS_API_KEY=",
-          "WORKOS_CLIENT_ID=",
-          "WORKOS_REDIRECT_URI=https://app.skillayer.com/callback",
-          "NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://app.skillayer.com/callback",
-          "WORKOS_COOKIE_PASSWORD=",
-          "OIDC_ISSUER_URL=https://your-company.okta.com"
+          "global.imageRegistry",
+          "global.imagePullSecrets",
+          "api.image.repository: skillayer/api",
+          "api.image.tag: latest",
+          "api.image.pullPolicy: IfNotPresent",
+          "api.replicas: 2",
+          "api.service.type: ClusterIP",
+          "api.service.port: 8000",
+          "api.resources.requests.memory: 256Mi",
+          "api.resources.requests.cpu: 250m",
+          "api.resources.limits.memory: 1Gi",
+          "api.resources.limits.cpu: 1000m"
         ],
         "related_imports": []
       },
       {
-        "path": ".turbo/cache/05d96156f2209614-manifest.json",
+        "path": "tests/fixtures/terraform_main.tf",
         "kind": "source",
         "language": "config",
         "tags": [
           "config"
         ],
         "snippet": [
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/server/normalizers/request/rsc.js.size: 490",
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/server/normalizers/request/rsc.js.mtime_nanos: 1776748264929361542",
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/server/normalizers/request/rsc.js.mode: 420",
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/server/normalizers/request/rsc.js.is_dir: False",
-          "files.apps/dashboard/.next/standalone/node_modules/caniuse-lite/data/features/es6.js.size: 2136",
-          "files.apps/dashboard/.next/standalone/node_modules/caniuse-lite/data/features/es6.js.mtime_nanos: 1776748264759674948",
-          "files.apps/dashboard/.next/standalone/node_modules/caniuse-lite/data/features/es6.js.mode: 420",
-          "files.apps/dashboard/.next/standalone/node_modules/caniuse-lite/data/features/es6.js.is_dir: False",
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/build/webpack/loaders/css-loader/src/plugins/postcss-import-parser.js.size: 8872",
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/build/webpack/loaders/css-loader/src/plugins/postcss-import-parser.js.mtime_nanos: 1776748264814243199",
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/build/webpack/loaders/css-loader/src/plugins/postcss-import-parser.js.mode: 420",
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/build/webpack/loaders/css-loader/src/plugins/postcss-import-parser.js.is_dir: False"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".turbo/cache/2eabdbab3a2e656b-manifest.json",
-        "kind": "source",
-        "language": "config",
-        "tags": [
-          "config"
-        ],
-        "snippet": [
-          "files.apps/dashboard/.next/standalone/node_modules/react-dom/cjs/react-dom-server.browser.production.js.size: 220700",
-          "files.apps/dashboard/.next/standalone/node_modules/react-dom/cjs/react-dom-server.browser.production.js.mtime_nanos: 1776660761225244944",
-          "files.apps/dashboard/.next/standalone/node_modules/react-dom/cjs/react-dom-server.browser.production.js.mode: 420",
-          "files.apps/dashboard/.next/standalone/node_modules/react-dom/cjs/react-dom-server.browser.production.js.is_dir: False",
-          "files.apps/dashboard/.next/server/app/_not-found.meta.size: 207",
-          "files.apps/dashboard/.next/server/app/_not-found.meta.mtime_nanos: 1776660749978533172",
-          "files.apps/dashboard/.next/server/app/_not-found.meta.mode: 420",
-          "files.apps/dashboard/.next/server/app/_not-found.meta.is_dir: False",
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/server/lib/router-utils/instrumentation-globals.external.js.size: 3602",
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/server/lib/router-utils/instrumentation-globals.external.js.mtime_nanos: 1776660761222293598",
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/server/lib/router-utils/instrumentation-globals.external.js.mode: 420",
-          "files.apps/dashboard/.next/standalone/node_modules/next/dist/server/lib/router-utils/instrumentation-globals.external.js.is_dir: False"
+          "terraform {",
+          "required_version = \">= 1.6.0\"",
+          "required_providers {",
+          "aws = {",
+          "source = \"hashicorp/aws\"",
+          "version = \"~> 5.0\"",
+          "}",
+          "google = {",
+          "source = \"hashicorp/google\"",
+          "version = \"~> 5.0\"",
+          "}",
+          "azurerm = {"
         ],
         "related_imports": []
       },
@@ -4540,6 +5997,29 @@
           "api -. evidence .-> api_api_app_clients_textstream_js[\"api/app/clients/TextStream.js\"]",
           "client[\"client\"]",
           "client --> roadmap[\"roadmap\"]"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "tests/fixtures/runbook_deploy.md",
+        "kind": "source",
+        "language": "documentation",
+        "tags": [
+          "documentation"
+        ],
+        "snippet": [
+          "---",
+          "owner: release-engineering",
+          "service: payments-api",
+          "Use this runbook when deploying the payments API to production.",
+          "1. Confirm the release candidate and freeze window.",
+          "2. Run the deployment workflow from the release branch.",
+          "3. Notify the incident channel when the rollout starts.",
+          "- Check `/health` returns 200 in every region.",
+          "- Confirm the deploy dashboard is green.",
+          "- Validate https://status.example.com/payments before closing the change.",
+          "- Do NOT skip the database backup.",
+          "- Never deploy while an active incident is open."
         ],
         "related_imports": []
       },
@@ -4608,29 +6088,6 @@
           "15 stale skills",
           "Auto-update on",
           "Git-aware new untracked files",
-          "Evidence"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": "docs/examples/librechat-dashboard.html",
-        "kind": "source",
-        "language": "enterprise_document",
-        "tags": [
-          "enterprise_document"
-        ],
-        "snippet": [
-          "Skilgen Dashboard \u00b7 librechat-dashboard-clean-0414",
-          "\u00a9 Skilgen",
-          "Agent Intelligence Surface",
-          "Repository \u00b7 librechat-dashboard-clean-0414",
-          "Skilgen Operating System",
-          "All your skill intelligence \u2014 alive, connected, and visible on a single surface. A living dashboard and repo map.",
-          "librechat-dashboard-clean-0414",
-          "is translated into one operating surface for coding agents: architecture, evidence, dependencies, skill flows, score, freshness, analytics, auto-update, and capability context toge",
-          "All skills current",
-          "Auto-update on",
-          "Git-aware manual edit",
           "Evidence"
         ],
         "related_imports": []
@@ -4705,6 +6162,35 @@
           "function load_project_link",
           "function deploy_command",
           "function dashboard_project_link"
+        ],
+        "related_imports": [
+          "__future__",
+          "argparse",
+          "collections.abc",
+          "contextlib",
+          "json",
+          "pathlib",
+          "subprocess"
+        ]
+      },
+      {
+        "path": "scripts/deploy_web.py",
+        "kind": "structure",
+        "language": "python",
+        "tags": [
+          "structural-evidence"
+        ],
+        "snippet": [
+          "from __future__ import annotations",
+          "imports argparse",
+          "imports json",
+          "imports subprocess",
+          "from collections.abc import Iterator",
+          "from contextlib import contextmanager",
+          "from pathlib import Path",
+          "function load_project_link",
+          "function deploy_command",
+          "function web_project_link"
         ],
         "related_imports": [
           "__future__",
@@ -5039,107 +6525,6 @@
         ]
       },
       {
-        "path": "skilgen/agents/model_registry.py",
-        "kind": "structure",
-        "language": "python",
-        "tags": [
-          "structural-evidence"
-        ],
-        "snippet": [
-          "from __future__ import annotations",
-          "imports os",
-          "from skilgen.core.models import ModelSettings, SkilgenConfig",
-          "function normalize_provider",
-          "function resolve_model_settings",
-          "function provider_supported"
-        ],
-        "related_imports": [
-          "__future__",
-          "os",
-          "skilgen/core/models.py"
-        ]
-      },
-      {
-        "path": ".pytest_cache/README.md",
-        "kind": "documentation",
-        "language": null,
-        "tags": [
-          "docs"
-        ],
-        "snippet": [
-          "# pytest cache directory #",
-          "This directory contains data from the pytest's cache plugin,",
-          "which provides the `--lf` and `--ff` options, as well as the `cache` fixture.",
-          "**Do not** commit this to version control.",
-          "See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more information."
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv/lib/python3.13/site-packages/langsmith/cli/README.md",
-        "kind": "documentation",
-        "language": null,
-        "tags": [
-          "docs"
-        ],
-        "snippet": [
-          "# DOCKER-COMPOSE MOVED",
-          "All documentation for `docker-compose` has been moved to the [helm repository](https://github.com/langchain-ai/helm/tree/main/charts/langsmith)."
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv/lib/python3.13/site-packages/langsmith/sandbox/README.md",
-        "kind": "documentation",
-        "language": null,
-        "tags": [
-          "docs"
-        ],
-        "snippet": [
-          "# LangSmith Sandbox",
-          "Sandboxed code execution for LangSmith. Run untrusted code safely in isolated containers.",
-          "> \u26a0\ufe0f **Warning**: This module is experimental. Features and APIs may change, and breaking changes are expected as we iterate.",
-          "## Quick Start",
-          "```python",
-          "from langsmith.sandbox import SandboxClient",
-          "# Client uses LANGSMITH_ENDPOINT and LANGSMITH_API_KEY from environment",
-          "client = SandboxClient()"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/langsmith/cli/README.md",
-        "kind": "documentation",
-        "language": null,
-        "tags": [
-          "docs"
-        ],
-        "snippet": [
-          "# DOCKER-COMPOSE MOVED",
-          "All documentation for `docker-compose` has been moved to the [helm repository](https://github.com/langchain-ai/helm/tree/main/charts/langsmith)."
-        ],
-        "related_imports": []
-      },
-      {
-        "path": ".venv-api/lib/python3.13/site-packages/langsmith/sandbox/README.md",
-        "kind": "documentation",
-        "language": null,
-        "tags": [
-          "docs"
-        ],
-        "snippet": [
-          "# LangSmith Sandbox",
-          "Sandboxed code execution for LangSmith. Run untrusted code safely in isolated containers.",
-          "> \u26a0\ufe0f **Warning**: This module is experimental. Features and APIs may change, and breaking changes are expected as we iterate.",
-          "## Quick Start",
-          "```python",
-          "from langsmith.sandbox import SandboxClient",
-          "# Client uses LANGSMITH_ENDPOINT and LANGSMITH_API_KEY from environment",
-          "client = SandboxClient()"
-        ],
-        "related_imports": []
-      },
-      {
         "path": "AGENTS.md",
         "kind": "documentation",
         "language": null,
@@ -5155,6 +6540,101 @@
           "1. Open `skills/MANIFEST.md` first.",
           "2. Open the most specific inferred child skill before changing code.",
           "3. Use `FEATURES.md`, `REPORT.md`, and `TRACEABILITY.md` to understand intent, current shape, and evidence."
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "FEATURES.md",
+        "kind": "documentation",
+        "language": null,
+        "tags": [
+          "docs"
+        ],
+        "snippet": [
+          "# Features",
+          "Search this file before implementing any feature to avoid duplicating work.",
+          "| Feature Name | Domain | Location | Description | Status | Last Modified |",
+          "| --- | --- | --- | --- | --- | --- |",
+          "| Project folder analysis | analysis | `skilgen-upstream-work` | Analyze the input folder and generate outputs into that same folder. | active | current |",
+          "| Backend route: skilgen/api/__init__.py | backend | `skilgen/api/__init__.py` | Detected route or handler implementation in the scanned codebase. | active | current |",
+          "| Backend route: skilgen/api/jobs.py | backend | `skilgen/api/jobs.py` | Detected route or handler implementation in the scanned codebase. | active | current |",
+          "| Backend route: skilgen/api/server.py | backend | `skilgen/api/server.py` | Detected route or handler implementation in the scanned codebase. | active | current |"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "README.md",
+        "kind": "documentation",
+        "language": null,
+        "tags": [
+          "docs"
+        ],
+        "snippet": [
+          "<p align=\"center\">",
+          "<img src=\"docs/assets/skilgen.svg\" alt=\"Skilgen\" width=\"480\" />",
+          "</p>",
+          "<h2 align=\"center\">The living skill system for AI coding agents</h2>",
+          "<p align=\"center\">",
+          "Every agent session starts from zero. Skilgen ends that.<br/>",
+          "Generate, govern, and keep your codebase's agent knowledge current automatically.",
+          "</p>"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "REPORT.md",
+        "kind": "documentation",
+        "language": null,
+        "tags": [
+          "docs"
+        ],
+        "snippet": [
+          "# Report",
+          "## Summary",
+          "- Detected domains: platform, platform-runtime, platform-agents, platform-cli, platform-core, platform-generators, platform-scripts, roadmap, roadmap-phase-0, roadmap-phase-1, road",
+          "- Feature inventory entries: 9",
+          "- Backend route files: 4",
+          "- Frontend route files: 0",
+          "- Component files: 0",
+          "- Service files: 1"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "TRACEABILITY.md",
+        "kind": "documentation",
+        "language": null,
+        "tags": [
+          "docs"
+        ],
+        "snippet": [
+          "# Traceability",
+          "This file maps requirements and detected code evidence to the generated Skilgen outputs.",
+          "## Requirements Source",
+          "- Source file: `codebase-only input`",
+          "- Source hash: `2b845af34337`",
+          "## Intent To Output Mapping",
+          "### Endpoints",
+          "- Intent: Detected route: skilgen/api/__init__.py"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "docs/examples/README.md",
+        "kind": "documentation",
+        "language": null,
+        "tags": [
+          "docs"
+        ],
+        "snippet": [
+          "# Dashboard Examples",
+          "These are committed, self-contained HTML dashboard snapshots generated with Skilgen and saved into the repo so people can inspect real output.",
+          "GitHub will show the HTML source in the repo view. Download the file or open it locally in a browser to see the full interactive dashboard.",
+          "## Anthropic claude-code",
+          "- Source repo: [anthropics/claude-code](https://github.com/anthropics/claude-code)",
+          "- Source commit: `5a7bf28`",
+          "- Dashboard file: [`claude-code-dashboard.html`](claude-code-dashboard.html)",
+          "- Generated `AGENTS.md`: [`claude-code-AGENTS.md`](claude-code-AGENTS.md)"
         ],
         "related_imports": []
       },
@@ -5178,31 +6658,26 @@
         "related_imports": []
       },
       {
-        "path": "apps/dashboard/.next/package.json",
+        "path": "apps/dashboard/Dockerfile",
         "kind": "config",
         "language": null,
         "tags": [
           "config"
         ],
         "snippet": [
-          "{\"type\": \"commonjs\"}"
+          "FROM node:20-alpine AS builder",
+          "WORKDIR /app",
+          "ARG NEXT_PUBLIC_API_URL=http://localhost:8000",
+          "ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}",
+          "# Enable standalone output for Docker (see next.config.ts)",
+          "ENV BUILD_STANDALONE=1",
+          "COPY package*.json turbo.json ./",
+          "COPY apps/dashboard/package*.json ./apps/dashboard/"
         ],
         "related_imports": []
       },
       {
-        "path": "apps/dashboard/.next/standalone/apps/dashboard/.next/package.json",
-        "kind": "config",
-        "language": null,
-        "tags": [
-          "config"
-        ],
-        "snippet": [
-          "{\"type\": \"commonjs\"}"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": "apps/dashboard/.next/standalone/apps/dashboard/package.json",
+        "path": "apps/dashboard/package.json",
         "kind": "config",
         "language": null,
         "tags": [
@@ -5221,7 +6696,7 @@
         "related_imports": []
       },
       {
-        "path": "apps/dashboard/.next/standalone/node_modules/@img/colour/package.json",
+        "path": "apps/web/package.json",
         "kind": "config",
         "language": null,
         "tags": [
@@ -5229,62 +6704,71 @@
         ],
         "snippet": [
           "{",
-          "\"name\": \"@img/colour\",",
-          "\"version\": \"1.1.0\",",
-          "\"description\": \"The ESM-only 'color' package made compatible for use with CommonJS runtimes\",",
-          "\"license\": \"MIT\",",
-          "\"main\": \"index.cjs\",",
-          "\"types\": \"index.d.ts\",",
-          "\"exports\": {"
+          "\"name\": \"skillayer-web\",",
+          "\"private\": true,",
+          "\"type\": \"module\",",
+          "\"scripts\": {",
+          "\"build\": \"next build\",",
+          "\"dev\": \"next dev\",",
+          "\"lint\": \"eslint .\","
         ],
         "related_imports": []
       },
       {
-        "path": "apps/dashboard/.next/standalone/node_modules/@img/sharp-darwin-arm64/package.json",
+        "path": "apps/worker/Dockerfile",
         "kind": "config",
         "language": null,
         "tags": [
           "config"
         ],
         "snippet": [
-          "{",
-          "\"name\": \"@img/sharp-darwin-arm64\",",
-          "\"version\": \"0.34.5\",",
-          "\"description\": \"Prebuilt sharp for use with macOS 64-bit ARM\",",
-          "\"author\": \"Lovell Fuller <npm@lovell.info>\",",
-          "\"homepage\": \"https://sharp.pixelplumbing.com\",",
-          "\"repository\": {",
-          "\"type\": \"git\","
+          "FROM python:3.12-slim",
+          "WORKDIR /app",
+          "RUN apt-get update && apt-get install -y \\",
+          "git build-essential \\",
+          "&& rm -rf /var/lib/apt/lists/*",
+          "COPY pyproject.toml setup.py ./",
+          "COPY skilgen/ ./skilgen/",
+          "COPY packages/db/ ./packages/db/"
         ],
         "related_imports": []
       },
       {
-        "path": ".vercel/output/diagnostics/cli_traces.json",
-        "kind": "runtime",
+        "path": "docs/examples/librechat-skill-tree/skilgen.yml",
+        "kind": "config",
         "language": null,
         "tags": [
-          "runtime",
-          "traces",
-          "json"
+          "config"
         ],
         "snippet": [
-          "0 spans across 0 services"
+          "# Skilgen configuration",
+          "include_paths:",
+          "- .",
+          "exclude_paths:",
+          "- .git",
+          "- __pycache__",
+          "- .venv",
+          "- node_modules"
         ],
         "related_imports": []
       },
       {
-        "path": "apps/web/.vercel/output/diagnostics/cli_traces.json",
+        "path": "tests/fixtures/semgrep_results.sarif",
         "kind": "runtime",
         "language": null,
         "tags": [
           "runtime",
-          "traces",
-          "json"
+          "sast",
+          "sarif"
         ],
         "snippet": [
-          "0 spans across 0 services"
+          "SAST findings across 2 files",
+          "Related paths: src/app.py, src/templates.py"
         ],
-        "related_imports": []
+        "related_imports": [
+          "src/app.py",
+          "src/templates.py"
+        ]
       }
     ],
     "recommendations": [
@@ -5319,6 +6803,14 @@
         "relationship_count": 0
       },
       "scripts/deploy_dashboard.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 6,
+        "call_count": 29,
+        "import_count": 7,
+        "relationship_count": 0
+      },
+      "scripts/deploy_web.py": {
         "language": "python",
         "backend": "python-ast",
         "symbol_count": 6,
@@ -5521,7 +7013,7 @@
       "skilgen/cli/main.py": {
         "language": "python",
         "backend": "python-ast",
-        "symbol_count": 15,
+        "symbol_count": 25,
         "call_count": 30,
         "import_count": 20,
         "relationship_count": 0
@@ -5537,7 +7029,7 @@
       "skilgen/core/analytics.py": {
         "language": "python",
         "backend": "python-ast",
-        "symbol_count": 9,
+        "symbol_count": 13,
         "call_count": 30,
         "import_count": 8,
         "relationship_count": 0
@@ -5561,7 +7053,7 @@
       "skilgen/core/config.py": {
         "language": "python",
         "backend": "python-ast",
-        "symbol_count": 10,
+        "symbol_count": 11,
         "call_count": 30,
         "import_count": 3,
         "relationship_count": 0
@@ -5753,7 +7245,7 @@
       "skilgen/delivery.py": {
         "language": "python",
         "backend": "python-ast",
-        "symbol_count": 4,
+        "symbol_count": 10,
         "call_count": 30,
         "import_count": 20,
         "relationship_count": 0
@@ -5793,17 +7285,217 @@
       "skilgen/generators/skills.py": {
         "language": "python",
         "backend": "python-ast",
+        "symbol_count": 30,
+        "call_count": 30,
+        "import_count": 16,
+        "relationship_count": 0
+      },
+      "skilgen/hooks/__init__.py": {
+        "language": "python",
+        "backend": "regex",
+        "symbol_count": 0,
+        "call_count": 0,
+        "import_count": 0,
+        "relationship_count": 0
+      },
+      "skilgen/hooks/claude_code.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 1,
+        "call_count": 5,
+        "import_count": 2,
+        "relationship_count": 0
+      },
+      "skilgen/hooks/claude_code_hook.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 4,
+        "call_count": 14,
+        "import_count": 5,
+        "relationship_count": 0
+      },
+      "skilgen/hooks/cursor.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 1,
+        "call_count": 5,
+        "import_count": 2,
+        "relationship_count": 0
+      },
+      "skilgen/hooks/cursor_watcher.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 3,
+        "call_count": 15,
+        "import_count": 7,
+        "relationship_count": 0
+      },
+      "skilgen/parsers/__init__.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 6,
+        "call_count": 4,
+        "import_count": 12,
+        "relationship_count": 1
+      },
+      "skilgen/parsers/auto_detect.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 9,
+        "call_count": 23,
+        "import_count": 6,
+        "relationship_count": 0
+      },
+      "skilgen/parsers/confluence.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 30,
+        "call_count": 30,
+        "import_count": 8,
+        "relationship_count": 1
+      },
+      "skilgen/parsers/dbt.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 23,
+        "call_count": 30,
+        "import_count": 6,
+        "relationship_count": 1
+      },
+      "skilgen/parsers/graphql.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 13,
+        "call_count": 30,
+        "import_count": 6,
+        "relationship_count": 0
+      },
+      "skilgen/parsers/helm.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 11,
+        "call_count": 30,
+        "import_count": 7,
+        "relationship_count": 1
+      },
+      "skilgen/parsers/incident.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 30,
+        "call_count": 30,
+        "import_count": 13,
+        "relationship_count": 1
+      },
+      "skilgen/parsers/kafka.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 24,
+        "call_count": 30,
+        "import_count": 6,
+        "relationship_count": 1
+      },
+      "skilgen/parsers/kubernetes.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 25,
+        "call_count": 30,
+        "import_count": 6,
+        "relationship_count": 1
+      },
+      "skilgen/parsers/notion.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 11,
+        "call_count": 30,
+        "import_count": 8,
+        "relationship_count": 0
+      },
+      "skilgen/parsers/openapi.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 18,
+        "call_count": 30,
+        "import_count": 8,
+        "relationship_count": 0
+      },
+      "skilgen/parsers/postman.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 13,
+        "call_count": 30,
+        "import_count": 6,
+        "relationship_count": 0
+      },
+      "skilgen/parsers/runbook.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 25,
+        "call_count": 30,
+        "import_count": 4,
+        "relationship_count": 1
+      },
+      "skilgen/parsers/runner.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 3,
+        "call_count": 20,
+        "import_count": 6,
+        "relationship_count": 0
+      },
+      "skilgen/parsers/sarif.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 19,
+        "call_count": 30,
+        "import_count": 6,
+        "relationship_count": 0
+      },
+      "skilgen/parsers/sbom.py": {
+        "language": "python",
+        "backend": "python-ast",
         "symbol_count": 27,
         "call_count": 30,
-        "import_count": 14,
+        "import_count": 9,
         "relationship_count": 0
+      },
+      "skilgen/parsers/security_policy.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 13,
+        "call_count": 30,
+        "import_count": 7,
+        "relationship_count": 0
+      },
+      "skilgen/parsers/sources.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 21,
+        "call_count": 30,
+        "import_count": 6,
+        "relationship_count": 0
+      },
+      "skilgen/parsers/sql_schema.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 30,
+        "call_count": 30,
+        "import_count": 6,
+        "relationship_count": 1
+      },
+      "skilgen/parsers/terraform.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 30,
+        "call_count": 30,
+        "import_count": 6,
+        "relationship_count": 1
       },
       "skilgen/registry_client.py": {
         "language": "python",
         "backend": "python-ast",
-        "symbol_count": 6,
-        "call_count": 24,
-        "import_count": 7,
+        "symbol_count": 10,
+        "call_count": 25,
+        "import_count": 8,
         "relationship_count": 1
       },
       "skilgen/sdk.py": {
@@ -5833,10 +7525,18 @@
       "tests/test_analytics.py": {
         "language": "python",
         "backend": "python-ast",
-        "symbol_count": 8,
-        "call_count": 17,
+        "symbol_count": 10,
+        "call_count": 19,
         "import_count": 5,
         "relationship_count": 1
+      },
+      "tests/test_api_key.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 20,
+        "call_count": 18,
+        "import_count": 10,
+        "relationship_count": 0
       },
       "tests/test_api_smoke.py": {
         "language": "python",
@@ -5844,6 +7544,14 @@
         "symbol_count": 13,
         "call_count": 30,
         "import_count": 17,
+        "relationship_count": 1
+      },
+      "tests/test_api_spec_parsers.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 9,
+        "call_count": 12,
+        "import_count": 8,
         "relationship_count": 1
       },
       "tests/test_architecture_cli.py": {
@@ -5868,6 +7576,14 @@
         "symbol_count": 2,
         "call_count": 10,
         "import_count": 7,
+        "relationship_count": 1
+      },
+      "tests/test_audit_log.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 11,
+        "call_count": 13,
+        "import_count": 6,
         "relationship_count": 1
       },
       "tests/test_auth_claim_mapping.py": {
@@ -5901,6 +7617,14 @@
         "call_count": 23,
         "import_count": 6,
         "relationship_count": 1
+      },
+      "tests/test_cli_sources.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 7,
+        "call_count": 13,
+        "import_count": 7,
+        "relationship_count": 0
       },
       "tests/test_codebase_signals.py": {
         "language": "python",
@@ -5949,6 +7673,22 @@
         "call_count": 30,
         "import_count": 14,
         "relationship_count": 1
+      },
+      "tests/test_dashboard_error_boundaries.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 4,
+        "call_count": 5,
+        "import_count": 2,
+        "relationship_count": 0
+      },
+      "tests/test_data_parsers.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 16,
+        "call_count": 15,
+        "import_count": 6,
+        "relationship_count": 3
       },
       "tests/test_decision_planner.py": {
         "language": "python",
@@ -6022,6 +7762,22 @@
         "import_count": 7,
         "relationship_count": 0
       },
+      "tests/test_eval.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 30,
+        "call_count": 28,
+        "import_count": 10,
+        "relationship_count": 0
+      },
+      "tests/test_eval_cli.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 5,
+        "call_count": 5,
+        "import_count": 4,
+        "relationship_count": 0
+      },
       "tests/test_feature_extractor.py": {
         "language": "python",
         "backend": "python-ast",
@@ -6038,6 +7794,22 @@
         "import_count": 4,
         "relationship_count": 1
       },
+      "tests/test_generation_quality.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 15,
+        "call_count": 30,
+        "import_count": 15,
+        "relationship_count": 1
+      },
+      "tests/test_half_life.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 11,
+        "call_count": 8,
+        "import_count": 5,
+        "relationship_count": 0
+      },
       "tests/test_identity_policy_store.py": {
         "language": "python",
         "backend": "python-ast",
@@ -6046,12 +7818,60 @@
         "import_count": 6,
         "relationship_count": 1
       },
+      "tests/test_improvement_loop.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 14,
+        "call_count": 17,
+        "import_count": 5,
+        "relationship_count": 0
+      },
+      "tests/test_incident_parsers.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 8,
+        "call_count": 19,
+        "import_count": 6,
+        "relationship_count": 1
+      },
+      "tests/test_infra_parsers.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 13,
+        "call_count": 13,
+        "import_count": 7,
+        "relationship_count": 3
+      },
       "tests/test_jobs.py": {
         "language": "python",
         "backend": "python-ast",
         "symbol_count": 4,
         "call_count": 27,
         "import_count": 9,
+        "relationship_count": 1
+      },
+      "tests/test_llm_config.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 9,
+        "call_count": 11,
+        "import_count": 3,
+        "relationship_count": 1
+      },
+      "tests/test_memory_capture.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 22,
+        "call_count": 26,
+        "import_count": 8,
+        "relationship_count": 0
+      },
+      "tests/test_memory_cli.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 6,
+        "call_count": 25,
+        "import_count": 8,
         "relationship_count": 1
       },
       "tests/test_model_registry.py": {
@@ -6062,10 +7882,18 @@
         "import_count": 4,
         "relationship_count": 1
       },
+      "tests/test_org_intelligence_api.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 29,
+        "call_count": 30,
+        "import_count": 9,
+        "relationship_count": 0
+      },
       "tests/test_org_settings.py": {
         "language": "python",
         "backend": "python-ast",
-        "symbol_count": 28,
+        "symbol_count": 30,
         "call_count": 25,
         "import_count": 13,
         "relationship_count": 0
@@ -6094,6 +7922,14 @@
         "import_count": 6,
         "relationship_count": 1
       },
+      "tests/test_policy_engine.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 14,
+        "call_count": 15,
+        "import_count": 5,
+        "relationship_count": 1
+      },
       "tests/test_pr_comment.py": {
         "language": "python",
         "backend": "python-ast",
@@ -6110,6 +7946,14 @@
         "import_count": 5,
         "relationship_count": 0
       },
+      "tests/test_process_parsers.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 18,
+        "call_count": 22,
+        "import_count": 9,
+        "relationship_count": 3
+      },
       "tests/test_rate_limit_store.py": {
         "language": "python",
         "backend": "python-ast",
@@ -6117,6 +7961,22 @@
         "call_count": 8,
         "import_count": 5,
         "relationship_count": 1
+      },
+      "tests/test_red_flags.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 22,
+        "call_count": 21,
+        "import_count": 10,
+        "relationship_count": 0
+      },
+      "tests/test_registry.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 15,
+        "call_count": 5,
+        "import_count": 5,
+        "relationship_count": 0
       },
       "tests/test_registry_api.py": {
         "language": "python",
@@ -6238,10 +8098,26 @@
         "import_count": 9,
         "relationship_count": 1
       },
+      "tests/test_security_parsers.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 16,
+        "call_count": 16,
+        "import_count": 8,
+        "relationship_count": 3
+      },
       "tests/test_skill_detail.py": {
         "language": "python",
         "backend": "python-ast",
         "symbol_count": 11,
+        "call_count": 9,
+        "import_count": 5,
+        "relationship_count": 0
+      },
+      "tests/test_skill_sources_api.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 10,
         "call_count": 9,
         "import_count": 5,
         "relationship_count": 0
@@ -6359,6 +8235,18 @@
         "function load_project_link",
         "function deploy_command",
         "function dashboard_project_link"
+      ],
+      "scripts/deploy_web.py": [
+        "from __future__ import annotations",
+        "imports argparse",
+        "imports json",
+        "imports subprocess",
+        "from collections.abc import Iterator",
+        "from contextlib import contextmanager",
+        "from pathlib import Path",
+        "function load_project_link",
+        "function deploy_command",
+        "function web_project_link"
       ],
       "scripts/run_requirements_pipeline.py": [
         "from __future__ import annotations",
@@ -6600,13 +8488,13 @@
         "from __future__ import annotations",
         "imports argparse",
         "imports json",
+        "imports os",
         "imports sys",
         "from dataclasses import dataclass",
+        "from datetime import UTC, datetime",
         "from pathlib import Path",
         "imports threading",
-        "imports time",
-        "from skilgen.api.server import run_server",
-        "from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker"
+        "imports time"
       ],
       "skilgen/core/analytics.py": [
         "from __future__ import annotations",
@@ -6617,8 +8505,8 @@
         "from pathlib import Path",
         "imports re",
         "from skilgen.external_skills import active_external_skills",
-        "function _analytics_path",
-        "function _timestamp"
+        "function _compute_richness_score",
+        "function _analytics_path"
       ],
       "skilgen/core/audit.py": [
         "from __future__ import annotations",
@@ -6647,14 +8535,14 @@
       "skilgen/core/config.py": [
         "from __future__ import annotations",
         "from pathlib import Path",
-        "from skilgen.core.models import CorpusSettings, SkilgenConfig",
+        "from skilgen.core.models import CorpusSettings, SkilgenConfig, SourceConfigValue",
         "function _string_or_none",
         "function _string_list",
         "function _bool_value",
         "function _int_value",
         "function _float_value",
         "function _dict_value",
-        "function _parse_scalar"
+        "function _source_dict_value"
       ],
       "skilgen/core/context.py": [
         "from __future__ import annotations",
@@ -6919,15 +8807,15 @@
       ],
       "skilgen/delivery.py": [
         "from __future__ import annotations",
+        "imports asyncio",
         "from dataclasses import replace",
+        "imports json",
+        "imports os",
         "imports time",
+        "imports uuid",
         "from pathlib import Path",
         "from typing import Callable",
-        "from skilgen.agents import build_agent_decision, fingerprint_project",
-        "from skilgen.agents.codebase_signals import clear_codebase_signal_caches, is_ignored_path_parts, is_internal_skillayer_monorepo",
-        "from skilgen.agents.source_graphs import clear_source_graph_caches",
-        "from skilgen.core.audit import append_audit_event",
-        "from skilgen.core.analytics import log_skill_usage"
+        "from urllib.error import HTTPError, URLError"
       ],
       "skilgen/enterprise_skills.py": [
         "from __future__ import annotations",
@@ -6968,14 +8856,284 @@
       "skilgen/generators/skills.py": [
         "from __future__ import annotations",
         "imports os",
+        "imports re",
         "from datetime import date",
         "from pathlib import Path",
         "from typing import Callable",
         "from skilgen.agents.architecture_planner import build_architecture_blueprint",
         "from skilgen.agents.codebase_signals import analyze_codebase",
         "from skilgen.agents.requirements_parser import parse_project_intent",
-        "from skilgen.agents.roadmap_planner import build_roadmap_plan",
-        "from skilgen.core.config import load_config"
+        "from skilgen.agents.roadmap_planner import build_roadmap_plan"
+      ],
+      "skilgen/hooks/claude_code.py": [
+        "from __future__ import annotations",
+        "from pathlib import Path",
+        "function write_claude_code_hook"
+      ],
+      "skilgen/hooks/claude_code_hook.py": [
+        "from __future__ import annotations",
+        "imports os",
+        "imports sys",
+        "imports time",
+        "imports urllib.request",
+        "function _session_lock_path",
+        "function _already_fired",
+        "function _mark_fired",
+        "function main"
+      ],
+      "skilgen/hooks/cursor.py": [
+        "from __future__ import annotations",
+        "from pathlib import Path",
+        "function write_cursor_watcher"
+      ],
+      "skilgen/hooks/cursor_watcher.py": [
+        "from __future__ import annotations",
+        "imports os",
+        "imports subprocess",
+        "imports sys",
+        "imports time",
+        "from pathlib import Path",
+        "function _skills_dir",
+        "function watch_skills"
+      ],
+      "skilgen/parsers/__init__.py": [
+        "from __future__ import annotations",
+        "from dataclasses import asdict, dataclass, field",
+        "from skilgen.parsers.dbt import DbtProjectAnalysis, DbtProjectParseError, parse_dbt_project",
+        "from skilgen.parsers.helm import HelmChartParseResult, HelmParserError, parse_helm_chart",
+        "from skilgen.parsers.kafka import KafkaAnalysis, KafkaParseError, parse_kafka_artifact",
+        "from skilgen.parsers.kubernetes import KubernetesManifestParseResult, KubernetesParserError, parse_kubernetes_manifests",
+        "from skilgen.parsers.runbook import ProcessParserError, ProcessSource, parse_runbook_file, parse_runbook_source",
+        "from skilgen.parsers.sarif import SarifFinding, SarifResult, SarifTool, parse_sarif",
+        "from skilgen.parsers.sbom import SbomPackage, SbomResult, parse_sbom",
+        "from skilgen.parsers.security_policy import SecurityPolicyResult, parse_security_policy"
+      ],
+      "skilgen/parsers/auto_detect.py": [
+        "from __future__ import annotations",
+        "from pathlib import Path",
+        "from typing import Iterable",
+        "from skilgen.core.config import load_config",
+        "from skilgen.core.models import SourceConfigValue",
+        "from skilgen.parsers.sources import SOURCE_ALIASES, SOURCE_TYPES",
+        "function normalize_source_name",
+        "function load_source_config",
+        "function detect_source_paths",
+        "function resolve_source_paths"
+      ],
+      "skilgen/parsers/confluence.py": [
+        "from __future__ import annotations",
+        "from html.parser import HTMLParser",
+        "from pathlib import Path",
+        "from tempfile import TemporaryDirectory",
+        "imports re",
+        "imports xml.etree.ElementTree",
+        "imports zipfile",
+        "from skilgen.parsers.runbook import ProcessParserError, ProcessSource, _dedupe",
+        "function parse_confluence_file",
+        "function parse_confluence_source"
+      ],
+      "skilgen/parsers/dbt.py": [
+        "from __future__ import annotations",
+        "imports re",
+        "from dataclasses import dataclass, field",
+        "from pathlib import Path",
+        "from typing import Any",
+        "imports yaml",
+        "class DbtProjectParseError",
+        "class DbtIssue",
+        "class DbtColumn",
+        "class DbtModel"
+      ],
+      "skilgen/parsers/graphql.py": [
+        "from __future__ import annotations",
+        "imports json",
+        "imports re",
+        "from pathlib import Path",
+        "from typing import Any",
+        "from skilgen.parsers import ApiSpecFinding, ApiSpecItem, ApiSpecParseResult, ApiSpecParserError",
+        "function parse_graphql_schema",
+        "function parse_graphql",
+        "function parse",
+        "function _parse_sdl"
+      ],
+      "skilgen/parsers/helm.py": [
+        "from __future__ import annotations",
+        "imports re",
+        "from collections import Counter",
+        "from dataclasses import dataclass, field",
+        "from pathlib import Path",
+        "from typing import Any",
+        "imports yaml",
+        "class HelmParserError",
+        "class HelmTemplateSummary",
+        "class HelmChartParseResult"
+      ],
+      "skilgen/parsers/incident.py": [
+        "from __future__ import annotations",
+        "from collections import Counter, defaultdict",
+        "from dataclasses import dataclass, field",
+        "from datetime import datetime, timezone",
+        "from json import JSONDecodeError",
+        "imports json",
+        "imports os",
+        "from pathlib import Path",
+        "imports re",
+        "imports time"
+      ],
+      "skilgen/parsers/kafka.py": [
+        "from __future__ import annotations",
+        "imports json",
+        "from dataclasses import dataclass, field",
+        "from pathlib import Path",
+        "from typing import Any",
+        "imports yaml",
+        "class KafkaParseError",
+        "class KafkaIssue",
+        "class KafkaTopic",
+        "class KafkaField"
+      ],
+      "skilgen/parsers/kubernetes.py": [
+        "from __future__ import annotations",
+        "from collections import Counter",
+        "from dataclasses import dataclass, field",
+        "from pathlib import Path",
+        "from typing import Any",
+        "imports yaml",
+        "class KubernetesParserError",
+        "class KubernetesObjectSummary",
+        "class KubernetesManifestParseResult",
+        "function parse_kubernetes_manifests"
+      ],
+      "skilgen/parsers/notion.py": [
+        "from __future__ import annotations",
+        "imports json",
+        "imports os",
+        "from pathlib import Path",
+        "imports time",
+        "from typing import Any",
+        "from skilgen.parsers.runbook import ProcessParserError, ProcessSource, _parse_markdown_document, _parse_markdown_text",
+        "function parse_notion_file",
+        "function parse_notion_source",
+        "function parse_notion_api_json"
+      ],
+      "skilgen/parsers/openapi.py": [
+        "from __future__ import annotations",
+        "imports json",
+        "imports re",
+        "from collections.abc import Iterable",
+        "from pathlib import Path",
+        "from typing import Any",
+        "imports yaml",
+        "from skilgen.parsers import ApiSpecFinding, ApiSpecItem, ApiSpecParseResult, ApiSpecParserError",
+        "function parse_openapi_spec",
+        "function parse_openapi"
+      ],
+      "skilgen/parsers/postman.py": [
+        "from __future__ import annotations",
+        "imports json",
+        "imports re",
+        "from pathlib import Path",
+        "from typing import Any",
+        "from skilgen.parsers import ApiSpecFinding, ApiSpecItem, ApiSpecParseResult, ApiSpecParserError",
+        "function parse_postman_collection",
+        "function parse_postman",
+        "function parse",
+        "function _load_collection"
+      ],
+      "skilgen/parsers/runbook.py": [
+        "from __future__ import annotations",
+        "from dataclasses import dataclass, field",
+        "from pathlib import Path",
+        "imports re",
+        "class ProcessParserError",
+        "class ProcessSource",
+        "function parse_runbook_file",
+        "function parse_runbook_source",
+        "function parse_runbook_dir",
+        "function _parse_markdown_document"
+      ],
+      "skilgen/parsers/runner.py": [
+        "from __future__ import annotations",
+        "from pathlib import Path",
+        "from typing import Iterable",
+        "from skilgen.core.models import SourceConfigValue",
+        "from skilgen.parsers.auto_detect import detect_source_paths, normalize_source_name",
+        "from skilgen.parsers.sources import SOURCE_TYPES, SkillSource, SourceRunResult, _call_parser",
+        "function run_source_parsers",
+        "function _selected_sources",
+        "function _resolved_paths"
+      ],
+      "skilgen/parsers/sarif.py": [
+        "from __future__ import annotations",
+        "from dataclasses import dataclass, field",
+        "imports json",
+        "from pathlib import Path",
+        "imports re",
+        "from typing import Any",
+        "class SarifTool",
+        "class SarifFinding",
+        "class SarifResult",
+        "function parse_sarif"
+      ],
+      "skilgen/parsers/sbom.py": [
+        "from __future__ import annotations",
+        "from dataclasses import dataclass, field",
+        "imports json",
+        "from pathlib import Path",
+        "imports re",
+        "from typing import Any",
+        "from urllib.parse import unquote",
+        "from xml.etree import ElementTree",
+        "class SbomPackage",
+        "class SbomResult"
+      ],
+      "skilgen/parsers/security_policy.py": [
+        "from __future__ import annotations",
+        "from dataclasses import dataclass, field",
+        "imports json",
+        "from pathlib import Path",
+        "imports re",
+        "from typing import Any",
+        "imports yaml",
+        "class SecurityPolicyResult",
+        "function parse_security_policy",
+        "function _parse_structured_yaml"
+      ],
+      "skilgen/parsers/sources.py": [
+        "from __future__ import annotations",
+        "from dataclasses import dataclass, field",
+        "from importlib import import_module",
+        "from pathlib import Path",
+        "imports re",
+        "from typing import Callable, Iterable",
+        "class SkillSource",
+        "class SourceRunResult",
+        "function slugify",
+        "function _field_list"
+      ],
+      "skilgen/parsers/sql_schema.py": [
+        "from __future__ import annotations",
+        "imports json",
+        "imports re",
+        "from dataclasses import dataclass, field",
+        "from pathlib import Path",
+        "from typing import Any",
+        "class SqlSchemaParseError",
+        "class SqlIssue",
+        "class SqlColumn",
+        "class SqlIndex"
+      ],
+      "skilgen/parsers/terraform.py": [
+        "from __future__ import annotations",
+        "imports re",
+        "from collections import Counter",
+        "from dataclasses import dataclass, field",
+        "from pathlib import Path",
+        "class TerraformParserError",
+        "class TerraformResource",
+        "class TerraformParseResult",
+        "function parse_terraform_directory",
+        "function parse_terraform_dir"
       ],
       "skilgen/registry_client.py": [
         "from __future__ import annotations",
@@ -6984,10 +9142,10 @@
         "from pathlib import Path",
         "from typing import cast",
         "from urllib.error import HTTPError, URLError",
+        "from urllib.parse import urlencode",
         "from urllib.request import Request, urlopen",
         "class RegistryClientError",
-        "function _api_key",
-        "function _api_url"
+        "function _api_key"
       ],
       "skilgen/sdk.py": [
         "from __future__ import annotations",
@@ -7017,9 +9175,22 @@
         "from pathlib import Path",
         "from tempfile import TemporaryDirectory",
         "imports unittest",
-        "from skilgen.core.analytics import analytics_summary, log_skill_usage",
+        "from unittest import mock",
+        "from skilgen.core.analytics import _detect_agent_runtime, analytics_summary, log_skill_usage",
         "from skilgen.generators.package import render_analytics_radial_data",
         "class AnalyticsTests"
+      ],
+      "tests/test_api_key.py": [
+        "from __future__ import annotations",
+        "imports asyncio",
+        "from types import SimpleNamespace",
+        "from typing import Any",
+        "from fastapi import FastAPI",
+        "from fastapi.testclient import TestClient",
+        "from apps.api.api import auth",
+        "from apps.api.api.auth import get_current_org_id",
+        "from apps.api.api.routes import orgs",
+        "from packages.db.database import get_db"
       ],
       "tests/test_api_smoke.py": [
         "from __future__ import annotations",
@@ -7032,6 +9203,17 @@
         "from unittest import mock",
         "from pathlib import Path",
         "from tempfile import TemporaryDirectory"
+      ],
+      "tests/test_api_spec_parsers.py": [
+        "from __future__ import annotations",
+        "from pathlib import Path",
+        "from tempfile import TemporaryDirectory",
+        "imports unittest",
+        "from skilgen.parsers import ApiSpecParserError",
+        "from skilgen.parsers.graphql import parse_graphql_schema",
+        "from skilgen.parsers.openapi import parse_openapi_spec",
+        "from skilgen.parsers.postman import parse_postman_collection",
+        "class ApiSpecParserTests"
       ],
       "tests/test_architecture_cli.py": [
         "from pathlib import Path",
@@ -7059,6 +9241,16 @@
         "from unittest.mock import patch",
         "from skilgen.core.audit import append_audit_event",
         "class AuditTests"
+      ],
+      "tests/test_audit_log.py": [
+        "from __future__ import annotations",
+        "from datetime import datetime",
+        "from types import SimpleNamespace",
+        "imports unittest",
+        "from apps.api.api.services import audit",
+        "from apps.api.api.routes import orgs",
+        "class _FakeDb",
+        "class AuditLogTests"
       ],
       "tests/test_auth_claim_mapping.py": [
         "from __future__ import annotations",
@@ -7096,6 +9288,18 @@
         "imports sys",
         "imports unittest",
         "class CliTests"
+      ],
+      "tests/test_cli_sources.py": [
+        "from __future__ import annotations",
+        "from pathlib import Path",
+        "from tempfile import TemporaryDirectory",
+        "from apps.api.api.analysis import _source_skill_files",
+        "from skilgen.cli.main import _render_source_summary",
+        "from skilgen.parsers.auto_detect import detect_source_paths",
+        "from skilgen.parsers.runner import run_source_parsers",
+        "function test_detect_source_paths_honors_sparse_sources_config_and_aliases",
+        "function test_run_source_parsers_supports_explicit_paths_without_persisting",
+        "function test_explicit_source_selection_overrides_disabled_config_entry"
       ],
       "tests/test_codebase_signals.py": [
         "from pathlib import Path",
@@ -7148,6 +9352,25 @@
         "imports sys",
         "imports unittest",
         "from unittest.mock import patch"
+      ],
+      "tests/test_dashboard_error_boundaries.py": [
+        "from __future__ import annotations",
+        "from pathlib import Path",
+        "function read",
+        "function test_dashboard_routes_define_segment_error_boundaries",
+        "function test_section_error_boundary_uses_shared_fallback_text",
+        "function test_dashboard_sections_are_wrapped_with_error_boundaries"
+      ],
+      "tests/test_data_parsers.py": [
+        "from pathlib import Path",
+        "from tempfile import TemporaryDirectory",
+        "imports unittest",
+        "from skilgen.parsers.dbt import DbtProjectParseError, parse_dbt_project",
+        "from skilgen.parsers.kafka import KafkaParseError, parse_kafka_artifact",
+        "from skilgen.parsers.sql_schema import SqlSchemaParseError, parse_sql_schema",
+        "class DbtParserTests",
+        "class SqlSchemaParserTests",
+        "class KafkaParserTests"
       ],
       "tests/test_decision_planner.py": [
         "from pathlib import Path",
@@ -7245,6 +9468,29 @@
         "function _write_policy",
         "function _write_skill"
       ],
+      "tests/test_eval.py": [
+        "from __future__ import annotations",
+        "from datetime import datetime, timedelta",
+        "imports importlib",
+        "from types import SimpleNamespace",
+        "from typing import Any",
+        "imports pytest",
+        "from fastapi import FastAPI",
+        "from fastapi.testclient import TestClient",
+        "from apps.api.api.auth import get_current_org_id",
+        "from packages.db.database import get_db"
+      ],
+      "tests/test_eval_cli.py": [
+        "from __future__ import annotations",
+        "imports sys",
+        "imports pytest",
+        "from skilgen.cli import main",
+        "function run_cli",
+        "function test_eval_record_success_posts",
+        "function test_eval_record_failure_warns_on_gap",
+        "function test_eval_status_prints_roi",
+        "function test_eval_gaps_lists_commands"
+      ],
       "tests/test_feature_extractor.py": [
         "from pathlib import Path",
         "from tempfile import TemporaryDirectory",
@@ -7259,6 +9505,30 @@
         "from skilgen.agents.framework_fingerprint import fingerprint_project",
         "class FrameworkFingerprintTests"
       ],
+      "tests/test_generation_quality.py": [
+        "from __future__ import annotations",
+        "imports asyncio",
+        "imports json",
+        "imports os",
+        "imports time",
+        "imports unittest",
+        "from pathlib import Path",
+        "from tempfile import TemporaryDirectory",
+        "from unittest.mock import patch",
+        "from skilgen.core.analytics import _compute_richness_score, analytics_summary"
+      ],
+      "tests/test_half_life.py": [
+        "from __future__ import annotations",
+        "from datetime import datetime, timedelta",
+        "from pathlib import Path",
+        "from types import SimpleNamespace",
+        "from apps.api.api.services import half_life",
+        "function _source",
+        "function test_compute_half_life_high_churn_uses_five_point_decay",
+        "function test_compute_half_life_moderate_churn_uses_two_point_decay",
+        "function test_compute_half_life_stable_uses_slow_decay_and_ninety_day_cap",
+        "function test_compute_half_life_already_stale_sets_zero_days"
+      ],
       "tests/test_identity_policy_store.py": [
         "from __future__ import annotations",
         "imports os",
@@ -7268,6 +9538,39 @@
         "from unittest import mock",
         "from skilgen.core.identity_policy_store import get_identity_policy, identity_policy_store_path, list_identity_policies, resolve_identity_policy",
         "class IdentityPolicyStoreTests"
+      ],
+      "tests/test_improvement_loop.py": [
+        "from __future__ import annotations",
+        "from datetime import datetime, timedelta",
+        "from pathlib import Path",
+        "from types import SimpleNamespace",
+        "from apps.api.api.routes.repos import _improvement_plan, _skill_code_block_count, _skill_improvement_plan, _skill_word_count",
+        "function _read",
+        "function _skill",
+        "function test_improvement_plan_for_score_15_flags_multiple_dimensions",
+        "function test_improvement_plan_for_score_75_returns_not_improvable_when_dimensions_are_strong",
+        "function test_improvement_plan_potential_score_never_exceeds_100"
+      ],
+      "tests/test_incident_parsers.py": [
+        "from __future__ import annotations",
+        "from pathlib import Path",
+        "from tempfile import TemporaryDirectory",
+        "imports unittest",
+        "from unittest.mock import patch",
+        "from skilgen.parsers.incident import IncidentParseError, fetch_github_incident_issues, parse_incident_sources, parse_markdown_postmortem",
+        "class IncidentParserTests"
+      ],
+      "tests/test_infra_parsers.py": [
+        "from __future__ import annotations",
+        "from pathlib import Path",
+        "from tempfile import TemporaryDirectory",
+        "imports unittest",
+        "from skilgen.parsers.helm import HelmParserError, parse_helm_chart",
+        "from skilgen.parsers.kubernetes import KubernetesParserError, parse_kubernetes_manifests",
+        "from skilgen.parsers.terraform import TerraformParserError, parse_terraform_directory",
+        "class TerraformParserTests",
+        "class KubernetesParserTests",
+        "class HelmParserTests"
       ],
       "tests/test_jobs.py": [
         "from contextlib import closing",
@@ -7281,12 +9584,54 @@
         "from skilgen.api.service import create_deliver_job, job_status_payload, jobs_payload, resume_job_payload",
         "class JobPersistenceTests"
       ],
+      "tests/test_llm_config.py": [
+        "from __future__ import annotations",
+        "imports unittest",
+        "from apps.api.api.services import llm_config",
+        "class LLMConfigTests"
+      ],
+      "tests/test_memory_capture.py": [
+        "from __future__ import annotations",
+        "from dataclasses import dataclass",
+        "from datetime import UTC, datetime, timedelta",
+        "from pathlib import Path",
+        "imports asyncio",
+        "imports pytest",
+        "from apps.api.api.services import memory",
+        "from packages.db.models import AgentSession, Skill",
+        "class Message",
+        "class FakeScalarResult"
+      ],
+      "tests/test_memory_cli.py": [
+        "from __future__ import annotations",
+        "imports json",
+        "imports os",
+        "imports subprocess",
+        "imports sys",
+        "imports threading",
+        "from http.server import BaseHTTPRequestHandler, HTTPServer",
+        "from pathlib import Path",
+        "function test_memory_init_session_creates_valid_json",
+        "function test_memory_upload_missing_api_key_exits_one"
+      ],
       "tests/test_model_registry.py": [
         "imports os",
         "imports unittest",
         "from skilgen.agents.model_registry import resolve_model_settings",
         "from skilgen.core.models import SkilgenConfig",
         "class ModelRegistryTests"
+      ],
+      "tests/test_org_intelligence_api.py": [
+        "from __future__ import annotations",
+        "from datetime import UTC, datetime, timedelta",
+        "from typing import Any",
+        "from fastapi import FastAPI",
+        "from fastapi.testclient import TestClient",
+        "from apps.api.api.auth import get_current_org_id",
+        "from apps.api.api.routes import orgs",
+        "from packages.db.database import get_db",
+        "from packages.db.models import AnalysisRun, Org, Repo, ScoreHistory",
+        "function _now"
       ],
       "tests/test_org_settings.py": [
         "from __future__ import annotations",
@@ -7332,6 +9677,17 @@
         "imports unittest",
         "class PlanCliTests"
       ],
+      "tests/test_policy_engine.py": [
+        "from __future__ import annotations",
+        "from datetime import datetime, timedelta",
+        "from types import SimpleNamespace",
+        "imports unittest",
+        "from apps.api.api.services import policy",
+        "function _policy",
+        "function _repo",
+        "function _skill",
+        "class PolicyEngineTests"
+      ],
       "tests/test_pr_comment.py": [
         "from __future__ import annotations",
         "imports unittest",
@@ -7351,6 +9707,18 @@
         "async function test_find_existing_comment_returns_id_when_skillayer_comment_found",
         "async function test_update_pr_comment_makes_patch_request"
       ],
+      "tests/test_process_parsers.py": [
+        "from __future__ import annotations",
+        "imports json",
+        "from pathlib import Path",
+        "from tempfile import TemporaryDirectory",
+        "imports unittest",
+        "imports zipfile",
+        "from skilgen.parsers.confluence import parse_confluence_file, parse_confluence_source",
+        "from skilgen.parsers.notion import parse_notion_api_json, parse_notion_file, parse_notion_source",
+        "from skilgen.parsers.runbook import ProcessParserError, parse_runbook_file, parse_runbook_source",
+        "class RunbookParserTests"
+      ],
       "tests/test_rate_limit_store.py": [
         "from __future__ import annotations",
         "from pathlib import Path",
@@ -7358,6 +9726,30 @@
         "imports unittest",
         "from skilgen.core.rate_limit_store import consume_rate_limit",
         "class RateLimitStoreTests"
+      ],
+      "tests/test_red_flags.py": [
+        "from __future__ import annotations",
+        "from datetime import UTC, datetime, timedelta",
+        "from typing import Any",
+        "from fastapi import FastAPI",
+        "from fastapi.testclient import TestClient",
+        "from apps.api.api.auth import get_current_org_id",
+        "from apps.api.api.routes import orgs",
+        "from apps.api.api.services.redflags import compute_repo_red_flags",
+        "from packages.db.database import get_db",
+        "from packages.db.models import Org, Repo, Skill"
+      ],
+      "tests/test_registry.py": [
+        "from __future__ import annotations",
+        "from datetime import datetime, timedelta",
+        "from pathlib import Path",
+        "from types import SimpleNamespace",
+        "from apps.api.api.routes import registry",
+        "function _source",
+        "function test_publish_skill_creates_registry_entry_with_scores",
+        "function test_publish_same_skill_twice_has_no_conflict_guard",
+        "function test_get_org_entries_filters_visibility_and_search",
+        "function test_install_marketplace_entry_increments_install_count"
       ],
       "tests/test_registry_api.py": [
         "from __future__ import annotations",
@@ -7496,6 +9888,18 @@
         "imports subprocess",
         "class SdkTests"
       ],
+      "tests/test_security_parsers.py": [
+        "from __future__ import annotations",
+        "from pathlib import Path",
+        "from tempfile import TemporaryDirectory",
+        "imports json",
+        "imports unittest",
+        "from skilgen.parsers.sarif import parse_sarif",
+        "from skilgen.parsers.sbom import parse_sbom",
+        "from skilgen.parsers.security_policy import parse_security_policy",
+        "class SarifParserTests",
+        "class SbomParserTests"
+      ],
       "tests/test_skill_detail.py": [
         "from __future__ import annotations",
         "imports asyncio",
@@ -7507,6 +9911,18 @@
         "function test_skill_response_includes_full_content_repo_and_usage_metadata",
         "function test_skill_detail_page_and_viewer_show_content_versions_and_usage",
         "function test_copy_button_copies_content_and_resets_success_state"
+      ],
+      "tests/test_skill_sources_api.py": [
+        "from __future__ import annotations",
+        "from pathlib import Path",
+        "from types import SimpleNamespace",
+        "from apps.api.api.routes.repos import _build_coverage_map, _compute_skill_score, _coverage_score",
+        "from packages.db.models.skill import skill_category_for_source_type",
+        "function _read",
+        "function test_repo_skill_sources_endpoint_requires_auth_and_returns_coverage_contract",
+        "function test_analyze_source_endpoint_validates_body_and_queues_job",
+        "function test_skill_content_update_endpoint_versions_content_and_requires_org_scope",
+        "function test_compute_skill_score_for_manual_content_update"
       ],
       "tests/test_skill_usage_analytics.py": [
         "from __future__ import annotations",
@@ -7669,6 +10085,32 @@
         "print",
         "read_text",
         "resolve"
+      ],
+      "scripts/deploy_web.py": [
+        "ArgumentParser",
+        "FileNotFoundError",
+        "Path",
+        "SystemExit",
+        "ValueError",
+        "add_argument",
+        "append",
+        "bool",
+        "deploy_command",
+        "deploy_web",
+        "difference",
+        "dumps",
+        "exists",
+        "int",
+        "join",
+        "load_project_link",
+        "loads",
+        "main",
+        "mkdir",
+        "parse_args",
+        "print",
+        "read_text",
+        "resolve",
+        "run"
       ],
       "scripts/run_requirements_pipeline.py": [
         "ArgumentParser",
@@ -8095,50 +10537,50 @@
         "Lock",
         "Path",
         "ProgressMilestone",
+        "Request",
         "Thread",
         "_elapsed",
+        "_eval_api_key",
+        "_eval_api_request",
+        "_eval_api_url",
+        "_eval_org_id",
         "_format_analytics_summary",
         "_infer_percent",
+        "_memory_session_files",
+        "_print_eval_gaps",
+        "_print_eval_status",
         "_render_line",
+        "_render_source_summary",
+        "_upload_memory_sessions",
+        "_write_memory_session_template",
         "activate_external_skill",
-        "activate_mcp_connector",
-        "active_external_skills",
-        "active_mcp_connectors",
-        "add_argument",
-        "add_parser",
-        "add_subparsers",
-        "all",
-        "analytics_payload",
-        "analyze_dependency_risks",
-        "analyze_payload",
-        "append",
-        "architecture_payload"
+        "activate_mcp_connector"
       ],
       "skilgen/core/analytics.py": [
         "Counter",
         "Path",
         "_analytics_path",
+        "_detect_agent_runtime",
+        "_frontmatter_int",
         "_iter_repo_skill_files",
         "_modeled_attention_score",
         "_normalize_skill_path",
+        "_richness_score",
         "_skill_content_metrics",
         "_skill_title_and_summary",
         "_timestamp",
         "active_external_skills",
         "add",
+        "any",
         "append",
         "as_posix",
         "count",
         "defaultdict",
         "dumps",
+        "endswith",
         "exists",
         "findall",
-        "get",
-        "getenv",
-        "int",
-        "is_absolute",
-        "is_file",
-        "isoformat"
+        "float"
       ],
       "skilgen/core/audit.py": [
         "Lock",
@@ -8197,6 +10639,7 @@
         "_int_value",
         "_parse_scalar",
         "_parse_yaml_like",
+        "_source_dict_value",
         "_string_list",
         "_string_or_none",
         "append",
@@ -8211,8 +10654,7 @@
         "items",
         "len",
         "list",
-        "lower",
-        "lstrip"
+        "lower"
       ],
       "skilgen/core/context.py": [
         "CodebaseContext",
@@ -8639,6 +11081,7 @@
         "_evidence_hits_for_skill",
         "_freshness_score",
         "_freshness_score_for_skill",
+        "_frontmatter_number",
         "_groundedness_score",
         "_groundedness_score_for_skills",
         "_has_git_metadata",
@@ -8648,8 +11091,7 @@
         "_parse_check_paths",
         "_parse_references",
         "_quality_gates",
-        "_resolve_placeholder_path",
-        "_score_history_path"
+        "_resolve_placeholder_path"
       ],
       "skilgen/core/validation.py": [
         "Path",
@@ -8731,7 +11173,13 @@
       ],
       "skilgen/delivery.py": [
         "Path",
+        "Request",
+        "_auto_sync_to_skillayer",
         "_emit",
+        "_local_analytics_events",
+        "_upload_analytics",
+        "_write_claude_code_hook",
+        "any",
         "append",
         "append_audit_event",
         "append_run_event",
@@ -8741,19 +11189,13 @@
         "classify_repo_change",
         "clear_codebase_signal_caches",
         "clear_source_graph_caches",
+        "close",
         "compute_freshness_report",
         "create_run_memory",
         "current_runtime_mode",
-        "ensure_corpus_index",
-        "ensure_enterprise_skills_for_project",
-        "ensure_external_skills_for_project",
-        "extend",
-        "finalize_run_memory",
-        "fingerprint_project",
-        "git_repo_state",
-        "is_file",
-        "is_generated_output_path",
-        "is_ignored_path_parts"
+        "decode",
+        "dumps",
+        "encode"
       ],
       "skilgen/enterprise_skills.py": [
         "MCPConnector",
@@ -8836,28 +11278,570 @@
       "skilgen/generators/skills.py": [
         "Path",
         "SkillSpec",
+        "_anti_pattern_title",
+        "_anti_patterns_for_spec",
         "_architecture_domain_map",
+        "_candidate_source_paths",
+        "_compute_richness_score",
         "_dependency_ecosystems_for_spec",
         "_dynamic_child_specs",
         "_dynamic_parent_specs",
         "_dynamic_summary_paths",
         "_emit_progress",
+        "_extract_code_example",
+        "_extract_code_examples",
         "_frontmatter_value",
+        "_interesting_code_window",
+        "_invert_pattern",
+        "_language_for_path",
         "_legacy_child_specs",
         "_looks_generated_skill",
         "_materialization_plan_map",
         "_parent_reference_map",
         "_prune_stale_generated_paths",
-        "_relative_skill_ref",
-        "_render_skill_native",
-        "_select_specs",
-        "_should_render_natively",
-        "_signal_bullets",
-        "_slug_name",
-        "_with_dependency_patterns",
+        "_relative_skill_ref"
+      ],
+      "skilgen/hooks/claude_code.py": [
+        "Path",
+        "chmod",
+        "mkdir",
+        "resolve",
+        "write_text"
+      ],
+      "skilgen/hooks/claude_code_hook.py": [
+        "Request",
+        "_already_fired",
+        "_mark_fired",
+        "_session_lock_path",
+        "close",
+        "get",
+        "getmtime",
+        "join",
+        "main",
+        "open",
+        "str",
+        "time",
+        "urlopen",
+        "write"
+      ],
+      "skilgen/hooks/cursor.py": [
+        "Path",
+        "chmod",
+        "mkdir",
+        "resolve",
+        "write_text"
+      ],
+      "skilgen/hooks/cursor_watcher.py": [
+        "Path",
+        "Popen",
+        "_skills_dir",
+        "exists",
+        "items",
+        "len",
+        "list",
+        "log_skill_usage",
+        "print",
+        "resolve",
+        "rglob",
+        "scan",
+        "sleep",
+        "stat",
+        "str"
+      ],
+      "skilgen/parsers/__init__.py": [
+        "asdict",
+        "dataclass",
+        "field",
+        "values"
+      ],
+      "skilgen/parsers/auto_detect.py": [
+        "Path",
+        "_candidate_sources",
+        "_configured_paths",
+        "_detect_with_defaults",
+        "_resolve_entries",
+        "_selected_sources",
+        "any",
+        "append",
+        "exists",
+        "extend",
+        "fromkeys",
+        "get",
+        "glob",
+        "is_absolute",
+        "isinstance",
+        "items",
+        "load_config",
+        "load_source_config",
+        "normalize_source_name",
+        "resolve",
+        "sorted",
+        "str",
+        "strip"
+      ],
+      "skilgen/parsers/confluence.py": [
+        "Path",
+        "ProcessParserError",
+        "ProcessSource",
+        "TemporaryDirectory",
+        "ZipFile",
+        "_ConfluenceHTMLExtractor",
+        "__init__",
+        "_clean_ordered_item",
+        "_clean_text",
+        "_dedupe",
+        "_extract_meta",
+        "_first_paragraph",
+        "_local_name",
+        "_normalize_body",
+        "_ordered_items",
+        "_parse_confluence_html",
+        "_parse_confluence_xml",
+        "_parse_confluence_zip",
+        "_section_groups",
+        "_section_items",
+        "_title_from_filename",
+        "_xml_code_blocks",
+        "_xml_labels",
+        "_xml_table_rows"
+      ],
+      "skilgen/parsers/dbt.py": [
+        "DbtColumn",
+        "DbtIssue",
+        "DbtMacro",
+        "DbtModel",
+        "DbtProjectAnalysis",
+        "DbtProjectParseError",
+        "DbtSourceTable",
+        "Path",
+        "_as_list",
+        "_collect_macros",
+        "_collect_schema_docs",
+        "_configured_paths",
+        "_find_cycles",
+        "_hardcoded_relations",
+        "_infer_model_group",
+        "_is_under_model_roots",
+        "_iter_sql_models",
+        "_load_yaml_mapping",
+        "_normalize_tests",
+        "_optional_string",
+        "_parse_columns",
         "add",
-        "analyze_codebase",
-        "any"
+        "any",
+        "append"
+      ],
+      "skilgen/parsers/graphql.py": [
+        "ApiSpecFinding",
+        "ApiSpecItem",
+        "ApiSpecParseResult",
+        "ApiSpecParserError",
+        "Path",
+        "_graphql_result",
+        "_is_paginated",
+        "_looks_like_list_object",
+        "_mostly_lower_camel",
+        "_named_type",
+        "_parse_introspection",
+        "_parse_sdl",
+        "_read_non_empty",
+        "_render_type",
+        "_unique",
+        "add",
+        "append",
+        "bool",
+        "compile",
+        "endswith",
+        "exists",
+        "extend",
+        "findall",
+        "finditer"
+      ],
+      "skilgen/parsers/helm.py": [
+        "Counter",
+        "HelmChartParseResult",
+        "HelmParserError",
+        "HelmTemplateSummary",
+        "Path",
+        "_chart_metadata",
+        "_dependencies",
+        "_load_yaml_file",
+        "_template_summaries",
+        "_type_name",
+        "_values_schema",
+        "add",
+        "any",
+        "append",
+        "as_posix",
+        "compile",
+        "dataclass",
+        "dict",
+        "exists",
+        "field",
+        "findall",
+        "fromkeys",
+        "get",
+        "is_dir"
+      ],
+      "skilgen/parsers/incident.py": [
+        "Counter",
+        "GitHubIncidentIssue",
+        "IncidentParseError",
+        "IncidentRecord",
+        "IncidentSourceAnalysis",
+        "PagerDutyMetrics",
+        "Path",
+        "Request",
+        "_MarkdownSection",
+        "_analysis_from_incidents",
+        "_clean_evidence_lines",
+        "_clean_inline_markdown",
+        "_cluster_title",
+        "_coerce_pagerduty_incidents",
+        "_dedupe",
+        "_dedupe_paths",
+        "_derive_incident_patterns",
+        "_derive_service_domain",
+        "_extract_body_summary",
+        "_extract_duration_minutes",
+        "_extract_markdown_title",
+        "_extract_pagerduty_urgency",
+        "_first_paragraph",
+        "_first_string"
+      ],
+      "skilgen/parsers/kafka.py": [
+        "KafkaAnalysis",
+        "KafkaField",
+        "KafkaIssue",
+        "KafkaParseError",
+        "KafkaSchema",
+        "KafkaTopic",
+        "Path",
+        "_audit_schemas",
+        "_audit_topics",
+        "_avro_schema_from_mapping",
+        "_avro_type_allows_null",
+        "_avro_type_name",
+        "_collect_configs",
+        "_int_or_none",
+        "_is_kafka_candidate",
+        "_json_schema_from_mapping",
+        "_json_type_name",
+        "_parse_avro_schema",
+        "_parse_json_schema",
+        "_schema_from_mapping",
+        "_string_or_none",
+        "_topic_from_payload",
+        "any",
+        "append"
+      ],
+      "skilgen/parsers/kubernetes.py": [
+        "Counter",
+        "KubernetesManifestParseResult",
+        "KubernetesObjectSummary",
+        "KubernetesParserError",
+        "Path",
+        "_candidate_manifest_roots",
+        "_collect_patterns",
+        "_container_runs_non_root",
+        "_containers",
+        "_data_keys",
+        "_has_probe",
+        "_has_resource_limits",
+        "_ingress_hosts",
+        "_is_privileged",
+        "_is_within_helm_chart",
+        "_load_yaml_documents",
+        "_looks_like_kubernetes_manifest",
+        "_looks_sensitive_key",
+        "_manifest_files",
+        "_nonzero_user",
+        "_pod_spec",
+        "_runs_non_root",
+        "_safe_port",
+        "_summarize_object"
+      ],
+      "skilgen/parsers/notion.py": [
+        "Client",
+        "Path",
+        "ProcessParserError",
+        "ProcessSource",
+        "_blocks_to_markdown",
+        "_notion_get",
+        "_notion_labels",
+        "_notion_title",
+        "_parse_markdown_document",
+        "_parse_markdown_text_source",
+        "_rate_limit",
+        "_rich_text",
+        "_source_from_markdown_text",
+        "append",
+        "exists",
+        "extend",
+        "fromkeys",
+        "get",
+        "int",
+        "is_dir",
+        "is_file",
+        "isdigit",
+        "isinstance",
+        "join"
+      ],
+      "skilgen/parsers/openapi.py": [
+        "ApiSpecFinding",
+        "ApiSpecItem",
+        "ApiSpecParseResult",
+        "ApiSpecParserError",
+        "Path",
+        "_auth_schemes",
+        "_compact",
+        "_error_responses",
+        "_examples",
+        "_load_mapping",
+        "_path_group",
+        "_rate_limits",
+        "_raw_pii_examples",
+        "_schema_names",
+        "_schema_refs",
+        "_security_names",
+        "_spec_version",
+        "_title",
+        "_unique",
+        "_walk_pairs",
+        "any",
+        "append",
+        "compile",
+        "dumps"
+      ],
+      "skilgen/parsers/postman.py": [
+        "ApiSpecFinding",
+        "ApiSpecItem",
+        "ApiSpecParseResult",
+        "ApiSpecParserError",
+        "Path",
+        "_auth_names",
+        "_event_list",
+        "_hardcoded_tokens",
+        "_hardcoded_urls",
+        "_iter_requests",
+        "_load_collection",
+        "_method",
+        "_scripts",
+        "_unique",
+        "_url",
+        "append",
+        "compile",
+        "dumps",
+        "exists",
+        "extend",
+        "findall",
+        "fromkeys",
+        "get",
+        "isinstance"
+      ],
+      "skilgen/parsers/runbook.py": [
+        "Path",
+        "ProcessParserError",
+        "ProcessSource",
+        "_clean_inline",
+        "_clean_list_marker",
+        "_dedupe",
+        "_extract_anti_patterns",
+        "_extract_check_paths",
+        "_extract_code_blocks",
+        "_extract_description",
+        "_extract_evidence",
+        "_extract_patterns",
+        "_extract_steps",
+        "_extract_title",
+        "_is_table_line",
+        "_list_or_paragraph_items",
+        "_looks_like_runbook_path",
+        "_numbered_items",
+        "_parse_markdown_document",
+        "_parse_markdown_text",
+        "_section_map",
+        "_strip_frontmatter",
+        "_title_from_filename",
+        "add"
+      ],
+      "skilgen/parsers/runner.py": [
+        "Path",
+        "SourceRunResult",
+        "_call_parser",
+        "_resolved_paths",
+        "_selected_sources",
+        "append",
+        "detect_source_paths",
+        "extend",
+        "fromkeys",
+        "get",
+        "is_absolute",
+        "items",
+        "normalize_skill_sources",
+        "normalize_source_name",
+        "resolve",
+        "setdefault",
+        "sorted",
+        "str",
+        "strip",
+        "write_skill_sources"
+      ],
+      "skilgen/parsers/sarif.py": [
+        "Path",
+        "SarifFinding",
+        "SarifResult",
+        "SarifTool",
+        "ValueError",
+        "_anti_patterns_from_rule",
+        "_categories_for",
+        "_dedupe_tools",
+        "_extract_cwes",
+        "_extract_tags",
+        "_file_paths_from_result",
+        "_flatten_rule_metadata",
+        "_load_sarif_json",
+        "_normalize_label",
+        "_patterns",
+        "_result_severity",
+        "_rule_id_from_index",
+        "_rules_from_run",
+        "_string_value",
+        "_tool_from_run",
+        "add",
+        "append",
+        "compile",
+        "dataclass"
+      ],
+      "skilgen/parsers/sbom.py": [
+        "Path",
+        "SbomPackage",
+        "SbomResult",
+        "ValueError",
+        "_build_result",
+        "_component_name",
+        "_cyclonedx_licenses",
+        "_cyclonedx_xml_licenses",
+        "_cyclonedx_xml_spec_version",
+        "_dedupe_license_values",
+        "_dependency_risk_key",
+        "_ecosystem_from_cpes",
+        "_ecosystem_from_purls",
+        "_is_cyclonedx_json",
+        "_is_spdx",
+        "_load_json",
+        "_local_name",
+        "_namespace",
+        "_normalize_license",
+        "_parse_cyclonedx_json",
+        "_parse_cyclonedx_xml",
+        "_parse_spdx_json",
+        "_patterns",
+        "_read_non_empty"
+      ],
+      "skilgen/parsers/security_policy.py": [
+        "Path",
+        "SecurityPolicyResult",
+        "ValueError",
+        "_dedupe",
+        "_disclosure_terms",
+        "_parse_security_markdown",
+        "_parse_structured_json",
+        "_parse_structured_payload",
+        "_parse_structured_yaml",
+        "_read_non_empty",
+        "_reporting_lines",
+        "_string_list",
+        "_string_list_or_mapping",
+        "_supported_version_lines",
+        "add",
+        "any",
+        "append",
+        "compile",
+        "dataclass",
+        "field",
+        "findall",
+        "finditer",
+        "fromkeys",
+        "get"
+      ],
+      "skilgen/parsers/sources.py": [
+        "AttributeError",
+        "SkillSource",
+        "SourceRunResult",
+        "_append_section",
+        "_call_parser",
+        "_dedupe",
+        "_default_domain",
+        "_description",
+        "_existing",
+        "_field_list",
+        "_finding_messages",
+        "_first_callable",
+        "_glob_existing",
+        "_normalize_grouped_api_result",
+        "_selected_sources",
+        "_title",
+        "add",
+        "append",
+        "callable",
+        "dataclass",
+        "detect_source_paths",
+        "exists",
+        "extend",
+        "field"
+      ],
+      "skilgen/parsers/sql_schema.py": [
+        "Path",
+        "SqlColumn",
+        "SqlConstraint",
+        "SqlIndex",
+        "SqlIssue",
+        "SqlSchemaAnalysis",
+        "SqlSchemaParseError",
+        "SqlTable",
+        "_audit_schema",
+        "_column_foreign_key_constraint",
+        "_constraint_from_export",
+        "_extract_create_tables",
+        "_find_matching_paren",
+        "_foreign_key_constraint_from_export",
+        "_format_fk_target",
+        "_json_type_to_sql",
+        "_normalize_name",
+        "_optional_name",
+        "_parse_column",
+        "_parse_indexes",
+        "_parse_table_constraint",
+        "_split_fk_target",
+        "_split_identifier_list",
+        "_split_top_level"
+      ],
+      "skilgen/parsers/terraform.py": [
+        "Counter",
+        "Path",
+        "TerraformParseResult",
+        "TerraformParserError",
+        "TerraformResource",
+        "_advance_to_next_line",
+        "_as_list",
+        "_contains_key",
+        "_extract_block_body",
+        "_hardcoded_value_findings",
+        "_has_any_tags",
+        "_has_key",
+        "_has_remote_state_data",
+        "_iter_backends",
+        "_iter_named_blocks",
+        "_iter_resources",
+        "_load_hcl",
+        "_looks_sensitive",
+        "_matching_brace_index",
+        "_parse_hcl_mapping",
+        "_public_mapping",
+        "_read_hcl_scalar",
+        "_read_text",
+        "_redacted_value"
       ],
       "skilgen/registry_client.py": [
         "RegistryClientError",
@@ -8882,8 +11866,8 @@
         "rstrip",
         "str",
         "strip",
-        "urlopen",
-        "write_text"
+        "urlencode",
+        "urlopen"
       ],
       "skilgen/sdk.py": [
         "Path",
@@ -8940,12 +11924,14 @@
       "tests/test_analytics.py": [
         "Path",
         "TemporaryDirectory",
+        "_detect_agent_runtime",
         "analytics_summary",
         "assertEqual",
         "assertGreater",
         "assertIn",
         "assertNotEqual",
         "assertTrue",
+        "dict",
         "len",
         "log_skill_usage",
         "main",
@@ -8955,6 +11941,26 @@
         "set",
         "str",
         "write_text"
+      ],
+      "tests/test_api_key.py": [
+        "FakeDb",
+        "FakeResult",
+        "FastAPI",
+        "SimpleNamespace",
+        "TestClient",
+        "_client",
+        "_credentials",
+        "_org",
+        "append",
+        "get",
+        "get_current_org_id",
+        "include_router",
+        "json",
+        "pop",
+        "post",
+        "run",
+        "setattr",
+        "update"
       ],
       "tests/test_api_smoke.py": [
         "AssertionError",
@@ -8981,6 +11987,20 @@
         "encode",
         "exists",
         "flush"
+      ],
+      "tests/test_api_spec_parsers.py": [
+        "Path",
+        "TemporaryDirectory",
+        "any",
+        "assertEqual",
+        "assertIn",
+        "assertRaisesRegex",
+        "assertTrue",
+        "main",
+        "parse_graphql_schema",
+        "parse_openapi_spec",
+        "parse_postman_collection",
+        "write_text"
       ],
       "tests/test_architecture_cli.py": [
         "Path",
@@ -9035,6 +12055,21 @@
         "main",
         "patch",
         "str"
+      ],
+      "tests/test_audit_log.py": [
+        "RuntimeError",
+        "SimpleNamespace",
+        "_FakeDb",
+        "_audit_event_response",
+        "append",
+        "assertEqual",
+        "assertIn",
+        "emit",
+        "len",
+        "main",
+        "open",
+        "read",
+        "utcnow"
       ],
       "tests/test_auth_claim_mapping.py": [
         "Path",
@@ -9103,6 +12138,21 @@
         "splitlines",
         "str",
         "strip",
+        "write_text"
+      ],
+      "tests/test_cli_sources.py": [
+        "Path",
+        "Result",
+        "TemporaryDirectory",
+        "_render_source_summary",
+        "_source_skill_files",
+        "detect_source_paths",
+        "join",
+        "len",
+        "mkdir",
+        "read_text",
+        "run_source_parsers",
+        "sorted",
         "write_text"
       ],
       "tests/test_codebase_signals.py": [
@@ -9202,6 +12252,30 @@
         "load_project_context",
         "loads",
         "main"
+      ],
+      "tests/test_dashboard_error_boundaries.py": [
+        "Path",
+        "items",
+        "read",
+        "read_text",
+        "resolve"
+      ],
+      "tests/test_data_parsers.py": [
+        "Path",
+        "TemporaryDirectory",
+        "any",
+        "assertEqual",
+        "assertIn",
+        "assertNotIn",
+        "assertRaisesRegex",
+        "assertTrue",
+        "len",
+        "main",
+        "next",
+        "parse_dbt_project",
+        "parse_kafka_artifact",
+        "parse_sql_schema",
+        "write_text"
       ],
       "tests/test_decision_planner.py": [
         "Path",
@@ -9384,6 +12458,39 @@
         "title",
         "write_text"
       ],
+      "tests/test_eval.py": [
+        "FakeDb",
+        "FakeResult",
+        "FakeScalars",
+        "FastAPI",
+        "SimpleNamespace",
+        "TestClient",
+        "_detect_skill_gaps",
+        "append",
+        "client",
+        "extend",
+        "get",
+        "import_module",
+        "include_router",
+        "isoformat",
+        "json",
+        "len",
+        "patch",
+        "payload",
+        "pop",
+        "post",
+        "range",
+        "repo",
+        "setattr",
+        "skill"
+      ],
+      "tests/test_eval_cli.py": [
+        "main",
+        "readouterr",
+        "run_cli",
+        "setattr",
+        "setenv"
+      ],
       "tests/test_feature_extractor.py": [
         "Path",
         "TemporaryDirectory",
@@ -9405,6 +12512,42 @@
         "mkdir",
         "write_text"
       ],
+      "tests/test_generation_quality.py": [
+        "Path",
+        "SkillSpec",
+        "TemporaryDirectory",
+        "_auto_sync_to_skillayer",
+        "_compute_richness_score",
+        "_extract_code_example",
+        "_spec",
+        "_write_claude_code_hook",
+        "analytics_summary",
+        "assertEqual",
+        "assertFalse",
+        "assertGreater",
+        "assertGreaterEqual",
+        "assertIn",
+        "assertIsNone",
+        "assertNotIn",
+        "assertTrue",
+        "count",
+        "dict",
+        "join",
+        "len",
+        "loads",
+        "main",
+        "mkdir"
+      ],
+      "tests/test_half_life.py": [
+        "Path",
+        "SimpleNamespace",
+        "_source",
+        "abs",
+        "datetime",
+        "read_text",
+        "resolve",
+        "timedelta"
+      ],
       "tests/test_identity_policy_store.py": [
         "Path",
         "TemporaryDirectory",
@@ -9420,6 +12563,61 @@
         "resolve_identity_policy",
         "str",
         "upsert_identity_policy"
+      ],
+      "tests/test_improvement_loop.py": [
+        "Path",
+        "SimpleNamespace",
+        "_improvement_plan",
+        "_read",
+        "_skill",
+        "_skill_code_block_count",
+        "_skill_improvement_plan",
+        "_skill_word_count",
+        "issubset",
+        "len",
+        "read_text",
+        "resolve",
+        "set",
+        "split",
+        "timedelta",
+        "update",
+        "utcnow"
+      ],
+      "tests/test_incident_parsers.py": [
+        "Path",
+        "TemporaryDirectory",
+        "any",
+        "assertEqual",
+        "assertIn",
+        "assertIsNone",
+        "assertIsNotNone",
+        "assertRaisesRegex",
+        "assertTrue",
+        "dict",
+        "fetch_github_incident_issues",
+        "join",
+        "len",
+        "main",
+        "parse_incident_sources",
+        "parse_markdown_postmortem",
+        "parse_pagerduty_export",
+        "resolve",
+        "write_text"
+      ],
+      "tests/test_infra_parsers.py": [
+        "Path",
+        "TemporaryDirectory",
+        "assertEqual",
+        "assertIn",
+        "assertNotIn",
+        "assertRaisesRegex",
+        "assertTrue",
+        "main",
+        "parse_helm_chart",
+        "parse_kubernetes_manifests",
+        "parse_terraform_directory",
+        "repr",
+        "write_text"
       ],
       "tests/test_jobs.py": [
         "Path",
@@ -9447,6 +12645,71 @@
         "resume_job_payload",
         "sleep"
       ],
+      "tests/test_llm_config.py": [
+        "assertEqual",
+        "assertIn",
+        "assertNotEqual",
+        "assertNotIn",
+        "decrypt_key",
+        "encrypt_key",
+        "index",
+        "key_hint",
+        "main",
+        "open",
+        "read"
+      ],
+      "tests/test_memory_capture.py": [
+        "AgentSession",
+        "FakeDb",
+        "FakeResult",
+        "FakeScalarResult",
+        "Message",
+        "Path",
+        "Skill",
+        "_build_transcript_text",
+        "_extract_session_knowledge",
+        "_session",
+        "_skill",
+        "_summarise_transcript",
+        "append",
+        "delenv",
+        "getattr",
+        "len",
+        "now",
+        "range",
+        "read_text",
+        "replace",
+        "resolve",
+        "run",
+        "setattr",
+        "startswith"
+      ],
+      "tests/test_memory_cli.py": [
+        "HTTPServer",
+        "Thread",
+        "dumps",
+        "encode",
+        "end_headers",
+        "get",
+        "glob",
+        "int",
+        "items",
+        "join",
+        "len",
+        "list",
+        "loads",
+        "mkdir",
+        "read",
+        "read_text",
+        "run",
+        "send_header",
+        "send_response",
+        "set",
+        "shutdown",
+        "start",
+        "str",
+        "write"
+      ],
       "tests/test_model_registry.py": [
         "SkilgenConfig",
         "assertEqual",
@@ -9454,6 +12717,32 @@
         "assertTrue",
         "main",
         "resolve_model_settings"
+      ],
+      "tests/test_org_intelligence_api.py": [
+        "AnalysisRun",
+        "AssertionError",
+        "FakeDb",
+        "FakeResult",
+        "FakeScalarResult",
+        "FastAPI",
+        "Org",
+        "Repo",
+        "ScoreHistory",
+        "Skill",
+        "TestClient",
+        "_client",
+        "_history",
+        "_now",
+        "_populated_db",
+        "_repo",
+        "_run",
+        "_skill",
+        "append",
+        "get",
+        "include_router",
+        "int",
+        "isinstance",
+        "json"
       ],
       "tests/test_org_settings.py": [
         "FakeDb",
@@ -9514,6 +12803,23 @@
         "str",
         "write_text"
       ],
+      "tests/test_policy_engine.py": [
+        "SimpleNamespace",
+        "_evaluate_rule",
+        "_policy",
+        "_repo",
+        "_skill",
+        "assertEqual",
+        "assertIn",
+        "assertTrue",
+        "len",
+        "main",
+        "open",
+        "read",
+        "timedelta",
+        "update",
+        "utcnow"
+      ],
       "tests/test_pr_comment.py": [
         "_delta_cell",
         "_score",
@@ -9534,6 +12840,30 @@
         "setattr",
         "update_pr_comment"
       ],
+      "tests/test_process_parsers.py": [
+        "Path",
+        "TemporaryDirectory",
+        "ZipFile",
+        "any",
+        "assertEqual",
+        "assertIn",
+        "assertRaisesRegex",
+        "assertTrue",
+        "len",
+        "loads",
+        "main",
+        "mkdir",
+        "parse_confluence_file",
+        "parse_confluence_source",
+        "parse_notion_api_json",
+        "parse_notion_file",
+        "parse_notion_source",
+        "parse_runbook_file",
+        "parse_runbook_source",
+        "read_text",
+        "write",
+        "write_text"
+      ],
       "tests/test_rate_limit_store.py": [
         "Path",
         "TemporaryDirectory",
@@ -9543,6 +12873,36 @@
         "assertTrue",
         "consume_rate_limit",
         "main"
+      ],
+      "tests/test_red_flags.py": [
+        "AssertionError",
+        "FakeDb",
+        "FakeResult",
+        "FakeScalarResult",
+        "FastAPI",
+        "Repo",
+        "Skill",
+        "TestClient",
+        "_client",
+        "_repo",
+        "_skill",
+        "any",
+        "compute_repo_red_flags",
+        "get",
+        "include_router",
+        "json",
+        "now",
+        "pop",
+        "replace",
+        "sorted",
+        "timedelta"
+      ],
+      "tests/test_registry.py": [
+        "Path",
+        "_source",
+        "read_text",
+        "resolve",
+        "split"
       ],
       "tests/test_registry_api.py": [
         "FakeDb",
@@ -9780,6 +13140,24 @@
         "deactivate_project_mcp_connector",
         "deactivate_skill_source"
       ],
+      "tests/test_security_parsers.py": [
+        "Path",
+        "TemporaryDirectory",
+        "any",
+        "assertEqual",
+        "assertFalse",
+        "assertIn",
+        "assertRaisesRegex",
+        "assertTrue",
+        "dumps",
+        "main",
+        "parse_sarif",
+        "parse_sbom",
+        "parse_security_policy",
+        "resolve",
+        "str",
+        "write_text"
+      ],
       "tests/test_skill_detail.py": [
         "Path",
         "SimpleNamespace",
@@ -9790,6 +13168,17 @@
         "read_text",
         "resolve",
         "run"
+      ],
+      "tests/test_skill_sources_api.py": [
+        "Path",
+        "SimpleNamespace",
+        "_build_coverage_map",
+        "_compute_skill_score",
+        "_coverage_score",
+        "_read",
+        "read_text",
+        "resolve",
+        "skill_category_for_source_type"
       ],
       "tests/test_skill_usage_analytics.py": [
         "AssertionError",
@@ -9948,7 +13337,13 @@
       ]
     },
     "config_runtime_graph": {
+      ".claude/settings.json": [
+        "env:CLAUDE_TOOL_INPUT_FILE_PATH",
+        "env:SKILLAYER_API_KEY",
+        "env:SKILLAYER_REPO_ID"
+      ],
       ".env.example": [
+        "env:ADMIN_SECRET",
         "env:API_URL",
         "env:DATABASE_URL",
         "env:DEPLOYMENT_MODE",
@@ -9965,6 +13360,7 @@
         "env:OIDC_AUDIENCE",
         "env:OIDC_ISSUER_URL",
         "env:OIDC_JWKS_URI",
+        "env:POSTGRES_PASSWORD",
         "env:QSTASH_CURRENT_SIGNING_KEY",
         "env:QSTASH_NEXT_SIGNING_KEY",
         "env:QSTASH_TOKEN",
@@ -9973,6 +13369,7 @@
         "env:WORKOS_CLIENT_ID",
         "env:WORKOS_COOKIE_PASSWORD",
         "env:WORKOS_REDIRECT_URI",
+        "runtime:docker",
         "runtime:postgres",
         "runtime:redis"
       ],
@@ -9998,556 +13395,6 @@
         "env:SKILGEN_REQUIREMENTS",
         "env:SKILGEN_SCORE_THRESHOLD",
         "env:TRACEABILITY"
-      ],
-      ".turbo/cache/05d96156f2209614-manifest.json": [
-        "env:BUILD_ID",
-        "env:LICENSE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      ".turbo/cache/088ccf5a78438390-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/1324b94b6a39f947-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/2584744feac7447b-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/2eabdbab3a2e656b-manifest.json": [
-        "env:BUILD_ID",
-        "env:LICENSE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      ".turbo/cache/35512ec318708105-manifest.json": [
-        "env:BUILD_ID",
-        "env:LICENSE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      ".turbo/cache/3af19f19c1fe0df8-manifest.json": [
-        "env:BUILD_ID",
-        "env:LICENSE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      ".turbo/cache/3e91b1f588eef3a1-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/402f872154d7e91c-manifest.json": [
-        "env:BUILD_ID",
-        "env:LICENSE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      ".turbo/cache/4af23fbc7dd3950d-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/522dea7d3da16ddd-manifest.json": [
-        "env:BUILD_ID",
-        "env:LICENSE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      ".turbo/cache/5411ec82ed63d937-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/57bbe5fb498d6e73-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/5abbf512bbef2d4c-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/5e3ba679fbb8594a-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/608408b38da933ed-manifest.json": [
-        "env:BUILD_ID",
-        "env:LICENSE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      ".turbo/cache/728c223a00108c10-manifest.json": [
-        "env:BH7",
-        "env:BUILD_ID",
-        "env:F6T"
-      ],
-      ".turbo/cache/75539954cf1492af-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/8ab728a3c130dbc4-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/8b577591ff455e0d-manifest.json": [
-        "env:BUILD_ID",
-        "env:LICENSE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      ".turbo/cache/8e76ca57f4f23337-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/9563b344098c230a-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/96cf72242e8102b4-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/a164f264df29eb71-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/a6a983669f950262-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/aae74d898a0f8428-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/b3945ac4350e177c-manifest.json": [
-        "env:BUILD_ID",
-        "env:LICENSE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      ".turbo/cache/d3bee0fbe167105c-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/e073edeea42eca79-manifest.json": [
-        "env:BUILD_ID",
-        "env:LICENSE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      ".turbo/cache/eb16a4a7226b48d1-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".turbo/cache/fe6a1306bcbe5bfb-manifest.json": [
-        "env:BUILD_ID"
-      ],
-      ".venv/lib/python3.13/site-packages/hf_xet-1.4.3.dist-info/sboms/hf_xet.cyclonedx.json": [
-        "env:AND",
-        "env:ANSI",
-        "env:API",
-        "env:ASCII",
-        "env:AVX",
-        "env:AWS",
-        "env:BLAKE3",
-        "env:BSD",
-        "env:BSL",
-        "env:CC0",
-        "env:COM",
-        "env:CPU",
-        "env:CRC32",
-        "env:CSV",
-        "env:DPC",
-        "env:ECN",
-        "env:FFI",
-        "env:GNU",
-        "env:HTML",
-        "env:HTTP",
-        "env:HTTPS",
-        "env:IANA",
-        "env:ICU",
-        "env:ICU4X",
-        "env:IDNA",
-        "env:IEEE",
-        "env:IRI",
-        "env:ISC",
-        "env:JSON",
-        "env:LLVM",
-        "env:LMDB",
-        "env:LRU",
-        "env:LZ4",
-        "env:MIME",
-        "env:MIT",
-        "env:MPL",
-        "env:MSVC",
-        "env:OSA",
-        "env:PHF",
-        "env:PKI",
-        "env:POSIX",
-        "env:QUIC",
-        "env:RAII",
-        "env:README",
-        "env:SHA",
-        "env:SIMD",
-        "env:SSE2",
-        "env:SSL",
-        "env:TLS",
-        "env:UDP",
-        "env:UNC",
-        "env:URL",
-        "env:UTF",
-        "env:VPN",
-        "env:WASM",
-        "env:WHATWG",
-        "env:WITH",
-        "env:XDG",
-        "env:XXH3",
-        "env:YOSHIOKA",
-        "runtime:docker",
-        "runtime:kubernetes"
-      ],
-      ".venv/lib/python3.13/site-packages/jiter-0.14.0.dist-info/sboms/jiter-python.cyclonedx.json": [
-        "env:AES",
-        "env:AND",
-        "env:API",
-        "env:BSD",
-        "env:COM",
-        "env:FFI",
-        "env:JSON",
-        "env:LEB128",
-        "env:LGPL",
-        "env:LLVM",
-        "env:MIT",
-        "env:MSVC",
-        "env:SHA",
-        "env:SIMD",
-        "env:UEFI",
-        "env:WIT",
-        "env:WITH",
-        "runtime:kubernetes"
-      ],
-      ".venv/lib/python3.13/site-packages/markdown_it/port.yaml": [
-        "env:HTML"
-      ],
-      ".venv/lib/python3.13/site-packages/orjson-3.11.8.dist-info/sboms/orjson.cyclonedx.json": [
-        "env:AND",
-        "env:API",
-        "env:BSD",
-        "env:BSL",
-        "env:COM",
-        "env:FFI",
-        "env:JSON",
-        "env:LLVM",
-        "env:LRU",
-        "env:MIT",
-        "env:MPL",
-        "env:MSVC",
-        "env:SHA",
-        "env:SIMD",
-        "env:UTF",
-        "env:WITH",
-        "runtime:kubernetes"
-      ],
-      ".venv/lib/python3.13/site-packages/pycparser/_c_ast.cfg": [
-        "env:AST",
-        "env:BSD",
-        "env:C99"
-      ],
-      ".venv/lib/python3.13/site-packages/pydantic_core-2.46.3.dist-info/sboms/pydantic-core.cyclonedx.json": [
-        "env:AES",
-        "env:AND",
-        "env:API",
-        "env:ASCII",
-        "env:BSD",
-        "env:DFS",
-        "env:DPC",
-        "env:FFI",
-        "env:HTML",
-        "env:ICU",
-        "env:ICU4X",
-        "env:IDNA",
-        "env:JSON",
-        "env:LGPL",
-        "env:LLVM",
-        "env:LRU",
-        "env:MIT",
-        "env:SHA",
-        "env:SIMD",
-        "env:UEFI",
-        "env:URL",
-        "env:UTF",
-        "env:WASI",
-        "env:WHATWG",
-        "env:WITH",
-        "runtime:kubernetes"
-      ],
-      ".venv/lib/python3.13/site-packages/tree_sitter_language_pack-1.6.2.dist-info/sboms/ts-pack-python.cyclonedx.json": [
-        "env:ABI",
-        "env:AES",
-        "env:AND",
-        "env:API",
-        "env:ASN",
-        "env:BER",
-        "env:BSD",
-        "env:CC0",
-        "env:CDLA",
-        "env:CMS",
-        "env:COM",
-        "env:CPU",
-        "env:CRC32",
-        "env:DEFLATE",
-        "env:DER",
-        "env:FFI",
-        "env:GNU",
-        "env:HTTP",
-        "env:IEC",
-        "env:IEEE",
-        "env:ISC",
-        "env:ISO",
-        "env:ITU",
-        "env:JSON",
-        "env:LEB128",
-        "env:LGPL",
-        "env:LLVM",
-        "env:MIT",
-        "env:MPL",
-        "env:MSVC",
-        "env:OID",
-        "env:PEM",
-        "env:PKCS",
-        "env:PKI",
-        "env:PKIX",
-        "env:POSIX",
-        "env:RFC",
-        "env:SHA",
-        "env:SIMD",
-        "env:SSL",
-        "env:TAR",
-        "env:TLS",
-        "env:TOML",
-        "env:UEFI",
-        "env:UTF",
-        "env:WASI",
-        "env:WASM",
-        "env:WIT",
-        "env:WITH",
-        "env:XDG",
-        "runtime:kubernetes"
-      ],
-      ".venv/lib/python3.13/site-packages/uuid_utils-0.14.1.dist-info/sboms/uuid-utils.cyclonedx.json": [
-        "env:AES",
-        "env:AND",
-        "env:API",
-        "env:BSD",
-        "env:DFS",
-        "env:DPC",
-        "env:FFI",
-        "env:LLVM",
-        "env:MAC",
-        "env:MD5",
-        "env:MIT",
-        "env:SHA",
-        "env:SHA1",
-        "env:WITH",
-        "runtime:kubernetes"
-      ],
-      ".venv-api/lib/python3.13/site-packages/hf_xet-1.4.3.dist-info/sboms/hf_xet.cyclonedx.json": [
-        "env:AND",
-        "env:ANSI",
-        "env:API",
-        "env:ASCII",
-        "env:AVX",
-        "env:AWS",
-        "env:BLAKE3",
-        "env:BSD",
-        "env:BSL",
-        "env:CC0",
-        "env:COM",
-        "env:CPU",
-        "env:CRC32",
-        "env:CSV",
-        "env:DPC",
-        "env:ECN",
-        "env:FFI",
-        "env:GNU",
-        "env:HTML",
-        "env:HTTP",
-        "env:HTTPS",
-        "env:IANA",
-        "env:ICU",
-        "env:ICU4X",
-        "env:IDNA",
-        "env:IEEE",
-        "env:IRI",
-        "env:ISC",
-        "env:JSON",
-        "env:LLVM",
-        "env:LMDB",
-        "env:LRU",
-        "env:LZ4",
-        "env:MIME",
-        "env:MIT",
-        "env:MPL",
-        "env:MSVC",
-        "env:OSA",
-        "env:PHF",
-        "env:PKI",
-        "env:POSIX",
-        "env:QUIC",
-        "env:RAII",
-        "env:README",
-        "env:SHA",
-        "env:SIMD",
-        "env:SSE2",
-        "env:SSL",
-        "env:TLS",
-        "env:UDP",
-        "env:UNC",
-        "env:URL",
-        "env:UTF",
-        "env:VPN",
-        "env:WASM",
-        "env:WHATWG",
-        "env:WITH",
-        "env:XDG",
-        "env:XXH3",
-        "env:YOSHIOKA",
-        "runtime:docker",
-        "runtime:kubernetes"
-      ],
-      ".venv-api/lib/python3.13/site-packages/jiter-0.14.0.dist-info/sboms/jiter-python.cyclonedx.json": [
-        "env:AES",
-        "env:AND",
-        "env:API",
-        "env:BSD",
-        "env:COM",
-        "env:FFI",
-        "env:JSON",
-        "env:LEB128",
-        "env:LGPL",
-        "env:LLVM",
-        "env:MIT",
-        "env:MSVC",
-        "env:SHA",
-        "env:SIMD",
-        "env:UEFI",
-        "env:WIT",
-        "env:WITH",
-        "runtime:kubernetes"
-      ],
-      ".venv-api/lib/python3.13/site-packages/markdown_it/port.yaml": [
-        "env:HTML"
-      ],
-      ".venv-api/lib/python3.13/site-packages/orjson-3.11.8.dist-info/sboms/orjson.cyclonedx.json": [
-        "env:AND",
-        "env:API",
-        "env:BSD",
-        "env:BSL",
-        "env:COM",
-        "env:FFI",
-        "env:JSON",
-        "env:LLVM",
-        "env:LRU",
-        "env:MIT",
-        "env:MPL",
-        "env:MSVC",
-        "env:SHA",
-        "env:SIMD",
-        "env:UTF",
-        "env:WITH",
-        "runtime:kubernetes"
-      ],
-      ".venv-api/lib/python3.13/site-packages/pycparser/_c_ast.cfg": [
-        "env:AST",
-        "env:BSD",
-        "env:C99"
-      ],
-      ".venv-api/lib/python3.13/site-packages/pydantic_core-2.46.2.dist-info/sboms/pydantic-core.cyclonedx.json": [
-        "env:AES",
-        "env:AND",
-        "env:API",
-        "env:ASCII",
-        "env:BSD",
-        "env:DFS",
-        "env:DPC",
-        "env:FFI",
-        "env:HTML",
-        "env:ICU",
-        "env:ICU4X",
-        "env:IDNA",
-        "env:JSON",
-        "env:LGPL",
-        "env:LLVM",
-        "env:LRU",
-        "env:MIT",
-        "env:SHA",
-        "env:SIMD",
-        "env:UEFI",
-        "env:URL",
-        "env:UTF",
-        "env:WASI",
-        "env:WHATWG",
-        "env:WITH",
-        "runtime:kubernetes"
-      ],
-      ".venv-api/lib/python3.13/site-packages/tree_sitter_language_pack-1.6.2.dist-info/sboms/ts-pack-python.cyclonedx.json": [
-        "env:ABI",
-        "env:AES",
-        "env:AND",
-        "env:API",
-        "env:ASN",
-        "env:BER",
-        "env:BSD",
-        "env:CC0",
-        "env:CDLA",
-        "env:CMS",
-        "env:COM",
-        "env:CPU",
-        "env:CRC32",
-        "env:DEFLATE",
-        "env:DER",
-        "env:FFI",
-        "env:GNU",
-        "env:HTTP",
-        "env:IEC",
-        "env:IEEE",
-        "env:ISC",
-        "env:ISO",
-        "env:ITU",
-        "env:JSON",
-        "env:LEB128",
-        "env:LGPL",
-        "env:LLVM",
-        "env:MIT",
-        "env:MPL",
-        "env:MSVC",
-        "env:OID",
-        "env:PEM",
-        "env:PKCS",
-        "env:PKI",
-        "env:PKIX",
-        "env:POSIX",
-        "env:RFC",
-        "env:SHA",
-        "env:SIMD",
-        "env:SSL",
-        "env:TAR",
-        "env:TLS",
-        "env:TOML",
-        "env:UEFI",
-        "env:UTF",
-        "env:WASI",
-        "env:WASM",
-        "env:WIT",
-        "env:WITH",
-        "env:XDG",
-        "runtime:kubernetes"
-      ],
-      ".venv-api/lib/python3.13/site-packages/uuid_utils-0.14.1.dist-info/sboms/uuid-utils.cyclonedx.json": [
-        "env:AES",
-        "env:AND",
-        "env:API",
-        "env:BSD",
-        "env:DFS",
-        "env:DPC",
-        "env:FFI",
-        "env:LLVM",
-        "env:MAC",
-        "env:MD5",
-        "env:MIT",
-        "env:SHA",
-        "env:SHA1",
-        "env:WITH",
-        "runtime:kubernetes"
-      ],
-      ".vercel/output/builds.json": [
-        "env:API"
-      ],
-      ".vercel/output/functions/_not-found.rsc.func/.vc-config.json": [
-        "env:BUILD_ID",
-        "env:ISR"
       ],
       "apps/api/.env.example": [
         "env:ADMIN_SECRET",
@@ -10576,11 +13423,13 @@
       "apps/api/Dockerfile": [
         "env:CMD",
         "env:COPY",
+        "env:ENTRYPOINT",
         "env:EXPOSE",
         "env:FROM",
         "env:HEALTHCHECK",
         "env:RUN",
-        "env:WORKDIR"
+        "env:WORKDIR",
+        "runtime:docker"
       ],
       "apps/api/alembic.ini": [
         "env:INFO",
@@ -10607,772 +13456,19 @@
         "env:WORKOS_COOKIE_PASSWORD",
         "env:WORKOS_REDIRECT_URI"
       ],
-      "apps/dashboard/.next/next-server.js.nft.json": [
-        "env:LICENSE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      "apps/dashboard/.next/prerender-manifest.json": [
-        "runtime:kubernetes"
-      ],
-      "apps/dashboard/.next/required-server-files.json": [
-        "env:BUILD_ID",
-        "runtime:kubernetes",
-        "runtime:slack"
-      ],
-      "apps/dashboard/.next/server/middleware-manifest.json": [
-        "env:NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
-      ],
-      "apps/dashboard/.next/server/server-reference-manifest.json": [
-        "env:RSC_SERVER_ACTION_0"
-      ],
-      "apps/dashboard/.next/standalone/apps/dashboard/.next/prerender-manifest.json": [
-        "runtime:kubernetes"
-      ],
-      "apps/dashboard/.next/standalone/apps/dashboard/.next/required-server-files.json": [
-        "env:BUILD_ID",
-        "runtime:kubernetes",
-        "runtime:slack"
-      ],
-      "apps/dashboard/.next/standalone/apps/dashboard/.next/server/middleware-manifest.json": [
-        "env:NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
-      ],
-      "apps/dashboard/.next/standalone/apps/dashboard/.next/server/server-reference-manifest.json": [
-        "env:RSC_SERVER_ACTION_0"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/@img/colour/package.json": [
-        "env:ESM",
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/@img/sharp-darwin-arm64/package.json": [
-        "env:ARM"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/@img/sharp-libvips-darwin-arm64/package.json": [
-        "env:ARM",
-        "env:LGPL"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/@next/env/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/@opentelemetry/api/package.json": [
-        "env:API",
-        "env:LICENSE",
-        "env:README"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/client-only/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/detect-libc/package.json": [
-        "env:CHANGELOG"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/nanoid/package.json": [
-        "env:MIT",
-        "env:URL"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/@edge-runtime/cookies/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/@edge-runtime/ponyfill/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/@edge-runtime/primitives/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/@hapi/accept/package.json": [
-        "env:BSD"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/@mswjs/interceptors/ClientRequest/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/@napi-rs/triples/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/@next/font/dist/google/font-data.json": [
-        "env:ACT",
-        "env:ARRR",
-        "env:B612",
-        "env:BIZ",
-        "env:BLED",
-        "env:BNCE",
-        "env:CASL",
-        "env:CRSV",
-        "env:EAN13",
-        "env:EDPT",
-        "env:EHLT",
-        "env:ELGR",
-        "env:ELSH",
-        "env:ELXP",
-        "env:FLAR",
-        "env:GFS",
-        "env:GRAD",
-        "env:HEXP",
-        "env:IBM",
-        "env:INFM",
-        "env:K2D",
-        "env:LXGW",
-        "env:MONO",
-        "env:MORF",
-        "env:NSW",
-        "env:NTR",
-        "env:PLUS",
-        "env:QLD",
-        "env:REM",
-        "env:ROND",
-        "env:SAS",
-        "env:SCAN",
-        "env:SHLN",
-        "env:SHRP",
-        "env:SIL",
-        "env:SOFT",
-        "env:SPAC",
-        "env:STIX",
-        "env:SUSE",
-        "env:TAS",
-        "env:VIC",
-        "env:VLG",
-        "env:VOLM",
-        "env:VT323",
-        "env:WAL",
-        "env:WDXL",
-        "env:WONK",
-        "env:XELA",
-        "env:XOPQ",
-        "env:XROT",
-        "env:XTRA",
-        "env:YEAR",
-        "env:YELA",
-        "env:YOPQ",
-        "env:YROT",
-        "env:YTAS",
-        "env:YTDE",
-        "env:YTFI",
-        "env:YTLC",
-        "env:YTUC",
-        "env:ZCOOL",
-        "runtime:kubernetes",
-        "runtime:slack"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/@next/font/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/@vercel/nft/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/acorn/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/amphtml-validator/package.json": [
-        "env:AMP",
-        "env:HTML"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/assert/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/async-retry/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/async-sema/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/babel/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/babel-code-frame/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/browserify-zlib/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/browserslist/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/buffer/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/bytes/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/ci-info/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/commander/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/comment-json/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/compression/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/conf/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/constants-browserify/constants.json": [
-        "env:DH_CHECK_P_NOT_PRIME",
-        "env:DH_CHECK_P_NOT_SAFE_PRIME",
-        "env:DH_NOT_SUITABLE_GENERATOR",
-        "env:DH_UNABLE_TO_CHECK_GENERATOR",
-        "env:E2BIG",
-        "env:EACCES",
-        "env:EADDRINUSE",
-        "env:EADDRNOTAVAIL",
-        "env:EAFNOSUPPORT",
-        "env:EAGAIN",
-        "env:EALREADY",
-        "env:EBADF",
-        "env:EBADMSG",
-        "env:EBUSY",
-        "env:ECANCELED",
-        "env:ECHILD",
-        "env:ECONNABORTED",
-        "env:ECONNREFUSED",
-        "env:ECONNRESET",
-        "env:EDEADLK",
-        "env:EDESTADDRREQ",
-        "env:EDOM",
-        "env:EDQUOT",
-        "env:EEXIST",
-        "env:EFAULT",
-        "env:EFBIG",
-        "env:EHOSTUNREACH",
-        "env:EIDRM",
-        "env:EILSEQ",
-        "env:EINPROGRESS",
-        "env:EINTR",
-        "env:EINVAL",
-        "env:EIO",
-        "env:EISCONN",
-        "env:EISDIR",
-        "env:ELOOP",
-        "env:EMFILE",
-        "env:EMLINK",
-        "env:EMSGSIZE",
-        "env:EMULTIHOP",
-        "env:ENAMETOOLONG",
-        "env:ENETDOWN",
-        "env:ENETRESET",
-        "env:ENETUNREACH",
-        "env:ENFILE",
-        "env:ENGINE_METHOD_ALL",
-        "env:ENGINE_METHOD_CIPHERS",
-        "env:ENGINE_METHOD_DH",
-        "env:ENGINE_METHOD_DIGESTS",
-        "env:ENGINE_METHOD_DSA",
-        "env:ENGINE_METHOD_ECDH",
-        "env:ENGINE_METHOD_ECDSA",
-        "env:ENGINE_METHOD_NONE",
-        "env:ENGINE_METHOD_PKEY_ASN1_METHS",
-        "env:ENGINE_METHOD_PKEY_METHS",
-        "env:ENGINE_METHOD_RAND",
-        "env:ENGINE_METHOD_STORE",
-        "env:ENOBUFS",
-        "env:ENODATA",
-        "env:ENODEV",
-        "env:ENOENT",
-        "env:ENOEXEC",
-        "env:ENOLCK",
-        "env:ENOLINK",
-        "env:ENOMEM",
-        "env:ENOMSG",
-        "env:ENOPROTOOPT",
-        "env:ENOSPC",
-        "env:ENOSR",
-        "env:ENOSTR",
-        "env:ENOSYS",
-        "env:ENOTCONN",
-        "env:ENOTDIR",
-        "env:ENOTEMPTY",
-        "env:ENOTSOCK",
-        "env:ENOTSUP",
-        "env:ENOTTY",
-        "env:ENXIO",
-        "env:EOPNOTSUPP",
-        "env:EOVERFLOW",
-        "env:EPERM",
-        "env:EPIPE",
-        "env:EPROTO",
-        "env:EPROTONOSUPPORT",
-        "env:EPROTOTYPE",
-        "env:ERANGE",
-        "env:EROFS",
-        "env:ESPIPE",
-        "env:ESRCH",
-        "env:ESTALE",
-        "env:ETIME",
-        "env:ETIMEDOUT",
-        "env:ETXTBSY",
-        "env:EWOULDBLOCK",
-        "env:EXDEV",
-        "env:F_OK",
-        "env:NPN_ENABLED",
-        "env:O_APPEND",
-        "env:O_CREAT",
-        "env:O_DIRECTORY",
-        "env:O_EXCL",
-        "env:O_NOCTTY",
-        "env:O_NOFOLLOW",
-        "env:O_NONBLOCK",
-        "env:O_RDONLY",
-        "env:O_RDWR",
-        "env:O_SYMLINK",
-        "env:O_SYNC",
-        "env:O_TRUNC",
-        "env:O_WRONLY",
-        "env:POINT_CONVERSION_COMPRESSED",
-        "env:POINT_CONVERSION_HYBRID",
-        "env:POINT_CONVERSION_UNCOMPRESSED",
-        "env:RSA_NO_PADDING",
-        "env:RSA_PKCS1_OAEP_PADDING",
-        "env:RSA_PKCS1_PADDING",
-        "env:RSA_PKCS1_PSS_PADDING",
-        "env:RSA_SSLV23_PADDING",
-        "env:RSA_X931_PADDING",
-        "env:R_OK",
-        "env:SIGABRT",
-        "env:SIGALRM",
-        "env:SIGBUS",
-        "env:SIGCHLD",
-        "env:SIGCONT",
-        "env:SIGFPE",
-        "env:SIGHUP",
-        "env:SIGILL",
-        "env:SIGINT",
-        "env:SIGIO",
-        "env:SIGIOT",
-        "env:SIGKILL",
-        "env:SIGPIPE",
-        "env:SIGPROF",
-        "env:SIGQUIT",
-        "env:SIGSEGV",
-        "env:SIGSTOP",
-        "env:SIGSYS",
-        "env:SIGTERM",
-        "env:SIGTRAP",
-        "env:SIGTSTP",
-        "env:SIGTTIN",
-        "env:SIGTTOU",
-        "env:SIGURG",
-        "env:SIGUSR1",
-        "env:SIGUSR2",
-        "env:SIGVTALRM",
-        "env:SIGWINCH",
-        "env:SIGXCPU",
-        "env:SIGXFSZ",
-        "env:SSL_OP_ALL",
-        "env:SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION",
-        "env:SSL_OP_CIPHER_SERVER_PREFERENCE",
-        "env:SSL_OP_CISCO_ANYCONNECT",
-        "env:SSL_OP_COOKIE_EXCHANGE",
-        "env:SSL_OP_CRYPTOPRO_TLSEXT_BUG",
-        "env:SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS",
-        "env:SSL_OP_EPHEMERAL_RSA",
-        "env:SSL_OP_LEGACY_SERVER_CONNECT",
-        "env:SSL_OP_MICROSOFT_BIG_SSLV3_BUFFER",
-        "env:SSL_OP_MICROSOFT_SESS_ID_BUG",
-        "env:SSL_OP_MSIE_SSLV2_RSA_PADDING",
-        "env:SSL_OP_NETSCAPE_CA_DN_BUG",
-        "env:SSL_OP_NETSCAPE_CHALLENGE_BUG",
-        "env:SSL_OP_NETSCAPE_DEMO_CIPHER_CHANGE_BUG",
-        "env:SSL_OP_NETSCAPE_REUSE_CIPHER_CHANGE_BUG",
-        "env:SSL_OP_NO_COMPRESSION",
-        "env:SSL_OP_NO_QUERY_MTU",
-        "env:SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION",
-        "env:SSL_OP_NO_TICKET",
-        "env:SSL_OP_PKCS1_CHECK_1",
-        "env:SSL_OP_PKCS1_CHECK_2",
-        "env:SSL_OP_SINGLE_DH_USE",
-        "env:SSL_OP_SINGLE_ECDH_USE",
-        "env:SSL_OP_SSLEAY_080_CLIENT_DH_BUG",
-        "env:SSL_OP_SSLREF2_REUSE_CERT_TYPE_BUG",
-        "env:SSL_OP_TLS_BLOCK_PADDING_BUG",
-        "env:SSL_OP_TLS_D5_BUG",
-        "env:SSL_OP_TLS_ROLLBACK_BUG",
-        "env:S_IFBLK",
-        "env:S_IFCHR",
-        "env:S_IFDIR",
-        "env:S_IFIFO",
-        "env:S_IFLNK",
-        "env:S_IFMT",
-        "env:S_IFREG",
-        "env:S_IFSOCK",
-        "env:S_IRGRP",
-        "env:S_IROTH",
-        "env:S_IRUSR",
-        "env:S_IRWXG",
-        "env:S_IRWXO",
-        "env:S_IRWXU",
-        "env:S_IWGRP",
-        "env:S_IWOTH",
-        "env:S_IWUSR",
-        "env:S_IXGRP",
-        "env:S_IXOTH",
-        "env:S_IXUSR",
-        "env:UV_UDP_REUSEADDR",
-        "env:W_OK",
-        "env:X_OK"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/content-disposition/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/cookie/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/cross-spawn/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/crypto-browserify/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/data-uri-to-buffer/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/debug/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/devalue/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/domain-browser/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/edge-runtime/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/events/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/find-up/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/fresh/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/glob/package.json": [
-        "env:ISC"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/gzip-size/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/http-proxy/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/http-proxy-agent/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/https-browserify/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/https-proxy-agent/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/icss-utils/package.json": [
-        "env:ISC"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/image-size/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/is-animated/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/is-docker/package.json": [
-        "env:MIT",
-        "runtime:docker"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/is-wsl/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/jest-worker/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/json5/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/jsonwebtoken/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/loader-utils2/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/loader-utils3/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/lodash.curry/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/lru-cache/package.json": [
-        "env:ISC"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/mini-css-extract-plugin/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/nanoid/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/neo-async/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/os-browserify/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/p-limit/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/p-queue/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/path-browserify/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/path-to-regexp/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/picomatch/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/postcss-flexbugs-fixes/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/postcss-modules-extract-imports/package.json": [
-        "env:ISC"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/postcss-modules-local-by-default/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/postcss-modules-scope/package.json": [
-        "env:ISC"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/postcss-modules-values/package.json": [
-        "env:ISC"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/postcss-preset-env/package.json": [
-        "env:CC0"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/postcss-scss/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/postcss-value-parser/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/process/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/punycode/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/querystring-es3/package.json": [
-        "runtime:s3"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/react-is/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/react-refresh/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/regenerator-runtime/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/safe-stable-stringify/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/sass-loader/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/schema-utils3/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/semver/package.json": [
-        "env:ISC"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/send/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/setimmediate/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/shell-quote/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/source-map/package.json": [
-        "env:BSD"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/source-map08/package.json": [
-        "env:BSD"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/stacktrace-parser/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/stream-browserify/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/stream-http/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/string-hash/package.json": [
-        "env:CC0"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/string_decoder/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/strip-ansi/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/superstruct/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/tar/package.json": [
-        "env:ISC"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/text-table/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/timers-browserify/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/tty-browserify/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/unistore/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/util/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/vm-browserify/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/watchpack/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/webpack-sources3/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/ws/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/zod/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/compiled/zod-validation-error/package.json": [
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/lib/server-external-packages.json": [
-        "runtime:s3"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/dist/server/capsize-font-metrics.json": [
-        "env:ACT",
-        "env:B612",
-        "env:BIZ",
-        "env:EAN13",
-        "env:FELL",
-        "env:GFS",
-        "env:IBM",
-        "env:K2D",
-        "env:LXGW",
-        "env:MPLUS1",
-        "env:MPLUS2",
-        "env:NSW",
-        "env:NTR",
-        "env:PLUS",
-        "env:QLD",
-        "env:REM",
-        "env:SAS",
-        "env:SFNS",
-        "env:SIL",
-        "env:STIX",
-        "env:SUSE",
-        "env:TAS",
-        "env:VIC",
-        "env:VLG",
-        "env:VT323",
-        "env:WAL",
-        "env:ZCOOL",
-        "runtime:kubernetes",
-        "runtime:s3",
-        "runtime:slack"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/node_modules/postcss/package.json": [
-        "env:MIT",
-        "runtime:docker"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/next/package.json": [
-        "env:BROWSER",
-        "env:MIT",
-        "env:NEXT_SERVER_NO_MANGLE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/picocolors/package.json": [
-        "env:ANSI",
-        "env:ISC"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/react/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/react-dom/package.json": [
-        "env:DOM",
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/sharp/node_modules/semver/package.json": [
-        "env:ISC"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/sharp/package.json": [
-        "env:AVIF",
-        "env:GIF",
-        "env:JPEG",
-        "env:PNG",
-        "env:TIFF",
-        "runtime:s3"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/source-map-js/package.json": [
-        "env:BSD",
-        "env:CONTRIBUTING",
-        "env:README"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/styled-jsx/package.json": [
-        "env:CSS",
-        "env:JSX",
-        "env:MIT"
-      ],
-      "apps/dashboard/.next/standalone/node_modules/typescript/package.json": [
-        "env:LICENSE",
-        "env:README",
-        "env:SECURITY"
-      ],
       "apps/dashboard/Dockerfile": [
+        "env:ARG",
+        "env:BUILD_STANDALONE",
         "env:CMD",
         "env:COPY",
         "env:ENV",
         "env:EXPOSE",
         "env:FROM",
+        "env:NEXT_PUBLIC_API_URL",
         "env:NODE_ENV",
         "env:RUN",
-        "env:WORKDIR"
-      ],
-      "apps/web/.next/next-server.js.nft.json": [
-        "env:LICENSE"
-      ],
-      "apps/web/.next/prerender-manifest.json": [
-        "runtime:kubernetes"
-      ],
-      "apps/web/.next/required-server-files.json": [
-        "env:BUILD_ID",
-        "runtime:kubernetes",
-        "runtime:slack"
-      ],
-      "apps/web/.vercel/output/builds.json": [
-        "env:API"
-      ],
-      "apps/web/.vercel/output/functions/_not-found.rsc.func/.vc-config.json": [
-        "env:BUILD_ID",
-        "env:ISR"
+        "env:WORKDIR",
+        "runtime:docker"
       ],
       "apps/worker/Dockerfile": [
         "env:CMD",
@@ -11411,6 +13507,7 @@
       "infra/docker/docker-compose.prod.yml": [
         "env:CMD",
         "env:DEPLOYMENT_MODE",
+        "env:NEXT_PUBLIC_API_URL",
         "env:POSTGRES_DB",
         "env:POSTGRES_PASSWORD",
         "env:POSTGRES_USER",
@@ -11437,3958 +13534,38 @@
         "runtime:redis"
       ],
       "infra/helm/skillayer/templates/configmap.yaml": [
+        "env:API_URL",
         "env:DEPLOYMENT_MODE",
-        "env:GITHUB_APP_ID"
+        "env:GITHUB_APP_ID",
+        "env:NEXT_PUBLIC_API_URL"
       ],
       "infra/helm/skillayer/templates/deployment-api.yaml": [
         "runtime:docker"
       ],
       "infra/helm/skillayer/templates/deployment-dashboard.yaml": [
+        "env:API_URL",
+        "env:NEXT_PUBLIC_API_URL",
         "runtime:docker"
       ],
       "infra/helm/skillayer/templates/deployment-worker.yaml": [
+        "env:HOSTNAME",
         "runtime:docker"
+      ],
+      "infra/helm/skillayer/templates/job-migrate.yaml": [
+        "runtime:docker",
+        "runtime:kubernetes"
       ],
       "infra/helm/skillayer/templates/secret.yaml": [
         "env:WORKOS_API_KEY"
       ],
       "infra/helm/skillayer/values.yaml": [
+        "runtime:kubernetes",
         "runtime:postgres",
         "runtime:redis"
       ],
-      "node_modules/.package-lock.json": [
-        "env:B4RT",
-        "env:BSD",
-        "env:CC0",
-        "env:G3ZA",
-        "env:G5KYP6",
-        "env:IICI",
-        "env:ISC",
-        "env:JTF99U",
-        "env:KIN",
-        "env:LGPL",
-        "env:LHE",
-        "env:LICENSE",
-        "env:LL8E",
-        "env:MFQ",
-        "env:MIT",
-        "env:MPL",
-        "env:O2XJB",
-        "env:PAJLD1I",
-        "env:PB7X",
-        "env:PKQ",
-        "env:SEE",
-        "env:SU5",
-        "env:T4IS",
-        "env:TER",
-        "env:THO",
-        "env:VJH",
-        "env:VOS",
-        "env:WPS",
-        "runtime:kubernetes",
-        "runtime:s3"
-      ],
-      "node_modules/@alloc/quick-lru/package.json": [
-        "env:LRU",
-        "env:MIT"
-      ],
-      "node_modules/@eslint/eslintrc/node_modules/globals/globals.json": [
-        "env:CSS",
-        "env:DDP",
-        "env:EJSON",
-        "env:HTTP",
-        "env:JSON",
-        "env:URL",
-        "env:UUID",
-        "env:WSH",
-        "env:YAHOO",
-        "env:YUI",
-        "runtime:docker",
-        "runtime:kubernetes"
-      ],
-      "node_modules/@eslint/eslintrc/node_modules/globals/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@eslint/eslintrc/package.json": [
-        "env:LICENSE",
-        "env:MIT"
-      ],
-      "node_modules/@eslint/js/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@eslint-community/eslint-utils/node_modules/eslint-visitor-keys/package.json": [
-        "env:AST"
-      ],
-      "node_modules/@eslint-community/eslint-utils/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@eslint-community/regexpp/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@floating-ui/core/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@floating-ui/dom/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@floating-ui/react-dom/package.json": [
-        "env:DOM",
-        "env:MIT"
-      ],
-      "node_modules/@floating-ui/utils/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@humanfs/types/tsconfig.json": [
-        "env:ES2022"
-      ],
-      "node_modules/@humanwhocodes/module-importer/package.json": [
-        "runtime:kubernetes"
-      ],
-      "node_modules/@humanwhocodes/retry/package.json": [
-        "runtime:kubernetes"
-      ],
-      "node_modules/@img/colour/package.json": [
-        "env:ESM",
-        "env:MIT"
-      ],
-      "node_modules/@img/sharp-darwin-arm64/package.json": [
-        "env:ARM"
-      ],
-      "node_modules/@img/sharp-libvips-darwin-arm64/package.json": [
-        "env:ARM",
-        "env:LGPL"
-      ],
-      "node_modules/@jridgewell/gen-mapping/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@jridgewell/resolve-uri/package.json": [
-        "env:MIT",
-        "env:URI"
-      ],
-      "node_modules/@jridgewell/sourcemap-codec/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@jridgewell/trace-mapping/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@next/env/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@next/eslint-plugin-next/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@next/swc-darwin-arm64/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@nodelib/fs.scandir/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@nodelib/fs.stat/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@nodelib/fs.walk/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@opentelemetry/api/package.json": [
+      "mkdocs.yml": [
         "env:API",
-        "env:LICENSE",
-        "env:README"
-      ],
-      "node_modules/@opentelemetry/api-logs/package.json": [
-        "env:API",
-        "env:LICENSE",
-        "env:README"
-      ],
-      "node_modules/@opentelemetry/core/package.json": [
-        "env:LICENSE",
-        "env:README",
-        "env:SDK"
-      ],
-      "node_modules/@opentelemetry/exporter-logs-otlp-http/package.json": [
-        "env:LICENSE",
-        "env:README"
-      ],
-      "node_modules/@opentelemetry/otlp-exporter-base/package.json": [
-        "env:LICENSE",
-        "env:OTLP",
-        "env:README"
-      ],
-      "node_modules/@opentelemetry/otlp-transformer/node_modules/@opentelemetry/resources/package.json": [
-        "env:LICENSE",
-        "env:README",
-        "env:SDK"
-      ],
-      "node_modules/@opentelemetry/otlp-transformer/package.json": [
-        "env:LICENSE",
-        "env:OTLP",
-        "env:README",
-        "env:SDK"
-      ],
-      "node_modules/@opentelemetry/resources/node_modules/@opentelemetry/core/package.json": [
-        "env:LICENSE",
-        "env:README",
-        "env:SDK"
-      ],
-      "node_modules/@opentelemetry/resources/package.json": [
-        "env:LICENSE",
-        "env:README",
-        "env:SDK"
-      ],
-      "node_modules/@opentelemetry/sdk-logs/node_modules/@opentelemetry/resources/package.json": [
-        "env:LICENSE",
-        "env:README",
-        "env:SDK"
-      ],
-      "node_modules/@opentelemetry/sdk-logs/package.json": [
-        "env:LICENSE",
-        "env:README",
-        "env:SDK"
-      ],
-      "node_modules/@opentelemetry/sdk-metrics/node_modules/@opentelemetry/resources/package.json": [
-        "env:LICENSE",
-        "env:README",
-        "env:SDK"
-      ],
-      "node_modules/@opentelemetry/sdk-metrics/package.json": [
-        "env:LICENSE",
-        "env:README",
-        "env:SDK"
-      ],
-      "node_modules/@opentelemetry/sdk-trace-base/node_modules/@opentelemetry/resources/package.json": [
-        "env:LICENSE",
-        "env:README",
-        "env:SDK"
-      ],
-      "node_modules/@opentelemetry/sdk-trace-base/package.json": [
-        "env:LICENSE",
-        "env:README"
-      ],
-      "node_modules/@opentelemetry/semantic-conventions/package.json": [
-        "env:LICENSE",
-        "env:README"
-      ],
-      "node_modules/@posthog/core/package.json": [
-        "env:MIT",
-        "env:PACKAGE_DEST"
-      ],
-      "node_modules/@posthog/types/package.json": [
-        "env:MIT",
-        "env:PACKAGE_DEST",
-        "env:SDK"
-      ],
-      "node_modules/@protobufjs/aspromise/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/@protobufjs/base64/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/@protobufjs/codegen/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/@protobufjs/eventemitter/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/@protobufjs/fetch/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/@protobufjs/float/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/@protobufjs/inquire/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/@protobufjs/path/package.json": [
-        "env:BSD",
-        "env:URL"
-      ],
-      "node_modules/@protobufjs/pool/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/@protobufjs/utf8/package.json": [
-        "env:BSD",
-        "env:UTF8"
-      ],
-      "node_modules/@radix-ui/number/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-arrow/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-arrow/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-avatar/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-collection/node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-collection/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-collection/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-compose-refs/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-dialog/node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-dialog/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-dialog/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-direction/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-dismissable-layer/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-dismissable-layer/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-dropdown-menu/node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-dropdown-menu/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-dropdown-menu/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-focus-guards/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-focus-scope/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-focus-scope/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-id/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-label/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-menu/node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-menu/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-menu/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-popover/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-popper/node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-popper/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-popper/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-portal/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-portal/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-presence/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-primitive/node_modules/@radix-ui/react-slot/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-progress/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-roving-focus/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-select/node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-select/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-select/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-separator/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-slot/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-switch/node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-switch/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-switch/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-tabs/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-tooltip/node_modules/@radix-ui/react-context/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-tooltip/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-tooltip/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-use-callback-ref/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-use-controllable-state/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-use-effect-event/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-use-escape-keydown/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-use-is-hydrated/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-use-layout-effect/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-use-previous/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-use-rect/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-use-size/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-visually-hidden/node_modules/@radix-ui/react-primitive/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/react-visually-hidden/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@radix-ui/rect/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@turbo/darwin-arm64/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@types/estree/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@types/json-schema/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@types/node/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@types/react/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@types/react-dom/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@types/trusted-types/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@typescript-eslint/eslint-plugin/node_modules/ignore/package.json": [
-        "env:ES6",
-        "env:IGNORE_ONLY_IGNORES",
-        "env:IGNORE_TEST_WIN32",
-        "env:LICENSE",
-        "env:MIT"
-      ],
-      "node_modules/@typescript-eslint/eslint-plugin/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@typescript-eslint/parser/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@typescript-eslint/project-service/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@typescript-eslint/scope-manager/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@typescript-eslint/tsconfig-utils/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@typescript-eslint/type-utils/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@typescript-eslint/types/package.json": [
-        "env:AST",
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@typescript-eslint/typescript-estree/node_modules/balanced-match/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@typescript-eslint/typescript-estree/node_modules/brace-expansion/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/@typescript-eslint/typescript-estree/node_modules/semver/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/@typescript-eslint/typescript-estree/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@typescript-eslint/utils/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@typescript-eslint/visitor-keys/node_modules/eslint-visitor-keys/package.json": [
-        "env:AST",
-        "env:README"
-      ],
-      "node_modules/@typescript-eslint/visitor-keys/package.json": [
-        "env:AST",
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@workos-inc/authkit-nextjs/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/@workos-inc/node/package.json": [
-        "env:API",
-        "env:MIT"
-      ],
-      "node_modules/acorn/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/acorn-jsx/package.json": [
-        "env:JSX",
-        "env:MIT"
-      ],
-      "node_modules/ajv/lib/refs/data.json": [
-        "env:JSON"
-      ],
-      "node_modules/ajv/lib/refs/json-schema-secure.json": [
-        "env:JSON"
-      ],
-      "node_modules/ajv/package.json": [
-        "env:AJV_FAST_TEST",
-        "env:ES5",
-        "env:JSON",
-        "env:LICENSE",
-        "env:MIT"
-      ],
-      "node_modules/ansi-styles/package.json": [
-        "env:ANSI",
-        "env:MIT"
-      ],
-      "node_modules/any-promise/package.json": [
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/anymatch/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/arg/package.json": [
-        "env:CLI",
-        "env:MIT",
-        "env:WARN_EXIT"
-      ],
-      "node_modules/argparse/package.json": [
         "env:CLI"
-      ],
-      "node_modules/aria-hidden/package.json": [
-        "env:CHANGELOG",
-        "env:DOM",
-        "env:MIT"
-      ],
-      "node_modules/aria-query/package.json": [
-        "env:ARIA",
-        "env:BABEL_ENV"
-      ],
-      "node_modules/array-buffer-byte-length/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/array-buffer-byte-length/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/array-includes/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES2016",
-        "env:ES3",
-        "env:ES7",
-        "env:MIT",
-        "env:README",
-        "runtime:s3"
-      ],
-      "node_modules/array.prototype.findlast/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES3",
-        "env:MIT",
-        "env:README",
-        "runtime:s3"
-      ],
-      "node_modules/array.prototype.flat/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES2019",
-        "env:ES3",
-        "env:MIT",
-        "env:README",
-        "runtime:s3"
-      ],
-      "node_modules/array.prototype.flatmap/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES2019",
-        "env:ES3",
-        "env:MIT",
-        "env:README",
-        "runtime:s3"
-      ],
-      "node_modules/array.prototype.tosorted/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES3",
-        "env:MIT",
-        "env:README",
-        "runtime:s3"
-      ],
-      "node_modules/arraybuffer.prototype.slice/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/ast-types-flow/package.json": [
-        "env:AST",
-        "env:MIT"
-      ],
-      "node_modules/async-function/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/autoprefixer/package.json": [
-        "env:CSS",
-        "env:MIT"
-      ],
-      "node_modules/available-typed-arrays/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/axe-core/locales/_template.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:URL",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/da.json": [
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "runtime:kubernetes"
-      ],
-      "node_modules/axe-core/locales/de.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:HTML5",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/el.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:URL",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/es.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/eu.json": [
-        "env:AAA",
-        "env:AREAN",
-        "env:ARIA",
-        "env:CSS",
-        "env:HTML",
-        "env:WCAG",
-        "runtime:kubernetes"
-      ],
-      "node_modules/axe-core/locales/fr.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:URL",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/he.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:HTML5",
-        "env:URL",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/it.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:URL",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/ja.json": [
-        "env:ARIA"
-      ],
-      "node_modules/axe-core/locales/ko.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:HTML",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/nl.json": [
-        "env:ARIA",
-        "runtime:kubernetes"
-      ],
-      "node_modules/axe-core/locales/no_NB.json": [
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "runtime:kubernetes"
-      ],
-      "node_modules/axe-core/locales/pl.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:AXE",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:URL",
-        "env:WCAG",
-        "runtime:kubernetes"
-      ],
-      "node_modules/axe-core/locales/pt_BR.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:URL",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/pt_PT.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:URL",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/ru.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:URL",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/zh_CN.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:URL",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/locales/zh_TW.json": [
-        "env:AAA",
-        "env:ARIA",
-        "env:CSS",
-        "env:DOM",
-        "env:HTML",
-        "env:URL",
-        "env:WCAG"
-      ],
-      "node_modules/axe-core/package.json": [
-        "env:LICENSE",
-        "env:MPL",
-        "env:PARTY",
-        "runtime:s3"
-      ],
-      "node_modules/axe-core/sri-history.json": [
-        "env:DKR4SE",
-        "env:GY6QNA",
-        "env:WSHVQ1",
-        "env:WUH",
-        "runtime:s3"
-      ],
-      "node_modules/axobject-query/package.json": [
-        "env:BABEL_ENV"
-      ],
-      "node_modules/balanced-match/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/baseline-browser-mapping/package.json": [
-        "env:FALSE",
-        "env:LICENSE",
-        "env:README",
-        "env:TRUE"
-      ],
-      "node_modules/binary-extensions/binary-extensions.json": [
-        "runtime:s3"
-      ],
-      "node_modules/binary-extensions/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/brace-expansion/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/braces/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/browserslist/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/call-bind/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/call-bind-apply-helpers/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/call-bound/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/callsites/package.json": [
-        "env:API",
-        "env:MIT"
-      ],
-      "node_modules/camelcase-css/package.json": [
-        "env:CSS",
-        "env:DOM",
-        "env:MIT",
-        "runtime:kubernetes"
-      ],
-      "node_modules/chalk/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/chokidar/node_modules/glob-parent/package.json": [
-        "env:ISC",
-        "env:LICENSE"
-      ],
-      "node_modules/chokidar/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/client-only/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/clsx/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/cmdk/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/color-convert/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/color-name/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/commander/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/concat-map/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/cookie/package.json": [
-        "env:HISTORY",
-        "env:HTTP",
-        "env:LICENSE",
-        "env:MIT",
-        "env:README",
-        "env:SECURITY",
-        "runtime:kubernetes"
-      ],
-      "node_modules/core-js/package.json": [
-        "env:ES2015",
-        "env:ES2016",
-        "env:ES2017",
-        "env:ES2018",
-        "env:ES2019",
-        "env:ES2020",
-        "env:ES2021",
-        "env:ES2022",
-        "env:ES2023",
-        "env:ES2024",
-        "env:ES2025",
-        "env:ES2026",
-        "env:ES3",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:MIT",
-        "env:URL",
-        "runtime:kubernetes",
-        "runtime:s3"
-      ],
-      "node_modules/cross-spawn/package.json": [
-        "env:HEAD",
-        "env:HUSKY_GIT_PARAMS",
-        "env:MIT"
-      ],
-      "node_modules/cssesc/package.json": [
-        "env:ASCII",
-        "env:CSS",
-        "env:LICENSE",
-        "env:MIT"
-      ],
-      "node_modules/csstype/package.json": [
-        "env:MDN",
-        "env:MIT"
-      ],
-      "node_modules/damerau-levenshtein/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/data-view-buffer/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/data-view-buffer/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/data-view-byte-length/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/data-view-byte-length/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/data-view-byte-offset/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/data-view-byte-offset/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/debug/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/deep-is/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/define-data-property/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/define-properties/package.json": [
-        "env:CHANGELOG",
-        "env:ES5",
-        "env:MIT"
-      ],
-      "node_modules/detect-libc/package.json": [
-        "env:CHANGELOG"
-      ],
-      "node_modules/detect-node-es/package.json": [
-        "env:ESM",
-        "env:MIT"
-      ],
-      "node_modules/dlv/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/dompurify/package.json": [
-        "env:BABEL_ENV",
-        "env:DOM",
-        "env:HTML",
-        "env:MPL",
-        "env:NODE_ENV",
-        "env:SVG",
-        "env:VERSION",
-        "env:XSS"
-      ],
-      "node_modules/dunder-proto/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/dunder-proto/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/electron-to-chromium/package.json": [
-        "env:ISC",
-        "env:LICENSE"
-      ],
-      "node_modules/emoji-regex/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:NODE_ENV"
-      ],
-      "node_modules/es-abstract/package.json": [
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:MIT"
-      ],
-      "node_modules/es-define-property/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/es-define-property/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/es-errors/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/es-errors/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/es-iterator-helpers/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES3",
-        "env:MIT",
-        "env:README",
-        "runtime:s3"
-      ],
-      "node_modules/es-object-atoms/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/es-object-atoms/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/es-set-tostringtag/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/es-shim-unscopables/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/es-to-primitive/package.json": [
-        "env:CHANGELOG",
-        "env:ES2015",
-        "env:ES5",
-        "env:MIT"
-      ],
-      "node_modules/escalade/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/escape-string-regexp/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/eslint/lib/cli-engine/formatters/formatters-meta.json": [
-        "env:API",
-        "env:CLI",
-        "env:HTML",
-        "env:JSON"
-      ],
-      "node_modules/eslint/package.json": [
-        "env:AST",
-        "env:LICENSE",
-        "env:MIT",
-        "env:README",
-        "runtime:docker"
-      ],
-      "node_modules/eslint-plugin-jsx-a11y/package.json": [
-        "env:AST",
-        "env:CHANGELOG",
-        "env:CONTRIBUTING",
-        "env:JSX",
-        "env:MIT"
-      ],
-      "node_modules/eslint-plugin-react/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/eslint-plugin-react-hooks/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/eslint-scope/package.json": [
-        "env:BSD",
-        "env:LICENSE",
-        "env:README"
-      ],
-      "node_modules/eslint-visitor-keys/package.json": [
-        "env:AST",
-        "env:README"
-      ],
-      "node_modules/espree/package.json": [
-        "env:BSD",
-        "env:README"
-      ],
-      "node_modules/esquery/package.json": [
-        "env:AST",
-        "env:BSD",
-        "env:CSS",
-        "env:README"
-      ],
-      "node_modules/esrecurse/package.json": [
-        "env:AST",
-        "env:BSD"
-      ],
-      "node_modules/estraverse/package.json": [
-        "env:AST",
-        "env:BSD"
-      ],
-      "node_modules/esutils/package.json": [
-        "env:BSD",
-        "env:LICENSE",
-        "env:README"
-      ],
-      "node_modules/eventemitter3/package.json": [
-        "env:AND",
-        "env:MIT"
-      ],
-      "node_modules/fast-deep-equal/package.json": [
-        "env:ES5",
-        "env:MIT"
-      ],
-      "node_modules/fast-glob/node_modules/glob-parent/package.json": [
-        "env:ISC",
-        "env:LICENSE"
-      ],
-      "node_modules/fast-glob/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/fast-json-stable-stringify/benchmark/test.json": [
-        "env:DANJA",
-        "env:FLEXIGEN",
-        "env:VERAQ"
-      ],
-      "node_modules/fast-json-stable-stringify/package.json": [
-        "env:JSON",
-        "env:MIT"
-      ],
-      "node_modules/fast-levenshtein/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/fastq/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/fflate/package.json": [
-        "env:MIT",
-        "env:TS_NODE_PROJECT"
-      ],
-      "node_modules/file-entry-cache/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/fill-range/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/find-up/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/flat-cache/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/flatted/package.json": [
-        "env:ISC",
-        "env:JSON",
-        "env:LICENSE",
-        "env:README"
-      ],
-      "node_modules/for-each/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/fraction.js/package.json": [
-        "env:MIT",
-        "env:RAW"
-      ],
-      "node_modules/fsevents/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/function-bind/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/function.prototype.name/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES2015",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/functions-have-names/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/generator-function/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/get-intrinsic/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/get-nonce/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/get-proto/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/get-symbol-description/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/get-symbol-description/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/glob-parent/package.json": [
-        "env:ISC",
-        "env:LICENSE"
-      ],
-      "node_modules/globals/globals.json": [
-        "env:CSS",
-        "env:DDP",
-        "env:EJSON",
-        "env:GPU",
-        "env:HID",
-        "env:HTTP",
-        "env:JSON",
-        "env:PERSISTENT",
-        "env:TEMPORARY",
-        "env:URL",
-        "env:USB",
-        "env:UUID",
-        "env:WSH",
-        "env:YAHOO",
-        "env:YUI",
-        "runtime:docker",
-        "runtime:kubernetes",
-        "runtime:s3"
-      ],
-      "node_modules/globals/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/globalthis/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/gopd/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/has-bigints/package.json": [
-        "env:CHANGELOG",
-        "env:ES2020",
-        "env:MIT"
-      ],
-      "node_modules/has-bigints/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/has-flag/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/has-property-descriptors/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/has-proto/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/has-symbols/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/has-symbols/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/has-tostringtag/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/hasown/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/hasown/package.json": [
-        "env:CHANGELOG",
-        "env:ES3",
-        "env:MIT",
-        "env:README",
-        "runtime:s3"
-      ],
-      "node_modules/ignore/package.json": [
-        "env:ES6",
-        "env:IGNORE_ONLY_IGNORES",
-        "env:IGNORE_TEST_WIN32",
-        "env:LICENSE",
-        "env:MIT"
-      ],
-      "node_modules/import-fresh/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/imurmurhash/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/internal-slot/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/internal-slot/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/iron-session/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/iron-webcrypto/package.json": [
-        "env:JSON",
-        "env:MIT"
-      ],
-      "node_modules/is-array-buffer/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/is-array-buffer/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-async-function/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/is-async-function/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-bigint/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/is-bigint/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-binary-path/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/is-boolean-object/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/is-boolean-object/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-callable/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/is-core-module/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/is-data-view/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/is-data-view/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-date-object/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/is-extglob/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/is-finalizationregistry/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/is-finalizationregistry/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-generator-function/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/is-glob/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/is-map/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/is-negative-zero/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/is-number/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/is-number-object/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/is-number-object/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-regex/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/is-regex/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-set/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/is-shared-array-buffer/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/is-shared-array-buffer/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-string/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/is-string/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-symbol/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/is-symbol/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-typed-array/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/is-weakmap/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT",
-        "runtime:kubernetes"
-      ],
-      "node_modules/is-weakref/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/is-weakref/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/is-weakset/.github/FUNDING.yml": [
-        "runtime:kubernetes"
-      ],
-      "node_modules/is-weakset/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT",
-        "runtime:kubernetes"
-      ],
-      "node_modules/is-weakset/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/isarray/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/isexe/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/iterator.prototype/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/iterator.prototype/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/jiti/package.json": [
-        "env:ESM",
-        "env:JITI_CACHE",
-        "env:JITI_DEBUG",
-        "env:JITI_REQUIRE_CACHE",
-        "env:MIT",
-        "env:NODE_ENV"
-      ],
-      "node_modules/jose/package.json": [
-        "env:JWA",
-        "env:JWE",
-        "env:JWK",
-        "env:JWKS",
-        "env:JWS",
-        "env:JWT",
-        "env:MIT"
-      ],
-      "node_modules/js-tokens/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/js-yaml/package.json": [
-        "env:MIT",
-        "env:YAML",
-        "runtime:kubernetes"
-      ],
-      "node_modules/json-buffer/package.json": [
-        "env:JSON",
-        "env:MIT"
-      ],
-      "node_modules/json-schema-traverse/package.json": [
-        "env:JSON",
-        "env:MIT"
-      ],
-      "node_modules/json-stable-stringify-without-jsonify/package.json": [
-        "env:JSON",
-        "env:MIT"
-      ],
-      "node_modules/jsx-ast-utils/package.json": [
-        "env:AST",
-        "env:CHANGELOG",
-        "env:JSX",
-        "env:MIT"
-      ],
-      "node_modules/keyv/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/language-subtag-registry/data/json/index.json": [
-        "runtime:kubernetes"
-      ],
-      "node_modules/language-subtag-registry/data/json/language.json": [
-        "runtime:kubernetes"
-      ],
-      "node_modules/language-subtag-registry/data/json/registry.json": [
-        "env:ALA",
-        "env:API",
-        "env:ASL",
-        "env:BASL",
-        "env:BCE",
-        "env:BCI",
-        "env:BSV",
-        "env:HSL",
-        "env:ISBN",
-        "env:ISO",
-        "env:KLI",
-        "env:KQSL",
-        "env:PRC",
-        "env:SAMPA",
-        "env:USA",
-        "env:USSR",
-        "runtime:kubernetes"
-      ],
-      "node_modules/language-subtag-registry/package.json": [
-        "env:BCP",
-        "env:CC0",
-        "env:IANA",
-        "env:JSON"
-      ],
-      "node_modules/language-tags/package.json": [
-        "env:IANA",
-        "env:MIT"
-      ],
-      "node_modules/levn/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/lilconfig/package.json": [
-        "env:MIT",
-        "env:NODE_OPTIONS"
-      ],
-      "node_modules/lines-and-columns/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/locate-path/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/lodash.merge/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/long/package.json": [
-        "env:LICENSE",
-        "env:README"
-      ],
-      "node_modules/loose-envify/package.json": [
-        "env:AST",
-        "env:MIT"
-      ],
-      "node_modules/lucide-react/package.json": [
-        "env:ISC",
-        "env:LICENSE",
-        "env:SVG"
-      ],
-      "node_modules/math-intrinsics/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/math-intrinsics/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/merge2/package.json": [
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/micromatch/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/minimatch/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/ms/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/mz/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/nanoid/package.json": [
-        "env:MIT",
-        "env:URL"
-      ],
-      "node_modules/natural-compare/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/next/dist/compiled/@ampproject/toolbox-optimizer/package.json": [
-        "env:AMPHTML"
-      ],
-      "node_modules/next/dist/compiled/@babel/runtime/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/@edge-runtime/cookies/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/@edge-runtime/ponyfill/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/@edge-runtime/primitives/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/@hapi/accept/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/next/dist/compiled/@mswjs/interceptors/ClientRequest/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/@napi-rs/triples/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/@next/font/dist/google/font-data.json": [
-        "env:ACT",
-        "env:ARRR",
-        "env:B612",
-        "env:BIZ",
-        "env:BLED",
-        "env:BNCE",
-        "env:CASL",
-        "env:CRSV",
-        "env:EAN13",
-        "env:EDPT",
-        "env:EHLT",
-        "env:ELGR",
-        "env:ELSH",
-        "env:ELXP",
-        "env:FLAR",
-        "env:GFS",
-        "env:GRAD",
-        "env:HEXP",
-        "env:IBM",
-        "env:INFM",
-        "env:K2D",
-        "env:LXGW",
-        "env:MONO",
-        "env:MORF",
-        "env:NSW",
-        "env:NTR",
-        "env:PLUS",
-        "env:QLD",
-        "env:REM",
-        "env:ROND",
-        "env:SAS",
-        "env:SCAN",
-        "env:SHLN",
-        "env:SHRP",
-        "env:SIL",
-        "env:SOFT",
-        "env:SPAC",
-        "env:STIX",
-        "env:SUSE",
-        "env:TAS",
-        "env:VIC",
-        "env:VLG",
-        "env:VOLM",
-        "env:VT323",
-        "env:WAL",
-        "env:WDXL",
-        "env:WONK",
-        "env:XELA",
-        "env:XOPQ",
-        "env:XROT",
-        "env:XTRA",
-        "env:YEAR",
-        "env:YELA",
-        "env:YOPQ",
-        "env:YROT",
-        "env:YTAS",
-        "env:YTDE",
-        "env:YTFI",
-        "env:YTLC",
-        "env:YTUC",
-        "env:ZCOOL",
-        "runtime:kubernetes",
-        "runtime:slack"
-      ],
-      "node_modules/next/dist/compiled/@next/font/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/@vercel/nft/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/@vercel/og/package.json": [
-        "env:MPL"
-      ],
-      "node_modules/next/dist/compiled/acorn/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/amphtml-validator/package.json": [
-        "env:AMP",
-        "env:HTML"
-      ],
-      "node_modules/next/dist/compiled/anser/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/assert/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/async-retry/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/async-sema/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/babel/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/babel-code-frame/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/browserify-zlib/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/browserslist/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/buffer/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/bytes/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/ci-info/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/cli-select/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/client-only/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/commander/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/comment-json/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/compression/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/conf/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/constants-browserify/constants.json": [
-        "env:DH_CHECK_P_NOT_PRIME",
-        "env:DH_CHECK_P_NOT_SAFE_PRIME",
-        "env:DH_NOT_SUITABLE_GENERATOR",
-        "env:DH_UNABLE_TO_CHECK_GENERATOR",
-        "env:E2BIG",
-        "env:EACCES",
-        "env:EADDRINUSE",
-        "env:EADDRNOTAVAIL",
-        "env:EAFNOSUPPORT",
-        "env:EAGAIN",
-        "env:EALREADY",
-        "env:EBADF",
-        "env:EBADMSG",
-        "env:EBUSY",
-        "env:ECANCELED",
-        "env:ECHILD",
-        "env:ECONNABORTED",
-        "env:ECONNREFUSED",
-        "env:ECONNRESET",
-        "env:EDEADLK",
-        "env:EDESTADDRREQ",
-        "env:EDOM",
-        "env:EDQUOT",
-        "env:EEXIST",
-        "env:EFAULT",
-        "env:EFBIG",
-        "env:EHOSTUNREACH",
-        "env:EIDRM",
-        "env:EILSEQ",
-        "env:EINPROGRESS",
-        "env:EINTR",
-        "env:EINVAL",
-        "env:EIO",
-        "env:EISCONN",
-        "env:EISDIR",
-        "env:ELOOP",
-        "env:EMFILE",
-        "env:EMLINK",
-        "env:EMSGSIZE",
-        "env:EMULTIHOP",
-        "env:ENAMETOOLONG",
-        "env:ENETDOWN",
-        "env:ENETRESET",
-        "env:ENETUNREACH",
-        "env:ENFILE",
-        "env:ENGINE_METHOD_ALL",
-        "env:ENGINE_METHOD_CIPHERS",
-        "env:ENGINE_METHOD_DH",
-        "env:ENGINE_METHOD_DIGESTS",
-        "env:ENGINE_METHOD_DSA",
-        "env:ENGINE_METHOD_ECDH",
-        "env:ENGINE_METHOD_ECDSA",
-        "env:ENGINE_METHOD_NONE",
-        "env:ENGINE_METHOD_PKEY_ASN1_METHS",
-        "env:ENGINE_METHOD_PKEY_METHS",
-        "env:ENGINE_METHOD_RAND",
-        "env:ENGINE_METHOD_STORE",
-        "env:ENOBUFS",
-        "env:ENODATA",
-        "env:ENODEV",
-        "env:ENOENT",
-        "env:ENOEXEC",
-        "env:ENOLCK",
-        "env:ENOLINK",
-        "env:ENOMEM",
-        "env:ENOMSG",
-        "env:ENOPROTOOPT",
-        "env:ENOSPC",
-        "env:ENOSR",
-        "env:ENOSTR",
-        "env:ENOSYS",
-        "env:ENOTCONN",
-        "env:ENOTDIR",
-        "env:ENOTEMPTY",
-        "env:ENOTSOCK",
-        "env:ENOTSUP",
-        "env:ENOTTY",
-        "env:ENXIO",
-        "env:EOPNOTSUPP",
-        "env:EOVERFLOW",
-        "env:EPERM",
-        "env:EPIPE",
-        "env:EPROTO",
-        "env:EPROTONOSUPPORT",
-        "env:EPROTOTYPE",
-        "env:ERANGE",
-        "env:EROFS",
-        "env:ESPIPE",
-        "env:ESRCH",
-        "env:ESTALE",
-        "env:ETIME",
-        "env:ETIMEDOUT",
-        "env:ETXTBSY",
-        "env:EWOULDBLOCK",
-        "env:EXDEV",
-        "env:F_OK",
-        "env:NPN_ENABLED",
-        "env:O_APPEND",
-        "env:O_CREAT",
-        "env:O_DIRECTORY",
-        "env:O_EXCL",
-        "env:O_NOCTTY",
-        "env:O_NOFOLLOW",
-        "env:O_NONBLOCK",
-        "env:O_RDONLY",
-        "env:O_RDWR",
-        "env:O_SYMLINK",
-        "env:O_SYNC",
-        "env:O_TRUNC",
-        "env:O_WRONLY",
-        "env:POINT_CONVERSION_COMPRESSED",
-        "env:POINT_CONVERSION_HYBRID",
-        "env:POINT_CONVERSION_UNCOMPRESSED",
-        "env:RSA_NO_PADDING",
-        "env:RSA_PKCS1_OAEP_PADDING",
-        "env:RSA_PKCS1_PADDING",
-        "env:RSA_PKCS1_PSS_PADDING",
-        "env:RSA_SSLV23_PADDING",
-        "env:RSA_X931_PADDING",
-        "env:R_OK",
-        "env:SIGABRT",
-        "env:SIGALRM",
-        "env:SIGBUS",
-        "env:SIGCHLD",
-        "env:SIGCONT",
-        "env:SIGFPE",
-        "env:SIGHUP",
-        "env:SIGILL",
-        "env:SIGINT",
-        "env:SIGIO",
-        "env:SIGIOT",
-        "env:SIGKILL",
-        "env:SIGPIPE",
-        "env:SIGPROF",
-        "env:SIGQUIT",
-        "env:SIGSEGV",
-        "env:SIGSTOP",
-        "env:SIGSYS",
-        "env:SIGTERM",
-        "env:SIGTRAP",
-        "env:SIGTSTP",
-        "env:SIGTTIN",
-        "env:SIGTTOU",
-        "env:SIGURG",
-        "env:SIGUSR1",
-        "env:SIGUSR2",
-        "env:SIGVTALRM",
-        "env:SIGWINCH",
-        "env:SIGXCPU",
-        "env:SIGXFSZ",
-        "env:SSL_OP_ALL",
-        "env:SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION",
-        "env:SSL_OP_CIPHER_SERVER_PREFERENCE",
-        "env:SSL_OP_CISCO_ANYCONNECT",
-        "env:SSL_OP_COOKIE_EXCHANGE",
-        "env:SSL_OP_CRYPTOPRO_TLSEXT_BUG",
-        "env:SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS",
-        "env:SSL_OP_EPHEMERAL_RSA",
-        "env:SSL_OP_LEGACY_SERVER_CONNECT",
-        "env:SSL_OP_MICROSOFT_BIG_SSLV3_BUFFER",
-        "env:SSL_OP_MICROSOFT_SESS_ID_BUG",
-        "env:SSL_OP_MSIE_SSLV2_RSA_PADDING",
-        "env:SSL_OP_NETSCAPE_CA_DN_BUG",
-        "env:SSL_OP_NETSCAPE_CHALLENGE_BUG",
-        "env:SSL_OP_NETSCAPE_DEMO_CIPHER_CHANGE_BUG",
-        "env:SSL_OP_NETSCAPE_REUSE_CIPHER_CHANGE_BUG",
-        "env:SSL_OP_NO_COMPRESSION",
-        "env:SSL_OP_NO_QUERY_MTU",
-        "env:SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION",
-        "env:SSL_OP_NO_TICKET",
-        "env:SSL_OP_PKCS1_CHECK_1",
-        "env:SSL_OP_PKCS1_CHECK_2",
-        "env:SSL_OP_SINGLE_DH_USE",
-        "env:SSL_OP_SINGLE_ECDH_USE",
-        "env:SSL_OP_SSLEAY_080_CLIENT_DH_BUG",
-        "env:SSL_OP_SSLREF2_REUSE_CERT_TYPE_BUG",
-        "env:SSL_OP_TLS_BLOCK_PADDING_BUG",
-        "env:SSL_OP_TLS_D5_BUG",
-        "env:SSL_OP_TLS_ROLLBACK_BUG",
-        "env:S_IFBLK",
-        "env:S_IFCHR",
-        "env:S_IFDIR",
-        "env:S_IFIFO",
-        "env:S_IFLNK",
-        "env:S_IFMT",
-        "env:S_IFREG",
-        "env:S_IFSOCK",
-        "env:S_IRGRP",
-        "env:S_IROTH",
-        "env:S_IRUSR",
-        "env:S_IRWXG",
-        "env:S_IRWXO",
-        "env:S_IRWXU",
-        "env:S_IWGRP",
-        "env:S_IWOTH",
-        "env:S_IWUSR",
-        "env:S_IXGRP",
-        "env:S_IXOTH",
-        "env:S_IXUSR",
-        "env:UV_UDP_REUSEADDR",
-        "env:W_OK",
-        "env:X_OK"
-      ],
-      "node_modules/next/dist/compiled/content-disposition/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/content-type/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/cookie/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/cross-spawn/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/crypto-browserify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/css.escape/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/data-uri-to-buffer/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/debug/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/devalue/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/domain-browser/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/edge-runtime/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/events/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/find-up/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/fresh/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/glob/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/next/dist/compiled/gzip-size/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/http-proxy/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/http-proxy-agent/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/https-browserify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/https-proxy-agent/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/icss-utils/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/next/dist/compiled/image-size/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/is-animated/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/is-docker/package.json": [
-        "env:MIT",
-        "runtime:docker"
-      ],
-      "node_modules/next/dist/compiled/is-wsl/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/jest-worker/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/json5/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/jsonwebtoken/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/loader-runner/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/loader-utils2/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/loader-utils3/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/lodash.curry/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/lru-cache/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/next/dist/compiled/mini-css-extract-plugin/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/nanoid/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/neo-async/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/node-html-parser/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/ora/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/os-browserify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/p-limit/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/p-queue/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/path-browserify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/path-to-regexp/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/picomatch/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/postcss-flexbugs-fixes/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/postcss-modules-extract-imports/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/next/dist/compiled/postcss-modules-local-by-default/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/postcss-modules-scope/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/next/dist/compiled/postcss-modules-values/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/next/dist/compiled/postcss-preset-env/package.json": [
-        "env:CC0"
-      ],
-      "node_modules/next/dist/compiled/postcss-safe-parser/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/postcss-scss/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/postcss-value-parser/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/process/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/punycode/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/querystring-es3/package.json": [
-        "runtime:s3"
-      ],
-      "node_modules/next/dist/compiled/raw-body/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/react-is/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/next/dist/compiled/react-refresh/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/next/dist/compiled/regenerator-runtime/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/safe-stable-stringify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/sass-loader/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/schema-utils2/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/schema-utils3/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/semver/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/next/dist/compiled/send/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/server-only/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/setimmediate/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/shell-quote/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/source-map/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/next/dist/compiled/source-map08/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/next/dist/compiled/stacktrace-parser/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/stream-browserify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/stream-http/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/string-hash/package.json": [
-        "env:CC0"
-      ],
-      "node_modules/next/dist/compiled/string_decoder/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/strip-ansi/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/superstruct/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/tar/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/next/dist/compiled/terser/package.json": [
-        "env:BSD"
-      ],
-      "node_modules/next/dist/compiled/text-table/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/timers-browserify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/tty-browserify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/ua-parser-js/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/unistore/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/util/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/vm-browserify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/watchpack/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/webpack/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/webpack-sources1/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/webpack-sources3/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/ws/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/zod/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/compiled/zod-validation-error/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/next/dist/esm/lib/server-external-packages.json": [
-        "runtime:s3"
-      ],
-      "node_modules/next/dist/lib/server-external-packages.json": [
-        "runtime:s3"
-      ],
-      "node_modules/next/dist/server/capsize-font-metrics.json": [
-        "env:ACT",
-        "env:B612",
-        "env:BIZ",
-        "env:EAN13",
-        "env:FELL",
-        "env:GFS",
-        "env:IBM",
-        "env:K2D",
-        "env:LXGW",
-        "env:MPLUS1",
-        "env:MPLUS2",
-        "env:NSW",
-        "env:NTR",
-        "env:PLUS",
-        "env:QLD",
-        "env:REM",
-        "env:SAS",
-        "env:SFNS",
-        "env:SIL",
-        "env:STIX",
-        "env:SUSE",
-        "env:TAS",
-        "env:VIC",
-        "env:VLG",
-        "env:VT323",
-        "env:WAL",
-        "env:ZCOOL",
-        "runtime:kubernetes",
-        "runtime:s3",
-        "runtime:slack"
-      ],
-      "node_modules/next/node_modules/postcss/package.json": [
-        "env:MIT",
-        "runtime:docker"
-      ],
-      "node_modules/next/package.json": [
-        "env:BROWSER",
-        "env:MIT",
-        "env:NEXT_SERVER_NO_MANGLE",
-        "runtime:docker",
-        "runtime:s3"
-      ],
-      "node_modules/node-exports-info/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/node-releases/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/normalize-path/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/object-assign/package.json": [
-        "env:ES2015",
-        "env:MIT"
-      ],
-      "node_modules/object-hash/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/object-inspect/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/object-keys/.travis.yml": [
-        "env:ALLOW_FAILURE",
-        "env:COVERAGE",
-        "env:NPM_CONFIG_STRICT_SSL",
-        "env:POSTTEST",
-        "env:PRETEST",
-        "env:TEST",
-        "env:TRAVIS_NODE_VERSION"
-      ],
-      "node_modules/object-keys/package.json": [
-        "env:ES5",
-        "env:MIT"
-      ],
-      "node_modules/object.assign/package.json": [
-        "env:API",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/object.entries/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES2017",
-        "env:ES7",
-        "env:ES8",
-        "env:MIT"
-      ],
-      "node_modules/object.fromentries/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES2017",
-        "env:ES7",
-        "env:ES8",
-        "env:MIT"
-      ],
-      "node_modules/object.values/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES2017",
-        "env:ES7",
-        "env:ES8",
-        "env:MIT"
-      ],
-      "node_modules/optionator/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/own-keys/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/p-limit/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/p-locate/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/parent-module/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/path-exists/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/path-key/package.json": [
-        "env:MIT",
-        "env:PATH"
-      ],
-      "node_modules/path-parse/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/path-to-regexp/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/picocolors/package.json": [
-        "env:ANSI",
-        "env:ISC"
-      ],
-      "node_modules/picomatch/package.json": [
-        "env:MIT",
-        "env:POSIX"
-      ],
-      "node_modules/pify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/pirates/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/possible-typed-array-names/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/possible-typed-array-names/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/postcss/package.json": [
-        "env:MIT",
-        "runtime:docker"
-      ],
-      "node_modules/postcss-import/node_modules/resolve/package.json": [
-        "env:CONTRIBUTING",
-        "env:MIT"
-      ],
-      "node_modules/postcss-import/node_modules/resolve/test/resolver/multirepo/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/postcss-import/node_modules/resolve/test/resolver/multirepo/packages/package-a/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/postcss-import/node_modules/resolve/test/resolver/multirepo/packages/package-b/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/postcss-import/node_modules/resolve/test/resolver/nested_symlinks/mylib/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/postcss-import/package.json": [
-        "env:CSS",
-        "env:MIT"
-      ],
-      "node_modules/postcss-js/package.json": [
-        "env:CSS",
-        "env:MIT"
-      ],
-      "node_modules/postcss-load-config/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/postcss-nested/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/postcss-selector-parser/package.json": [
-        "env:API",
-        "env:BABEL_ENV",
-        "env:CHANGELOG",
-        "env:LICENSE",
-        "env:MIT"
-      ],
-      "node_modules/postcss-value-parser/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/posthog-js/lib/package.json": [
-        "env:ESR",
-        "env:LICENSE",
-        "env:NODE_OPTIONS",
-        "env:PACKAGE_DEST",
-        "env:SEE",
-        "env:VERCEL",
-        "env:WRITE_MANGLED_PROPERTIES"
-      ],
-      "node_modules/posthog-js/package.json": [
-        "env:ESR",
-        "env:LICENSE",
-        "env:NODE_OPTIONS",
-        "env:PACKAGE_DEST",
-        "env:SEE",
-        "env:WRITE_MANGLED_PROPERTIES"
-      ],
-      "node_modules/posthog-js/react/package.json": [
-        "env:NPM"
-      ],
-      "node_modules/preact/compat/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/preact/debug/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/preact/devtools/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/preact/hooks/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/preact/jsx-runtime/package.json": [
-        "env:JSX",
-        "env:MIT"
-      ],
-      "node_modules/preact/package.json": [
-        "env:COVERAGE",
-        "env:DOM",
-        "env:MINIFY",
-        "env:MIT"
-      ],
-      "node_modules/preact/test-utils/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/prelude-ls/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/prop-types/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:NODE_ENV",
-        "env:README"
-      ],
-      "node_modules/protobufjs/google/protobuf/api.json": [
-        "env:SYNTAX_PROTO2",
-        "env:SYNTAX_PROTO3"
-      ],
-      "node_modules/protobufjs/google/protobuf/descriptor.json": [
-        "env:ALIAS",
-        "env:ALLOW",
-        "env:CLOSED",
-        "env:CODE_SIZE",
-        "env:CORD",
-        "env:DECLARATION",
-        "env:DEFAULT_SYMBOL_VISIBILITY_UNKNOWN",
-        "env:DELIMITED",
-        "env:EDITION_1_TEST_ONLY",
-        "env:EDITION_2023",
-        "env:EDITION_2024",
-        "env:EDITION_2_TEST_ONLY",
-        "env:EDITION_99997_TEST_ONLY",
-        "env:EDITION_99998_TEST_ONLY",
-        "env:EDITION_99999_TEST_ONLY",
-        "env:EDITION_LEGACY",
-        "env:EDITION_MAX",
-        "env:EDITION_PROTO2",
-        "env:EDITION_PROTO3",
-        "env:EDITION_UNKNOWN",
-        "env:ENFORCE_NAMING_STYLE_UNKNOWN",
-        "env:ENUM_TYPE_UNKNOWN",
-        "env:EXPANDED",
-        "env:EXPLICIT",
-        "env:EXPORT_ALL",
-        "env:EXPORT_TOP_LEVEL",
-        "env:FIELD_PRESENCE_UNKNOWN",
-        "env:GPB",
-        "env:IDEMPOTENCY_UNKNOWN",
-        "env:IDEMPOTENT",
-        "env:IMPLICIT",
-        "env:JSON_FORMAT_UNKNOWN",
-        "env:JS_NORMAL",
-        "env:JS_NUMBER",
-        "env:JS_STRING",
-        "env:LABEL_OPTIONAL",
-        "env:LABEL_REPEATED",
-        "env:LABEL_REQUIRED",
-        "env:LEGACY_BEST_EFFORT",
-        "env:LEGACY_REQUIRED",
-        "env:LENGTH_PREFIXED",
-        "env:LITE_RUNTIME",
-        "env:LOCAL_ALL",
-        "env:MESSAGE_ENCODING_UNKNOWN",
-        "env:NONE",
-        "env:NO_SIDE_EFFECTS",
-        "env:OPEN",
-        "env:PACKED",
-        "env:REPEATED_FIELD_ENCODING_UNKNOWN",
-        "env:RETENTION_RUNTIME",
-        "env:RETENTION_SOURCE",
-        "env:RETENTION_UNKNOWN",
-        "env:SET",
-        "env:SPEED",
-        "env:STRICT",
-        "env:STRING",
-        "env:STRING_PIECE",
-        "env:STYLE2024",
-        "env:STYLE_LEGACY",
-        "env:TARGET_TYPE_ENUM",
-        "env:TARGET_TYPE_ENUM_ENTRY",
-        "env:TARGET_TYPE_EXTENSION_RANGE",
-        "env:TARGET_TYPE_FIELD",
-        "env:TARGET_TYPE_FILE",
-        "env:TARGET_TYPE_MESSAGE",
-        "env:TARGET_TYPE_METHOD",
-        "env:TARGET_TYPE_ONEOF",
-        "env:TARGET_TYPE_SERVICE",
-        "env:TARGET_TYPE_UNKNOWN",
-        "env:TYPE_BOOL",
-        "env:TYPE_BYTES",
-        "env:TYPE_DOUBLE",
-        "env:TYPE_ENUM",
-        "env:TYPE_FIXED32",
-        "env:TYPE_FIXED64",
-        "env:TYPE_FLOAT",
-        "env:TYPE_GROUP",
-        "env:TYPE_INT32",
-        "env:TYPE_INT64",
-        "env:TYPE_MESSAGE",
-        "env:TYPE_SFIXED32",
-        "env:TYPE_SFIXED64",
-        "env:TYPE_SINT32",
-        "env:TYPE_SINT64",
-        "env:TYPE_STRING",
-        "env:TYPE_UINT32",
-        "env:TYPE_UINT64",
-        "env:UNVERIFIED",
-        "env:UTF8_VALIDATION_UNKNOWN",
-        "env:VERIFY",
-        "env:VISIBILITY_EXPORT",
-        "env:VISIBILITY_LOCAL",
-        "env:VISIBILITY_UNSET"
-      ],
-      "node_modules/protobufjs/google/protobuf/type.json": [
-        "env:CARDINALITY_OPTIONAL",
-        "env:CARDINALITY_REPEATED",
-        "env:CARDINALITY_REQUIRED",
-        "env:CARDINALITY_UNKNOWN",
-        "env:SYNTAX_PROTO2",
-        "env:SYNTAX_PROTO3",
-        "env:TYPE_BOOL",
-        "env:TYPE_BYTES",
-        "env:TYPE_DOUBLE",
-        "env:TYPE_ENUM",
-        "env:TYPE_FIXED32",
-        "env:TYPE_FIXED64",
-        "env:TYPE_FLOAT",
-        "env:TYPE_GROUP",
-        "env:TYPE_INT32",
-        "env:TYPE_INT64",
-        "env:TYPE_MESSAGE",
-        "env:TYPE_SFIXED32",
-        "env:TYPE_SFIXED64",
-        "env:TYPE_SINT32",
-        "env:TYPE_SINT64",
-        "env:TYPE_STRING",
-        "env:TYPE_UINT32",
-        "env:TYPE_UINT64",
-        "env:TYPE_UNKNOWN"
-      ],
-      "node_modules/protobufjs/package.json": [
-        "env:BSD",
-        "env:README"
-      ],
-      "node_modules/protobufjs/tsconfig.json": [
-        "env:ES5"
-      ],
-      "node_modules/punycode/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:RFC"
-      ],
-      "node_modules/query-selector-shadow-dom/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/queue-microtask/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/react/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/react-dom/package.json": [
-        "env:DOM",
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/react-is/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/react-remove-scroll/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/react-remove-scroll-bar/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/react-style-singleton/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/read-cache/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/readdirp/package.json": [
-        "env:API",
-        "env:MIT"
-      ],
-      "node_modules/reflect.getprototypeof/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES2015",
-        "env:ES5",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/regexp.prototype.flags/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/resolve/package.json": [
-        "env:CONTRIBUTING",
-        "env:MIT"
-      ],
-      "node_modules/resolve/test/resolver/multirepo/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/resolve/test/resolver/multirepo/packages/package-a/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/resolve/test/resolver/multirepo/packages/package-b/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/resolve/test/resolver/nested_symlinks/mylib/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/resolve-from/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/reusify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/run-parallel/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/safe-array-concat/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/safe-push-apply/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/safe-regex-test/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/scheduler/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/semver/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/set-function-length/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/set-function-length/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/set-function-name/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/set-function-name/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/set-proto/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/sharp/node_modules/semver/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/sharp/package.json": [
-        "env:AVIF",
-        "env:GIF",
-        "env:JPEG",
-        "env:PNG",
-        "env:TIFF",
-        "runtime:s3"
-      ],
-      "node_modules/shebang-command/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/shebang-regex/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/side-channel/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/side-channel-list/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/side-channel-map/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/side-channel-weakmap/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/source-map-js/package.json": [
-        "env:BSD",
-        "env:CONTRIBUTING",
-        "env:README"
-      ],
-      "node_modules/stop-iteration-iterator/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/string.prototype.includes/.github/workflows/publish-on-tag.yml": [
-        "env:NPM_TOKEN"
-      ],
-      "node_modules/string.prototype.includes/.github/workflows/rebase.yml": [
-        "env:GITHUB_TOKEN"
-      ],
-      "node_modules/string.prototype.includes/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/string.prototype.matchall/package.json": [
-        "env:CHANGELOG",
-        "env:ES2020",
-        "env:MIT"
-      ],
-      "node_modules/string.prototype.repeat/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/string.prototype.trim/package.json": [
-        "env:API",
-        "env:CHANGELOG",
-        "env:ES5",
-        "env:MIT"
-      ],
-      "node_modules/string.prototype.trimend/package.json": [
-        "env:CHANGELOG",
-        "env:ES2019",
-        "env:MIT"
-      ],
-      "node_modules/string.prototype.trimstart/package.json": [
-        "env:CHANGELOG",
-        "env:ES2019",
-        "env:MIT"
-      ],
-      "node_modules/strip-json-comments/package.json": [
-        "env:JSON",
-        "env:MIT"
-      ],
-      "node_modules/styled-jsx/package.json": [
-        "env:CSS",
-        "env:JSX",
-        "env:MIT"
-      ],
-      "node_modules/sucrase/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/supports-color/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/supports-preserve-symlinks-flag/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/tailwind-merge/package.json": [
-        "env:CSS",
-        "env:DANYS_MACHINE",
-        "env:MIT"
-      ],
-      "node_modules/tailwindcss/node_modules/fast-glob/node_modules/glob-parent/package.json": [
-        "env:ISC",
-        "env:LICENSE"
-      ],
-      "node_modules/tailwindcss/node_modules/fast-glob/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/tailwindcss/node_modules/resolve/package.json": [
-        "env:CONTRIBUTING",
-        "env:MIT"
-      ],
-      "node_modules/tailwindcss/node_modules/resolve/test/resolver/multirepo/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/tailwindcss/node_modules/resolve/test/resolver/multirepo/packages/package-a/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/tailwindcss/node_modules/resolve/test/resolver/multirepo/packages/package-b/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/tailwindcss/node_modules/resolve/test/resolver/nested_symlinks/mylib/package.json": [
-        "env:ISC"
-      ],
-      "node_modules/tailwindcss/package.json": [
-        "env:CSS",
-        "env:CSS_TRANSFORMER_WASM",
-        "env:MIT"
-      ],
-      "node_modules/thenify/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/thenify-all/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/tinyglobby/node_modules/fdir/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/tinyglobby/node_modules/picomatch/package.json": [
-        "env:MIT",
-        "env:POSIX"
-      ],
-      "node_modules/tinyglobby/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/to-regex-range/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/ts-api-utils/package.json": [
-        "env:API",
-        "env:MIT"
-      ],
-      "node_modules/turbo/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/turbo/schema.json": [
-        "env:API",
-        "env:AWS_SECRET_KEY",
-        "env:CORS",
-        "env:HMAC",
-        "env:HTTP",
-        "env:JSON",
-        "env:OPTIONS",
-        "env:SHA256",
-        "env:TURBO_REMOTE_CACHE_SIGNATURE_KEY",
-        "env:URL"
-      ],
-      "node_modules/type-check/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/typed-array-buffer/.github/FUNDING.yml": [
-        "env:URL"
-      ],
-      "node_modules/typed-array-buffer/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/typed-array-byte-length/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/typed-array-byte-length/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/typed-array-byte-offset/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/typed-array-byte-offset/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/typed-array-length/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/typed-array-length/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/typescript/lib/cs/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:AND",
-        "env:API",
-        "env:ASCII",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:CRLF",
-        "env:DIRECTORY_6038",
-        "env:DRUH",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND_6034",
-        "env:LOCATION_6037",
-        "env:NEBO",
-        "env:NEWLINE_6061",
-        "env:PARAMETRY",
-        "env:SOUBOR",
-        "env:STRATEGIE",
-        "env:STRATEGY_6039",
-        "env:TSC",
-        "env:UMD",
-        "env:URI",
-        "env:URL",
-        "env:UTF",
-        "env:VERSION_6036",
-        "env:VERZE",
-        "env:WATCH_OPTIONS_6918",
-        "runtime:docker"
-      ],
-      "node_modules/typescript/lib/de/diagnosticMessages.generated.json": [
-        "env:ALLE",
-        "env:ALLGEMEINE",
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:API",
-        "env:ART",
-        "env:ASCII",
-        "env:BEFEHLE",
-        "env:BEFEHLSZEILENFLAGS",
-        "env:BOM",
-        "env:BUILDOPTIONEN",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:COMPILEROPTIONEN",
-        "env:CPU",
-        "env:CRLF",
-        "env:DATEI",
-        "env:DIRECTORY_6038",
-        "env:DOS",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESC",
-        "env:ESM",
-        "env:FALSE",
-        "env:FALSY",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:GET",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND_6034",
-        "env:LOCATION_6037",
-        "env:MAP",
-        "env:NEUE",
-        "env:NEWLINE_6061",
-        "env:NULL",
-        "env:NULLISH",
-        "env:ODER",
-        "env:REST",
-        "env:SET",
-        "env:SPEICHERORT",
-        "env:STRATEGIE",
-        "env:STRATEGY_6039",
-        "env:TRUE",
-        "env:TRUTHY",
-        "env:TSBUILDINFO",
-        "env:UMD",
-        "env:URI",
-        "env:URL",
-        "env:UTF",
-        "env:VERSION",
-        "env:VERSION_6036",
-        "env:VERZEICHNIS",
-        "env:WATCH_OPTIONS_6918",
-        "env:ZEILE",
-        "runtime:docker",
-        "runtime:kubernetes"
-      ],
-      "node_modules/typescript/lib/es/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:API",
-        "env:ARCHIVO",
-        "env:ASCII",
-        "env:BOM",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMANDOS",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:COMPILADOR",
-        "env:COMUNES",
-        "env:CPU",
-        "env:CRLF",
-        "env:CTS",
-        "env:DEL",
-        "env:DIRECTORIO",
-        "env:DIRECTORY_6038",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:ESTRATEGIA",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND_6034",
-        "env:LAS",
-        "env:LOCATION_6037",
-        "env:MARCAS",
-        "env:NEWLINE_6061",
-        "env:NUEVA",
-        "env:NULL",
-        "env:OPCIONES",
-        "env:REST",
-        "env:STRATEGY_6039",
-        "env:STRICT",
-        "env:TIPO",
-        "env:TODAS",
-        "env:UMD",
-        "env:URI",
-        "env:URL",
-        "env:UTF",
-        "env:VERSION_6036",
-        "env:WATCH_OPTIONS_6918",
-        "runtime:docker"
-      ],
-      "node_modules/typescript/lib/fr/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:API",
-        "env:ASCII",
-        "env:BOM",
-        "env:BUILD",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMMANDE",
-        "env:COMMANDES",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:COMPILATEUR",
-        "env:COURANTES",
-        "env:CRLF",
-        "env:DIRECTORY_6038",
-        "env:EMPLACEMENT",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:FICHIER",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:GENRE",
-        "env:HTML",
-        "env:INDICATEURS",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND_6034",
-        "env:LES",
-        "env:LIGNE",
-        "env:LOCATION_6037",
-        "env:NEWLINE_6061",
-        "env:NOUVELLE",
-        "env:OBSERVATION",
-        "env:OPTIONS",
-        "env:REST",
-        "env:STRATEGY_6039",
-        "env:TOUTES",
-        "env:UMD",
-        "env:URI",
-        "env:URL",
-        "env:UTF",
-        "env:VERSION",
-        "env:VERSION_6036",
-        "env:WATCH_OPTIONS_6918",
-        "runtime:docker"
-      ],
-      "node_modules/typescript/lib/it/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:AND",
-        "env:API",
-        "env:ASCII",
-        "env:BOM",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMANDI",
-        "env:COMANDO",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:COMPILATORE",
-        "env:COMPILAZIONE",
-        "env:COMUNI",
-        "env:CONTROLLO",
-        "env:CPU",
-        "env:CRLF",
-        "env:CTS",
-        "env:DEL",
-        "env:DELL",
-        "env:DELLA",
-        "env:DIRECTORY",
-        "env:DIRECTORY_6038",
-        "env:DOS",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:ESPRESSIONE",
-        "env:FILE",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:FLAG",
-        "env:GLOB",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND_6034",
-        "env:LOCATION_6037",
-        "env:MTS",
-        "env:NEWLINE_6061",
-        "env:NUOVA",
-        "env:OPZIONI",
-        "env:PERCORSO",
-        "env:REST",
-        "env:RIGA",
-        "env:STRATEGIA",
-        "env:STRATEGY_6039",
-        "env:TIPOLOGIA",
-        "env:TUTTE",
-        "env:UMD",
-        "env:UNIX",
-        "env:URI",
-        "env:URL",
-        "env:UTF",
-        "env:VERSIONE",
-        "env:VERSION_6036",
-        "env:WATCH_OPTIONS_6918",
-        "runtime:docker"
-      ],
-      "node_modules/typescript/lib/ja/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:AND",
-        "env:API",
-        "env:ASCII",
-        "env:BOM",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:CPU",
-        "env:CRLF",
-        "env:DIRECTORY_6038",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND_6034",
-        "env:LOCATION_6037",
-        "env:NEWLINE_6061",
-        "env:NULL",
-        "env:STRATEGY_6039",
-        "env:UMD",
-        "env:URI",
-        "env:URL",
-        "env:UTF",
-        "env:VERSION_6036",
-        "env:WATCH_OPTIONS_6918",
-        "runtime:docker"
-      ],
-      "node_modules/typescript/lib/ko/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:AND",
-        "env:ASCII",
-        "env:BOM",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:CPU",
-        "env:CRLF",
-        "env:DIRECTORY_6038",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:GLOB",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND",
-        "env:KIND_6034",
-        "env:LOCATION_6037",
-        "env:NEWLINE_6061",
-        "env:REST",
-        "env:STRATEGY_6039",
-        "env:UMD",
-        "env:URL",
-        "env:UTF",
-        "env:VERSION_6036",
-        "env:WATCH_OPTIONS_6918",
-        "runtime:docker"
-      ],
-      "node_modules/typescript/lib/pl/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:API",
-        "env:ASCII",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:CPU",
-        "env:CRLF",
-        "env:CTS",
-        "env:DIRECTORY_6038",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:FLAGI",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KATALOG",
-        "env:KIND_6034",
-        "env:KOMPILACJI",
-        "env:KOMPILATORA",
-        "env:LOCATION_6037",
-        "env:LOKALIZACJA",
-        "env:LUB",
-        "env:MTS",
-        "env:NEWLINE_6061",
-        "env:NOWY",
-        "env:OBSERWACJI",
-        "env:OPCJE",
-        "env:ORAZ",
-        "env:PLIK",
-        "env:POLECENIA",
-        "env:REST",
-        "env:RODZAJ",
-        "env:STRATEGIA",
-        "env:STRATEGY_6039",
-        "env:TYPOWE",
-        "env:UMD",
-        "env:URI",
-        "env:URL",
-        "env:UTF",
-        "env:VERSION_6036",
-        "env:WATCH_OPTIONS_6918",
-        "env:WERSJA",
-        "env:WIERSZ",
-        "env:WIERSZA",
-        "env:WSZYSTKIE",
-        "runtime:docker",
-        "runtime:kubernetes"
-      ],
-      "node_modules/typescript/lib/pt-br/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:API",
-        "env:ARQUIVO",
-        "env:ASCII",
-        "env:BOM",
-        "env:BUILD",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMANDO",
-        "env:COMANDOS",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:COMPILADOR",
-        "env:COMUNS",
-        "env:CPU",
-        "env:CRLF",
-        "env:DIRECTORY_6038",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND_6034",
-        "env:LINHA",
-        "env:LOCAL",
-        "env:LOCATION_6037",
-        "env:NEWLINE",
-        "env:NEWLINE_6061",
-        "env:REST",
-        "env:SINALIZADORES",
-        "env:STRATEGY_6039",
-        "env:TIPO",
-        "env:TODAS",
-        "env:UMD",
-        "env:URI",
-        "env:URL",
-        "env:UTF",
-        "env:VERSION_6036",
-        "env:WATCH_OPTIONS_6918",
-        "runtime:docker"
-      ],
-      "node_modules/typescript/lib/ru/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:API",
-        "env:ASCII",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:CRLF",
-        "env:CTS",
-        "env:DIRECTORY_6038",
-        "env:DOS",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND_6034",
-        "env:LOCATION_6037",
-        "env:MTS",
-        "env:NEWLINE_6061",
-        "env:NULL",
-        "env:REST",
-        "env:STRATEGY_6039",
-        "env:TSBUILDINFO",
-        "env:TSC",
-        "env:UMD",
-        "env:UNIX",
-        "env:URI",
-        "env:URL",
-        "env:UTF",
-        "env:VERSION_6036",
-        "env:WATCH_OPTIONS_6918",
-        "runtime:docker"
-      ],
-      "node_modules/typescript/lib/tr/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:API",
-        "env:ASCII",
-        "env:BAYRAKLARI",
-        "env:BOM",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:CPU",
-        "env:CRLF",
-        "env:DERLEME",
-        "env:DIRECTORY_6038",
-        "env:DOSYA",
-        "env:DRY",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND_6034",
-        "env:KOMUT",
-        "env:KOMUTLAR",
-        "env:KONUM",
-        "env:LOCATION_6037",
-        "env:NEWLINE_6061",
-        "env:ORTAK",
-        "env:REST",
-        "env:SATIR",
-        "env:SATIRI",
-        "env:STRATEGY_6039",
-        "env:UMD",
-        "env:URI",
-        "env:UTF",
-        "env:VERSION_6036",
-        "env:VEYA",
-        "env:WATCH_OPTIONS_6918",
-        "runtime:docker",
-        "runtime:kubernetes"
-      ],
-      "node_modules/typescript/lib/typesMap.json": [
-        "env:ES6",
-        "env:SAT",
-        "env:UUID",
-        "runtime:redis"
-      ],
-      "node_modules/typescript/lib/zh-cn/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:AND",
-        "env:API",
-        "env:ASCII",
-        "env:BOM",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:CPU",
-        "env:CRLF",
-        "env:DIRECTORY_6038",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND_6034",
-        "env:LOCATION_6037",
-        "env:NEWLINE_6061",
-        "env:NULL",
-        "env:STRATEGY_6039",
-        "env:UMD",
-        "env:URI",
-        "env:URL",
-        "env:UTF",
-        "env:VERSION_6036",
-        "env:WATCH_OPTIONS_6918",
-        "runtime:docker"
-      ],
-      "node_modules/typescript/lib/zh-tw/diagnosticMessages.generated.json": [
-        "env:ALL_COMPILER_OPTIONS_6917",
-        "env:AMD",
-        "env:AND",
-        "env:API",
-        "env:ASCII",
-        "env:BOM",
-        "env:BUILD_OPTIONS_6919",
-        "env:COMMAND_LINE_FLAGS_6921",
-        "env:COMMON_COMMANDS_6916",
-        "env:COMMON_COMPILER_OPTIONS_6920",
-        "env:CPU",
-        "env:CRLF",
-        "env:DIRECTORY_6038",
-        "env:DOS",
-        "env:DRY",
-        "env:ES2015",
-        "env:ES2018",
-        "env:ES2020",
-        "env:ES2022",
-        "env:ES5",
-        "env:ES6",
-        "env:ES7",
-        "env:ESM",
-        "env:FILE_6035",
-        "env:FILE_OR_DIRECTORY_6040",
-        "env:HTML",
-        "env:JSON",
-        "env:JSX",
-        "env:KIND_6034",
-        "env:LOCATION_6037",
-        "env:NEWLINE_6061",
-        "env:REST",
-        "env:STRATEGY_6039",
-        "env:UMD",
-        "env:UNIX",
-        "env:URI",
-        "env:URL",
-        "env:UTF",
-        "env:VERSION_6036",
-        "env:WATCH_OPTIONS_6918",
-        "runtime:docker"
-      ],
-      "node_modules/typescript/package.json": [
-        "env:LICENSE",
-        "env:README",
-        "env:SECURITY"
-      ],
-      "node_modules/typescript-eslint/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/unbox-primitive/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/uncrypto/package.json": [
-        "env:API",
-        "env:MIT"
-      ],
-      "node_modules/undici-types/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/update-browserslist-db/package.json": [
-        "env:CLI",
-        "env:MIT"
-      ],
-      "node_modules/uri-js/package.json": [
-        "env:BSD",
-        "env:CHANGELOG",
-        "env:HTTP",
-        "env:HTTPS",
-        "env:IDN",
-        "env:IRI",
-        "env:LICENSE",
-        "env:MAILTO",
-        "env:README",
-        "env:RFC",
-        "env:RFC2141",
-        "env:RFC2616",
-        "env:RFC2818",
-        "env:RFC3986",
-        "env:RFC3987",
-        "env:RFC4122",
-        "env:RFC4291",
-        "env:RFC5891",
-        "env:RFC5952",
-        "env:RFC6068",
-        "env:RFC6455",
-        "env:RFC6874",
-        "env:URI",
-        "env:URN",
-        "env:UUID",
-        "env:WSS"
-      ],
-      "node_modules/use-callback-ref/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/use-sidecar/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/use-sync-external-store/package.json": [
-        "env:LICENSE",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/util-deprecate/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/web-vitals/package.json": [
-        "env:CLS",
-        "env:FCP",
-        "env:INP",
-        "env:LCP",
-        "env:TTFB"
-      ],
-      "node_modules/which/package.json": [
-        "env:CHANGELOG",
-        "env:ISC",
-        "env:PATH"
-      ],
-      "node_modules/which-boxed-primitive/package.json": [
-        "env:CHANGELOG",
-        "env:MIT"
-      ],
-      "node_modules/which-boxed-primitive/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/which-builtin-type/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "env:README"
-      ],
-      "node_modules/which-builtin-type/tsconfig.json": [
-        "env:ES2021"
-      ],
-      "node_modules/which-collection/package.json": [
-        "env:CHANGELOG",
-        "env:MIT",
-        "runtime:kubernetes"
-      ],
-      "node_modules/which-typed-array/package.json": [
-        "env:CHANGELOG",
-        "env:ES6",
-        "env:MIT"
-      ],
-      "node_modules/word-wrap/package.json": [
-        "env:MIT"
-      ],
-      "node_modules/yocto-queue/package.json": [
-        "env:MIT"
       ],
       "package-lock.json": [
         "env:AND",
@@ -15445,6 +13622,59 @@
       ],
       "skilgen.yml": [
         "env:OPENAI_API_KEY"
+      ],
+      "tests/fixtures/cyclonedx_bom.json": [
+        "env:BSD",
+        "env:GPL",
+        "env:NOASSERTION"
+      ],
+      "tests/fixtures/helm_chart/Chart.yaml": [
+        "runtime:postgres"
+      ],
+      "tests/fixtures/helm_chart/templates/deployment.yaml": [
+        "runtime:docker"
+      ],
+      "tests/fixtures/helm_chart/templates/job.yaml": [
+        "runtime:docker",
+        "runtime:kubernetes"
+      ],
+      "tests/fixtures/helm_chart/values.yaml": [
+        "runtime:postgres"
+      ],
+      "tests/fixtures/k8s_deployment.yaml": [
+        "env:API_TOKEN",
+        "env:LOG_LEVEL",
+        "runtime:docker"
+      ],
+      "tests/fixtures/kafka_topic.yaml": [
+        "env:BACKWARD"
+      ],
+      "tests/fixtures/pagerduty_export.json": [
+        "env:API",
+        "env:SLO"
+      ],
+      "tests/fixtures/postman_collection.json": [
+        "env:GET",
+        "env:POST"
+      ],
+      "tests/fixtures/security_policy.yml": [
+        "env:AGPL",
+        "env:GPL"
+      ],
+      "tests/fixtures/spdx_sbom.json": [
+        "env:CC0",
+        "env:DOCUMENT",
+        "env:GPL",
+        "env:MANAGER",
+        "env:NOASSERTION",
+        "env:PACKAGE",
+        "env:SECURITY",
+        "env:SPDX",
+        "env:SPDXID"
+      ],
+      "tests/fixtures/terraform_main.tf": [
+        "runtime:kubernetes",
+        "runtime:s3"
       ]
     },
     "test_mapping": {
@@ -15459,8 +13689,23 @@
       "tests/test_analytics.py": [
         "skilgen/core/analytics.py"
       ],
+      "tests/test_api_key.py": [
+        "scripts/deploy_api.py",
+        "skilgen/api/__init__.py",
+        "skilgen/api/jobs.py",
+        "skilgen/api/server.py",
+        "skilgen/api/service.py"
+      ],
       "tests/test_api_smoke.py": [
         "scripts/deploy_api.py",
+        "skilgen/api/__init__.py",
+        "skilgen/api/jobs.py",
+        "skilgen/api/server.py",
+        "skilgen/api/service.py"
+      ],
+      "tests/test_api_spec_parsers.py": [
+        "scripts/deploy_api.py",
+        "skilgen/agents/language_parsers.py",
         "skilgen/api/__init__.py",
         "skilgen/api/jobs.py",
         "skilgen/api/server.py",
@@ -15480,6 +13725,9 @@
       "tests/test_audit.py": [
         "skilgen/core/audit.py"
       ],
+      "tests/test_audit_log.py": [
+        "skilgen/core/audit.py"
+      ],
       "tests/test_auth_claim_mapping.py": [
         "skilgen/core/auth_tokens.py"
       ],
@@ -15492,6 +13740,11 @@
       "tests/test_cli.py": [
         "skilgen/cli/__init__.py",
         "skilgen/cli/main.py"
+      ],
+      "tests/test_cli_sources.py": [
+        "skilgen/cli/__init__.py",
+        "skilgen/cli/main.py",
+        "skilgen/parsers/sources.py"
       ],
       "tests/test_codebase_signals.py": [
         "skilgen/agents/codebase_signals.py",
@@ -15515,6 +13768,17 @@
         "scripts/deploy_dashboard.py",
         "skilgen/cli/__init__.py",
         "skilgen/cli/main.py"
+      ],
+      "tests/test_dashboard_error_boundaries.py": [
+        "scripts/deploy_dashboard.py"
+      ],
+      "tests/test_data_parsers.py": [
+        "skilgen/agents/language_parsers.py",
+        "skilgen/core/runtime_data.py",
+        "skilgen/parsers/__init__.py",
+        "skilgen/parsers/auto_detect.py",
+        "skilgen/parsers/confluence.py",
+        "skilgen/parsers/dbt.py"
       ],
       "tests/test_decision_planner.py": [
         "skilgen/agents/decision_planner.py",
@@ -15558,7 +13822,12 @@
         "skilgen/cli/__init__.py",
         "skilgen/cli/main.py",
         "skilgen/core/identity_policy_store.py",
-        "skilgen/enterprise_skills.py"
+        "skilgen/enterprise_skills.py",
+        "skilgen/parsers/security_policy.py"
+      ],
+      "tests/test_eval_cli.py": [
+        "skilgen/cli/__init__.py",
+        "skilgen/cli/main.py"
       ],
       "tests/test_feature_extractor.py": [
         "skilgen/agents/feature_extractor.py"
@@ -15569,14 +13838,51 @@
       "tests/test_identity_policy_store.py": [
         "skilgen/core/identity_policy_store.py",
         "skilgen/core/enterprise_policy.py",
-        "skilgen/core/rate_limit_store.py"
+        "skilgen/core/rate_limit_store.py",
+        "skilgen/parsers/security_policy.py"
+      ],
+      "tests/test_incident_parsers.py": [
+        "skilgen/parsers/incident.py",
+        "skilgen/agents/language_parsers.py",
+        "skilgen/parsers/__init__.py",
+        "skilgen/parsers/auto_detect.py",
+        "skilgen/parsers/confluence.py",
+        "skilgen/parsers/dbt.py"
+      ],
+      "tests/test_infra_parsers.py": [
+        "skilgen/agents/language_parsers.py",
+        "skilgen/parsers/__init__.py",
+        "skilgen/parsers/auto_detect.py",
+        "skilgen/parsers/confluence.py",
+        "skilgen/parsers/dbt.py",
+        "skilgen/parsers/graphql.py"
       ],
       "tests/test_jobs.py": [
         "skilgen/api/jobs.py"
       ],
+      "tests/test_llm_config.py": [
+        "skilgen/core/config.py"
+      ],
+      "tests/test_memory_capture.py": [
+        "skilgen/core/project_memory.py",
+        "skilgen/core/run_memory.py"
+      ],
+      "tests/test_memory_cli.py": [
+        "skilgen/cli/__init__.py",
+        "skilgen/cli/main.py",
+        "skilgen/core/project_memory.py",
+        "skilgen/core/run_memory.py"
+      ],
       "tests/test_model_registry.py": [
         "skilgen/agents/model_registry.py",
         "skilgen/registry_client.py"
+      ],
+      "tests/test_org_intelligence_api.py": [
+        "scripts/deploy_api.py",
+        "skilgen/api/__init__.py",
+        "skilgen/api/jobs.py",
+        "skilgen/api/server.py",
+        "skilgen/api/service.py"
       ],
       "tests/test_overview_data.py": [
         "skilgen/core/runtime_data.py"
@@ -15585,9 +13891,26 @@
         "skilgen/cli/__init__.py",
         "skilgen/cli/main.py"
       ],
+      "tests/test_policy_engine.py": [
+        "skilgen/core/enterprise_policy.py",
+        "skilgen/core/identity_policy_store.py",
+        "skilgen/parsers/security_policy.py"
+      ],
+      "tests/test_process_parsers.py": [
+        "skilgen/agents/language_parsers.py",
+        "skilgen/parsers/__init__.py",
+        "skilgen/parsers/auto_detect.py",
+        "skilgen/parsers/confluence.py",
+        "skilgen/parsers/dbt.py",
+        "skilgen/parsers/graphql.py"
+      ],
       "tests/test_rate_limit_store.py": [
         "skilgen/core/rate_limit_store.py",
         "skilgen/core/identity_policy_store.py"
+      ],
+      "tests/test_registry.py": [
+        "skilgen/agents/model_registry.py",
+        "skilgen/registry_client.py"
       ],
       "tests/test_registry_api.py": [
         "scripts/deploy_api.py",
@@ -15658,6 +13981,22 @@
       "tests/test_sdk.py": [
         "skilgen/sdk.py"
       ],
+      "tests/test_security_parsers.py": [
+        "skilgen/parsers/security_policy.py",
+        "skilgen/agents/language_parsers.py",
+        "skilgen/parsers/__init__.py",
+        "skilgen/parsers/auto_detect.py",
+        "skilgen/parsers/confluence.py",
+        "skilgen/parsers/dbt.py"
+      ],
+      "tests/test_skill_sources_api.py": [
+        "scripts/deploy_api.py",
+        "skilgen/api/__init__.py",
+        "skilgen/api/jobs.py",
+        "skilgen/api/server.py",
+        "skilgen/api/service.py",
+        "skilgen/parsers/sources.py"
+      ],
       "tests/test_skill_usage_analytics.py": [
         "skilgen/core/analytics.py"
       ],
@@ -15678,14 +14017,15 @@
       "tests/test_vercel_api_deploy.py": [
         "scripts/deploy_api.py",
         "scripts/deploy_dashboard.py",
+        "scripts/deploy_web.py",
         "skilgen/api/__init__.py",
         "skilgen/api/jobs.py",
-        "skilgen/api/server.py",
-        "skilgen/api/service.py"
+        "skilgen/api/server.py"
       ],
       "tests/test_vercel_dashboard_deploy.py": [
         "scripts/deploy_dashboard.py",
-        "scripts/deploy_api.py"
+        "scripts/deploy_api.py",
+        "scripts/deploy_web.py"
       ],
       "tests/test_workspace_graph.py": [
         "skilgen/agents/workspace_graph.py",
@@ -15884,6 +14224,86 @@
         "confidence": 0.35
       },
       {
+        "source_path": "skilgen/parsers/__init__.py",
+        "source_symbol": "ApiSpecParserError",
+        "relationship": "extends",
+        "target_symbol": "ValueError",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "skilgen/parsers/confluence.py",
+        "source_symbol": "_ConfluenceHTMLExtractor",
+        "relationship": "extends",
+        "target_symbol": "HTMLParser",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "skilgen/parsers/dbt.py",
+        "source_symbol": "DbtProjectParseError",
+        "relationship": "extends",
+        "target_symbol": "ValueError",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "skilgen/parsers/helm.py",
+        "source_symbol": "HelmParserError",
+        "relationship": "extends",
+        "target_symbol": "ValueError",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "skilgen/parsers/incident.py",
+        "source_symbol": "IncidentParseError",
+        "relationship": "extends",
+        "target_symbol": "ValueError",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "skilgen/parsers/kafka.py",
+        "source_symbol": "KafkaParseError",
+        "relationship": "extends",
+        "target_symbol": "ValueError",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "skilgen/parsers/kubernetes.py",
+        "source_symbol": "KubernetesParserError",
+        "relationship": "extends",
+        "target_symbol": "ValueError",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "skilgen/parsers/runbook.py",
+        "source_symbol": "ProcessParserError",
+        "relationship": "extends",
+        "target_symbol": "ValueError",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "skilgen/parsers/sql_schema.py",
+        "source_symbol": "SqlSchemaParseError",
+        "relationship": "extends",
+        "target_symbol": "ValueError",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "skilgen/parsers/terraform.py",
+        "source_symbol": "TerraformParserError",
+        "relationship": "extends",
+        "target_symbol": "ValueError",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
         "source_path": "skilgen/registry_client.py",
         "source_symbol": "RegistryClientError",
         "relationship": "extends",
@@ -15916,6 +14336,14 @@
         "confidence": 0.35
       },
       {
+        "source_path": "tests/test_api_spec_parsers.py",
+        "source_symbol": "ApiSpecParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
         "source_path": "tests/test_architecture_cli.py",
         "source_symbol": "ArchitectureCliTests",
         "relationship": "extends",
@@ -15936,6 +14364,14 @@
         "source_symbol": "AuditTests",
         "relationship": "extends",
         "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_audit_log.py",
+        "source_symbol": "AuditLogTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.IsolatedAsyncioTestCase",
         "target_path": null,
         "confidence": 0.35
       },
@@ -16020,6 +14456,30 @@
         "confidence": 0.35
       },
       {
+        "source_path": "tests/test_data_parsers.py",
+        "source_symbol": "DbtParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_data_parsers.py",
+        "source_symbol": "SqlSchemaParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_data_parsers.py",
+        "source_symbol": "KafkaParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
         "source_path": "tests/test_decision_planner.py",
         "source_symbol": "DecisionPlannerTests",
         "relationship": "extends",
@@ -16092,8 +14552,48 @@
         "confidence": 0.35
       },
       {
+        "source_path": "tests/test_generation_quality.py",
+        "source_symbol": "GenerationQualityTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
         "source_path": "tests/test_identity_policy_store.py",
         "source_symbol": "IdentityPolicyStoreTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_incident_parsers.py",
+        "source_symbol": "IncidentParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_infra_parsers.py",
+        "source_symbol": "TerraformParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_infra_parsers.py",
+        "source_symbol": "KubernetesParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_infra_parsers.py",
+        "source_symbol": "HelmParserTests",
         "relationship": "extends",
         "target_symbol": "unittest.TestCase",
         "target_path": null,
@@ -16104,6 +14604,22 @@
         "source_symbol": "JobPersistenceTests",
         "relationship": "extends",
         "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_llm_config.py",
+        "source_symbol": "LLMConfigTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_memory_cli.py",
+        "source_symbol": "UploadHandler",
+        "relationship": "extends",
+        "target_symbol": "BaseHTTPRequestHandler",
         "target_path": null,
         "confidence": 0.35
       },
@@ -16132,8 +14648,40 @@
         "confidence": 0.35
       },
       {
+        "source_path": "tests/test_policy_engine.py",
+        "source_symbol": "PolicyEngineTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
         "source_path": "tests/test_pr_comment.py",
         "source_symbol": "PrCommentTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_process_parsers.py",
+        "source_symbol": "RunbookParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_process_parsers.py",
+        "source_symbol": "ConfluenceParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_process_parsers.py",
+        "source_symbol": "NotionParserTests",
         "relationship": "extends",
         "target_symbol": "unittest.TestCase",
         "target_path": null,
@@ -16244,6 +14792,30 @@
         "confidence": 0.35
       },
       {
+        "source_path": "tests/test_security_parsers.py",
+        "source_symbol": "SarifParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_security_parsers.py",
+        "source_symbol": "SbomParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "tests/test_security_parsers.py",
+        "source_symbol": "SecurityPolicyParserTests",
+        "relationship": "extends",
+        "target_symbol": "unittest.TestCase",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
         "source_path": "tests/test_source_graphs.py",
         "source_symbol": "SourceGraphTests",
         "relationship": "extends",
@@ -16279,27 +14851,31 @@
     "runtime_signals": {
       "artifacts": [
         {
-          "path": ".vercel/output/diagnostics/cli_traces.json",
-          "kind": "traces",
-          "format": "json",
-          "signal_count": 0,
-          "related_paths": [],
-          "summary": "0 spans across 0 services"
-        },
-        {
-          "path": "apps/web/.vercel/output/diagnostics/cli_traces.json",
-          "kind": "traces",
-          "format": "json",
-          "signal_count": 0,
-          "related_paths": [],
-          "summary": "0 spans across 0 services"
+          "path": "tests/fixtures/semgrep_results.sarif",
+          "kind": "sast",
+          "format": "sarif",
+          "signal_count": 2,
+          "related_paths": [
+            "src/app.py",
+            "src/templates.py"
+          ],
+          "summary": "SAST findings across 2 files"
         }
       ],
       "coverage_by_path": {},
       "test_results": {},
-      "sast_findings": {},
+      "sast_findings": {
+        "src/app.py": [
+          "error:python.lang.security.audit.sql-injection"
+        ],
+        "src/templates.py": [
+          "warning:python.flask.security.xss.audit.template-autoescape"
+        ]
+      },
       "trace_services": [],
-      "recommendations": []
+      "recommendations": [
+        "Treat SARIF findings as first-class evidence when prioritizing skill hardening and security guidance."
+      ]
     },
     "dependency_risk_graph": {
       "nodes": [
@@ -16410,7 +14986,10 @@
           ],
           "dependencies": [
             "__future__",
+            "asyncio",
             "dataclasses",
+            "json",
+            "os",
             "pathlib",
             "skilgen/agents/__init__.py",
             "skilgen/agents/codebase_signals.py",
@@ -16421,10 +15000,7 @@
             "skilgen/core/context.py",
             "skilgen/core/corpus_index.py",
             "skilgen/core/freshness.py",
-            "skilgen/core/generated_outputs.py",
-            "skilgen/core/models.py",
-            "skilgen/core/repo_state.py",
-            "skilgen/core/requirements.py"
+            "skilgen/core/generated_outputs.py"
           ]
         },
         {
@@ -17283,7 +15859,9 @@
             "__future__",
             "argparse",
             "dataclasses",
+            "datetime",
             "json",
+            "os",
             "pathlib",
             "skilgen/__init__.py",
             "skilgen/agents/__init__.py",
@@ -17293,9 +15871,7 @@
             "skilgen/autoupdate.py",
             "skilgen/core/analytics.py",
             "skilgen/core/config.py",
-            "skilgen/core/corpus_index.py",
-            "skilgen/core/dependency_risk.py",
-            "skilgen/core/enterprise_policy.py"
+            "skilgen/core/corpus_index.py"
           ]
         },
         {
@@ -17543,16 +16119,154 @@
             "datetime",
             "os",
             "pathlib",
+            "re",
             "skilgen/agents/architecture_planner.py",
             "skilgen/agents/codebase_signals.py",
             "skilgen/agents/requirements_parser.py",
             "skilgen/agents/roadmap_planner.py",
+            "skilgen/core/analytics.py",
             "skilgen/core/config.py",
             "skilgen/core/context.py",
             "skilgen/core/dependency_risk.py",
             "skilgen/core/models.py",
             "skilgen/deep_agents_core.py",
             "typing"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/__init__.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "dataclasses",
+            "skilgen/parsers/dbt.py",
+            "skilgen/parsers/helm.py",
+            "skilgen/parsers/kafka.py",
+            "skilgen/parsers/kubernetes.py",
+            "skilgen/parsers/runbook.py",
+            "skilgen/parsers/sarif.py",
+            "skilgen/parsers/sbom.py",
+            "skilgen/parsers/security_policy.py",
+            "skilgen/parsers/sql_schema.py",
+            "skilgen/parsers/terraform.py"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/confluence.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "html.parser",
+            "pathlib",
+            "re",
+            "skilgen/parsers/runbook.py",
+            "tempfile",
+            "xml.etree.ElementTree",
+            "zipfile"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/incident.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "collections",
+            "dataclasses",
+            "datetime",
+            "json",
+            "os",
+            "pathlib",
+            "re",
+            "time",
+            "typing",
+            "urllib.error",
+            "urllib.parse",
+            "urllib.request"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/notion.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "httpx",
+            "json",
+            "os",
+            "pathlib",
+            "skilgen/parsers/runbook.py",
+            "time",
+            "typing"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/openapi.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "collections.abc",
+            "json",
+            "pathlib",
+            "re",
+            "skilgen/parsers/__init__.py",
+            "typing",
+            "yaml"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/sbom.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "dataclasses",
+            "json",
+            "pathlib",
+            "re",
+            "skilgen/core/dependency_risk.py",
+            "typing",
+            "urllib.parse",
+            "xml.etree"
+          ]
+        },
+        {
+          "id": "skilgen/registry_client.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "json",
+            "os",
+            "pathlib",
+            "typing",
+            "urllib.error",
+            "urllib.parse",
+            "urllib.request"
           ]
         },
         {
@@ -17595,6 +16309,25 @@
           ]
         },
         {
+          "id": "tests/test_api_key.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/auth.py",
+            "apps/api/api/routes/orgs.py",
+            "asyncio",
+            "fastapi",
+            "fastapi.testclient",
+            "packages/db/database.py",
+            "types",
+            "typing"
+          ]
+        },
+        {
           "id": "tests/test_api_smoke.py",
           "kind": "source-file",
           "risk_score": 0.15,
@@ -17618,6 +16351,24 @@
             "unittest",
             "urllib.error",
             "urllib.parse"
+          ]
+        },
+        {
+          "id": "tests/test_api_spec_parsers.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "pathlib",
+            "skilgen/parsers/__init__.py",
+            "skilgen/parsers/graphql.py",
+            "skilgen/parsers/openapi.py",
+            "skilgen/parsers/postman.py",
+            "tempfile",
+            "unittest"
           ]
         },
         {
@@ -17720,6 +16471,51 @@
           ]
         },
         {
+          "id": "tests/test_eval.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/auth.py",
+            "datetime",
+            "fastapi",
+            "fastapi.testclient",
+            "importlib",
+            "packages/db/database.py",
+            "pytest",
+            "types",
+            "typing"
+          ]
+        },
+        {
+          "id": "tests/test_generation_quality.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "asyncio",
+            "json",
+            "os",
+            "pathlib",
+            "skilgen/core/analytics.py",
+            "skilgen/core/models.py",
+            "skilgen/delivery.py",
+            "skilgen/generators/skills.py",
+            "skilgen/hooks/claude_code_hook.py",
+            "skilgen/hooks/cursor_watcher.py",
+            "tempfile",
+            "time",
+            "unittest",
+            "unittest.mock"
+          ]
+        },
+        {
           "id": "tests/test_jobs.py",
           "kind": "source-file",
           "risk_score": 0.15,
@@ -17735,6 +16531,61 @@
             "tempfile",
             "time",
             "unittest"
+          ]
+        },
+        {
+          "id": "tests/test_memory_capture.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/services/memory.py",
+            "asyncio",
+            "dataclasses",
+            "datetime",
+            "packages/db/models/__init__.py",
+            "pathlib",
+            "pytest"
+          ]
+        },
+        {
+          "id": "tests/test_memory_cli.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "http.server",
+            "json",
+            "os",
+            "pathlib",
+            "subprocess",
+            "sys",
+            "threading"
+          ]
+        },
+        {
+          "id": "tests/test_org_intelligence_api.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/auth.py",
+            "apps/api/api/routes/orgs.py",
+            "datetime",
+            "fastapi",
+            "fastapi.testclient",
+            "packages/db/database.py",
+            "packages/db/models/__init__.py",
+            "typing"
           ]
         },
         {
@@ -17776,6 +16627,45 @@
             "tempfile",
             "time",
             "unittest"
+          ]
+        },
+        {
+          "id": "tests/test_process_parsers.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "json",
+            "pathlib",
+            "skilgen/parsers/confluence.py",
+            "skilgen/parsers/notion.py",
+            "skilgen/parsers/runbook.py",
+            "tempfile",
+            "unittest",
+            "zipfile"
+          ]
+        },
+        {
+          "id": "tests/test_red_flags.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/auth.py",
+            "apps/api/api/routes/orgs.py",
+            "apps/api/api/services/redflags.py",
+            "datetime",
+            "fastapi",
+            "fastapi.testclient",
+            "packages/db/database.py",
+            "packages/db/models/__init__.py",
+            "typing"
           ]
         },
         {
@@ -17900,6 +16790,24 @@
           ]
         },
         {
+          "id": "tests/test_security_parsers.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "json",
+            "pathlib",
+            "skilgen/parsers/sarif.py",
+            "skilgen/parsers/sbom.py",
+            "skilgen/parsers/security_policy.py",
+            "tempfile",
+            "unittest"
+          ]
+        },
+        {
           "id": "tests/test_skill_usage_analytics.py",
           "kind": "source-file",
           "risk_score": 0.15,
@@ -17941,9 +16849,7 @@
             "hashlib",
             "hmac",
             "packages/db/config.py",
-            "packages/db/models/Base.py",
-            "packages/db/models/Org.py",
-            "packages/db/models/Repo.py",
+            "packages/db/models/__init__.py",
             "pytest"
           ]
         },
@@ -17981,7 +16887,7 @@
             "fastapi.testclient",
             "json",
             "packages/db/database.py",
-            "packages/db/models/Org.py",
+            "packages/db/models/__init__.py",
             "pytest",
             "types",
             "typing"
@@ -18003,42 +16909,8 @@
             "httpx",
             "redis",
             "celery",
-            "stripe"
-          ]
-        },
-        {
-          "id": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "kind": "manifest",
-          "risk_score": 0.0,
-          "signals": [],
-          "dependencies": [
-            "@skillayer/config",
-            "@skillayer/types",
-            "@skillayer/ui",
-            "@workos-inc/authkit-nextjs",
-            "autoprefixer",
-            "lucide-react",
-            "next",
-            "postcss",
-            "posthog-js",
-            "react",
-            "react-dom",
-            "tailwindcss",
-            "@types/node",
-            "@types/react",
-            "@types/react-dom",
-            "eslint",
-            "typescript"
-          ]
-        },
-        {
-          "id": "manifest:apps/dashboard/.next/standalone/package.json",
-          "kind": "manifest",
-          "risk_score": 0.0,
-          "signals": [],
-          "dependencies": [
-            "turbo",
-            "typescript"
+            "stripe",
+            "cryptography"
           ]
         },
         {
@@ -18186,6 +17058,21 @@
         },
         {
           "id": "scripts/deploy_dashboard.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "argparse",
+            "collections.abc",
+            "contextlib",
+            "json",
+            "pathlib",
+            "subprocess"
+          ]
+        },
+        {
+          "id": "scripts/deploy_web.py",
           "kind": "source-file",
           "risk_score": 0.0,
           "signals": [],
@@ -18594,18 +17481,254 @@
           "dependencies": []
         },
         {
-          "id": "skilgen/registry_client.py",
+          "id": "skilgen/hooks/__init__.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": []
+        },
+        {
+          "id": "skilgen/hooks/claude_code.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "pathlib"
+          ]
+        },
+        {
+          "id": "skilgen/hooks/claude_code_hook.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "os",
+            "sys",
+            "time",
+            "urllib.request"
+          ]
+        },
+        {
+          "id": "skilgen/hooks/cursor.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "pathlib"
+          ]
+        },
+        {
+          "id": "skilgen/hooks/cursor_watcher.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "os",
+            "pathlib",
+            "skilgen/core/analytics.py",
+            "subprocess",
+            "sys",
+            "time"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/auto_detect.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "pathlib",
+            "skilgen/core/config.py",
+            "skilgen/core/models.py",
+            "skilgen/parsers/sources.py",
+            "typing"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/dbt.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "dataclasses",
+            "pathlib",
+            "re",
+            "typing",
+            "yaml"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/graphql.py",
           "kind": "source-file",
           "risk_score": 0.0,
           "signals": [],
           "dependencies": [
             "__future__",
             "json",
-            "os",
+            "pathlib",
+            "re",
+            "skilgen/parsers/__init__.py",
+            "typing"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/helm.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "collections",
+            "dataclasses",
+            "pathlib",
+            "re",
+            "typing",
+            "yaml"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/kafka.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "dataclasses",
+            "json",
             "pathlib",
             "typing",
-            "urllib.error",
-            "urllib.request"
+            "yaml"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/kubernetes.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "collections",
+            "dataclasses",
+            "pathlib",
+            "typing",
+            "yaml"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/postman.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "json",
+            "pathlib",
+            "re",
+            "skilgen/parsers/__init__.py",
+            "typing"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/runbook.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "dataclasses",
+            "pathlib",
+            "re"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/runner.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "pathlib",
+            "skilgen/core/models.py",
+            "skilgen/parsers/auto_detect.py",
+            "skilgen/parsers/sources.py",
+            "typing"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/sarif.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "dataclasses",
+            "json",
+            "pathlib",
+            "re",
+            "typing"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/security_policy.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "dataclasses",
+            "json",
+            "pathlib",
+            "re",
+            "typing",
+            "yaml"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/sources.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "dataclasses",
+            "importlib",
+            "pathlib",
+            "re",
+            "typing"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/sql_schema.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "dataclasses",
+            "json",
+            "pathlib",
+            "re",
+            "typing"
+          ]
+        },
+        {
+          "id": "skilgen/parsers/terraform.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "collections",
+            "dataclasses",
+            "hcl2",
+            "pathlib",
+            "re"
           ]
         },
         {
@@ -18671,6 +17794,20 @@
           ]
         },
         {
+          "id": "tests/test_audit_log.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/routes/orgs.py",
+            "apps/api/api/services/audit.py",
+            "datetime",
+            "types",
+            "unittest"
+          ]
+        },
+        {
           "id": "tests/test_auth_claim_mapping.py",
           "kind": "source-file",
           "risk_score": 0.0,
@@ -18724,6 +17861,21 @@
             "sys",
             "tempfile",
             "unittest"
+          ]
+        },
+        {
+          "id": "tests/test_cli_sources.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/analysis.py",
+            "pathlib",
+            "skilgen/cli/main.py",
+            "skilgen/parsers/auto_detect.py",
+            "skilgen/parsers/runner.py",
+            "tempfile"
           ]
         },
         {
@@ -18787,6 +17939,30 @@
             "skilgen/agents/codebase_signals.py",
             "skilgen/core/corpus_index.py",
             "skilgen/core/deep_sampler.py",
+            "tempfile",
+            "unittest"
+          ]
+        },
+        {
+          "id": "tests/test_dashboard_error_boundaries.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "pathlib"
+          ]
+        },
+        {
+          "id": "tests/test_data_parsers.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "pathlib",
+            "skilgen/parsers/dbt.py",
+            "skilgen/parsers/kafka.py",
+            "skilgen/parsers/sql_schema.py",
             "tempfile",
             "unittest"
           ]
@@ -18863,6 +18039,18 @@
           ]
         },
         {
+          "id": "tests/test_eval_cli.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "pytest",
+            "skilgen/cli/main.py",
+            "sys"
+          ]
+        },
+        {
           "id": "tests/test_feature_extractor.py",
           "kind": "source-file",
           "risk_score": 0.0,
@@ -18887,6 +18075,19 @@
           ]
         },
         {
+          "id": "tests/test_half_life.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/services/half_life.py",
+            "datetime",
+            "pathlib",
+            "types"
+          ]
+        },
+        {
           "id": "tests/test_identity_policy_store.py",
           "kind": "source-file",
           "risk_score": 0.0,
@@ -18897,6 +18098,59 @@
             "pathlib",
             "skilgen/core/identity_policy_store.py",
             "tempfile",
+            "unittest"
+          ]
+        },
+        {
+          "id": "tests/test_improvement_loop.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/routes/repos.py",
+            "datetime",
+            "pathlib",
+            "types"
+          ]
+        },
+        {
+          "id": "tests/test_incident_parsers.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "pathlib",
+            "skilgen/parsers/incident.py",
+            "tempfile",
+            "unittest",
+            "unittest.mock"
+          ]
+        },
+        {
+          "id": "tests/test_infra_parsers.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "pathlib",
+            "skilgen/parsers/helm.py",
+            "skilgen/parsers/kubernetes.py",
+            "skilgen/parsers/terraform.py",
+            "tempfile",
+            "unittest"
+          ]
+        },
+        {
+          "id": "tests/test_llm_config.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/services/llm_config.py",
             "unittest"
           ]
         },
@@ -18938,6 +18192,19 @@
           ]
         },
         {
+          "id": "tests/test_policy_engine.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/services/policy.py",
+            "datetime",
+            "types",
+            "unittest"
+          ]
+        },
+        {
           "id": "tests/test_pr_comment.py",
           "kind": "source-file",
           "risk_score": 0.0,
@@ -18972,6 +18239,19 @@
             "skilgen/core/rate_limit_store.py",
             "tempfile",
             "unittest"
+          ]
+        },
+        {
+          "id": "tests/test_registry.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/routes/registry.py",
+            "datetime",
+            "pathlib",
+            "types"
           ]
         },
         {
@@ -19090,6 +18370,19 @@
             "__future__",
             "apps/api/api/routes/skills.py",
             "asyncio",
+            "pathlib",
+            "types"
+          ]
+        },
+        {
+          "id": "tests/test_skill_sources_api.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "__future__",
+            "apps/api/api/routes/repos.py",
+            "packages/db/models/skill.py",
             "pathlib",
             "types"
           ]
@@ -19247,6 +18540,14 @@
         },
         {
           "source": "manifest:apps/api/requirements.txt",
+          "target": "package:cryptography",
+          "kind": "external-package",
+          "risk_signals": [
+            "version:loosely-pinned"
+          ]
+        },
+        {
+          "source": "manifest:apps/api/requirements.txt",
           "target": "package:fastapi",
           "kind": "external-package",
           "risk_signals": [
@@ -19304,152 +18605,6 @@
         {
           "source": "manifest:apps/api/requirements.txt",
           "target": "package:stripe",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:@skillayer/config",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:@skillayer/types",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:@skillayer/ui",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:@types/node",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:@types/react",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:@types/react-dom",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:@workos-inc/authkit-nextjs",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:autoprefixer",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:eslint",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:lucide-react",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:next",
-          "kind": "external-package",
-          "risk_signals": []
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:postcss",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:posthog-js",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:react",
-          "kind": "external-package",
-          "risk_signals": []
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:react-dom",
-          "kind": "external-package",
-          "risk_signals": []
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:tailwindcss",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/apps/dashboard/package.json",
-          "target": "package:typescript",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/package.json",
-          "target": "package:turbo",
-          "kind": "external-package",
-          "risk_signals": [
-            "version:loosely-pinned"
-          ]
-        },
-        {
-          "source": "manifest:apps/dashboard/.next/standalone/package.json",
-          "target": "package:typescript",
           "kind": "external-package",
           "risk_signals": [
             "version:loosely-pinned"
@@ -20954,18 +20109,6 @@
           "risk_signals": []
         },
         {
-          "source": "skilgen/cli/main.py",
-          "target": "skilgen/external_skills.py",
-          "kind": "repo-import",
-          "risk_signals": []
-        },
-        {
-          "source": "skilgen/cli/main.py",
-          "target": "skilgen/registry_client.py",
-          "kind": "repo-import",
-          "risk_signals": []
-        },
-        {
           "source": "skilgen/core/analytics.py",
           "target": "skilgen/external_skills.py",
           "kind": "repo-import",
@@ -21444,26 +20587,6 @@
           "risk_signals": []
         },
         {
-          "source": "skilgen/delivery.py",
-          "target": "skilgen/external_skills.py",
-          "kind": "repo-import",
-          "risk_signals": []
-        },
-        {
-          "source": "skilgen/delivery.py",
-          "target": "skilgen/generators/package.py",
-          "kind": "repo-import",
-          "risk_signals": [
-            "cycle:internal"
-          ]
-        },
-        {
-          "source": "skilgen/delivery.py",
-          "target": "skilgen/generators/skills.py",
-          "kind": "repo-import",
-          "risk_signals": []
-        },
-        {
           "source": "skilgen/enterprise_skills.py",
           "target": "skilgen/core/config.py",
           "kind": "repo-import",
@@ -21569,6 +20692,12 @@
         },
         {
           "source": "skilgen/generators/skills.py",
+          "target": "skilgen/core/analytics.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/generators/skills.py",
           "target": "skilgen/core/config.py",
           "kind": "repo-import",
           "risk_signals": []
@@ -21594,6 +20723,144 @@
         {
           "source": "skilgen/generators/skills.py",
           "target": "skilgen/deep_agents_core.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/hooks/cursor_watcher.py",
+          "target": "skilgen/core/analytics.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/__init__.py",
+          "target": "skilgen/parsers/dbt.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/__init__.py",
+          "target": "skilgen/parsers/helm.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/__init__.py",
+          "target": "skilgen/parsers/kafka.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/__init__.py",
+          "target": "skilgen/parsers/kubernetes.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/__init__.py",
+          "target": "skilgen/parsers/runbook.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/__init__.py",
+          "target": "skilgen/parsers/sarif.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/__init__.py",
+          "target": "skilgen/parsers/sbom.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/__init__.py",
+          "target": "skilgen/parsers/security_policy.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/__init__.py",
+          "target": "skilgen/parsers/sql_schema.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/__init__.py",
+          "target": "skilgen/parsers/terraform.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/auto_detect.py",
+          "target": "skilgen/core/config.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/auto_detect.py",
+          "target": "skilgen/core/models.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/auto_detect.py",
+          "target": "skilgen/parsers/sources.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/confluence.py",
+          "target": "skilgen/parsers/runbook.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/graphql.py",
+          "target": "skilgen/parsers/__init__.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/notion.py",
+          "target": "skilgen/parsers/runbook.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/openapi.py",
+          "target": "skilgen/parsers/__init__.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/postman.py",
+          "target": "skilgen/parsers/__init__.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/runner.py",
+          "target": "skilgen/core/models.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/runner.py",
+          "target": "skilgen/parsers/auto_detect.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/runner.py",
+          "target": "skilgen/parsers/sources.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/parsers/sbom.py",
+          "target": "skilgen/core/dependency_risk.py",
           "kind": "repo-import",
           "risk_signals": []
         },
@@ -21652,6 +20919,24 @@
           "risk_signals": []
         },
         {
+          "source": "tests/test_api_key.py",
+          "target": "apps/api/api/auth.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_api_key.py",
+          "target": "apps/api/api/routes/orgs.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_api_key.py",
+          "target": "packages/db/database.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
           "source": "tests/test_api_smoke.py",
           "target": "skilgen/api/server.py",
           "kind": "repo-import",
@@ -21670,6 +20955,30 @@
           "risk_signals": []
         },
         {
+          "source": "tests/test_api_spec_parsers.py",
+          "target": "skilgen/parsers/__init__.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_api_spec_parsers.py",
+          "target": "skilgen/parsers/graphql.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_api_spec_parsers.py",
+          "target": "skilgen/parsers/openapi.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_api_spec_parsers.py",
+          "target": "skilgen/parsers/postman.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
           "source": "tests/test_architecture_planner.py",
           "target": "skilgen/agents/architecture_planner.py",
           "kind": "repo-import",
@@ -21684,6 +20993,18 @@
         {
           "source": "tests/test_audit.py",
           "target": "skilgen/core/audit.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_audit_log.py",
+          "target": "apps/api/api/routes/orgs.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_audit_log.py",
+          "target": "apps/api/api/services/audit.py",
           "kind": "repo-import",
           "risk_signals": []
         },
@@ -21708,6 +21029,30 @@
         {
           "source": "tests/test_autoupdate.py",
           "target": "skilgen/autoupdate.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_cli_sources.py",
+          "target": "apps/api/api/analysis.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_cli_sources.py",
+          "target": "skilgen/cli/main.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_cli_sources.py",
+          "target": "skilgen/parsers/auto_detect.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_cli_sources.py",
+          "target": "skilgen/parsers/runner.py",
           "kind": "repo-import",
           "risk_signals": []
         },
@@ -21774,6 +21119,24 @@
         {
           "source": "tests/test_dashboard_cli.py",
           "target": "skilgen/generators/package.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_data_parsers.py",
+          "target": "skilgen/parsers/dbt.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_data_parsers.py",
+          "target": "skilgen/parsers/kafka.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_data_parsers.py",
+          "target": "skilgen/parsers/sql_schema.py",
           "kind": "repo-import",
           "risk_signals": []
         },
@@ -21898,6 +21261,24 @@
           "risk_signals": []
         },
         {
+          "source": "tests/test_eval.py",
+          "target": "apps/api/api/auth.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_eval.py",
+          "target": "packages/db/database.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_eval_cli.py",
+          "target": "skilgen/cli/main.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
           "source": "tests/test_feature_extractor.py",
           "target": "skilgen/agents/feature_extractor.py",
           "kind": "repo-import",
@@ -21910,8 +21291,80 @@
           "risk_signals": []
         },
         {
+          "source": "tests/test_generation_quality.py",
+          "target": "skilgen/core/analytics.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_generation_quality.py",
+          "target": "skilgen/core/models.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_generation_quality.py",
+          "target": "skilgen/delivery.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_generation_quality.py",
+          "target": "skilgen/generators/skills.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_generation_quality.py",
+          "target": "skilgen/hooks/claude_code_hook.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_generation_quality.py",
+          "target": "skilgen/hooks/cursor_watcher.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_half_life.py",
+          "target": "apps/api/api/services/half_life.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
           "source": "tests/test_identity_policy_store.py",
           "target": "skilgen/core/identity_policy_store.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_improvement_loop.py",
+          "target": "apps/api/api/routes/repos.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_incident_parsers.py",
+          "target": "skilgen/parsers/incident.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_infra_parsers.py",
+          "target": "skilgen/parsers/helm.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_infra_parsers.py",
+          "target": "skilgen/parsers/kubernetes.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_infra_parsers.py",
+          "target": "skilgen/parsers/terraform.py",
           "kind": "repo-import",
           "risk_signals": []
         },
@@ -21928,6 +21381,24 @@
           "risk_signals": []
         },
         {
+          "source": "tests/test_llm_config.py",
+          "target": "apps/api/api/services/llm_config.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_memory_capture.py",
+          "target": "apps/api/api/services/memory.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_memory_capture.py",
+          "target": "packages/db/models/__init__.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
           "source": "tests/test_model_registry.py",
           "target": "skilgen/agents/model_registry.py",
           "kind": "repo-import",
@@ -21936,6 +21407,30 @@
         {
           "source": "tests/test_model_registry.py",
           "target": "skilgen/core/models.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_org_intelligence_api.py",
+          "target": "apps/api/api/auth.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_org_intelligence_api.py",
+          "target": "apps/api/api/routes/orgs.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_org_intelligence_api.py",
+          "target": "packages/db/database.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_org_intelligence_api.py",
+          "target": "packages/db/models/__init__.py",
           "kind": "repo-import",
           "risk_signals": []
         },
@@ -21970,6 +21465,12 @@
           "risk_signals": []
         },
         {
+          "source": "tests/test_policy_engine.py",
+          "target": "apps/api/api/services/policy.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
           "source": "tests/test_pr_comment.py",
           "target": "apps/api/api/pr_comment.py",
           "kind": "repo-import",
@@ -21982,8 +21483,62 @@
           "risk_signals": []
         },
         {
+          "source": "tests/test_process_parsers.py",
+          "target": "skilgen/parsers/confluence.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_process_parsers.py",
+          "target": "skilgen/parsers/notion.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_process_parsers.py",
+          "target": "skilgen/parsers/runbook.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
           "source": "tests/test_rate_limit_store.py",
           "target": "skilgen/core/rate_limit_store.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_red_flags.py",
+          "target": "apps/api/api/auth.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_red_flags.py",
+          "target": "apps/api/api/routes/orgs.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_red_flags.py",
+          "target": "apps/api/api/services/redflags.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_red_flags.py",
+          "target": "packages/db/database.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_red_flags.py",
+          "target": "packages/db/models/__init__.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_registry.py",
+          "target": "apps/api/api/routes/registry.py",
           "kind": "repo-import",
           "risk_signals": []
         },
@@ -22120,8 +21675,38 @@
           "risk_signals": []
         },
         {
+          "source": "tests/test_security_parsers.py",
+          "target": "skilgen/parsers/sarif.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_security_parsers.py",
+          "target": "skilgen/parsers/sbom.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_security_parsers.py",
+          "target": "skilgen/parsers/security_policy.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
           "source": "tests/test_skill_detail.py",
           "target": "apps/api/api/routes/skills.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_skill_sources_api.py",
+          "target": "apps/api/api/routes/repos.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "tests/test_skill_sources_api.py",
+          "target": "packages/db/models/skill.py",
           "kind": "repo-import",
           "risk_signals": []
         },
@@ -22187,19 +21772,7 @@
         },
         {
           "source": "tests/test_skillayer_api_infra.py",
-          "target": "packages/db/models/Base.py",
-          "kind": "repo-import",
-          "risk_signals": []
-        },
-        {
-          "source": "tests/test_skillayer_api_infra.py",
-          "target": "packages/db/models/Org.py",
-          "kind": "repo-import",
-          "risk_signals": []
-        },
-        {
-          "source": "tests/test_skillayer_api_infra.py",
-          "target": "packages/db/models/Repo.py",
+          "target": "packages/db/models/__init__.py",
           "kind": "repo-import",
           "risk_signals": []
         },
@@ -22253,7 +21826,7 @@
         },
         {
           "source": "tests/test_stripe_webhook.py",
-          "target": "packages/db/models/Org.py",
+          "target": "packages/db/models/__init__.py",
           "kind": "repo-import",
           "risk_signals": []
         },
@@ -22352,8 +21925,25 @@
   },
   "architecture": {
     "headline": "Evidence-backed architecture blueprint for the codebase",
-    "system_summary": "Skilgen identified 2 top-level architecture domains from 91 evidence items and 12 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 124 symbol-bearing files, 121 call-bearing files, 54 mapped tests, and 6 workspace packages.",
+    "system_summary": "Skilgen identified 3 top-level architecture domains from 90 evidence items and 13 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 172 symbol-bearing files, 169 call-bearing files, 72 mapped tests, and 6 workspace packages.",
     "domains": [
+      {
+        "name": "requirements",
+        "summary": "Planning and product-intent domain used to keep the skill tree aligned with requirements and changing scope.",
+        "confidence": 0.99,
+        "responsibilities": [
+          "Planning and product-intent domain used to keep the skill tree aligned with requirements and changing scope.",
+          "requirements-first planning",
+          "skill scaffolding"
+        ],
+        "evidence_paths": [
+          "README.md"
+        ],
+        "related_domains": [
+          "roadmap"
+        ],
+        "recommended_skill_path": "skills/requirements/SKILL.md"
+      },
       {
         "name": "platform",
         "summary": "Tooling and runtime domain covering Skilgen's internal engine, CLI, planners, generators, and maintenance scripts.",
@@ -22373,6 +21963,7 @@
           "skilgen/cli/main.py"
         ],
         "related_domains": [
+          "requirements",
           "roadmap"
         ],
         "recommended_skill_path": "skills/platform/SKILL.md"
@@ -22392,9 +21983,7 @@
           "REPORT.md"
         ],
         "related_domains": [
-          "requirements",
-          "backend",
-          "frontend"
+          "requirements"
         ],
         "recommended_skill_path": "skills/roadmap/SKILL.md"
       }
@@ -22410,6 +21999,16 @@
     ],
     "materialization_plan": [
       {
+        "domain": "requirements",
+        "parent_skill_path": "skills/requirements/SKILL.md",
+        "child_skill_paths": [],
+        "cross_links": [
+          "skills/roadmap/SKILL.md"
+        ],
+        "decision": "keep",
+        "rationale": "Keep as a first-class boundary because confidence is 0.99, 1 evidence paths cluster around one coherent responsibility set, and the boundary is clearer as a single skill than as shallower splits."
+      },
+      {
         "domain": "platform",
         "parent_skill_path": "skills/platform/SKILL.md",
         "child_skill_paths": [
@@ -22421,6 +22020,7 @@
           "skills/platform/scripts/SKILL.md"
         ],
         "cross_links": [
+          "skills/requirements/SKILL.md",
           "skills/roadmap/SKILL.md"
         ],
         "decision": "split",
@@ -22435,7 +22035,9 @@
           "skills/roadmap/phase-2/SKILL.md",
           "skills/roadmap/phase-3/SKILL.md"
         ],
-        "cross_links": [],
+        "cross_links": [
+          "skills/requirements/SKILL.md"
+        ],
         "decision": "split",
         "rationale": "Split because 4 concrete child skill surfaces emerged from 2 grounded evidence paths. The parent skill can hold shared context while child skills isolate the distinct capability seams around roadmap-phase-0, roadmap-phase-1, roadmap-phase-2."
       }

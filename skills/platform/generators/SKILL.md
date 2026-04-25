@@ -3,11 +3,19 @@ name: platform-generators
 version: 0.6.0
 domain: platform
 sub_domain: platform-generators
-last_updated: 2026-04-23
+last_updated: 2026-04-25
 triggered_by: requirements_pipeline
-source_hash: 2b845af34337743bca28b87aa1fb2621357bc8d71cba4772d869b351c815ef8a
+source_hash: 2837441a102548bef06fba7b2eca5d2c3dbc03490ce3cb2864d5e3ca6a4c3c26
+richness_score: 94
+score:
+  total: 94
+  groundedness: 22
+  coverage: 22
+  freshness: 25
+  structure: 25
 references:
   - ../SKILL.md
+  - ../../requirements/SKILL.md
   - ../../roadmap/SKILL.md
 status: active
 ---
@@ -34,17 +42,59 @@ Artifact materialization guidance for docs, skills, dashboards, and output rende
 - `@radix-ui/react-dropdown-menu` in `packages/ui/package.json` is medium; npm install @radix-ui/react-dropdown-menu.
 - `@radix-ui/react-label` in `packages/ui/package.json` is medium; npm install @radix-ui/react-label.
 
+## Anti-patterns
+- **Introduce a second pattern for the same workflow**: Don't introduce a second pattern for the same workflow — duplicated conventions make agent edits unreliable
+- **Remove nearby verification steps**: Don't remove nearby verification steps — future agents need a fast way to prove behaviour still works
+- **Leave file references vague**: Don't leave file references vague — agents waste time searching and may edit the wrong boundary
+
 ## How-To
 1. Start from the nearest evidence file in this child domain.
 2. Keep the change aligned with the parent domain contract before widening the boundary.
 3. Prefer cross-linked sibling skills when the change spans multiple closely related surfaces.
 
+## Code Examples
+
+### skilgen/generators/package.py (python)
+```python
+class ProjectAnalysisBundle:
+    fingerprint: object
+    signals: object
+    import_graph: dict[str, list[str]]
+    codebase_context: object
+    evidence_graph: object
+    architecture: object
+
+
+ProgressCallback = Callable[[str], None]
+
+
+def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> None:
+    if progress_callback is not None:
+```
+
+### skilgen/generators/skills.py (python)
+```python
+def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> None:
+    if progress_callback is not None:
+        progress_callback(message)
+
+
+def _signal_bullets(items: list[str], fallback: str, limit: int = 5) -> list[str]:
+    if not items:
+        return [fallback]
+    bullets = [f"Detected: `{item}`" for item in items[:limit]]
+    if len(items) > limit:
+        bullets.append(f"Detected {len(items) - limit} more matching files elsewhere in the repo.")
+    return bullets
+```
+
 ## Traceability
-- Generated from requirements source hash: `2b845af34337743bca28b87aa1fb2621357bc8d71cba4772d869b351c815ef8a`
+- Generated from requirements source hash: `2837441a102548bef06fba7b2eca5d2c3dbc03490ce3cb2864d5e3ca6a4c3c26`
 - Domain path: `platform/platform-generators`
 - Read `../../../TRACEABILITY.md` for full requirement-to-output mapping.
 - Use the detected file patterns in this skill before creating new structure.
 
 ## References
 - ../SKILL.md
+- ../../requirements/SKILL.md
 - ../../roadmap/SKILL.md

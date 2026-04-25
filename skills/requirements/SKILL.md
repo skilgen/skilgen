@@ -1,7 +1,7 @@
 ---
-name: roadmap
+name: requirements
 version: 0.6.0
-domain: roadmap
+domain: requirements
 sub_domain: platform
 last_updated: 2026-04-25
 triggered_by: requirements_pipeline
@@ -14,38 +14,31 @@ score:
   freshness: 25
   structure: 25
 references:
-  - ../requirements/SKILL.md
-  - phase-0/SKILL.md
-  - phase-1/SKILL.md
-  - phase-2/SKILL.md
-  - phase-3/SKILL.md
+  - ../roadmap/SKILL.md
 status: active
 ---
 
-# Roadmap Skill
+# Requirements Skill
 
 ## Overview
-Delivery sequencing domain that keeps phases, next steps, and implementation order explicit for agents.
+Planning and product-intent domain used to keep the skill tree aligned with requirements and changing scope.
 
 ## Check These Paths First
-- {{project_root}}/skills/roadmap/SKILL.md
-- {{project_root}}/REPORT.md
+- {{project_root}}/README.md
 
 ## Patterns
 ### Architecture responsibilities
-- Delivery sequencing domain that keeps phases, next steps, and implementation order explicit for agents.
-- Coordinates subdomains: roadmap-phase-0, roadmap-phase-1, roadmap-phase-2, roadmap-phase-3.
-- phase-based delivery
-- sequenced implementation planning
+- Planning and product-intent domain used to keep the skill tree aligned with requirements and changing scope.
+- requirements-first planning
+- skill scaffolding
 ### Inferred domain patterns
-- phase-based delivery
-- sequenced implementation planning
-- traceable next steps
+- requirements-first planning
+- skill scaffolding
+- agent operating guidance
 ### Dynamic topology
 - This parent skill was inferred from the current repo and may expand or contract as the codebase evolves.
 ### Architecture evidence
-- Evidence: `skills/roadmap/SKILL.md`
-- Evidence: `REPORT.md`
+- Evidence: `README.md`
 ### Dependency signals
 - `@eslint/js` in `packages/config/package.json` is medium; npm install @eslint/js.
 - `@radix-ui/react-avatar` in `packages/ui/package.json` is medium; npm install @radix-ui/react-avatar.
@@ -62,37 +55,33 @@ Delivery sequencing domain that keeps phases, next steps, and implementation ord
 1. Start from the architecture evidence paths before broadening the scope of the change.
 2. Use the listed responsibilities to keep changes inside the right domain boundary.
 3. Refresh this parent skill whenever the architecture blueprint or top evidence files change materially.
-4. Honor the current materialization decision for this domain: `split`.
+4. Honor the current materialization decision for this domain: `keep`.
 
 ## Code Examples
 
-### REPORT.md
+### README.md
 ```
-# Report
+<p align="center">
+  <img src="docs/assets/skilgen.svg" alt="Skilgen" width="480" />
+</p>
 
-## Summary
-- Detected domains: requirements, platform, platform-runtime, platform-agents, platform-cli, platform-core, platform-generators, platform-scripts, roadmap, roadmap-phase-0, roadmap-phase-1, roadmap-phase-2, roadmap-phase-3
-- Feature inventory entries: 18
-- Backend route files: 4
-- Frontend route files: 0
-- Component files: 0
-- Service files: 1
-- Test files: 87
-- Data model files: 1
-- Persistence files: 2
-- Background job files: 2
-- Auth files: 5
+<h2 align="center">The living skill system for AI coding agents</h2>
+
+<p align="center">
+  Every agent session starts from zero. Skilgen ends that.<br/>
+  Generate, govern, and keep your codebase's agent knowledge current automatically.
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/skilgen/"><img src="https://img.shields.io/pypi/v/skilgen?color=efd37a&labelColor=0d1117&label=skilgen" alt="PyPI" /></a>
+  <a href="https://pypi.org/project/skilgen/"><img src="https://img.shields.io/pypi/pyversions/skilgen?color=8fd9a8&labelColor=0d1117" alt="Python" /></a>
 ```
 
 ## Traceability
 - Generated from requirements source hash: `2837441a102548bef06fba7b2eca5d2c3dbc03490ce3cb2864d5e3ca6a4c3c26`
-- Domain path: `roadmap/platform`
+- Domain path: `requirements/platform`
 - Read `../../TRACEABILITY.md` for full requirement-to-output mapping.
 - Use the detected file patterns in this skill before creating new structure.
 
 ## References
-- ../requirements/SKILL.md
-- phase-0/SKILL.md
-- phase-1/SKILL.md
-- phase-2/SKILL.md
-- phase-3/SKILL.md
+- ../roadmap/SKILL.md

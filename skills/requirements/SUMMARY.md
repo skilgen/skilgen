@@ -1,16 +1,14 @@
-# Roadmap Summary
+# Requirements Summary
 
 ## Architecture responsibilities
-- Delivery sequencing domain that keeps phases, next steps, and implementation order explicit for agents.
-- Coordinates subdomains: roadmap-phase-0, roadmap-phase-1, roadmap-phase-2, roadmap-phase-3.
-- phase-based delivery
-- sequenced implementation planning
+- Planning and product-intent domain used to keep the skill tree aligned with requirements and changing scope.
+- requirements-first planning
+- skill scaffolding
 
 ## Evidence paths
-- `skills/roadmap/SKILL.md`
-- `REPORT.md`
+- `README.md`
 
-## Roadmap Context
+## Planning Inputs
 - <h2 align="center">The living skill system for AI coding agents</h2>
 - Every agent session starts from zero. Skilgen ends that.<br/>
 - Generate, govern, and keep your codebase's agent knowledge current automatically.
