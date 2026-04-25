@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     ADMIN_SECRET: str = ""
 
     DEPLOYMENT_MODE: str = "workos"
+    SKILLAYER_ENCRYPTION_KEY: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

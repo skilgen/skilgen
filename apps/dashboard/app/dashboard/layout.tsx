@@ -17,6 +17,7 @@ import {
   Package,
   Plus,
   Settings,
+  ScrollText,
   AlertTriangle,
   ShieldAlert,
   Users2,
@@ -27,7 +28,7 @@ import { cache } from "react";
 
 import { dashboardNavItems, mockOrg, mockUser } from "@/lib/mock-data";
 import { DashboardNavLink } from "@/components/dashboard-nav-link";
-import { getBootstrapOrg, getMemoryQueue, getMyOrg, getOrgRedFlags, type Org } from "../../lib/data";
+import { getAuditLogStats, getBootstrapOrg, getMemoryQueue, getMyOrg, getOrgRedFlags, type Org } from "../../lib/data";
 
 type ShellUser = Pick<typeof mockUser, "email" | "firstName" | "lastName">;
 
@@ -108,7 +109,7 @@ async function loadShellUser(): Promise<ShellUser> {
   return mockUser;
 }
 
-const loadNavBadges = cache(async (): Promise<{ memory: boolean; redFlags: boolean }> => {
+const loadNavBadges = cache(async (): Promise<{ memory: boolean; redFlags: boolean; audit: boolean }> => {
   let accessToken = "";
   try {
     const session = await withAuth({ ensureSignedIn: false });
@@ -117,14 +118,16 @@ const loadNavBadges = cache(async (): Promise<{ memory: boolean; redFlags: boole
     console.error("Dashboard nav badge auth unavailable:", error);
   }
   const org = await getBootstrapOrg();
-  if (!org?.id) return { memory: false, redFlags: false };
-  const [memory, redFlags] = await Promise.all([
+  if (!org?.id) return { memory: false, redFlags: false, audit: false };
+  const [memory, redFlags, auditStats] = await Promise.all([
     getMemoryQueue(accessToken, org.id, { status: "pending", limit: 1 }),
     getOrgRedFlags(accessToken, org.id, "critical"),
+    getAuditLogStats(accessToken, org.id),
   ]);
   return {
     memory: (memory?.pending_count ?? 0) > 0,
     redFlags: (redFlags?.critical_count ?? 0) > 0,
+    audit: (auditStats?.critical_events_7d ?? 0) > 0,
   };
 });
 
@@ -146,6 +149,7 @@ export default async function DashboardLayout({
     ClipboardList,
     AlertTriangle,
     ShieldAlert,
+    ScrollText,
     Settings,
     CreditCard,
   };
@@ -227,8 +231,10 @@ export default async function DashboardLayout({
   if (!accountItems.some((item) => item.href === "/dashboard/audit")) {
     accountItems.unshift({
       href: "/dashboard/audit",
-      label: "Audit",
-      icon: "ClipboardList",
+      label: "Audit Log",
+      icon: "ScrollText",
+      badge: navBadges.audit ? "Critical audit events" : undefined,
+      badgeVariant: "dot",
     });
   }
   const initials = `${shellUser.firstName[0] ?? "S"}${shellUser.lastName[0] ?? "U"}`;

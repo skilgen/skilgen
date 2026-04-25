@@ -7,8 +7,12 @@ import logging
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+import csv
+from io import StringIO
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 import httpx
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, update
@@ -18,9 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.api.auth import get_current_org_id, get_current_org_id_optional
 from apps.api.api.github import get_installation_token
 from apps.api.api.notifications import build_test_notification_message, post_slack_message
+from apps.api.api.services import audit
+from apps.api.api.services.audit import get_actor_login
+from apps.api.api.services.llm_config import decrypt_key, encrypt_key, key_hint
+from apps.api.api.services.policy import POLICY_RULE_TYPES, PolicyViolation, evaluate_policies
 from apps.api.api.services.redflags import compute_repo_red_flags
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AnalysisRun, Org, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillUsageEvent, SkillVersion
+from packages.db.models import AgentSession, AnalysisRun, AuditEvent, Org, OrgLLMConfig, OrgPolicy, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillUsageEvent, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
     AuditLogEventResponse,
@@ -232,6 +240,116 @@ class RedFlagsResponse(BaseModel):
     flags: list[RedFlagResponse]
 
 
+class AuditEventResponse(BaseModel):
+    id: str
+    event_type: str
+    action: str
+    actor_login: str | None
+    repo_id: str | None
+    repo_name: str | None
+    skill_id: str | None
+    skill_domain: str | None
+    resource_type: str | None
+    resource_id: str | None
+    summary: str
+    severity: Literal["info", "warning", "critical"]
+    metadata: dict[str, object]
+    created_at: datetime
+
+
+class AuditEventsResponse(BaseModel):
+    total: int
+    events: list[AuditEventResponse]
+    has_more: bool
+
+
+class AuditStatsResponse(BaseModel):
+    total_events: int
+    by_severity: dict[str, int]
+    by_resource_type: dict[str, int]
+    most_active_actor: str | None
+    critical_events_7d: int
+    analysis_runs_30d: int
+    gate_failures_30d: int
+    gate_pass_rate: float | None
+
+
+class AuditWebhookConfig(BaseModel):
+    webhook_url: str
+    secret: str | None = None
+    enabled: bool
+    event_filter: Literal["critical", "warnings", "all"] = "warnings"
+
+
+class PolicyResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None
+    rule_type: str
+    rule_config: dict[str, object]
+    severity: Literal["error", "warning"]
+    enabled: bool
+    created_at: datetime
+    violation_count: int = 0
+
+
+class PolicyMutation(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    description: str | None = Field(default=None, max_length=512)
+    rule_type: str | None = None
+    rule_config: dict[str, object] | None = None
+    severity: Literal["error", "warning"] | None = None
+    enabled: bool | None = None
+
+
+class PolicyViolationResponse(BaseModel):
+    policy_id: str
+    policy_name: str
+    rule_type: str
+    severity: Literal["error", "warning"]
+    repo_id: str | None
+    repo_name: str | None
+    skill_id: str | None
+    skill_domain: str | None
+    description: str
+    fix_url: str | None
+
+
+class PolicyCheckResponse(BaseModel):
+    passed: bool
+    error_count: int
+    warning_count: int
+    violations: list[PolicyViolationResponse]
+    checked_at: datetime
+
+
+class OrgLLMConfigResponse(BaseModel):
+    provider: str
+    model: str | None
+    endpoint_url: str | None
+    api_key_hint: str | None
+    azure_deployment: str | None
+    azure_api_version: str | None
+    is_configured: bool
+    last_tested_at: datetime | None
+    last_test_ok: bool | None
+
+
+class LLMConfigUpdate(BaseModel):
+    provider: Literal["skillayer", "anthropic", "openai", "azure_openai", "ollama", "custom"]
+    model: str | None = None
+    endpoint_url: str | None = None
+    api_key: str | None = None
+    azure_deployment: str | None = None
+    azure_api_version: str | None = None
+
+
+class LLMConfigTestResponse(BaseModel):
+    ok: bool
+    latency_ms: int
+    error: str | None
+
+
 def _last_30_score_dates() -> list[str]:
     """Return the last 30 UTC score dates in chronological order."""
     today = datetime.now(UTC).date()
@@ -336,6 +454,81 @@ def _get_policies(org: Org) -> list[GovernancePolicyResponse]:
     source = raw_policies if isinstance(raw_policies, list) else DEFAULT_POLICIES
     policies = [_normalize_policy(item, index) for index, item in enumerate(source)]
     return [policy for policy in policies if policy is not None]
+
+
+def _audit_event_response(event: AuditEvent) -> AuditEventResponse:
+    return AuditEventResponse(
+        id=event.id,
+        event_type=event.event_type,
+        action=event.action,
+        actor_login=event.actor_login,
+        repo_id=event.repo_id,
+        repo_name=event.repo_name,
+        skill_id=event.skill_id,
+        skill_domain=event.skill_domain,
+        resource_type=event.resource_type,
+        resource_id=event.resource_id,
+        summary=event.summary,
+        severity=event.severity if event.severity in {"info", "warning", "critical"} else "info",
+        metadata=event.metadata_json or {},
+        created_at=event.created_at,
+    )
+
+
+def _policy_response(policy: OrgPolicy, violation_count: int = 0) -> PolicyResponse:
+    return PolicyResponse(
+        id=policy.id,
+        name=policy.name,
+        description=policy.description,
+        rule_type=policy.rule_type,
+        rule_config=policy.rule_config or {},
+        severity=policy.severity if policy.severity in {"error", "warning"} else "error",
+        enabled=bool(policy.enabled),
+        created_at=policy.created_at,
+        violation_count=violation_count,
+    )
+
+
+def _policy_violation_response(violation: PolicyViolation) -> PolicyViolationResponse:
+    return PolicyViolationResponse(**violation.__dict__)
+
+
+def _policy_check_response(violations: list[PolicyViolation]) -> PolicyCheckResponse:
+    error_count = sum(1 for item in violations if item.severity == "error")
+    warning_count = sum(1 for item in violations if item.severity == "warning")
+    return PolicyCheckResponse(
+        passed=error_count == 0,
+        error_count=error_count,
+        warning_count=warning_count,
+        violations=[_policy_violation_response(item) for item in violations],
+        checked_at=_utc_now_naive(),
+    )
+
+
+def _llm_config_response(config: OrgLLMConfig | None) -> OrgLLMConfigResponse:
+    if config is None:
+        return OrgLLMConfigResponse(
+            provider="skillayer",
+            model=None,
+            endpoint_url=None,
+            api_key_hint=None,
+            azure_deployment=None,
+            azure_api_version=None,
+            is_configured=False,
+            last_tested_at=None,
+            last_test_ok=None,
+        )
+    return OrgLLMConfigResponse(
+        provider=config.provider,
+        model=config.model,
+        endpoint_url=config.endpoint_url,
+        api_key_hint=config.api_key_hint,
+        azure_deployment=config.azure_deployment,
+        azure_api_version=config.azure_api_version,
+        is_configured=bool(config.is_configured),
+        last_tested_at=config.last_tested_at,
+        last_test_ok=config.last_test_ok,
+    )
 
 
 async def _latest_repo_score(db: AsyncSession, repo_id: str) -> int:
@@ -1243,6 +1436,7 @@ async def review_memory_stub(
     org_id: str,
     stub_id: str,
     payload: MemoryStubAction,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id),
 ) -> MemoryStubResponse:
@@ -1265,6 +1459,7 @@ async def review_memory_stub(
         stub.status = "rejected"
         stub.reviewer_note = payload.reviewer_note
         stub.reviewed_at = now
+        await audit.emit(db, org_id, "memory.stub_rejected", "rejected", f"Rejected memory stub {stub.title}", actor_login=get_actor_login(request), repo_id=stub.repo_id, repo_name=str(_row_value(row, "repo_name", "")), resource_type="session", resource_id=stub.id)
         await db.commit()
         return _memory_stub_response(stub, str(_row_value(row, "repo_name", "")), _row_value(row, "session_created_at"), None)
 
@@ -1285,6 +1480,7 @@ async def review_memory_stub(
         stub.status = "approved"
         stub.reviewer_note = payload.reviewer_note
         stub.reviewed_at = now
+        await audit.emit(db, org_id, "memory.stub_approved", "approved", f"Approved memory stub {stub.title}", actor_login=get_actor_login(request), repo_id=stub.repo_id, repo_name=str(_row_value(row, "repo_name", "")), resource_type="session", resource_id=stub.id)
         await db.commit()
         return _memory_stub_response(stub, str(_row_value(row, "repo_name", "")), _row_value(row, "session_created_at"), None)
 
@@ -1325,6 +1521,7 @@ async def review_memory_stub(
     stub.reviewer_note = payload.reviewer_note
     stub.merged_version_number = version_number
     stub.reviewed_at = now
+    await audit.emit(db, org_id, "memory.stub_approved", "approved", f"Merged memory stub {stub.title}", actor_login=get_actor_login(request), repo_id=stub.repo_id, repo_name=str(_row_value(row, "repo_name", "")), skill_id=skill.id, skill_domain=skill.domain, resource_type="skill", resource_id=skill.id, metadata={"version_number": version_number})
     await db.commit()
     existing_skill_content = new_content
     return _memory_stub_response(stub, str(_row_value(row, "repo_name", "")), _row_value(row, "session_created_at"), existing_skill_content)
@@ -1568,92 +1765,405 @@ async def get_team_rollup(
     )
 
 
-@router.get("/{org_id}/audit-log", response_model=AuditLogResponse)
+@router.get("/{org_id}/audit-log")
 async def get_audit_log(
     org_id: str,
-    event_type: str | None = Query(default=None),
-    repo_id: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=100),
+    event_type: str | None = None,
+    resource_type: str | None = None,
+    repo_id: str | None = None,
+    actor: str | None = None,
+    severity: Literal["info", "warning", "critical"] | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    format: Literal["json", "csv"] = "json",
     db: AsyncSession = Depends(get_db),
-) -> AuditLogResponse:
+):
+    now = _utc_now_naive()
+    since = since or (now - timedelta(days=30))
+    until = until or now
+    filters = [AuditEvent.org_id == org_id, AuditEvent.created_at >= since, AuditEvent.created_at <= until]
+    if event_type:
+        filters.append(AuditEvent.event_type.startswith(event_type) if event_type.endswith(".") else AuditEvent.event_type == event_type)
+    if resource_type:
+        filters.append(AuditEvent.resource_type == resource_type)
+    if repo_id:
+        filters.append(AuditEvent.repo_id == repo_id)
+    if actor:
+        filters.append(AuditEvent.actor_login.ilike(f"%{actor}%"))
+    if severity:
+        filters.append(AuditEvent.severity == severity)
     try:
-        query = (
-            select(AnalysisRun, Repo.name.label("repo_name"))
-            .join(Repo, Repo.id == AnalysisRun.repo_id)
-            .where(Repo.org_id == org_id)
-            .order_by(desc(AnalysisRun.created_at))
-        )
-        if repo_id:
-            query = query.where(Repo.id == repo_id)
-        rows = (await db.execute(query.limit(max(limit + offset + 100, 200)))).all()
+        total = int((await db.execute(select(func.count(AuditEvent.id)).where(*filters))).scalar() or 0)
+        rows = (
+            await db.execute(
+                select(AuditEvent)
+                .where(*filters)
+                .order_by(desc(AuditEvent.created_at))
+                .limit(limit)
+                .offset(offset)
+            )
+        ).scalars().all()
     except SQLAlchemyError as exc:
         await _rollback(db, "audit log lookup")
         raise HTTPException(status_code=400, detail="Unable to load audit log") from exc
+    if format == "csv":
+        def stream_rows():
+            buffer = StringIO()
+            writer = csv.writer(buffer)
+            writer.writerow(["timestamp", "event_type", "action", "actor", "summary", "repo", "severity"])
+            yield buffer.getvalue()
+            buffer.seek(0)
+            buffer.truncate(0)
+            for event in rows:
+                writer.writerow([event.created_at.isoformat(), event.event_type, event.action, event.actor_login or "system", event.summary, event.repo_name or "", event.severity])
+                yield buffer.getvalue()
+                buffer.seek(0)
+                buffer.truncate(0)
 
-    events: list[AuditLogEventResponse] = []
-    for run, repo_name in rows:
-        derived_event_type = _event_type_for_run(run)
-        if event_type and derived_event_type != event_type:
-            continue
-        anchor = (run.created_at or _utc_now_naive()) - timedelta(seconds=1)
-        score_before = await _repo_score_before(db, run.repo_id, anchor)
-        score_after = int(run.score_total) if run.score_total is not None else None
-        events.append(
-            AuditLogEventResponse(
-                id=run.id,
-                event_type=derived_event_type,
-                repo_name=str(repo_name),
-                repo_id=run.repo_id,
-                actor=_actor_for_trigger(run.trigger),
-                status=run.status,
-                score_before=score_before,
-                score_after=score_after,
-                skill_count=int(run.skill_count) if run.skill_count is not None else None,
-                created_at=run.created_at,
-            )
+        return StreamingResponse(
+            stream_rows(),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=audit-log.csv"},
         )
-    return AuditLogResponse(events=events[offset:offset + limit], limit=limit, offset=offset)
+    return AuditEventsResponse(total=total, events=[_audit_event_response(event) for event in rows], has_more=offset + len(rows) < total)
 
 
-@router.get("/{org_id}/policies", response_model=GovernancePoliciesResponse)
+@router.get("/{org_id}/audit-log/stats", response_model=AuditStatsResponse)
+async def get_audit_log_stats(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AuditStatsResponse:
+    _assert_org_scope(org_id, current_org_id)
+    now = _utc_now_naive()
+    since_30 = now - timedelta(days=30)
+    since_7 = now - timedelta(days=7)
+    rows = (await db.execute(select(AuditEvent).where(AuditEvent.org_id == org_id, AuditEvent.created_at >= since_30))).scalars().all()
+    by_severity = {"info": 0, "warning": 0, "critical": 0}
+    by_resource: dict[str, int] = {}
+    actors: dict[str, int] = {}
+    for event in rows:
+        by_severity[event.severity] = by_severity.get(event.severity, 0) + 1
+        if event.resource_type:
+            by_resource[event.resource_type] = by_resource.get(event.resource_type, 0) + 1
+        if event.actor_login:
+            actors[event.actor_login] = actors.get(event.actor_login, 0) + 1
+    passes = sum(1 for event in rows if event.event_type == "gate.passed")
+    failures = sum(1 for event in rows if event.event_type == "gate.failed")
+    return AuditStatsResponse(
+        total_events=len(rows),
+        by_severity=by_severity,
+        by_resource_type=by_resource,
+        most_active_actor=max(actors, key=actors.get) if actors else None,
+        critical_events_7d=sum(1 for event in rows if event.severity == "critical" and event.created_at >= since_7),
+        analysis_runs_30d=sum(1 for event in rows if event.event_type == "analysis.triggered"),
+        gate_failures_30d=failures,
+        gate_pass_rate=(passes / (passes + failures)) if passes + failures else None,
+    )
+
+
+@router.post("/{org_id}/audit-log/webhook")
+async def configure_audit_webhook(
+    org_id: str,
+    payload: AuditWebhookConfig,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, bool]:
+    _assert_org_scope(org_id, current_org_id)
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    org.siem_webhook_url = payload.webhook_url
+    org.siem_webhook_secret = payload.secret
+    org.siem_webhook_enabled = payload.enabled
+    org.siem_event_filter = payload.event_filter
+    await db.commit()
+    return {"configured": True}
+
+
+@router.get("/{org_id}/policies", response_model=list[PolicyResponse])
 async def get_org_policies(
     org_id: str,
     db: AsyncSession = Depends(get_db),
-) -> GovernancePoliciesResponse:
-    org = await db.get(Org, org_id)
-    if org is None:
-        raise HTTPException(status_code=404, detail="Org not found")
-    return GovernancePoliciesResponse(policies=_get_policies(org))
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[PolicyResponse]:
+    _assert_org_scope(org_id, current_org_id)
+    policies = (await db.execute(select(OrgPolicy).where(OrgPolicy.org_id == org_id).order_by(desc(OrgPolicy.created_at)))).scalars().all()
+    violations = await evaluate_policies(org_id, db)
+    counts: dict[str, int] = {}
+    for violation in violations:
+        counts[violation.policy_id] = counts.get(violation.policy_id, 0) + 1
+    return [_policy_response(policy, counts.get(policy.id, 0)) for policy in policies]
 
 
-@router.post("/{org_id}/policies", response_model=GovernancePoliciesResponse)
-async def upsert_org_policies(
+@router.post("/{org_id}/policies", response_model=PolicyResponse)
+async def create_org_policy(
     org_id: str,
-    payload: GovernancePoliciesResponse,
+    payload: PolicyMutation,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-) -> GovernancePoliciesResponse:
-    org = await db.get(Org, org_id)
-    if org is None:
-        raise HTTPException(status_code=404, detail="Org not found")
-    settings = dict(org.notification_settings or {})
-    normalized = [_normalize_policy(item.model_dump(), index) for index, item in enumerate(payload.policies)]
-    policies = [policy for policy in normalized if policy is not None]
-    settings["policies"] = [
-        {
-            **policy.model_dump(),
-            "created_at": policy.created_at.isoformat() if policy.created_at else datetime.now(UTC).isoformat(),
-        }
-        for policy in policies
-    ]
-    org.notification_settings = settings
+    current_org_id: str = Depends(get_current_org_id),
+) -> PolicyResponse:
+    _assert_org_scope(org_id, current_org_id)
+    if payload.rule_type not in POLICY_RULE_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid rule_type")
+    policy = OrgPolicy(
+        org_id=org_id,
+        name=payload.name or "Untitled policy",
+        description=payload.description,
+        rule_type=payload.rule_type,
+        rule_config=payload.rule_config or {},
+        severity=payload.severity or "error",
+        enabled=True if payload.enabled is None else payload.enabled,
+    )
+    db.add(policy)
+    await audit.emit(db, org_id, "policy.created", "created", f"Created policy {policy.name}", actor_login=get_actor_login(request), resource_type="policy", resource_id=policy.id)
     try:
-        await db.flush()
         await db.commit()
     except SQLAlchemyError as exc:
-        await _rollback(db, "policy update")
-        raise HTTPException(status_code=400, detail="Unable to update policies") from exc
-    return GovernancePoliciesResponse(policies=policies)
+        await _rollback(db, "policy create")
+        raise HTTPException(status_code=400, detail="Unable to create policy") from exc
+    return _policy_response(policy)
+
+
+@router.patch("/{org_id}/policies/{policy_id}", response_model=PolicyResponse)
+async def update_org_policy(
+    org_id: str,
+    policy_id: str,
+    payload: PolicyMutation,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> PolicyResponse:
+    _assert_org_scope(org_id, current_org_id)
+    policy = await db.get(OrgPolicy, policy_id)
+    if policy is None or policy.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    if payload.rule_type is not None:
+        if payload.rule_type not in POLICY_RULE_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid rule_type")
+        policy.rule_type = payload.rule_type
+    if payload.name is not None:
+        policy.name = payload.name
+    if payload.description is not None:
+        policy.description = payload.description
+    if payload.rule_config is not None:
+        policy.rule_config = payload.rule_config
+    if payload.severity is not None:
+        policy.severity = payload.severity
+    if payload.enabled is not None:
+        policy.enabled = payload.enabled
+    policy.updated_at = _utc_now_naive()
+    await audit.emit(db, org_id, "policy.updated", "updated", f"Updated policy {policy.name}", actor_login=get_actor_login(request), resource_type="policy", resource_id=policy.id)
+    await db.commit()
+    return _policy_response(policy)
+
+
+@router.delete("/{org_id}/policies/{policy_id}")
+async def delete_org_policy(
+    org_id: str,
+    policy_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, bool]:
+    _assert_org_scope(org_id, current_org_id)
+    policy = await db.get(OrgPolicy, policy_id)
+    if policy is None or policy.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    await audit.emit(db, org_id, "policy.deleted", "deleted", f"Deleted policy {policy.name}", actor_login=get_actor_login(request), resource_type="policy", resource_id=policy.id)
+    await db.delete(policy)
+    await db.commit()
+    return {"deleted": True}
+
+
+@router.get("/{org_id}/policy-templates", response_model=list[PolicyResponse])
+async def get_policy_templates(
+    org_id: str,
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[PolicyResponse]:
+    _assert_org_scope(org_id, current_org_id)
+    now = _utc_now_naive()
+    templates = [
+        ("require_skill_category", "Security skill required", "Every repo must have a security & compliance skill.", {"category": "security_compliance"}, "error"),
+        ("require_skill_category", "Testing conventions required", "Every repo must document testing patterns.", {"category": "testing_conventions"}, "warning"),
+        ("max_skill_age_days", "No skills older than 30 days", "Skills must be re-analysed at least monthly.", {"max_days": 30}, "error"),
+        ("min_skill_score", "Minimum quality gate", "No skill should score below 40.", {"min_score": 40}, "warning"),
+        ("min_freshness_score", "Minimum freshness", "All skills must have at least 15/25 freshness.", {"min_freshness": 15}, "error"),
+        ("require_analysis_recency", "Analysis within 14 days", "All repos must be analysed at least bi-weekly.", {"max_days": 14}, "warning"),
+    ]
+    return [
+        PolicyResponse(
+            id=f"template-{rule}",
+            name=name,
+            description=description,
+            rule_type=rule,
+            rule_config=config,
+            severity=severity,
+            enabled=True,
+            created_at=now,
+            violation_count=0,
+        )
+        for rule, name, description, config, severity in templates
+    ]
+
+
+@router.get("/{org_id}/policy-check", response_model=PolicyCheckResponse)
+async def run_policy_check(
+    org_id: str,
+    request: Request,
+    repo_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> PolicyCheckResponse:
+    _assert_org_scope(org_id, current_org_id)
+    violations = await evaluate_policies(org_id, db, [repo_id] if repo_id else None)
+    response = _policy_check_response(violations)
+    await audit.emit(
+        db,
+        org_id,
+        "policy.check_failed" if not response.passed else "policy.check_passed",
+        "failed" if not response.passed else "passed",
+        f"Policy check {'failed' if not response.passed else 'passed'}",
+        actor_login=get_actor_login(request),
+        resource_type="policy",
+        severity="critical" if response.error_count else "info",
+        metadata={"violation_count": len(response.violations), "repo_id": repo_id},
+    )
+    await db.commit()
+    return response
+
+
+@router.post("/{org_id}/policy-check/ci", response_model=PolicyCheckResponse)
+async def run_policy_check_ci(
+    org_id: str,
+    repo_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> PolicyCheckResponse | JSONResponse:
+    violations = await evaluate_policies(org_id, db, [repo_id] if repo_id else None)
+    response = _policy_check_response(violations)
+    if response.passed:
+        return response
+    return JSONResponse(status_code=422, content=response.model_dump(mode="json"))
+
+
+@router.get("/{org_id}/llm-config", response_model=OrgLLMConfigResponse)
+async def get_llm_config(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgLLMConfigResponse:
+    _assert_org_scope(org_id, current_org_id)
+    config = (await db.execute(select(OrgLLMConfig).where(OrgLLMConfig.org_id == org_id))).scalar_one_or_none()
+    return _llm_config_response(config)
+
+
+@router.post("/{org_id}/llm-config", response_model=OrgLLMConfigResponse)
+async def save_llm_config(
+    org_id: str,
+    payload: LLMConfigUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgLLMConfigResponse:
+    _assert_org_scope(org_id, current_org_id)
+    config = (await db.execute(select(OrgLLMConfig).where(OrgLLMConfig.org_id == org_id))).scalar_one_or_none()
+    if config is None:
+        config = OrgLLMConfig(org_id=org_id)
+        db.add(config)
+    config.provider = payload.provider
+    config.model = payload.model
+    config.endpoint_url = payload.endpoint_url
+    config.azure_deployment = payload.azure_deployment
+    config.azure_api_version = payload.azure_api_version
+    config.updated_at = _utc_now_naive()
+    if payload.provider == "skillayer":
+        config.api_key_encrypted = None
+        config.api_key_hint = None
+        config.is_configured = True
+    elif payload.api_key:
+        config.api_key_encrypted = encrypt_key(payload.api_key)
+        config.api_key_hint = key_hint(payload.api_key)
+        config.is_configured = True
+    else:
+        config.is_configured = bool(config.api_key_encrypted or payload.endpoint_url)
+    await audit.emit(
+        db,
+        org_id,
+        "settings.llm_configured",
+        "configured",
+        f"Configured LLM provider {payload.provider}",
+        actor_login=get_actor_login(request),
+        resource_type="settings",
+        metadata={"provider": payload.provider, "model": payload.model, "api_key_hint": config.api_key_hint},
+    )
+    await db.commit()
+    return _llm_config_response(config)
+
+
+@router.post("/{org_id}/llm-config/test", response_model=LLMConfigTestResponse)
+async def test_llm_config(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> LLMConfigTestResponse:
+    _assert_org_scope(org_id, current_org_id)
+    config = (await db.execute(select(OrgLLMConfig).where(OrgLLMConfig.org_id == org_id))).scalar_one_or_none()
+    if config is None:
+        config = OrgLLMConfig(org_id=org_id, provider="skillayer", is_configured=True)
+        db.add(config)
+    start = time.perf_counter()
+    ok = False
+    error: str | None = None
+    try:
+        if config.provider == "skillayer":
+            ok = True
+        elif config.provider == "anthropic":
+            if not config.api_key_encrypted:
+                raise RuntimeError("Missing Anthropic API key")
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={"x-api-key": decrypt_key(config.api_key_encrypted), "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                    json={"model": config.model or "claude-3-5-haiku-20241022", "max_tokens": 1, "messages": [{"role": "user", "content": "ping"}]},
+                )
+                ok = resp.status_code < 400
+                if not ok:
+                    error = f"Provider returned {resp.status_code}"
+        elif config.provider in {"openai", "azure_openai"}:
+            if not config.api_key_encrypted:
+                raise RuntimeError("Missing OpenAI API key")
+            url = config.endpoint_url or "https://api.openai.com/v1/chat/completions"
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {decrypt_key(config.api_key_encrypted)}", "content-type": "application/json"},
+                    json={"model": config.model or "gpt-4o-mini", "max_tokens": 1, "messages": [{"role": "user", "content": "ping"}]},
+                )
+                ok = resp.status_code < 400
+                if not ok:
+                    error = f"Provider returned {resp.status_code}"
+        else:
+            if not config.endpoint_url:
+                raise RuntimeError("Missing endpoint URL")
+            base = config.endpoint_url.rstrip("/")
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(f"{base}/api/tags")
+                if resp.status_code >= 400:
+                    resp = await client.get(f"{base}/v1/models")
+                ok = resp.status_code < 400
+                if not ok:
+                    error = f"Provider returned {resp.status_code}"
+    except Exception as exc:
+        ok = False
+        error = str(exc)
+    latency_ms = round((time.perf_counter() - start) * 1000)
+    config.last_tested_at = _utc_now_naive()
+    config.last_test_ok = ok
+    await db.commit()
+    return LLMConfigTestResponse(ok=ok, latency_ms=latency_ms, error=error)
 
 
 @router.get("/{org_id}/available-repos")

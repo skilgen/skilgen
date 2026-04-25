@@ -24,6 +24,8 @@ from apps.api.api.routes.orgs import (
 
 from apps.api.api.analysis import _skill_category_for_domain
 from apps.api.api.routes.webhook import _queue_analysis
+from apps.api.api.services import audit
+from apps.api.api.services.audit import get_actor_login
 from apps.api.api.services.memory import run_session_knowledge_extraction
 from packages.db.database import get_db
 from packages.db.models import AgentSession, AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillUsageEvent, SkillVersion
@@ -465,11 +467,12 @@ async def update_repo_skill_content(
     repo_id: str,
     skill_id: str,
     payload: SkillContentUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id),
 ) -> dict[str, object]:
     """Update stored skill content and create a new version for the edit."""
-    await _repo_in_scope(db, repo_id, current_org_id)
+    repo = await _repo_in_scope(db, repo_id, current_org_id)
     skill = await db.get(Skill, skill_id)
     if skill is None or skill.repo_id != repo_id:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -525,6 +528,21 @@ async def update_repo_skill_content(
                 is_latest=True,
             )
         )
+        await audit.emit(
+            db,
+            current_org_id,
+            "skill.content_edited",
+            "updated",
+            f"Edited skill content for {skill.domain}",
+            actor_login=get_actor_login(request),
+            repo_id=repo_id,
+            repo_name=repo.name,
+            skill_id=skill.id,
+            skill_domain=skill.domain,
+            resource_type="skill",
+            resource_id=skill.id,
+            metadata={"version_number": version_number, "score_total": score["total"]},
+        )
         await db.commit()
     except SQLAlchemyError as exc:
         await db.rollback()
@@ -546,6 +564,7 @@ async def ingest_agent_session(
     repo_id: str,
     payload: SessionIngestionPayload,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id),
 ) -> SessionIngestionResponse:
@@ -577,6 +596,19 @@ async def ingest_agent_session(
         discoveries_found=0,
     )
     db.add(session)
+    await audit.emit(
+        db,
+        repo.org_id,
+        "memory.session_uploaded",
+        "created",
+        f"Uploaded {payload.agent_runtime} session {payload.session_id}",
+        actor_login=get_actor_login(request),
+        repo_id=repo_id,
+        repo_name=repo.name,
+        resource_type="session",
+        resource_id=session.id,
+        metadata={"agent_runtime": payload.agent_runtime, "message_count": len(payload.messages)},
+    )
     try:
         await db.commit()
     except SQLAlchemyError as exc:

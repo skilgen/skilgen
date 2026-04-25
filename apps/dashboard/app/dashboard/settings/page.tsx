@@ -1,11 +1,27 @@
 import Link from "next/link";
 import type { ReactElement } from "react";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { Bell, CreditCard, Github, Settings } from "lucide-react";
+import { Bell, Brain, CreditCard, Github, RadioTower, Settings, ShieldAlert } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
-import { API_URL, getBootstrapOrg, getMyOrg, getOrgPolicies, getOrgSettings, type GovernancePoliciesResponse, type OrgSettings } from "../../../lib/data";
+import {
+  API_URL,
+  getBootstrapOrg,
+  getLLMConfig,
+  getMyOrg,
+  getOrgPolicies,
+  getOrgSettings,
+  getPolicies,
+  getPolicyTemplates,
+  runPolicyCheck,
+  type GovernancePoliciesResponse,
+  type LLMConfig,
+  type OrgSettings,
+  type PolicyCheckResult,
+  type PolicyRule,
+} from "../../../lib/data";
 import { ManageBillingButton } from "./billing/manage-billing-button";
+import { LlmSettingsPanel, PolicySettingsPanel, SiemSettingsPanel } from "./enterprise-settings";
 import { SettingsControls } from "./settings-controls";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +41,9 @@ type SubscriptionState = {
 const tabs = [
   { key: "general", label: "General", icon: Settings },
   { key: "notifications", label: "Notifications", icon: Bell },
+  { key: "llm", label: "LLM", icon: Brain },
+  { key: "policies", label: "Policies", icon: ShieldAlert },
+  { key: "siem", label: "SIEM", icon: RadioTower },
   { key: "github", label: "GitHub App", icon: Github },
   { key: "billing", label: "Billing", icon: CreditCard },
 ] as const;
@@ -94,6 +113,10 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
   let settings = fallbackSettings();
   let subscription: SubscriptionState | null = null;
   let policies: GovernancePoliciesResponse = { policies: [] };
+  let policyRules: PolicyRule[] = [];
+  let policyTemplates: PolicyRule[] = [];
+  let policyCheck: PolicyCheckResult | null = null;
+  let llmConfig: LLMConfig | null = null;
 
   try {
     const session = await withAuth({ ensureSignedIn: true });
@@ -102,6 +125,10 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
     if (org) {
       settings = (await getOrgSettings(accessToken, org.id)) ?? { ...settings, ...org };
       policies = (await getOrgPolicies(accessToken, org.id)) ?? policies;
+      policyRules = await getPolicies(accessToken, org.id);
+      policyTemplates = await getPolicyTemplates(accessToken, org.id);
+      policyCheck = await runPolicyCheck(accessToken, org.id);
+      llmConfig = await getLLMConfig(accessToken, org.id);
     }
     subscription = await getSubscription(accessToken);
   } catch {
@@ -109,6 +136,9 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
     if (org) {
       settings = (await getOrgSettings("", org.id)) ?? { ...settings, ...org };
       policies = (await getOrgPolicies("", org.id)) ?? policies;
+      policyRules = await getPolicies("", org.id);
+      policyTemplates = await getPolicyTemplates("", org.id);
+      llmConfig = await getLLMConfig("", org.id);
     }
     subscription = null;
   }
@@ -145,6 +175,9 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
         {tab === "general" || tab === "notifications" ? (
           <SettingsControls accessToken={accessToken} initialPolicies={policies.policies} initialSettings={settings} orgId={settings.id} tab={tab} />
         ) : null}
+        {tab === "llm" ? <LlmSettingsPanel accessToken={accessToken} initialConfig={llmConfig} orgId={settings.id} /> : null}
+        {tab === "policies" ? <PolicySettingsPanel accessToken={accessToken} initialCheck={policyCheck} initialPolicies={policyRules} orgId={settings.id} templates={policyTemplates} /> : null}
+        {tab === "siem" ? <SiemSettingsPanel accessToken={accessToken} orgId={settings.id} /> : null}
         {tab === "github" ? <GitHubSettingsPanel settings={settings} /> : null}
         {tab === "billing" ? <BillingPanel accessToken={accessToken} success={success} subscription={subscription} upgradedPlan={upgradedPlan} /> : null}
       </SectionErrorBoundary>

@@ -247,21 +247,35 @@ export type OrgRedFlags = {
 export type AuditLogEvent = {
   id: string;
   event_type: string;
+  action: string;
+  actor_login: string | null;
   repo_name: string | null;
   repo_id: string | null;
-  actor: string | null;
-  status: string | null;
-  score_before: number | null;
-  score_after: number | null;
-  skill_count: number | null;
-  created_at: string | null;
+  skill_id: string | null;
+  skill_domain: string | null;
+  resource_type: string | null;
+  resource_id: string | null;
+  summary: string;
+  severity: "info" | "warning" | "critical";
+  metadata: Record<string, unknown>;
+  created_at: string;
 };
 
 export type AuditLogResponse = {
+  total: number;
   events: AuditLogEvent[];
-  limit?: number;
-  offset?: number;
-  total?: number;
+  has_more: boolean;
+};
+
+export type AuditLogStats = {
+  total_events: number;
+  by_severity: Record<string, number>;
+  by_resource_type: Record<string, number>;
+  most_active_actor: string | null;
+  critical_events_7d: number;
+  analysis_runs_30d: number;
+  gate_failures_30d: number;
+  gate_pass_rate: number | null;
 };
 
 export type GovernancePolicy = {
@@ -277,6 +291,51 @@ export type GovernancePolicy = {
 
 export type GovernancePoliciesResponse = {
   policies: GovernancePolicy[];
+};
+
+export type PolicyRule = {
+  id: string;
+  name: string;
+  description: string | null;
+  rule_type: string;
+  rule_config: Record<string, unknown>;
+  severity: "error" | "warning";
+  enabled: boolean;
+  created_at: string;
+  violation_count: number;
+};
+
+export type PolicyViolation = {
+  policy_id: string;
+  policy_name: string;
+  rule_type: string;
+  severity: "error" | "warning";
+  repo_id: string | null;
+  repo_name: string | null;
+  skill_id: string | null;
+  skill_domain: string | null;
+  description: string;
+  fix_url: string | null;
+};
+
+export type PolicyCheckResult = {
+  passed: boolean;
+  error_count: number;
+  warning_count: number;
+  violations: PolicyViolation[];
+  checked_at: string;
+};
+
+export type LLMConfig = {
+  provider: string;
+  model: string | null;
+  endpoint_url: string | null;
+  api_key_hint: string | null;
+  azure_deployment: string | null;
+  azure_api_version: string | null;
+  is_configured: boolean;
+  last_tested_at: string | null;
+  last_test_ok: boolean | null;
 };
 
 export type SkillUsageDailyLoad = {
@@ -668,8 +727,79 @@ export async function getOrgAuditLog(accessToken: string | null, orgId: string, 
   return apiFetch<AuditLogResponse>(`/orgs/${orgId}/audit-log${query ? `?${query}` : ""}`, { accessToken, cache: "no-store" });
 }
 
+export async function getAuditLogStats(accessToken: string | null, orgId: string): Promise<AuditLogStats | null> {
+  return apiFetch<AuditLogStats>(`/orgs/${orgId}/audit-log/stats`, { accessToken, cache: "no-store" });
+}
+
+export function exportAuditLogCsvUrl(orgId: string): string {
+  return `${API_URL}/orgs/${orgId}/audit-log?format=csv`;
+}
+
+export async function configureAuditWebhook(
+  accessToken: string,
+  orgId: string,
+  body: { webhook_url: string; secret?: string | null; enabled: boolean; event_filter?: string },
+): Promise<boolean> {
+  const result = await apiFetch<{ configured: boolean }>(`/orgs/${orgId}/audit-log/webhook`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  return Boolean(result?.configured);
+}
+
+export async function getPolicies(accessToken: string | null, orgId: string): Promise<PolicyRule[]> {
+  return (await apiFetch<PolicyRule[]>(`/orgs/${orgId}/policies`, { accessToken, cache: "no-store" })) ?? [];
+}
+
+export async function getPolicyTemplates(accessToken: string | null, orgId: string): Promise<PolicyRule[]> {
+  return (await apiFetch<PolicyRule[]>(`/orgs/${orgId}/policy-templates`, { accessToken, cache: "no-store" })) ?? [];
+}
+
+export async function createPolicy(accessToken: string, orgId: string, body: Partial<PolicyRule>): Promise<PolicyRule | null> {
+  return apiFetch<PolicyRule>(`/orgs/${orgId}/policies`, { accessToken, method: "POST", body: JSON.stringify(body), cache: "no-store" });
+}
+
+export async function updatePolicy(accessToken: string, orgId: string, policyId: string, body: Partial<PolicyRule>): Promise<PolicyRule | null> {
+  return apiFetch<PolicyRule>(`/orgs/${orgId}/policies/${policyId}`, { accessToken, method: "PATCH", body: JSON.stringify(body), cache: "no-store" });
+}
+
+export async function deletePolicy(accessToken: string, orgId: string, policyId: string): Promise<boolean> {
+  const result = await apiFetch<{ deleted: boolean }>(`/orgs/${orgId}/policies/${policyId}`, { accessToken, method: "DELETE", cache: "no-store" });
+  return Boolean(result?.deleted);
+}
+
+export async function runPolicyCheck(accessToken: string, orgId: string): Promise<PolicyCheckResult | null> {
+  return apiFetch<PolicyCheckResult>(`/orgs/${orgId}/policy-check`, { accessToken, cache: "no-store" });
+}
+
+export async function getLLMConfig(accessToken: string | null, orgId: string): Promise<LLMConfig | null> {
+  return apiFetch<LLMConfig>(`/orgs/${orgId}/llm-config`, { accessToken, cache: "no-store" });
+}
+
+export async function saveLLMConfig(accessToken: string, orgId: string, body: Partial<LLMConfig> & { api_key?: string | null }): Promise<LLMConfig | null> {
+  return apiFetch<LLMConfig>(`/orgs/${orgId}/llm-config`, { accessToken, method: "POST", body: JSON.stringify(body), cache: "no-store" });
+}
+
+export async function testLLMConfig(accessToken: string, orgId: string): Promise<{ ok: boolean; latency_ms: number; error: string | null } | null> {
+  return apiFetch<{ ok: boolean; latency_ms: number; error: string | null }>(`/orgs/${orgId}/llm-config/test`, { accessToken, method: "POST", cache: "no-store" });
+}
+
 export async function getOrgPolicies(accessToken: string | null, orgId: string): Promise<GovernancePoliciesResponse | null> {
-  return apiFetch<GovernancePoliciesResponse>(`/orgs/${orgId}/policies`, { accessToken, cache: "no-store" });
+  const policies = await getPolicies(accessToken, orgId);
+  return {
+    policies: policies.map((policy) => ({
+      id: policy.id,
+      name: policy.name,
+      type: "min_score",
+      threshold: Number(policy.rule_config.min_score ?? policy.rule_config.max_days ?? 0),
+      scope: "all_repos",
+      action: policy.severity === "error" ? "block_pr" : "warn",
+      enabled: policy.enabled,
+      created_at: policy.created_at,
+    })),
+  };
 }
 
 export async function getRepo(accessToken: string | null, repoId: string): Promise<Repo | null> {

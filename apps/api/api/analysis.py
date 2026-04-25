@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.github import clone_repo
 from apps.api.api.notifications import build_stale_skill_message, post_slack_message
+from apps.api.api.services.llm_config import configured_llm_environment, get_repo_llm_config
 from packages.db.models import AnalysisRun, Dependency, Org, Repo, ScoreHistory, Skill, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
 from skilgen.core.dependency_risk import analyze_dependency_risks
@@ -569,7 +570,9 @@ async def run_analysis(
         if skilgen_path.exists() and "/app" not in sys.path:
             sys.path.insert(0, "/app")
 
-        analysis_result = await run_skilgen_analysis(tmpdir, source_type=source_type, source_path=source_path)
+        llm_config = await get_repo_llm_config(db, repo_id)
+        with configured_llm_environment(llm_config):
+            analysis_result = await run_skilgen_analysis(tmpdir, source_type=source_type, source_path=source_path)
         score = dict(analysis_result.get("score") or {})
         skill_files = list(analysis_result.get("skill_files") or [])
         saved_skills = await save_skills(db, repo_id, run_id, skill_files)

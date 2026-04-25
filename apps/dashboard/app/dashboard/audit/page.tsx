@@ -1,36 +1,12 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { CheckCircle2, Clock3, Filter, XCircle } from "lucide-react";
+import Link from "next/link";
 
-import { getBootstrapOrg, getMyOrg, getOrgAuditLog, type AuditLogEvent, type AuditLogResponse } from "../../../lib/data";
+import { AuditClient } from "./audit-client";
+import { exportAuditLogCsvUrl, getAuditLogStats, getBootstrapOrg, getMyOrg, getOrgAuditLog } from "../../../lib/data";
 
 export const dynamic = "force-dynamic";
 
-type AuditPageProps = {
-  searchParams: Promise<{ event_type?: string; repo_id?: string; limit?: string; offset?: string }>;
-};
-
-function relativeTime(value: string | null): string {
-  if (!value) return "Unknown";
-  const diffHours = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 3600000));
-  if (diffHours < 1) return "Just now";
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${Math.floor(diffHours / 24)}d ago`;
-}
-
-function statusIcon(status: string | null) {
-  if (status === "complete") return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
-  if (status === "failed") return <XCircle className="h-4 w-4 text-red-400" />;
-  return <Clock3 className="h-4 w-4 text-amber-400" />;
-}
-
-function scoreChange(event: AuditLogEvent): string {
-  if (event.score_before == null || event.score_after == null) return "—";
-  const delta = event.score_after - event.score_before;
-  const prefix = delta > 0 ? "+" : "";
-  return `${event.score_before} → ${event.score_after} (${prefix}${delta})`;
-}
-
-async function loadAudit(params: URLSearchParams): Promise<AuditLogResponse | null> {
+export default async function AuditPage() {
   let accessToken = "";
   try {
     const session = await withAuth({ ensureSignedIn: false });
@@ -39,98 +15,69 @@ async function loadAudit(params: URLSearchParams): Promise<AuditLogResponse | nu
     console.error("Audit auth unavailable:", error);
   }
   const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
-  if (!org) return null;
-  return getOrgAuditLog(accessToken, org.id, params);
-}
-
-export default async function AuditPage({ searchParams }: AuditPageProps) {
-  const resolved = await searchParams;
-  const params = new URLSearchParams();
-  if (resolved.event_type) params.set("event_type", resolved.event_type);
-  if (resolved.repo_id) params.set("repo_id", resolved.repo_id);
-  params.set("limit", resolved.limit || "50");
-  params.set("offset", resolved.offset || "0");
-
-  const audit = await loadAudit(params);
-  const limit = Number(resolved.limit || "50");
-  const offset = Number(resolved.offset || "0");
-  const nextParams = new URLSearchParams(params);
-  nextParams.set("offset", String(offset + limit));
+  const orgId = org?.id ?? "";
+  const params = new URLSearchParams({ limit: "50" });
+  const [audit, stats] = orgId
+    ? await Promise.all([getOrgAuditLog(accessToken, orgId, params), getAuditLogStats(accessToken, orgId)])
+    : [null, null];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">Audit</h1>
-        <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Filterable event history for analyses, automation, and governance signals.</p>
+      <nav className="text-[12px] text-[color:var(--text-tertiary)]">
+        <Link className="hover:text-[color:var(--text-primary)]" href="/dashboard">
+          Overview
+        </Link>
+        <span className="px-2">/</span>
+        <span>Audit Log</span>
+      </nav>
+
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h1 className="text-[32px] font-semibold text-[color:var(--text-primary)]">Audit Log</h1>
+          <p className="mt-2 max-w-[760px] text-[15px] text-[color:var(--text-secondary)]">
+            Every analysis run, skill edit, gate result, and config change across your org. 1-year retention.
+          </p>
+        </div>
+        {orgId ? (
+          <a
+            className="inline-flex items-center justify-center rounded-full border border-[color:var(--bg-border)] px-4 py-2 text-[13px] font-semibold text-[color:var(--text-primary)] transition-colors hover:border-[color:var(--accent-primary)] hover:text-[color:var(--accent-primary)]"
+            href={exportAuditLogCsvUrl(orgId)}
+            target="_blank"
+          >
+            Export CSV
+          </a>
+        ) : null}
       </div>
 
-      <form className="grid gap-3 rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5 md:grid-cols-4" method="get">
-        <label className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
-          Event type
-          <input className="mt-2 h-11 w-full rounded-xl border border-[color:var(--bg-border)] bg-black/20 px-3 text-[14px] text-[color:var(--text-primary)]" defaultValue={resolved.event_type || ""} name="event_type" placeholder="analysis_complete" />
-        </label>
-        <label className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
-          Repository
-          <input className="mt-2 h-11 w-full rounded-xl border border-[color:var(--bg-border)] bg-black/20 px-3 text-[14px] text-[color:var(--text-primary)]" defaultValue={resolved.repo_id || ""} name="repo_id" placeholder="repo id" />
-        </label>
-        <label className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
-          Limit
-          <select className="mt-2 h-11 w-full rounded-xl border border-[color:var(--bg-border)] bg-black/20 px-3 text-[14px] text-[color:var(--text-primary)]" defaultValue={resolved.limit || "50"} name="limit">
-            <option value="50">50</option>
-            <option value="100">100</option>
-          </select>
-        </label>
-        <div className="flex items-end">
-          <button className="inline-flex h-11 items-center gap-2 rounded-xl bg-[color:var(--accent-primary)] px-4 text-[14px] font-semibold text-black hover:bg-[color:var(--accent-bright)]" type="submit">
-            <Filter className="h-4 w-4" />
-            Apply
-          </button>
-        </div>
-      </form>
+      <div className="grid gap-4 md:grid-cols-4">
+        <Metric label="TOTAL EVENTS (30D)" value={stats?.total_events ?? 0} />
+        <Metric label="ANALYSIS RUNS (30D)" value={stats?.analysis_runs_30d ?? 0} />
+        <Metric
+          label="GATE PASS RATE"
+          value={stats?.gate_pass_rate == null ? "—" : `${Math.round((stats.gate_pass_rate ?? 0) * 100)}%`}
+          tone={(stats?.gate_pass_rate ?? 1) >= 0.8 ? "green" : (stats?.gate_pass_rate ?? 1) >= 0.5 ? "amber" : "red"}
+        />
+        <Metric label="CRITICAL EVENTS (7D)" value={stats?.critical_events_7d ?? 0} tone={(stats?.critical_events_7d ?? 0) > 0 ? "red" : "default"} />
+      </div>
 
-      {!audit || audit.events.length === 0 ? (
-        <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center text-[14px] text-[color:var(--text-secondary)]">
-          No events recorded yet. Events appear after your first analysis run.
-        </section>
-      ) : (
-        <section className="overflow-hidden rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
-          <div className="grid grid-cols-[120px_180px_minmax(0,1fr)_110px_110px_160px] bg-black/20 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
-            <span>Time</span>
-            <span>Event</span>
-            <span>Repository</span>
-            <span>Actor</span>
-            <span>Status</span>
-            <span>Score change</span>
-          </div>
-          {audit.events.map((event) => (
-            <details className="border-t border-[color:var(--bg-border)]" key={event.id}>
-              <summary className="grid cursor-pointer grid-cols-[120px_180px_minmax(0,1fr)_110px_110px_160px] items-center px-4 py-4 text-[13px] marker:content-none">
-                <span className="text-[color:var(--text-secondary)]">{relativeTime(event.created_at)}</span>
-                <span className="font-medium text-[color:var(--text-primary)]">{event.event_type.replaceAll("_", " ")}</span>
-                <span className="truncate text-[color:var(--text-primary)]">{event.repo_name ?? "—"}</span>
-                <span className="text-[color:var(--text-secondary)]">{event.actor ?? "—"}</span>
-                <span className="inline-flex items-center gap-2 text-[color:var(--text-secondary)]">
-                  {statusIcon(event.status)}
-                  {event.status ?? "—"}
-                </span>
-                <span className="text-[color:var(--text-secondary)]">{scoreChange(event)}</span>
-              </summary>
-              <div className="bg-black/10 px-4 py-4 text-[13px] text-[color:var(--text-secondary)]">
-                <div>ID: {event.id}</div>
-                <div>Repo ID: {event.repo_id ?? "—"}</div>
-                <div>Created: {event.created_at ? new Date(event.created_at).toLocaleString() : "Unknown"}</div>
-                <div>Skill count: {event.skill_count ?? "—"}</div>
-              </div>
-            </details>
-          ))}
-        </section>
-      )}
+      <AuditClient accessToken={accessToken} initialAudit={audit} orgId={orgId} />
+    </div>
+  );
+}
 
-      {audit && audit.events.length >= limit ? (
-        <a className="inline-flex items-center gap-2 rounded-full border border-[color:var(--bg-border)] px-4 py-2 text-[13px] font-semibold text-[color:var(--text-primary)] hover:bg-white/5" href={`/dashboard/audit?${nextParams.toString()}`}>
-          Load more
-        </a>
-      ) : null}
+function Metric({ label, value, tone = "default" }: { label: string; value: string | number; tone?: "default" | "green" | "amber" | "red" }) {
+  const toneClass =
+    tone === "green"
+      ? "text-[color:var(--accent-green)]"
+      : tone === "amber"
+        ? "text-amber-400"
+        : tone === "red"
+          ? "text-red-400"
+          : "text-[color:var(--text-primary)]";
+  return (
+    <div className="rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">{label}</div>
+      <div className={`mt-3 text-[32px] font-semibold ${toneClass}`}>{value}</div>
     </div>
   );
 }
