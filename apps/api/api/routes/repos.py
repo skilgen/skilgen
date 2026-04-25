@@ -24,8 +24,9 @@ from apps.api.api.routes.orgs import (
 
 from apps.api.api.analysis import _skill_category_for_domain
 from apps.api.api.routes.webhook import _queue_analysis
+from apps.api.api.services.memory import run_session_knowledge_extraction
 from packages.db.database import get_db
-from packages.db.models import AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillUsageEvent, SkillVersion
+from packages.db.models import AgentSession, AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillUsageEvent, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
     AnalysisRunResponse,
@@ -110,6 +111,47 @@ class SkillContentUpdate(BaseModel):
     """Request body for manual skill content updates."""
 
     content: str = Field(min_length=1, max_length=200_000)
+
+
+class SessionMessage(BaseModel):
+    role: Literal["user", "assistant", "tool"]
+    content: str
+
+
+class SessionIngestionPayload(BaseModel):
+    session_id: str = Field(max_length=128)
+    agent_runtime: Literal["claude_code", "codex", "cursor", "copilot", "gemini", "other"]
+    task_description: str | None = Field(default=None, max_length=1000)
+    engineer_login: str | None = Field(default=None, max_length=128)
+    duration_minutes: int | None = None
+    files_touched: list[str] = Field(default_factory=list, max_length=500)
+    skill_paths_loaded: list[str] = Field(default_factory=list, max_length=200)
+    messages: list[SessionMessage] = Field(default_factory=list, max_length=500)
+
+
+class SessionIngestionResponse(BaseModel):
+    session_db_id: str
+    status: Literal["created", "duplicate"]
+    extraction_queued: bool
+
+
+class AgentSessionResponse(BaseModel):
+    id: str
+    session_id: str
+    agent_runtime: str
+    task_description: str | None
+    engineer_login: str | None
+    duration_minutes: int | None
+    files_touched: list[str]
+    skill_paths_loaded: list[str]
+    extraction_status: str
+    discoveries_found: int
+    created_at: datetime
+
+
+class KnowledgeVelocityPoint(BaseModel):
+    week_start: str
+    discoveries: int
 
 
 async def _repo_in_scope(db: AsyncSession, repo_id: str, org_id: str) -> Repo:
@@ -493,6 +535,120 @@ async def update_repo_skill_content(
         "version_number": version_number,
         "score": _score_response(skill).model_dump(),
     }
+
+
+def _week_start(value: datetime) -> datetime:
+    return (value - timedelta(days=value.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+@router.post("/{repo_id}/sessions", response_model=SessionIngestionResponse, status_code=201)
+async def ingest_agent_session(
+    repo_id: str,
+    payload: SessionIngestionPayload,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> SessionIngestionResponse:
+    """Capture a coding-agent session for asynchronous knowledge extraction."""
+    repo = await _repo_in_scope(db, repo_id, current_org_id)
+    existing = (
+        await db.execute(
+            select(AgentSession).where(
+                AgentSession.repo_id == repo_id,
+                AgentSession.session_id == payload.session_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return SessionIngestionResponse(session_db_id=existing.id, status="duplicate", extraction_queued=False)
+
+    session = AgentSession(
+        repo_id=repo_id,
+        org_id=repo.org_id,
+        session_id=payload.session_id,
+        agent_runtime=payload.agent_runtime,
+        task_description=payload.task_description,
+        engineer_login=payload.engineer_login,
+        duration_minutes=payload.duration_minutes,
+        files_touched=list(payload.files_touched),
+        skill_paths_loaded=list(payload.skill_paths_loaded),
+        raw_message_count=len(payload.messages),
+        extraction_status="pending",
+        discoveries_found=0,
+    )
+    db.add(session)
+    try:
+        await db.commit()
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to capture session") from exc
+
+    background_tasks.add_task(run_session_knowledge_extraction, session.id, payload.messages, repo_id)
+    return SessionIngestionResponse(session_db_id=session.id, status="created", extraction_queued=True)
+
+
+@router.get("/{repo_id}/sessions", response_model=list[AgentSessionResponse])
+async def list_agent_sessions(
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[AgentSessionResponse]:
+    await _repo_in_scope(db, repo_id, current_org_id)
+    sessions = (
+        await db.execute(
+            select(AgentSession)
+            .where(AgentSession.repo_id == repo_id)
+            .order_by(desc(AgentSession.created_at))
+            .limit(20)
+        )
+    ).scalars().all()
+    return [
+        AgentSessionResponse(
+            id=session.id,
+            session_id=session.session_id,
+            agent_runtime=session.agent_runtime,
+            task_description=session.task_description,
+            engineer_login=session.engineer_login,
+            duration_minutes=session.duration_minutes,
+            files_touched=list(session.files_touched or []),
+            skill_paths_loaded=list(session.skill_paths_loaded or []),
+            extraction_status=session.extraction_status,
+            discoveries_found=int(session.discoveries_found or 0),
+            created_at=session.created_at,
+        )
+        for session in sessions
+    ]
+
+
+@router.get("/{repo_id}/knowledge-velocity", response_model=list[KnowledgeVelocityPoint])
+async def repo_knowledge_velocity(
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[KnowledgeVelocityPoint]:
+    await _repo_in_scope(db, repo_id, current_org_id)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    this_week = _week_start(now)
+    week_starts = [this_week - timedelta(weeks=offset) for offset in range(8)]
+    oldest = week_starts[-1]
+    rows = (
+        await db.execute(
+            select(SkillMemoryStub.created_at)
+            .where(
+                SkillMemoryStub.repo_id == repo_id,
+                SkillMemoryStub.status != "rejected",
+                SkillMemoryStub.created_at >= oldest,
+            )
+        )
+    ).all()
+    counts = {week.date().isoformat(): 0 for week in week_starts}
+    for row in rows:
+        created_at = getattr(row, "created_at", None) or row[0]
+        if isinstance(created_at, datetime):
+            key = _week_start(created_at).date().isoformat()
+            if key in counts:
+                counts[key] += 1
+    return [KnowledgeVelocityPoint(week_start=week.date().isoformat(), discoveries=counts[week.date().isoformat()]) for week in week_starts]
 
 
 @router.get("/{repo_id}/score-history")

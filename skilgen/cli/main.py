@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import threading
 import time
+import uuid
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -68,6 +69,82 @@ from skilgen.external_skills import (
 
 def emit_progress(message: str) -> None:
     print(f"[skilgen] {message}", file=sys.stderr)
+
+
+def _write_memory_session_template(project_root: Path, output: str | None = None) -> Path:
+    session_id = str(uuid.uuid4())
+    path = Path(output).resolve() if output else project_root / ".skilgen" / "sessions" / f"{session_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "session_id": session_id,
+        "agent_runtime": "claude_code",
+        "task_description": "Implement JWT refresh token rotation",
+        "engineer_login": "janedoe",
+        "duration_minutes": 47,
+        "files_touched": ["src/auth/jwt.py"],
+        "skill_paths_loaded": ["auth/SKILL.md"],
+        "messages": [
+            {"role": "user", "content": "Describe the task the engineer gave the agent."},
+            {"role": "assistant", "content": "Summarize the codebase-specific discovery here."},
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def _memory_session_files(project_root: Path, session_file: str | None) -> list[Path]:
+    if session_file:
+        return [Path(session_file).resolve()]
+    sessions_dir = project_root / ".skilgen" / "sessions"
+    return sorted(sessions_dir.glob("*.json")) if sessions_dir.exists() else []
+
+
+def _upload_memory_sessions(project_root: Path, repo_id: str, api_url: str, session_file: str | None) -> None:
+    api_key = os.getenv("SKILLAYER_API_KEY", "")
+    if not api_key:
+        print("error: SKILLAYER_API_KEY environment variable is required", file=sys.stderr)
+        sys.exit(1)
+    if not repo_id:
+        print("error: --repo-id is required when using --upload", file=sys.stderr)
+        sys.exit(1)
+
+    uploaded = 0
+    skipped = 0
+    for path in _memory_session_files(project_root, session_file):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"✗ Failed: invalid session file {path}: {exc}", file=sys.stderr)
+            continue
+        session_id = str(payload.get("session_id") or path.stem)
+        print(f"↑ Uploading session {session_id}... ", end="")
+        body = json.dumps(payload).encode("utf-8")
+        request = Request(
+            f"{api_url.rstrip('/')}/repos/{repo_id}/sessions",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urlopen(request, timeout=30) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+        except HTTPError as exc:
+            print(f"✗ Failed: {exc.code}")
+            continue
+        except URLError as exc:
+            print(f"✗ Failed: {exc.reason}")
+            continue
+        if result.get("status") == "duplicate":
+            skipped += 1
+            print("— Already uploaded (skipping)")
+        else:
+            uploaded += 1
+            print("✓ Queued for extraction (0 prior discoveries)")
+    print(f"{uploaded} session(s) uploaded, {skipped} skipped.")
 
 
 @dataclass(frozen=True)
@@ -635,6 +712,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Skillayer API base URL. Defaults to SKILLAYER_API_URL env var or https://api.skillayer.com.",
     )
+
+    memory = subparsers.add_parser("memory", help="Upload coding-agent sessions to Skillayer memory capture.")
+    memory.add_argument("--project-root", default=".")
+    memory.add_argument("--upload", action="store_true")
+    memory.add_argument("--init-session", action="store_true")
+    memory.add_argument("--repo-id", default="")
+    memory.add_argument("--session-file")
+    memory.add_argument("--output")
+    memory.add_argument("--api-url", default="")
 
     validate = subparsers.add_parser("validate", help="Validate generated outputs and skill references.")
     validate.add_argument("--project-root", default=".")
@@ -1261,6 +1347,21 @@ def main() -> None:
         else:
             print(_format_analytics_summary(payload))
         return
+    if args.command == "memory":
+        root = Path(args.project_root).resolve()
+        if args.init_session:
+            path = _write_memory_session_template(root, args.output)
+            display_path = path.relative_to(root) if path.is_relative_to(root) else path
+            print(f"Session file created: {display_path}")
+            print("Fill in the messages field with your session transcript and run:")
+            print("SKILLAYER_API_KEY=<key> skilgen memory --upload --repo-id <uuid>")
+            return
+        if args.upload:
+            api_url = args.api_url or os.getenv("SKILLAYER_API_URL", "") or "https://api.skillayer.com"
+            _upload_memory_sessions(root, args.repo_id, api_url, args.session_file)
+            return
+        print("error: specify --init-session or --upload", file=sys.stderr)
+        sys.exit(1)
     if args.command == "doctor":
         payload = doctor_payload(Path(args.project_root).resolve())
         print(json.dumps(payload, indent=2))

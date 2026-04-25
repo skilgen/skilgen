@@ -39,6 +39,8 @@ from packages.db.models.org import Org
 from packages.db.models.repo import Repo
 from packages.db.models.analysis_run import AnalysisRun
 from packages.db.models.skill import Skill
+from packages.db.models.agent_session import AgentSession
+from packages.db.models.skill_memory_stub import SkillMemoryStub
 from packages.db.models.skill_version import SkillVersion
 from packages.db.models.score_history import ScoreHistory
 

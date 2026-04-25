@@ -6,6 +6,8 @@ import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
 import {
   API_URL,
+  getBootstrapOrg,
+  getOrgRedFlags,
   getRepoDependencies,
   getRepo,
   getRepoScoreForecast,
@@ -16,6 +18,7 @@ import {
   type DependencyReport,
   type Repo,
   type RepoSkillSources,
+  type RedFlag,
   type ScoreForecast,
   type Score,
   type ScoreHistoryPoint,
@@ -408,6 +411,25 @@ function QualitySnapshotCard({ skills }: { skills: RepoSkill[] }) {
   );
 }
 
+function RepoRedFlagsBanner({ flags }: { flags: RedFlag[] }) {
+  const critical = flags.filter((flag) => flag.severity === "critical");
+  if (critical.length === 0) return null;
+  return (
+    <section className="mb-8 rounded-xl border border-red-500/30 bg-red-500/10 px-5 py-4">
+      <div className="text-[14px] font-semibold text-red-300">⚠ {critical.length} critical flag{critical.length === 1 ? "" : "s"} detected in this repo.</div>
+      <div className="mt-3 space-y-2">
+        {critical.slice(0, 3).map((flag) => (
+          <div className="flex flex-col gap-2 text-[13px] md:flex-row md:items-center md:justify-between" key={`${flag.flag_type}-${flag.skill_id}`}>
+            <span className="text-[color:var(--text-secondary)]">{flag.title}</span>
+            {flag.action_url ? <Link className="text-[12px] font-semibold text-[color:var(--accent-primary)] hover:underline" href={flag.action_url}>Fix →</Link> : null}
+          </div>
+        ))}
+      </div>
+      <Link className="mt-3 inline-flex text-[12px] font-semibold text-red-200 hover:underline" href="/dashboard/red-flags">View all →</Link>
+    </section>
+  );
+}
+
 function qualityTierDotClass(score: number): string {
   if (score <= 40) return "bg-red-400";
   if (score <= 70) return "bg-amber-400";
@@ -532,6 +554,7 @@ export default async function RepoDetailPage({ params }: PageProps) {
   let scoreForecast: ScoreForecast | null = null;
   let dependencies: DependencyReport | null = null;
   let skillSources: RepoSkillSources | null = null;
+  let repoRedFlags: RedFlag[] = [];
   let repoLoadFailed = false;
 
   try {
@@ -556,6 +579,10 @@ export default async function RepoDetailPage({ params }: PageProps) {
     scoreForecast = forecastPayload;
     dependencies = dependencyPayload;
     skillSources = sourcePayload;
+    const org = await getBootstrapOrg();
+    if (org?.id) {
+      repoRedFlags = (await getOrgRedFlags(accessToken, org.id, "critical", repoId))?.flags ?? [];
+    }
   } catch (error) {
     repoLoadFailed = true;
     console.error("Failed to fetch repo detail:", error);
@@ -636,6 +663,7 @@ export default async function RepoDetailPage({ params }: PageProps) {
           <SubscoreCard label="Structure" value={score?.structure} />
           <QualitySnapshotCard skills={skills} />
         </div>
+        <RepoRedFlagsBanner flags={repoRedFlags} />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary section="score history">

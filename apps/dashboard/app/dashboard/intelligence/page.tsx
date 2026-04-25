@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
-import { getBootstrapOrg, getOrgIntelligence, type CategoryMatrixEntry, type OrgIntelligence, type OrgRepoSummary, type StaleAlert, type TopSkill } from "../../../lib/data";
+import { getBootstrapOrg, getOrgIntelligence, getOrgRedFlags, type CategoryMatrixEntry, type OrgIntelligence, type OrgRepoSummary, type RedFlag, type StaleAlert, type TopSkill } from "../../../lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -307,6 +307,33 @@ function TopSkills({ totalLoads, skills }: { totalLoads: number; skills: TopSkil
   );
 }
 
+function LiveRedFlags({ flags }: { flags: RedFlag[] }) {
+  if (flags.length === 0) return null;
+  return (
+    <section className="mb-8 overflow-hidden rounded-xl border border-red-500/30 bg-red-500/10">
+      <div className="flex items-start justify-between gap-4 border-b border-red-500/20 px-6 py-5">
+        <div>
+          <h2 className="text-[18px] font-semibold text-red-300">🔴 Live Red Flags</h2>
+          <p className="mt-1 text-[13px] text-red-200/80">Critical skill risks currently affecting agent decisions.</p>
+        </div>
+        <Link className="text-[12px] font-semibold text-red-200 hover:underline" href="/dashboard/red-flags">View all red flags →</Link>
+      </div>
+      <div className="divide-y divide-red-500/20">
+        {flags.slice(0, 3).map((flag) => (
+          <div className="flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:justify-between" key={`${flag.flag_type}-${flag.repo_id}-${flag.skill_id}`}>
+            <div className="min-w-0">
+              <span className="mr-2 rounded-full bg-red-500/20 px-2.5 py-1 text-[12px] font-semibold text-red-300">{flag.flag_type.replaceAll("_", " ")}</span>
+              <span className="text-[14px] font-semibold text-[color:var(--text-primary)]">{flag.title}</span>
+              <span className="ml-2 text-[12px] text-[color:var(--text-secondary)]">{flag.repo_name}</span>
+            </div>
+            {flag.action_url ? <Link className="text-[12px] font-semibold text-[color:var(--accent-primary)] hover:underline" href={flag.action_url}>Fix →</Link> : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default async function IntelligencePage() {
   let accessToken = "";
 
@@ -318,7 +345,7 @@ export default async function IntelligencePage() {
   }
 
   const org = await getBootstrapOrg();
-  const intelligence = org?.id ? await getOrgIntelligence(accessToken, org.id) : null;
+  const [intelligence, redFlags] = org?.id ? await Promise.all([getOrgIntelligence(accessToken, org.id), getOrgRedFlags(accessToken, org.id, "critical")]) : [null, null];
   const dataUnavailable = Boolean(org?.id && intelligence === null);
   const safeIntelligence: OrgIntelligence = intelligence ?? {
     org_health_score: 0,
@@ -354,6 +381,7 @@ export default async function IntelligencePage() {
       <HeroMetrics intelligence={safeIntelligence} />
       <RepoLeaderboard repos={safeIntelligence.repos} />
       <SkillAlerts alerts={safeIntelligence.stale_alerts} dataUnavailable={dataUnavailable} totalRepos={safeIntelligence.total_repos} />
+      <LiveRedFlags flags={redFlags?.flags ?? []} />
       <CoverageMatrix intelligence={safeIntelligence} />
       <TopSkills skills={safeIntelligence.top_skills} totalLoads={safeIntelligence.total_loads_30d} />
     </div>

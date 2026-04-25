@@ -167,6 +167,83 @@ export type OrgIntelligence = {
   top_skills: TopSkill[];
 };
 
+export type DiscoveryType =
+  | "undocumented_pattern"
+  | "workaround"
+  | "architectural_insight"
+  | "gotcha"
+  | "dependency_insight"
+  | "contradiction";
+
+export type MemoryStub = {
+  id: string;
+  repo_id: string;
+  repo_name: string;
+  domain: string;
+  skill_id: string | null;
+  discovery_type: DiscoveryType;
+  title: string;
+  proposed_content: string;
+  evidence: string | null;
+  confidence: number;
+  agent_runtime: string;
+  engineer_login: string | null;
+  task_description: string | null;
+  status: "pending" | "approved" | "rejected" | "merged";
+  reviewer_note: string | null;
+  merged_version_number: number | null;
+  created_at: string;
+  reviewed_at: string | null;
+  session_created_at: string;
+  existing_skill_content: string | null;
+};
+
+export type MemoryQueueResponse = {
+  total: number;
+  pending_count: number;
+  items: MemoryStub[];
+};
+
+export type KnowledgeVelocityWeek = {
+  week_start: string;
+  discovered: number;
+  approved: number;
+};
+
+export type KnowledgeVelocity = {
+  weekly: KnowledgeVelocityWeek[];
+  total_discoveries_all_time: number;
+  approval_rate: number | null;
+};
+
+export type RedFlagType =
+  | "stale_but_active"
+  | "dead_high_quality"
+  | "conflict"
+  | "missing_security"
+  | "freshness_critical";
+
+export type RedFlag = {
+  flag_type: RedFlagType;
+  severity: "critical" | "high" | "medium";
+  repo_id: string;
+  repo_name: string;
+  skill_id: string | null;
+  domain: string | null;
+  title: string;
+  description: string;
+  loads_30d: number;
+  action: string;
+  action_url: string | null;
+};
+
+export type OrgRedFlags = {
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  flags: RedFlag[];
+};
+
 export type AuditLogEvent = {
   id: string;
   event_type: string;
@@ -542,6 +619,48 @@ export async function getOrgTeamRollup(accessToken: string | null, orgId: string
 
 export async function getOrgIntelligence(accessToken: string, orgId: string): Promise<OrgIntelligence | null> {
   return apiFetch<OrgIntelligence>(`/orgs/${orgId}/intelligence`, { accessToken, cache: "no-store" });
+}
+
+export async function getMemoryQueue(
+  accessToken: string | null,
+  orgId: string,
+  params?: { status?: string; repo_id?: string; limit?: number; offset?: number },
+): Promise<MemoryQueueResponse | null> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.repo_id) query.set("repo_id", params.repo_id);
+  if (params?.limit !== undefined) query.set("limit", String(params.limit));
+  if (params?.offset !== undefined) query.set("offset", String(params.offset));
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return apiFetch<MemoryQueueResponse>(`/orgs/${orgId}/memory-queue${suffix}`, { accessToken, cache: "no-store" });
+}
+
+export async function reviewMemoryStub(
+  accessToken: string,
+  orgId: string,
+  stubId: string,
+  action: "approve" | "reject",
+  editedContent?: string,
+  reviewerNote?: string,
+): Promise<MemoryStub | null> {
+  return apiFetch<MemoryStub>(`/orgs/${orgId}/memory-queue/${stubId}`, {
+    accessToken,
+    method: "PATCH",
+    body: JSON.stringify({ action, edited_content: editedContent, reviewer_note: reviewerNote }),
+    cache: "no-store",
+  });
+}
+
+export async function getKnowledgeVelocity(accessToken: string | null, orgId: string): Promise<KnowledgeVelocity | null> {
+  return apiFetch<KnowledgeVelocity>(`/orgs/${orgId}/knowledge-velocity`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgRedFlags(accessToken: string | null, orgId: string, severity?: string, repoId?: string): Promise<OrgRedFlags | null> {
+  const query = new URLSearchParams();
+  if (severity) query.set("severity", severity);
+  if (repoId) query.set("repo_id", repoId);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return apiFetch<OrgRedFlags>(`/orgs/${orgId}/red-flags${suffix}`, { accessToken, cache: "no-store" });
 }
 
 export async function getOrgAuditLog(accessToken: string | null, orgId: string, params?: URLSearchParams): Promise<AuditLogResponse | null> {

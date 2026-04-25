@@ -5,6 +5,7 @@ import {
   BarChart2,
   BarChart3,
   BookOpen,
+  Brain,
   Building2,
   ChevronDown,
   ClipboardList,
@@ -17,14 +18,16 @@ import {
   Plus,
   Settings,
   AlertTriangle,
+  ShieldAlert,
   Users2,
 } from "lucide-react";
 import { signOut, withAuth } from "@workos-inc/authkit-nextjs";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 
 import { dashboardNavItems, mockOrg, mockUser } from "@/lib/mock-data";
 import { DashboardNavLink } from "@/components/dashboard-nav-link";
-import { getBootstrapOrg, getMyOrg, type Org } from "../../lib/data";
+import { getBootstrapOrg, getMemoryQueue, getMyOrg, getOrgRedFlags, type Org } from "../../lib/data";
 
 type ShellUser = Pick<typeof mockUser, "email" | "firstName" | "lastName">;
 
@@ -105,6 +108,26 @@ async function loadShellUser(): Promise<ShellUser> {
   return mockUser;
 }
 
+const loadNavBadges = cache(async (): Promise<{ memory: boolean; redFlags: boolean }> => {
+  let accessToken = "";
+  try {
+    const session = await withAuth({ ensureSignedIn: false });
+    accessToken = session?.accessToken || "";
+  } catch (error) {
+    console.error("Dashboard nav badge auth unavailable:", error);
+  }
+  const org = await getBootstrapOrg();
+  if (!org?.id) return { memory: false, redFlags: false };
+  const [memory, redFlags] = await Promise.all([
+    getMemoryQueue(accessToken, org.id, { status: "pending", limit: 1 }),
+    getOrgRedFlags(accessToken, org.id, "critical"),
+  ]);
+  return {
+    memory: (memory?.pending_count ?? 0) > 0,
+    redFlags: (redFlags?.critical_count ?? 0) > 0,
+  };
+});
+
 export default async function DashboardLayout({
   children,
 }: Readonly<{
@@ -115,12 +138,14 @@ export default async function DashboardLayout({
     GitBranch,
     BarChart3,
     BarChart2,
+    Brain,
     BookOpen,
     Package,
     Database,
     Users2,
     ClipboardList,
     AlertTriangle,
+    ShieldAlert,
     Settings,
     CreditCard,
   };
@@ -130,9 +155,11 @@ export default async function DashboardLayout({
     label: string;
     icon: IconName;
     badge?: string;
+    badgeVariant?: "label" | "dot";
   };
   const shellOrg = await loadShellOrg();
   const shellUser = await loadShellUser();
+  const navBadges = await loadNavBadges();
   const workspaceItems: NavItem[] = dashboardNavItems
     .filter((item) => item.href !== "/dashboard/settings" && item.href !== "/dashboard/upgrade")
     .map((item) => ({ ...item, icon: item.icon as IconName }));
@@ -164,6 +191,26 @@ export default async function DashboardLayout({
       href: "/dashboard/debt",
       label: "Skill Debt",
       icon: "AlertTriangle",
+    });
+  }
+  if (!workspaceItems.some((item) => item.href === "/dashboard/memory")) {
+    const intelligenceIndex = workspaceItems.findIndex((item) => item.href === "/dashboard/intelligence");
+    workspaceItems.splice(intelligenceIndex >= 0 ? intelligenceIndex + 1 : 5, 0, {
+      href: "/dashboard/memory",
+      label: "Memory",
+      icon: "Brain",
+      badge: navBadges.memory ? "Pending memory" : undefined,
+      badgeVariant: "dot",
+    });
+  }
+  if (!workspaceItems.some((item) => item.href === "/dashboard/red-flags")) {
+    const memoryIndex = workspaceItems.findIndex((item) => item.href === "/dashboard/memory");
+    workspaceItems.splice(memoryIndex >= 0 ? memoryIndex + 1 : 6, 0, {
+      href: "/dashboard/red-flags",
+      label: "Red Flags",
+      icon: "ShieldAlert",
+      badge: navBadges.redFlags ? "Critical red flags" : undefined,
+      badgeVariant: "dot",
     });
   }
   if (shellOrg.plan === "free") {
@@ -202,7 +249,7 @@ export default async function DashboardLayout({
             {workspaceItems.map((item) => {
               const Icon = icons[item.icon];
 
-              return <DashboardNavLink badge={item.badge} key={item.href} href={item.href} icon={<Icon className="h-4 w-4" />} label={item.label} />;
+              return <DashboardNavLink badge={item.badge} badgeVariant={item.badgeVariant} key={item.href} href={item.href} icon={<Icon className="h-4 w-4" />} label={item.label} />;
             })}
           </div>
 
@@ -211,7 +258,7 @@ export default async function DashboardLayout({
             {accountItems.map((item) => {
               const Icon = icons[item.icon];
 
-              return <DashboardNavLink badge={item.badge} key={item.href} href={item.href} icon={<Icon className="h-4 w-4" />} label={item.label} />;
+              return <DashboardNavLink badge={item.badge} badgeVariant={item.badgeVariant} key={item.href} href={item.href} icon={<Icon className="h-4 w-4" />} label={item.label} />;
             })}
           </div>
         </nav>

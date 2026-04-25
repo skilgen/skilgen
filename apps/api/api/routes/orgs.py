@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+import hashlib
 import logging
 from typing import Literal
 from uuid import uuid4
@@ -8,16 +10,17 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 import httpx
-from pydantic import BaseModel
-from sqlalchemy import desc, func, select
+from pydantic import BaseModel, Field
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id, get_current_org_id_optional
 from apps.api.api.github import get_installation_token
 from apps.api.api.notifications import build_test_notification_message, post_slack_message
+from apps.api.api.services.redflags import compute_repo_red_flags
 from packages.db.database import get_db
-from packages.db.models import AnalysisRun, Org, Repo, ScoreHistory, Skill, SkillUsageEvent
+from packages.db.models import AgentSession, AnalysisRun, Org, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillUsageEvent, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
     AuditLogEventResponse,
@@ -159,6 +162,74 @@ class OrgIntelligenceResponse(BaseModel):
     category_matrix: dict[str, list[OrgIntelligenceCategoryMatrixEntry]]
     stale_alerts: list[OrgIntelligenceStaleAlert]
     top_skills: list[OrgIntelligenceTopSkill]
+
+
+class MemoryStubResponse(BaseModel):
+    id: str
+    repo_id: str
+    repo_name: str
+    domain: str
+    skill_id: str | None
+    discovery_type: str
+    title: str
+    proposed_content: str
+    evidence: str | None
+    confidence: float
+    agent_runtime: str
+    engineer_login: str | None
+    task_description: str | None
+    status: str
+    reviewer_note: str | None
+    merged_version_number: int | None
+    created_at: datetime
+    reviewed_at: datetime | None
+    session_created_at: datetime
+    existing_skill_content: str | None
+
+
+class MemoryQueueResponse(BaseModel):
+    total: int
+    pending_count: int
+    items: list[MemoryStubResponse]
+
+
+class MemoryStubAction(BaseModel):
+    action: Literal["approve", "reject"]
+    edited_content: str | None = None
+    reviewer_note: str | None = None
+
+
+class KnowledgeVelocityWeek(BaseModel):
+    week_start: str
+    discovered: int
+    approved: int
+
+
+class KnowledgeVelocityResponse(BaseModel):
+    weekly: list[KnowledgeVelocityWeek]
+    total_discoveries_all_time: int
+    approval_rate: float | None
+
+
+class RedFlagResponse(BaseModel):
+    flag_type: str
+    severity: Literal["critical", "high", "medium"]
+    repo_id: str
+    repo_name: str
+    skill_id: str | None
+    domain: str | None
+    title: str
+    description: str
+    loads_30d: int
+    action: str
+    action_url: str | None
+
+
+class RedFlagsResponse(BaseModel):
+    critical_count: int
+    high_count: int
+    medium_count: int
+    flags: list[RedFlagResponse]
 
 
 def _last_30_score_dates() -> list[str]:
@@ -453,6 +524,35 @@ def _latest_scores_by_repo(runs: list[AnalysisRun]) -> dict[str, AnalysisRun]:
         if run.repo_id not in latest:
             latest[run.repo_id] = run
     return latest
+
+
+def _week_start(value: datetime) -> datetime:
+    return (value - timedelta(days=value.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _memory_stub_response(stub: SkillMemoryStub, repo_name: str, session_created_at: datetime, existing_skill_content: str | None) -> MemoryStubResponse:
+    return MemoryStubResponse(
+        id=stub.id,
+        repo_id=stub.repo_id,
+        repo_name=repo_name,
+        domain=stub.domain,
+        skill_id=stub.skill_id,
+        discovery_type=stub.discovery_type,
+        title=stub.title,
+        proposed_content=stub.proposed_content,
+        evidence=stub.evidence,
+        confidence=float(stub.confidence or 0),
+        agent_runtime=stub.agent_runtime,
+        engineer_login=stub.engineer_login,
+        task_description=stub.task_description,
+        status=stub.status,
+        reviewer_note=stub.reviewer_note,
+        merged_version_number=stub.merged_version_number,
+        created_at=stub.created_at,
+        reviewed_at=stub.reviewed_at,
+        session_created_at=session_created_at,
+        existing_skill_content=existing_skill_content,
+    )
 
 
 def _usage_by_skill(rows: list[object]) -> dict[str, dict[str, object]]:
@@ -1085,6 +1185,226 @@ async def get_org_intelligence(
         category_matrix=category_matrix,
         stale_alerts=stale_alerts[:20],
         top_skills=top_skills,
+    )
+
+
+@router.get("/{org_id}/memory-queue", response_model=MemoryQueueResponse)
+async def get_memory_queue(
+    org_id: str,
+    status: Literal["pending", "approved", "rejected", "all"] = "pending",
+    repo_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> MemoryQueueResponse:
+    _assert_org_scope(org_id, current_org_id)
+    filters = [SkillMemoryStub.org_id == org_id]
+    if status != "all":
+        filters.append(SkillMemoryStub.status == status)
+    if repo_id:
+        filters.append(SkillMemoryStub.repo_id == repo_id)
+
+    total = int((await db.execute(select(func.count(SkillMemoryStub.id)).where(*filters))).scalar() or 0)
+    pending_count = int(
+        (await db.execute(select(func.count(SkillMemoryStub.id)).where(SkillMemoryStub.org_id == org_id, SkillMemoryStub.status == "pending"))).scalar()
+        or 0
+    )
+    rows = (
+        await db.execute(
+            select(SkillMemoryStub, Repo.name.label("repo_name"), AgentSession.created_at.label("session_created_at"), Skill.content.label("skill_content"))
+            .join(Repo, Repo.id == SkillMemoryStub.repo_id)
+            .join(AgentSession, AgentSession.id == SkillMemoryStub.session_id)
+            .outerjoin(Skill, Skill.id == SkillMemoryStub.skill_id)
+            .where(*filters)
+            .order_by(desc(SkillMemoryStub.confidence), desc(SkillMemoryStub.created_at))
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+    return MemoryQueueResponse(
+        total=total,
+        pending_count=pending_count,
+        items=[
+            _memory_stub_response(
+                stub,
+                str(_row_value(row, "repo_name", "")),
+                _row_value(row, "session_created_at") if isinstance(_row_value(row, "session_created_at"), datetime) else stub.created_at,
+                _row_value(row, "skill_content") if isinstance(_row_value(row, "skill_content"), str) else None,
+            )
+            for row in rows
+            for stub in [_row_value(row, "SkillMemoryStub", None) or row[0]]
+        ],
+    )
+
+
+@router.patch("/{org_id}/memory-queue/{stub_id}", response_model=MemoryStubResponse)
+async def review_memory_stub(
+    org_id: str,
+    stub_id: str,
+    payload: MemoryStubAction,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> MemoryStubResponse:
+    _assert_org_scope(org_id, current_org_id)
+    row = (
+        await db.execute(
+            select(SkillMemoryStub, Repo.name.label("repo_name"), AgentSession.created_at.label("session_created_at"))
+            .join(Repo, Repo.id == SkillMemoryStub.repo_id)
+            .join(AgentSession, AgentSession.id == SkillMemoryStub.session_id)
+            .where(SkillMemoryStub.id == stub_id, SkillMemoryStub.org_id == org_id)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Memory stub not found")
+    stub = row[0]
+    now = _utc_now_naive()
+    existing_skill_content: str | None = None
+
+    if payload.action == "reject":
+        stub.status = "rejected"
+        stub.reviewer_note = payload.reviewer_note
+        stub.reviewed_at = now
+        await db.commit()
+        return _memory_stub_response(stub, str(_row_value(row, "repo_name", "")), _row_value(row, "session_created_at"), None)
+
+    skill = await db.get(Skill, stub.skill_id) if stub.skill_id else None
+    if skill is None:
+        skill = (
+            await db.execute(
+                select(Skill).where(
+                    Skill.repo_id == stub.repo_id,
+                    func.lower(Skill.domain) == stub.domain.lower(),
+                )
+            )
+        ).scalar_one_or_none()
+        if skill is not None:
+            stub.skill_id = skill.id
+
+    if skill is None:
+        stub.status = "approved"
+        stub.reviewer_note = payload.reviewer_note
+        stub.reviewed_at = now
+        await db.commit()
+        return _memory_stub_response(stub, str(_row_value(row, "repo_name", "")), _row_value(row, "session_created_at"), None)
+
+    from apps.api.api.routes.repos import _compute_skill_score
+
+    addition = payload.edited_content or stub.proposed_content
+    separator = f"\n\n---\n*Captured from {stub.agent_runtime} session ({stub.created_at.date().isoformat()})*\n\n"
+    new_content = f"{skill.content or ''}{separator}{addition}"
+    content_hash = hashlib.sha256(new_content.encode()).hexdigest()
+    score = _compute_skill_score(new_content)
+    await db.execute(
+        update(SkillVersion)
+        .where(SkillVersion.skill_id == skill.id, SkillVersion.is_latest.is_(True))
+        .values(is_latest=False)
+    )
+    version_number = int((await db.execute(select(func.count(SkillVersion.id)).where(SkillVersion.skill_id == skill.id))).scalar() or 0) + 1
+    skill.content = new_content
+    skill.content_hash = content_hash
+    skill.score_total = score["total"]
+    skill.score_groundedness = score["groundedness"]
+    skill.score_coverage = score["coverage"]
+    skill.score_freshness = score["freshness"]
+    skill.score_structure = score["structure"]
+    skill.is_stale = False
+    db.add(
+        SkillVersion(
+            skill_id=skill.id,
+            run_id=skill.run_id or str(uuid4()),
+            repo_id=skill.repo_id,
+            domain=skill.domain,
+            content=new_content,
+            content_hash=content_hash,
+            version_number=version_number,
+            is_latest=True,
+        )
+    )
+    stub.status = "merged"
+    stub.reviewer_note = payload.reviewer_note
+    stub.merged_version_number = version_number
+    stub.reviewed_at = now
+    await db.commit()
+    existing_skill_content = new_content
+    return _memory_stub_response(stub, str(_row_value(row, "repo_name", "")), _row_value(row, "session_created_at"), existing_skill_content)
+
+
+@router.get("/{org_id}/knowledge-velocity", response_model=KnowledgeVelocityResponse)
+async def org_knowledge_velocity(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> KnowledgeVelocityResponse:
+    _assert_org_scope(org_id, current_org_id)
+    now = _utc_now_naive()
+    this_week = _week_start(now)
+    week_starts = [this_week - timedelta(weeks=offset) for offset in range(8)]
+    oldest = week_starts[-1]
+    rows = (
+        await db.execute(
+            select(SkillMemoryStub.created_at, SkillMemoryStub.status)
+            .where(SkillMemoryStub.org_id == org_id, SkillMemoryStub.created_at >= oldest)
+        )
+    ).all()
+    weekly = {week.date().isoformat(): {"discovered": 0, "approved": 0} for week in week_starts}
+    for row in rows:
+        created_at = _row_value(row, "created_at")
+        status_value = str(_row_value(row, "status", ""))
+        if isinstance(created_at, datetime):
+            key = _week_start(created_at).date().isoformat()
+            if key in weekly:
+                if status_value != "rejected":
+                    weekly[key]["discovered"] += 1
+                if status_value in {"approved", "merged"}:
+                    weekly[key]["approved"] += 1
+    total_all_time = int((await db.execute(select(func.count(SkillMemoryStub.id)).where(SkillMemoryStub.org_id == org_id))).scalar() or 0)
+    reviewed_rows = (
+        await db.execute(
+            select(SkillMemoryStub.status).where(SkillMemoryStub.org_id == org_id, SkillMemoryStub.status.in_(["approved", "merged", "rejected"]))
+        )
+    ).all()
+    approved = sum(1 for row in reviewed_rows if str(_row_value(row, "status", "")) in {"approved", "merged"})
+    reviewed = len(reviewed_rows)
+    return KnowledgeVelocityResponse(
+        weekly=[KnowledgeVelocityWeek(week_start=week.date().isoformat(), **weekly[week.date().isoformat()]) for week in week_starts],
+        total_discoveries_all_time=total_all_time,
+        approval_rate=(approved / reviewed) if reviewed else None,
+    )
+
+
+@router.get("/{org_id}/red-flags", response_model=RedFlagsResponse)
+async def get_org_red_flags(
+    org_id: str,
+    severity: Literal["critical", "high", "medium", "all"] = "all",
+    repo_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> RedFlagsResponse:
+    _assert_org_scope(org_id, current_org_id)
+    repo_filters = [Repo.org_id == org_id, Repo.is_active.is_(True)]
+    if repo_id:
+        repo_filters.append(Repo.id == repo_id)
+    repos = (await db.execute(select(Repo).where(*repo_filters))).scalars().all()
+    repo_ids = [repo.id for repo in repos]
+    skills = (await db.execute(select(Skill).where(Skill.repo_id.in_(repo_ids)))).scalars().all() if repo_ids else []
+    skills_by_repo: dict[str, list[Skill]] = {repo.id: [] for repo in repos}
+    for skill in skills:
+        skills_by_repo.setdefault(skill.repo_id, []).append(skill)
+    flags = [
+        flag
+        for repo in repos
+        for flag in compute_repo_red_flags(repo, skills_by_repo.get(repo.id, []))
+    ]
+    if severity != "all":
+        flags = [flag for flag in flags if flag.severity == severity]
+    flags.sort(key=lambda flag: (0 if flag.severity == "critical" else 1 if flag.severity == "high" else 2, -flag.loads_30d, flag.repo_name))
+    all_flags = [flag for repo in repos for flag in compute_repo_red_flags(repo, skills_by_repo.get(repo.id, []))]
+    return RedFlagsResponse(
+        critical_count=sum(1 for flag in all_flags if flag.severity == "critical"),
+        high_count=sum(1 for flag in all_flags if flag.severity == "high"),
+        medium_count=sum(1 for flag in all_flags if flag.severity == "medium"),
+        flags=[RedFlagResponse(**asdict(flag)) for flag in flags[:100]],
     )
 
 
