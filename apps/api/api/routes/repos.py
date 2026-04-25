@@ -1636,9 +1636,7 @@ async def load_skills_for_agent(
         .join(SkillVersion, Skill.id == SkillVersion.skill_id)
         .where(
             Skill.repo_id == repo_id,
-            SkillVersion.version_number == select(
-                func.max(SkillVersion.version_number)
-            ).where(SkillVersion.skill_id == Skill.id).scalar_subquery(),
+            SkillVersion.is_latest.is_(True),
         )
         .order_by(Skill.domain)
     )
@@ -1654,7 +1652,7 @@ async def load_skills_for_agent(
     # Build agent-readable content block + record load events
     agent = _detect_agent_runtime(request)
     session_id = request.headers.get("x-session-id") or str(uuid4())
-    now = datetime.now(UTC)
+    now = datetime.utcnow()  # naive UTC — asyncpg requires naive for TIMESTAMP WITHOUT TIME ZONE
 
     skill_blocks: list[str] = []
     skill_summaries: list[dict] = []
@@ -1688,9 +1686,12 @@ async def load_skills_for_agent(
 
     try:
         await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
+    except Exception:
         # Non-fatal — still return skills even if event recording failed
+        try:
+            await db.rollback()
+        except Exception:
+            pass
 
     full_content = (
         f"# {repo.name} — Skillayer Skills\n"
