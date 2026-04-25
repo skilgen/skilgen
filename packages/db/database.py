@@ -13,7 +13,7 @@ _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
 def _database_url_and_connect_args() -> tuple[str, dict[str, object]]:
-    database_url = settings.DATABASE_URL
+    database_url = settings.DATABASE_URL or settings.DATABASE_URL_UNPOOLED
     connect_args: dict[str, object] = {}
     if "neon.tech" in database_url or "ssl" in database_url:
         ssl_context = ssl.create_default_context()
@@ -26,7 +26,7 @@ def _database_url_and_connect_args() -> tuple[str, dict[str, object]]:
 
 def get_engine() -> AsyncEngine:
     global _engine
-    if not settings.DATABASE_URL:
+    if not (settings.DATABASE_URL or settings.DATABASE_URL_UNPOOLED):
         raise RuntimeError("DATABASE_URL is not configured")
     if _engine is None:
         database_url, connect_args = _database_url_and_connect_args()

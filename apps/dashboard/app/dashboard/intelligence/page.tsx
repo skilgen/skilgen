@@ -159,14 +159,18 @@ function alertLabel(alertType: StaleAlert["alert_type"]): string {
   return "Dormant Repo";
 }
 
-function SkillAlerts({ alerts }: { alerts: StaleAlert[] }) {
+function SkillAlerts({ alerts, dataUnavailable, totalRepos }: { alerts: StaleAlert[]; dataUnavailable: boolean; totalRepos: number }) {
   return (
     <section className="mb-8 overflow-hidden rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
       <div className="border-b border-[color:var(--bg-border)] px-6 py-5">
         <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Skill Alerts</h2>
         <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Skills and repos that need attention.</p>
       </div>
-      {alerts.length === 0 ? (
+      {dataUnavailable ? (
+        <div className="m-5 rounded-xl border border-amber-500/25 bg-amber-500/10 px-5 py-4 text-[13px] font-semibold text-amber-300">Unable to load skill alerts right now.</div>
+      ) : totalRepos === 0 ? (
+        <div className="px-6 py-14 text-center text-[14px] text-[color:var(--text-secondary)]">No repositories connected yet.</div>
+      ) : alerts.length === 0 ? (
         <div className="m-5 rounded-xl border border-[rgb(var(--accent-green-rgb)/0.25)] bg-[rgb(var(--accent-green-rgb)/0.12)] px-5 py-4 text-[13px] font-semibold text-[color:var(--accent-green)]">✓ No alerts — all skills are fresh and active.</div>
       ) : (
         <div className="divide-y divide-[color:var(--bg-elevated)]">
@@ -264,7 +268,7 @@ function TopSkills({ totalLoads, skills }: { totalLoads: number; skills: TopSkil
         <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Most-Used Skills</h2>
         <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Skills loaded most frequently by agents in the last 30 days.</p>
       </div>
-      {totalLoads === 0 ? (
+      {totalLoads === 0 || skills.length === 0 ? (
         <div className="px-6 py-14 text-center">
           <p className="text-[14px] text-[color:var(--text-secondary)]">No agent activity recorded yet. See the Heatmap for setup instructions.</p>
           <Link className="mt-4 inline-flex rounded-full border border-[color:var(--bg-border)] px-4 py-2 text-[12px] font-semibold text-[color:var(--accent-primary)] hover:border-[color:var(--accent-primary)]" href="/dashboard/heatmap">
@@ -315,6 +319,7 @@ export default async function IntelligencePage() {
 
   const org = await getBootstrapOrg();
   const intelligence = org?.id ? await getOrgIntelligence(accessToken, org.id) : null;
+  const dataUnavailable = Boolean(org?.id && intelligence === null);
   const safeIntelligence: OrgIntelligence = intelligence ?? {
     org_health_score: 0,
     org_health_trend: null,
@@ -342,9 +347,13 @@ export default async function IntelligencePage() {
         <p className="mt-1 text-[14px] text-[color:var(--text-secondary)]">Cross-repo skill health, coverage gaps, and agent activity across your organisation.</p>
       </div>
 
+      {dataUnavailable ? (
+        <div className="mb-8 rounded-xl border border-amber-500/25 bg-amber-500/10 px-5 py-4 text-[13px] font-semibold text-amber-300">Org intelligence is temporarily unavailable. The dashboard will recover automatically once the API responds.</div>
+      ) : null}
+
       <HeroMetrics intelligence={safeIntelligence} />
       <RepoLeaderboard repos={safeIntelligence.repos} />
-      <SkillAlerts alerts={safeIntelligence.stale_alerts} />
+      <SkillAlerts alerts={safeIntelligence.stale_alerts} dataUnavailable={dataUnavailable} totalRepos={safeIntelligence.total_repos} />
       <CoverageMatrix intelligence={safeIntelligence} />
       <TopSkills skills={safeIntelligence.top_skills} totalLoads={safeIntelligence.total_loads_30d} />
     </div>

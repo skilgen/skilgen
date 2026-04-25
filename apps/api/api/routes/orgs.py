@@ -908,6 +908,21 @@ async def get_org_intelligence(
                 .order_by(ScoreHistory.repo_id, ScoreHistory.recorded_at)
             )
         ).all()
+        usage_rows = (
+            await db.execute(
+                select(
+                    SkillUsageEvent.skill_id,
+                    func.count(SkillUsageEvent.id).label("loads_30d"),
+                    func.max(SkillUsageEvent.loaded_at).label("last_loaded_at"),
+                )
+                .where(
+                    SkillUsageEvent.org_id == org_id,
+                    SkillUsageEvent.loaded_at >= cutoff_30,
+                    SkillUsageEvent.skill_id.in_([skill.id for skill in skills]),
+                )
+                .group_by(SkillUsageEvent.skill_id)
+            )
+        ).all()
     except HTTPException:
         raise
     except SQLAlchemyError as exc:
@@ -939,7 +954,26 @@ async def get_org_intelligence(
         points = sorted(history_by_repo.get(repo.id, []), key=lambda item: item[0])
         repo_trends[repo.id] = float(points[-1][1] - points[0][1]) if len(points) >= 2 else None
 
-    total_loads_30d = sum(int(skill.load_count_30d or 0) for skill in skills)
+    usage_by_skill: dict[str, dict[str, object]] = {}
+    for row in usage_rows:
+        skill_id = str(_row_value(row, "skill_id", ""))
+        if not skill_id:
+            continue
+        usage_by_skill[skill_id] = {
+            "loads_30d": int(_row_value(row, "loads_30d", 0) or 0),
+            "last_loaded_at": _row_value(row, "last_loaded_at"),
+        }
+
+    def _loads_30d(skill: Skill) -> int:
+        usage = usage_by_skill.get(skill.id)
+        return int(usage["loads_30d"]) if usage else 0
+
+    def _last_loaded_at(skill: Skill) -> datetime | None:
+        usage = usage_by_skill.get(skill.id)
+        usage_last_loaded = usage.get("last_loaded_at") if usage else None
+        return usage_last_loaded if isinstance(usage_last_loaded, datetime) else skill.last_loaded_at
+
+    total_loads_30d = sum(_loads_30d(skill) for skill in skills)
 
     response_repos: list[OrgIntelligenceRepo] = []
     for repo in repos:
@@ -957,7 +991,7 @@ async def get_org_intelligence(
                 dead_skill_count=sum(
                     1
                     for skill in repo_skills
-                    if _skill_alert(skill, int(skill.load_count_30d or 0), now) == "dead_skill"
+                    if _skill_alert(skill, _loads_30d(skill), now) == "dead_skill"
                 ),
                 stale_skill_count=sum(1 for skill in repo_skills if bool(skill.is_stale)),
                 last_analysed_at=last_analysed_at,
@@ -988,13 +1022,13 @@ async def get_org_intelligence(
         repo = repo_by_id.get(skill.repo_id)
         if repo is None:
             continue
-        loads_30d = int(skill.load_count_30d or 0)
-        last_loaded_at = skill.last_loaded_at
+        loads_30d = _loads_30d(skill)
+        last_loaded_at = _last_loaded_at(skill)
         helper_alert = _skill_alert(skill, loads_30d, now)
         alert_type: Literal["dead", "stale_but_active", "dormant_repo"] | None = None
         if helper_alert == "dead_skill":
             alert_type = "dead"
-        elif bool(skill.is_stale):
+        elif helper_alert == "stale_but_active":
             alert_type = "stale_but_active"
         elif dormant_by_repo.get(skill.repo_id):
             alert_type = "dormant_repo"
@@ -1026,17 +1060,20 @@ async def get_org_intelligence(
             repo_id=skill.repo_id,
             repo_name=repo_by_id[skill.repo_id].name if skill.repo_id in repo_by_id else "unknown",
             domain=skill.domain,
-            loads_30d=int(skill.load_count_30d or 0),
+            loads_30d=_loads_30d(skill),
             score=int(skill.score_total or 0),
         )
-        for skill in sorted(skills, key=lambda item: (-int(item.load_count_30d or 0), item.domain))[:10]
+        for skill in sorted(
+            [skill for skill in skills if _loads_30d(skill) > 0],
+            key=lambda item: (-_loads_30d(item), item.domain),
+        )[:10]
     ]
 
     repo_scores = [repo.score for repo in response_repos]
     repo_trend_values = [trend for trend in repo_trends.values() if trend is not None]
-    max_loads = max((int(skill.load_count_30d or 0) for skill in skills), default=1)
+    max_loads = max((_loads_30d(skill) for skill in skills), default=1)
     for skill in skills:
-        _criticality_score(int(skill.load_count_30d or 0), skill.last_loaded_at, bool(skill.is_stale), max_loads)
+        _criticality_score(_loads_30d(skill), _last_loaded_at(skill), bool(skill.is_stale), max_loads)
 
     return OrgIntelligenceResponse(
         org_health_score=round(sum(repo_scores) / len(repo_scores)) if repo_scores else 0,

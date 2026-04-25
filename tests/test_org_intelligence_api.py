@@ -164,6 +164,11 @@ def _populated_db() -> FakeDb:
             _history("h3", "repo_2", "run_repo_2", 95, days_ago=29),
             _history("h4", "repo_2", "run_repo_2", 90, days_ago=1),
         ],
+        [
+            {"skill_id": "skill_stale", "loads_30d": 3, "last_loaded_at": _now() - timedelta(days=1)},
+            {"skill_id": "skill_top", "loads_30d": 12, "last_loaded_at": _now() - timedelta(days=1)},
+            {"skill_id": "skill_dormant", "loads_30d": 1, "last_loaded_at": _now() - timedelta(days=1)},
+        ],
     ]
     return FakeDb(org, results)
 
@@ -224,6 +229,40 @@ def test_top_skills_are_ordered_by_loads_desc() -> None:
     response = _client(_populated_db()).get("/orgs/org_123/intelligence")
 
     assert [skill["skill_id"] for skill in response.json()["top_skills"][:2]] == ["skill_top", "skill_stale"]
+    assert "skill_dead" not in {skill["skill_id"] for skill in response.json()["top_skills"]}
+
+
+def test_loads_30d_are_derived_from_usage_events_not_denormalized_counters() -> None:
+    db = _populated_db()
+    response = _client(db).get("/orgs/org_123/intelligence")
+
+    payload = response.json()
+    assert payload["total_loads_30d"] == 16
+    assert next(skill for skill in payload["top_skills"] if skill["skill_id"] == "skill_top")["loads_30d"] == 12
+
+
+def test_recent_stale_zero_load_skill_is_not_reported_active() -> None:
+    db = _populated_db()
+    skills = db.results[1]
+    assert isinstance(skills, list)
+    skills.append(
+        _skill(
+            "skill_recent_stale",
+            "repo_1",
+            "recent-stale",
+            "code_style",
+            42,
+            99,
+            is_stale=True,
+            last_loaded_days_ago=None,
+            created_days_ago=1,
+        )
+    )
+
+    response = _client(db).get("/orgs/org_123/intelligence")
+
+    alerts = response.json()["stale_alerts"]
+    assert "skill_recent_stale" not in {alert["skill_id"] for alert in alerts}
 
 
 def test_category_matrix_has_all_eight_categories() -> None:
