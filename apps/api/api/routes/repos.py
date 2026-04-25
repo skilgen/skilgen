@@ -1612,35 +1612,37 @@ async def load_skills_for_agent(
     Accepts auth via:
       - Authorization: Bearer sk-...
       - API-Key: sk-...   (header used in CLAUDE.md / AGENTS.md snippets)
+    This endpoint MUST never return 500. Skills are always returned if they exist.
     """
-    # Also accept API-Key header (used in CLAUDE.md / AGENTS.md instructions)
-    api_key_header = request.headers.get("api-key") or request.headers.get("API-Key")
-    if api_key_header and not current_org_id:
-        # Resolve org from api_key_header directly
-        from packages.db.models import Org
-        result = await db.execute(select(Org).where(Org.api_key == api_key_header))
-        org = result.scalar_one_or_none()
-        if org:
-            current_org_id = str(org.id)
+    # Resolve org from API-Key header (used in CLAUDE.md / AGENTS.md)
+    # Wrapped in try/except so a missing api_key column never crashes the endpoint.
+    if not current_org_id:
+        try:
+            api_key_header = request.headers.get("api-key") or request.headers.get("API-Key")
+            if api_key_header:
+                from packages.db.models import Org
+                org_row = (await db.execute(select(Org).where(Org.api_key == api_key_header))).scalar_one_or_none()
+                if org_row:
+                    current_org_id = str(org_row.id)
+        except Exception:
+            pass  # Degrade gracefully — org_id will be inferred from repo below
 
-    # Load repo + skills
-    repo_result = await db.execute(
-        select(Repo).where(Repo.id == repo_id)
-    )
-    repo = repo_result.scalar_one_or_none()
+    # Load repo — 404 if not found, that's intentional
+    repo = (await db.execute(select(Repo).where(Repo.id == repo_id))).scalar_one_or_none()
     if repo is None:
         raise HTTPException(status_code=404, detail="Repo not found")
 
-    skills_result = await db.execute(
-        select(Skill, SkillVersion)
-        .join(SkillVersion, Skill.id == SkillVersion.skill_id)
-        .where(
-            Skill.repo_id == repo_id,
-            SkillVersion.is_latest.is_(True),
+    # Load latest skill versions
+    try:
+        skills_result = await db.execute(
+            select(Skill, SkillVersion)
+            .join(SkillVersion, Skill.id == SkillVersion.skill_id)
+            .where(Skill.repo_id == repo_id, SkillVersion.is_latest.is_(True))
+            .order_by(Skill.domain)
         )
-        .order_by(Skill.domain)
-    )
-    rows = skills_result.all()
+        rows = skills_result.all()
+    except Exception:
+        rows = []
 
     if not rows:
         return {
@@ -1649,10 +1651,11 @@ async def load_skills_for_agent(
             "content": f"# {repo.name} — No skills generated yet\nRun `skilgen deliver --project-root .` to generate skills.",
         }
 
-    # Build agent-readable content block + record load events
+    # Build agent-readable content
     agent = _detect_agent_runtime(request)
     session_id = request.headers.get("x-session-id") or str(uuid4())
-    now = datetime.utcnow()  # naive UTC — asyncpg requires naive for TIMESTAMP WITHOUT TIME ZONE
+    now = datetime.utcnow()  # naive UTC — required by asyncpg for TIMESTAMP WITHOUT TIME ZONE
+    effective_org_id = current_org_id or str(repo.org_id)
 
     skill_blocks: list[str] = []
     skill_summaries: list[dict] = []
@@ -1672,22 +1675,21 @@ async def load_skills_for_agent(
             "version": version.version_number,
         })
 
-        # Record load event
-        skill.load_count_30d = int(skill.load_count_30d or 0) + 1
-        skill.last_loaded_at = now
-        db.add(SkillUsageEvent(
-            org_id=current_org_id or str(repo.org_id),
-            repo_id=repo_id,
-            skill_id=skill.id,
-            agent_runtime=agent,
-            session_id=session_id,
-            loaded_at=now,
-        ))
-
+    # Record load events — completely non-fatal, never affects the response
     try:
+        for skill, _version in rows:
+            skill.load_count_30d = int(skill.load_count_30d or 0) + 1
+            skill.last_loaded_at = now
+            db.add(SkillUsageEvent(
+                org_id=effective_org_id,
+                repo_id=repo_id,
+                skill_id=str(skill.id),
+                agent_runtime=agent,
+                session_id=session_id,
+                loaded_at=now,
+            ))
         await db.commit()
     except Exception:
-        # Non-fatal — still return skills even if event recording failed
         try:
             await db.rollback()
         except Exception:
