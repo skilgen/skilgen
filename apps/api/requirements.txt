@@ -12,3 +12,4 @@ redis>=5.0.0
 celery>=5.4.0
 stripe>=7.0.0
 cryptography>=42.0.0
+# Vercel build 1777151938
