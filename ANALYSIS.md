@@ -4343,6 +4343,27 @@
         "related_imports": []
       },
       {
+        "path": "packages/db/database.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from collections.abc import AsyncGenerator",
+          "import ssl",
+          "from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine",
+          "from packages.db.config import settings",
+          "_engine: AsyncEngine | None = None",
+          "_sessionmaker: async_sessionmaker[AsyncSession] | None = None",
+          "def _database_url_and_connect_args() -> tuple[str, dict[str, object]]:",
+          "database_url = settings.DATABASE_URL or settings.DATABASE_URL_UNPOOLED",
+          "if database_url.startswith(\"postgres://\"):",
+          "database_url = database_url.replace(\"postgres://\", \"postgresql+asyncpg://\", 1)",
+          "elif database_url.startswith(\"postgresql://\"):"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/core/models.py",
         "kind": "source",
         "language": "python",
@@ -4368,23 +4389,42 @@
         ]
       },
       {
-        "path": "packages/db/database.py",
+        "path": "packages/db/models/base.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
           "from __future__ import annotations",
-          "from collections.abc import AsyncGenerator",
-          "import ssl",
-          "from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine",
-          "from packages.db.config import settings",
-          "_engine: AsyncEngine | None = None",
-          "_sessionmaker: async_sessionmaker[AsyncSession] | None = None",
-          "def _database_url_and_connect_args() -> tuple[str, dict[str, object]]:",
-          "database_url = settings.DATABASE_URL or settings.DATABASE_URL_UNPOOLED",
-          "if database_url.startswith(\"postgres://\"):",
-          "database_url = database_url.replace(\"postgres://\", \"postgresql+asyncpg://\", 1)",
-          "elif database_url.startswith(\"postgresql://\"):"
+          "from datetime import datetime",
+          "import uuid",
+          "from sqlalchemy.orm import DeclarativeBase",
+          "def utcnow() -> datetime:",
+          "return datetime.utcnow()",
+          "def new_uuid() -> str:",
+          "return str(uuid.uuid4())",
+          "class Base(DeclarativeBase):",
+          "pass"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "apps/api/api/auth.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import time",
+          "from typing import Any",
+          "import httpx",
+          "from fastapi import Depends, HTTPException",
+          "from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer",
+          "from jose import JWTError, jwk, jwt",
+          "from jose.utils import base64url_decode",
+          "from sqlalchemy import select",
+          "from sqlalchemy.ext.asyncio import AsyncSession",
+          "from packages.db.database import get_db",
+          "from packages.db.config import settings"
         ],
         "related_imports": []
       },
@@ -4421,42 +4461,23 @@
         ]
       },
       {
-        "path": "apps/api/api/auth.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import time",
-          "from typing import Any",
-          "import httpx",
-          "from fastapi import Depends, HTTPException",
-          "from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer",
-          "from jose import JWTError, jwk, jwt",
-          "from jose.utils import base64url_decode",
-          "from sqlalchemy import select",
-          "from sqlalchemy.ext.asyncio import AsyncSession",
-          "from packages.db.database import get_db",
-          "from packages.db.config import settings"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": "packages/db/models/base.py",
+        "path": "packages/db/models/skill.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
           "from __future__ import annotations",
           "from datetime import datetime",
-          "import uuid",
-          "from sqlalchemy.orm import DeclarativeBase",
-          "def utcnow() -> datetime:",
-          "return datetime.utcnow()",
-          "def new_uuid() -> str:",
-          "return str(uuid.uuid4())",
-          "class Base(DeclarativeBase):",
-          "pass"
+          "from typing import TYPE_CHECKING",
+          "from sqlalchemy import ForeignKey, JSON, String, Text",
+          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
+          "from packages.db.models.base import Base, new_uuid, utcnow",
+          "if TYPE_CHECKING:",
+          "from packages.db.models.repo import Repo",
+          "from packages.db.models.skill_version import SkillVersion",
+          "SOURCE_TYPE_TO_CATEGORY: dict[str, str] = {",
+          "\"code\": \"codebase_architecture\",",
+          "\"openapi\": \"internal_tools\","
         ],
         "related_imports": []
       },
@@ -4515,7 +4536,7 @@
         ]
       },
       {
-        "path": "packages/db/models/skill.py",
+        "path": "packages/db/models/repo.py",
         "kind": "source",
         "language": "python",
         "tags": [],
@@ -4523,15 +4544,15 @@
           "from __future__ import annotations",
           "from datetime import datetime",
           "from typing import TYPE_CHECKING",
-          "from sqlalchemy import ForeignKey, JSON, String, Text",
+          "from sqlalchemy import BigInteger, ForeignKey, String",
           "from sqlalchemy.orm import Mapped, mapped_column, relationship",
           "from packages.db.models.base import Base, new_uuid, utcnow",
           "if TYPE_CHECKING:",
-          "from packages.db.models.repo import Repo",
-          "from packages.db.models.skill_version import SkillVersion",
-          "SOURCE_TYPE_TO_CATEGORY: dict[str, str] = {",
-          "\"code\": \"codebase_architecture\",",
-          "\"openapi\": \"internal_tools\","
+          "from packages.db.models.analysis_run import AnalysisRun",
+          "from packages.db.models.dependency import Dependency",
+          "from packages.db.models.org import Org",
+          "from packages.db.models.skill import Skill",
+          "class Repo(Base):"
         ],
         "related_imports": []
       },
@@ -4634,48 +4655,6 @@
         ]
       },
       {
-        "path": "packages/db/config.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from pydantic_settings import BaseSettings, SettingsConfigDict",
-          "class Settings(BaseSettings):",
-          "DATABASE_URL: str = \"\"",
-          "DATABASE_URL_UNPOOLED: str = \"\"",
-          "DEBUG: bool = False",
-          "GITHUB_APP_ID: str = \"\"",
-          "GITHUB_APP_PRIVATE_KEY: str = \"\"",
-          "GITHUB_WEBHOOK_SECRET: str = \"\"",
-          "WORKOS_API_KEY: str = \"\"",
-          "WORKOS_CLIENT_ID: str = \"\"",
-          "OIDC_ISSUER_URL: str = \"\""
-        ],
-        "related_imports": []
-      },
-      {
-        "path": "packages/db/models/repo.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from datetime import datetime",
-          "from typing import TYPE_CHECKING",
-          "from sqlalchemy import BigInteger, ForeignKey, String",
-          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
-          "from packages.db.models.base import Base, new_uuid, utcnow",
-          "if TYPE_CHECKING:",
-          "from packages.db.models.analysis_run import AnalysisRun",
-          "from packages.db.models.dependency import Dependency",
-          "from packages.db.models.org import Org",
-          "from packages.db.models.skill import Skill",
-          "class Repo(Base):"
-        ],
-        "related_imports": []
-      },
-      {
         "path": "apps/api/api/analysis.py",
         "kind": "source",
         "language": "python",
@@ -4732,6 +4711,69 @@
         ]
       },
       {
+        "path": "apps/api/api/routes/repos.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import hashlib",
+          "import re",
+          "from datetime import UTC, datetime, timedelta",
+          "from typing import Any, Literal",
+          "from uuid import uuid4",
+          "from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response",
+          "from fastapi.responses import JSONResponse",
+          "from pydantic import BaseModel, Field",
+          "from sqlalchemy import desc, func, select, update",
+          "from sqlalchemy.ext.asyncio import AsyncSession",
+          "from sqlalchemy.exc import SQLAlchemyError"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "packages/db/config.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from pydantic_settings import BaseSettings, SettingsConfigDict",
+          "class Settings(BaseSettings):",
+          "DATABASE_URL: str = \"\"",
+          "DATABASE_URL_UNPOOLED: str = \"\"",
+          "DEBUG: bool = False",
+          "GITHUB_APP_ID: str = \"\"",
+          "GITHUB_APP_PRIVATE_KEY: str = \"\"",
+          "GITHUB_WEBHOOK_SECRET: str = \"\"",
+          "WORKOS_API_KEY: str = \"\"",
+          "WORKOS_CLIENT_ID: str = \"\"",
+          "OIDC_ISSUER_URL: str = \"\""
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "packages/db/models/__init__.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from packages.db.models.agent_session import AgentSession",
+          "from packages.db.models.analysis_run import AnalysisRun",
+          "from packages.db.models.audit_event import AuditEvent",
+          "from packages.db.models.autopilot_task import AutopilotTask",
+          "from packages.db.models.base import Base",
+          "from packages.db.models.dependency import Dependency",
+          "from packages.db.models.eval import ABTest, AgentTask, EvalSession, SkillGap",
+          "from packages.db.models.flag_dismissal import FlagDismissal",
+          "from packages.db.models.half_life import SkillHalfLife",
+          "from packages.db.models.org import Org",
+          "from packages.db.models.org_llm_config import OrgLLMConfig",
+          "from packages.db.models.org_policy import OrgPolicy"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/core/context.py",
         "kind": "source",
         "language": "python",
@@ -4759,48 +4801,6 @@
           "skilgen/agents/workspace_graph.py",
           "skilgen/core/models.py"
         ]
-      },
-      {
-        "path": "apps/api/api/routes/repos.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import hashlib",
-          "import os",
-          "import re",
-          "from datetime import UTC, datetime, timedelta",
-          "from typing import Any, Literal",
-          "from uuid import uuid4",
-          "from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response",
-          "from pydantic import BaseModel, Field",
-          "from sqlalchemy import desc, func, select, update",
-          "from sqlalchemy.ext.asyncio import AsyncSession",
-          "from sqlalchemy.exc import SQLAlchemyError"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": "packages/db/models/__init__.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from packages.db.models.agent_session import AgentSession",
-          "from packages.db.models.analysis_run import AnalysisRun",
-          "from packages.db.models.audit_event import AuditEvent",
-          "from packages.db.models.base import Base",
-          "from packages.db.models.dependency import Dependency",
-          "from packages.db.models.eval import ABTest, AgentTask, EvalSession, SkillGap",
-          "from packages.db.models.half_life import SkillHalfLife",
-          "from packages.db.models.org import Org",
-          "from packages.db.models.org_llm_config import OrgLLMConfig",
-          "from packages.db.models.org_policy import OrgPolicy",
-          "from packages.db.models.repo import Repo",
-          "from packages.db.models.registry_skill import RegistrySkill"
-        ],
-        "related_imports": []
       },
       {
         "path": "skilgen/agents/requirements_parser.py",
@@ -5011,6 +5011,27 @@
         ]
       },
       {
+        "path": "apps/api/api/routes/orgs.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from dataclasses import asdict",
+          "from datetime import UTC, datetime, timedelta",
+          "import hashlib",
+          "import logging",
+          "import secrets",
+          "from typing import Any, Literal",
+          "from uuid import uuid4",
+          "import csv",
+          "from io import StringIO",
+          "import time",
+          "from fastapi import APIRouter, Depends, HTTPException, Query, Request"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/agents/domain_graph_planner.py",
         "kind": "source",
         "language": "python",
@@ -5212,6 +5233,27 @@
         ]
       },
       {
+        "path": "packages/db/models/org.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "from typing import TYPE_CHECKING",
+          "from sqlalchemy import JSON, BigInteger, String",
+          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
+          "from packages.db.models.base import Base, new_uuid, utcnow",
+          "if TYPE_CHECKING:",
+          "from packages.db.models.repo import Repo",
+          "class Org(Base):",
+          "__tablename__ = \"orgs\"",
+          "id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)",
+          "github_org_id: Mapped[int] = mapped_column(BigInteger, unique=True)"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/agents/evidence_graph.py",
         "kind": "source",
         "language": "python",
@@ -5367,27 +5409,6 @@
           "re",
           "skilgen/external_skills.py"
         ]
-      },
-      {
-        "path": "apps/api/api/routes/orgs.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from dataclasses import asdict",
-          "from datetime import UTC, datetime, timedelta",
-          "import hashlib",
-          "import logging",
-          "import secrets",
-          "from typing import Literal",
-          "from uuid import uuid4",
-          "import csv",
-          "from io import StringIO",
-          "import time",
-          "from fastapi import APIRouter, Depends, HTTPException, Query, Request"
-        ],
-        "related_imports": []
       },
       {
         "path": "skilgen/generators/package.py",
@@ -5555,34 +5576,6 @@
           "re",
           "skilgen/agents/codebase_signals.py",
           "warnings"
-        ]
-      },
-      {
-        "path": "skilgen/agents/feature_extractor.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from pathlib import Path",
-          "from skilgen.agents.codebase_signals import analyze_codebase",
-          "from skilgen.agents.requirements_parser import parse_project_intent, parse_project_intent_native",
-          "from skilgen.deep_agents_core import run_deep_json",
-          "from skilgen.core.models import FeatureRecord",
-          "def extract_features_native(requirements_path: Path | None, project_root: Path) -> list[FeatureRecord]:",
-          "intent = parse_project_intent_native(project_root, requirements_path)",
-          "signals = analyze_codebase(project_root)",
-          "features: list[FeatureRecord] = []",
-          "if requirements_path is not None:",
-          "features.append("
-        ],
-        "related_imports": [
-          "__future__",
-          "pathlib",
-          "skilgen/agents/codebase_signals.py",
-          "skilgen/agents/requirements_parser.py",
-          "skilgen/core/models.py",
-          "skilgen/deep_agents_core.py"
         ]
       },
       {
@@ -6535,7 +6528,7 @@
           "# Skilgen Agent Contract",
           "## Project Overview",
           "This repository was generated or refreshed by Skilgen to help coding agents work from project-specific context instead of generic prompts.",
-          "The current input mode was: `codebase only`.",
+          "The current input mode was: `requirements + codebase`.",
           "## How To Work In This Repo",
           "1. Open `skills/MANIFEST.md` first.",
           "2. Open the most specific inferred child skill before changing code.",
@@ -6555,10 +6548,10 @@
           "Search this file before implementing any feature to avoid duplicating work.",
           "| Feature Name | Domain | Location | Description | Status | Last Modified |",
           "| --- | --- | --- | --- | --- | --- |",
-          "| Project folder analysis | analysis | `skilgen-upstream-work` | Analyze the input folder and generate outputs into that same folder. | active | current |",
+          "| Requirements-driven scan | requirements | `README.md` | Parse the requirements input and generate skills and project docs. | active | current |",
+          "| Project folder analysis | analysis | `skilgen` | Analyze the input folder and generate outputs into that same folder. | active | current |",
           "| Backend route: skilgen/api/__init__.py | backend | `skilgen/api/__init__.py` | Detected route or handler implementation in the scanned codebase. | active | current |",
-          "| Backend route: skilgen/api/jobs.py | backend | `skilgen/api/jobs.py` | Detected route or handler implementation in the scanned codebase. | active | current |",
-          "| Backend route: skilgen/api/server.py | backend | `skilgen/api/server.py` | Detected route or handler implementation in the scanned codebase. | active | current |"
+          "| Backend route: skilgen/api/jobs.py | backend | `skilgen/api/jobs.py` | Detected route or handler implementation in the scanned codebase. | active | current |"
         ],
         "related_imports": []
       },
@@ -6591,8 +6584,8 @@
         "snippet": [
           "# Report",
           "## Summary",
-          "- Detected domains: platform, platform-runtime, platform-agents, platform-cli, platform-core, platform-generators, platform-scripts, roadmap, roadmap-phase-0, roadmap-phase-1, road",
-          "- Feature inventory entries: 9",
+          "- Detected domains: requirements, platform, platform-runtime, platform-agents, platform-cli, platform-core, platform-generators, platform-scripts, roadmap, roadmap-phase-0, roadmap",
+          "- Feature inventory entries: 18",
           "- Backend route files: 4",
           "- Frontend route files: 0",
           "- Component files: 0",
@@ -6611,11 +6604,11 @@
           "# Traceability",
           "This file maps requirements and detected code evidence to the generated Skilgen outputs.",
           "## Requirements Source",
-          "- Source file: `codebase-only input`",
-          "- Source hash: `2b845af34337`",
+          "- Source file: `README.md`",
+          "- Source hash: `2837441a1025`",
           "## Intent To Output Mapping",
           "### Endpoints",
-          "- Intent: Detected route: skilgen/api/__init__.py"
+          "- Intent: # Export a provider key, or point Skilgen at a private model endpoint below."
         ],
         "related_imports": []
       },
