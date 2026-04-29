@@ -1410,6 +1410,18 @@ def _scorecard_skill_name(item: object) -> str | None:
     return None
 
 
+def _dt_naive(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value.replace(tzinfo=None) if value.tzinfo else value
+
+
+def _json_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
 def _pr_card(pr: PullRequest, repo: Repo, attribution: PRAttribution | None) -> dict[str, object]:
     violation_count, warning_count = _finding_counts(attribution)
     sessions = attribution.sessions if attribution and isinstance(attribution.sessions, list) else []
@@ -6125,6 +6137,206 @@ async def get_agent_scorecard(
         "avg_risk": round(sum(float(row["avg_risk_score"]) for row in agent_rows) / len(agent_rows), 1) if agent_rows else 0.0,
     }
     return {"window_days": days, "days": days, "generated_at": generated_at.isoformat(), "summary": summary, "agents": agent_rows}
+
+
+@router.get("/{org_id}/developer-leaderboard")
+async def get_developer_leaderboard(
+    org_id: str,
+    days: int = Query(default=30, ge=1, le=180),
+    sort_by: Literal["compliance", "prs", "sessions", "violations", "lines"] = Query(default="compliance"),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    if days not in {7, 30, 90}:
+        raise HTTPException(status_code=422, detail="days must be one of 7, 30, or 90")
+    generated_at = _utc_now_naive()
+    cutoff = generated_at - timedelta(days=days)
+    repo_rows = list(
+        (
+            await db.execute(
+                select(Repo).where(
+                    Repo.org_id == org_id,
+                    Repo.is_active.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    repo_ids = [repo.id for repo in repo_rows]
+    if not repo_ids:
+        return {"window_days": days, "generated_at": generated_at.isoformat(), "developers": []}
+
+    sessions = list(
+        (
+            await db.execute(
+                select(AgentSession).where(
+                    AgentSession.repo_id.in_(repo_ids),
+                    AgentSession.session_start >= cutoff,
+                    AgentSession.engineer_login.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    sessions = [
+        session
+        for session in sessions
+        if str(session.engineer_login or "").strip()
+        and _dt_naive(session.session_start) is not None
+        and _dt_naive(session.session_start) >= cutoff
+    ]
+
+    pr_rows = list(
+        (
+            await db.execute(
+                select(PullRequest).where(
+                    PullRequest.repo_id.in_(repo_ids),
+                    PullRequest.opened_at >= cutoff,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    pr_rows = [
+        pr
+        for pr in pr_rows
+        if str(pr.author_login or "").strip()
+        and _dt_naive(pr.opened_at) is not None
+        and _dt_naive(pr.opened_at) >= cutoff
+    ]
+    pr_ids = [pr.id for pr in pr_rows]
+    attributions = (
+        list((await db.execute(select(PRAttribution).where(PRAttribution.pr_id.in_(pr_ids)))).scalars().all())
+        if pr_ids
+        else []
+    )
+    attr_by_pr = {attr.pr_id: attr for attr in attributions}
+
+    developers: dict[str, dict[str, object]] = {}
+    file_sets: dict[str, set[str]] = defaultdict(set)
+    runtime_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    skill_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    violation_skill_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    risk_sums: dict[str, int] = defaultdict(int)
+    risk_counts: dict[str, int] = defaultdict(int)
+    clean_prs: dict[str, int] = defaultdict(int)
+
+    def row_for(login: str) -> dict[str, object]:
+        return developers.setdefault(
+            login,
+            {
+                "login": login,
+                "sessions_count": 0,
+                "files_touched": 0,
+                "lines_changed": 0,
+                "prs_opened": 0,
+                "prs_merged": 0,
+                "prs_reverted": 0,
+                "agent_runtimes": [],
+                "skills_loaded": [],
+                "violations_total": 0,
+                "warnings_total": 0,
+                "compliance_pct": 100.0,
+                "avg_risk_score": 0.0,
+                "risk_distribution": {"red": 0, "yellow": 0, "green": 0},
+                "top_violations": [],
+                "last_active": None,
+            },
+        )
+
+    def touch_last_active(row: dict[str, object], value: datetime | None) -> None:
+        candidate = _dt_naive(value)
+        if candidate is None:
+            return
+        existing_raw = row.get("last_active")
+        existing = datetime.fromisoformat(str(existing_raw)) if existing_raw else None
+        if existing is None or candidate > existing:
+            row["last_active"] = candidate.isoformat()
+
+    for session in sessions:
+        login = str(session.engineer_login or "").strip()
+        row = row_for(login)
+        row["sessions_count"] = int(row["sessions_count"]) + 1
+        for path in _json_string_list(session.files_touched):
+            file_sets[login].add(path)
+        runtime = str(session.agent_runtime or "").strip()
+        if runtime:
+            runtime_counts[login][runtime] += 1
+        for skill in _json_string_list(session.skills_loaded):
+            name = _scorecard_skill_name(skill)
+            if name:
+                skill_counts[login][name] += 1
+        touch_last_active(row, session.session_start)
+
+    for pr in pr_rows:
+        login = str(pr.author_login or "").strip()
+        row = row_for(login)
+        row["prs_opened"] = int(row["prs_opened"]) + 1
+        row["lines_changed"] = int(row["lines_changed"]) + int(pr.additions or 0) + int(pr.deletions or 0)
+        if pr.merged_at is not None or pr.state == "merged":
+            row["prs_merged"] = int(row["prs_merged"]) + 1
+        elif pr.closed_at is not None or pr.state == "closed":
+            row["prs_reverted"] = int(row["prs_reverted"]) + 1
+
+        attribution = attr_by_pr.get(pr.id)
+        violations, warnings = _finding_counts(attribution)
+        row["violations_total"] = int(row["violations_total"]) + violations
+        row["warnings_total"] = int(row["warnings_total"]) + warnings
+        if violations == 0:
+            clean_prs[login] += 1
+
+        tier = _scorecard_risk_tier(attribution)
+        risk_distribution = row["risk_distribution"]
+        if isinstance(risk_distribution, dict):
+            risk_distribution[tier] = int(risk_distribution.get(tier, 0)) + 1
+        risk_sums[login] += int(attribution.risk_score or 0) if attribution else 0
+        risk_counts[login] += 1
+
+        if attribution and isinstance(attribution.skills_loaded, list):
+            for skill in attribution.skills_loaded:
+                name = _scorecard_skill_name(skill)
+                if name:
+                    skill_counts[login][name] += 1
+        if attribution and isinstance(attribution.skills_violated, list):
+            for finding in attribution.skills_violated:
+                if not isinstance(finding, dict) or _severity_bucket(finding) != "violation":
+                    continue
+                name = _scorecard_skill_name(finding)
+                if name:
+                    violation_skill_counts[login][name] += 1
+        touch_last_active(row, pr.opened_at)
+
+    developer_rows: list[dict[str, object]] = []
+    for login, row in developers.items():
+        prs_opened = int(row["prs_opened"])
+        row["files_touched"] = len(file_sets[login])
+        row["agent_runtimes"] = _scorecard_top_counts(runtime_counts[login], 20)
+        row["skills_loaded"] = _scorecard_top_counts(skill_counts[login], 5)
+        row["top_violations"] = _scorecard_top_counts(violation_skill_counts[login], 3)
+        row["compliance_pct"] = round((clean_prs[login] / prs_opened) * 100, 1) if prs_opened else 100.0
+        row["avg_risk_score"] = round(risk_sums[login] / risk_counts[login], 1) if risk_counts[login] else 0.0
+        developer_rows.append(row)
+
+    def sort_key(row: dict[str, object]) -> tuple[object, ...]:
+        if sort_by == "prs":
+            return (-int(row["prs_merged"]), -int(row["prs_opened"]), str(row["login"]))
+        if sort_by == "sessions":
+            return (-int(row["sessions_count"]), str(row["login"]))
+        if sort_by == "violations":
+            return (-int(row["violations_total"]), -int(row["warnings_total"]), str(row["login"]))
+        if sort_by == "lines":
+            return (-int(row["lines_changed"]), str(row["login"]))
+        return (-float(row["compliance_pct"]), -int(row["prs_merged"]), -int(row["sessions_count"]), str(row["login"]))
+
+    developer_rows.sort(key=sort_key)
+    for index, row in enumerate(developer_rows, start=1):
+        row["rank"] = index
+
+    return {"window_days": days, "generated_at": generated_at.isoformat(), "developers": developer_rows}
 
 
 @router.get("/{org_id}/agent-prs")

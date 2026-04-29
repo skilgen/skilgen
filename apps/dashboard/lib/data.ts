@@ -213,6 +213,32 @@ export type AgentScorecardResponse = {
   agents: AgentScorecardRow[];
 };
 
+export type DeveloperLeaderboardEntry = {
+  login: string;
+  rank: number;
+  sessions_count: number;
+  files_touched: number;
+  lines_changed: number;
+  prs_opened: number;
+  prs_merged: number;
+  prs_reverted: number;
+  agent_runtimes: string[];
+  skills_loaded: string[];
+  violations_total: number;
+  warnings_total: number;
+  compliance_pct: number;
+  avg_risk_score: number;
+  risk_distribution: { red: number; yellow: number; green: number };
+  top_violations: string[];
+  last_active: string | null;
+};
+
+export type DeveloperLeaderboardResponse = {
+  window_days: number;
+  generated_at: string;
+  developers: DeveloperLeaderboardEntry[];
+};
+
 export type SetupStep = {
   id: "connect_repo" | "generate_skills" | "connect_agent" | "improve_skills" | string;
   title: string;
@@ -1283,6 +1309,11 @@ export async function getMyCodeToday(accessToken: string | null, orgId: string, 
 export async function getAgentScorecard(accessToken: string | null, orgId: string, days = 30): Promise<AgentScorecardResponse | null> {
   const params = new URLSearchParams({ days: String(days) });
   return apiFetch<AgentScorecardResponse>(`/orgs/${orgId}/agent-scorecard?${params.toString()}`, { accessToken, cache: "no-store" });
+}
+
+export async function getDeveloperLeaderboard(accessToken: string | null, orgId: string, days = 30, sortBy = "compliance"): Promise<DeveloperLeaderboardResponse | null> {
+  const params = new URLSearchParams({ days: String(days), sort_by: sortBy });
+  return apiFetch<DeveloperLeaderboardResponse>(`/orgs/${orgId}/developer-leaderboard?${params.toString()}`, { accessToken, cache: "no-store" });
 }
 
 export async function getAutopilotQueue(accessToken: string | null, orgId: string): Promise<AutopilotTask[] | null> {
