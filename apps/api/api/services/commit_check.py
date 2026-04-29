@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -16,9 +17,10 @@ from apps.api.api.pr_comment import (
     violation_marker,
 )
 from apps.api.api.routes.review import _files_to_diff, _skill_pattern_comments, _structured_from_comments
+from apps.api.api.services.manifest import build_manifest
 from apps.api.api.services.pr_risk import compute_risk_score
 from apps.api.api.services.policy_engine import evaluate_pr_policies
-from packages.db.models import PRAttribution, PullRequest, Repo, Skill
+from packages.db.models import Org, PRAttribution, PullRequest, Repo, Skill
 
 
 @dataclass
@@ -126,6 +128,17 @@ async def publish_pr_commit_check(
     if hasattr(db, "refresh"):
         await db.refresh(attribution)
     policy_failures = await evaluate_pr_policies(repo.org_id, attribution, db)
+    org = await db.get(Org, repo.org_id) if hasattr(db, "get") else None
+    if org and getattr(org, "api_key", None):
+        attribution.signed_manifest = build_manifest(
+            pr=pr,
+            attribution=attribution,
+            repo=repo,
+            org_api_key=str(org.api_key),
+            policy_outcome="blocked" if policy_failures else "pass",
+        )
+        attribution.manifest_signed_at = datetime.utcnow()
+        await db.commit()
 
     settings_url = "https://app.skillayer.com/dashboard/settings"
     for finding in result.violations + result.warnings:

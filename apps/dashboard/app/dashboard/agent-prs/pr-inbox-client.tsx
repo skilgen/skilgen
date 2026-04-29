@@ -84,6 +84,25 @@ async function fetchAgentPrDetail(accessToken: string, orgId: string, prId: stri
   return response.json() as Promise<AgentPrDetail>;
 }
 
+async function fetchManifest(accessToken: string, orgId: string, prId: string): Promise<{ manifest: Record<string, unknown>; signed_at: string | null }> {
+  const response = await fetch(`${API_URL}/orgs/${orgId}/agent-prs/${prId}/manifest`, {
+    headers: { "Content-Type": "application/json", ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json() as Promise<{ manifest: Record<string, unknown>; signed_at: string | null }>;
+}
+
+async function verifyManifest(accessToken: string, orgId: string, prId: string, manifest: Record<string, unknown>): Promise<{ valid: boolean; message: string }> {
+  const response = await fetch(`${API_URL}/orgs/${orgId}/agent-prs/${prId}/manifest/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+    body: JSON.stringify({ manifest }),
+  });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json() as Promise<{ valid: boolean; message: string }>;
+}
+
 function EmptyState() {
   return (
     <div className="rounded-[28px] border border-dashed border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-6 py-16 text-center">
@@ -172,7 +191,48 @@ function PrCard({ item, active, selected, onOpen }: { item: AgentPrCard; active:
   );
 }
 
-function DetailPanel({ detail, loading, onClose }: { detail: AgentPrDetail | null; loading: boolean; onClose: () => void }) {
+function DetailPanel({ accessToken, detail, loading, onClose, orgId }: { accessToken: string; detail: AgentPrDetail | null; loading: boolean; onClose: () => void; orgId: string }) {
+  const [manifest, setManifest] = useState<Record<string, unknown> | null>(null);
+  const [manifestOpen, setManifestOpen] = useState(false);
+  const [manifestError, setManifestError] = useState("");
+  const [manifestLoading, setManifestLoading] = useState(false);
+  const [verifyMessage, setVerifyMessage] = useState<{ valid: boolean; message: string } | null>(null);
+
+  async function openManifest() {
+    if (!detail) return;
+    setManifestLoading(true);
+    setManifestError("");
+    setVerifyMessage(null);
+    try {
+      const response = await fetchManifest(accessToken, orgId, detail.pr_id);
+      setManifest(response.manifest);
+      setManifestOpen(true);
+    } catch {
+      setManifestError("Manifest not yet generated — triggers on next PR push");
+    } finally {
+      setManifestLoading(false);
+    }
+  }
+
+  function downloadManifest() {
+    if (!manifest || !detail) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `skillayer-manifest-pr-${detail.github_pr_number}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function runVerify() {
+    if (!detail || !manifest) return;
+    try {
+      setVerifyMessage(await verifyManifest(accessToken, orgId, detail.pr_id, manifest));
+    } catch (err) {
+      setVerifyMessage({ valid: false, message: err instanceof Error ? err.message : "Verification failed" });
+    }
+  }
+
   return (
     <aside className="fixed inset-y-0 right-0 z-[80] w-full overflow-y-auto border-l border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-6 shadow-2xl md:w-[40vw] md:min-w-[520px]">
       <div className="flex items-start justify-between gap-4">
@@ -221,6 +281,18 @@ function DetailPanel({ detail, loading, onClose }: { detail: AgentPrDetail | nul
             </div>
           </section>
           <section className="rounded-2xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold">Provenance Manifest</h3>
+                <p className="mt-1 text-xs text-[color:var(--text-secondary)]">Tamper-evident proof of agent attribution, loaded skills, risk, and policy outcome.</p>
+              </div>
+              <button className="rounded-lg border border-[color:var(--bg-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--text-secondary)] transition-colors hover:border-[color:var(--accent-primary)] hover:text-[color:var(--text-primary)] disabled:cursor-wait disabled:opacity-60" disabled={manifestLoading} onClick={openManifest} type="button">
+                {manifestLoading ? "Loading..." : "View Manifest"}
+              </button>
+            </div>
+            {manifestError ? <p className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-100">{manifestError}</p> : null}
+          </section>
+          <section className="rounded-2xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
             <h3 className="font-semibold">Violations</h3>
             <div className="mt-4 space-y-3">
               {detail.violations.length ? detail.violations.map((violation, index) => (
@@ -252,6 +324,29 @@ function DetailPanel({ detail, loading, onClose }: { detail: AgentPrDetail | nul
           </section>
         </div>
       )}
+      {manifestOpen && manifest ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4">
+          <div className="max-h-[86vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] shadow-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--bg-border)] p-4">
+              <div>
+                <h3 className="font-semibold text-[color:var(--text-primary)]">Signed Provenance Manifest</h3>
+                <p className="text-xs text-[color:var(--text-secondary)]">PR #{detail?.github_pr_number}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="rounded-lg border border-[color:var(--bg-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--text-secondary)] hover:border-[color:var(--accent-primary)]" onClick={downloadManifest} type="button">Download</button>
+                <button className="rounded-lg border border-[color:var(--bg-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--text-secondary)] hover:border-[color:var(--accent-primary)]" onClick={runVerify} type="button">Verify</button>
+                <button className="rounded-lg p-2 text-[color:var(--text-secondary)] hover:bg-[color:var(--bg-surface)]" onClick={() => setManifestOpen(false)} type="button"><X className="h-4 w-4" /></button>
+              </div>
+            </div>
+            {verifyMessage ? (
+              <div className={cn("mx-4 mt-4 rounded-lg border p-3 text-sm", verifyMessage.valid ? "border-[color:var(--accent-green)]/30 bg-[color:var(--accent-green)]/10 text-[color:var(--accent-green)]" : "border-red-500/30 bg-red-500/10 text-red-100")}>
+                {verifyMessage.valid ? "✓" : "✗"} {verifyMessage.message}
+              </div>
+            ) : null}
+            <pre className="m-4 max-h-[62vh] overflow-auto rounded-xl bg-black/30 p-4 text-xs leading-relaxed text-[color:var(--text-secondary)]">{JSON.stringify(manifest, null, 2)}</pre>
+          </div>
+        </div>
+      ) : null}
     </aside>
   );
 }
@@ -437,7 +532,7 @@ export function AgentPrInboxClient({ accessToken, apiKey, orgId, initialData, in
         <span>{data?.total_count ?? 0} PRs · Updated {relativeTime(new Date(now).toISOString())}</span>
         <span className="inline-flex items-center gap-1"><Filter className="h-3.5 w-3.5" /> Press / to search, j/k to move, Enter to open</span>
       </div>
-      {selectedId ? <DetailPanel detail={detail} loading={detailLoading} onClose={() => { setSelectedId(null); setDetail(null); }} /> : null}
+      {selectedId ? <DetailPanel accessToken={accessToken} detail={detail} loading={detailLoading} onClose={() => { setSelectedId(null); setDetail(null); }} orgId={orgId} /> : null}
     </div>
   );
 }

@@ -219,3 +219,41 @@ def test_developer_leaderboard_lines_changed_and_file_dedupe(monkeypatch) -> Non
     ravi = response.json()["developers"][0]
     assert ravi["files_touched"] == 3
     assert ravi["lines_changed"] == 140
+
+
+def test_developer_leaderboard_trend_up_and_sparkline(monkeypatch) -> None:
+    current_prs = [_pr("ravi", pr_id="pr_1", days_old=1), _pr("ravi", pr_id="pr_2", days_old=2)]
+    current_attrs = [_attr("pr_1", findings=[]), _attr("pr_2", findings=[])]
+    previous_prs = [_pr("ravi", pr_id="pr_old", days_old=10)]
+    previous_attrs = [_attr("pr_old", findings=[{"severity": "critical", "skill_name": "security"}])]
+    client = _client(Db([Result([_repo()]), Result([]), Result(current_prs), Result(current_attrs), Result(previous_prs), Result(previous_attrs)]), monkeypatch)
+
+    response = client.get("/orgs/org_1/developer-leaderboard?days=7&include_trend=true")
+
+    ravi = response.json()["developers"][0]
+    assert ravi["trend"] == {"compliance_delta": 100.0, "violations_delta": -1, "direction": "up"}
+    assert len(ravi["sparkline"]) == 7
+    assert ravi["sparkline"].count(100.0) == 2
+
+
+def test_developer_leaderboard_trend_down_flat_and_null(monkeypatch) -> None:
+    current_prs = [
+        _pr("down", pr_id="pr_1", days_old=1),
+        _pr("flat", pr_id="pr_2", days_old=1),
+        _pr("new", pr_id="pr_3", days_old=1),
+    ]
+    current_attrs = [
+        _attr("pr_1", findings=[{"severity": "critical", "skill_name": "auth"}]),
+        _attr("pr_2", findings=[]),
+        _attr("pr_3", findings=[]),
+    ]
+    previous_prs = [_pr("down", pr_id="old_1", days_old=10), _pr("flat", pr_id="old_2", days_old=10)]
+    previous_attrs = [_attr("old_1", findings=[]), _attr("old_2", findings=[])]
+    client = _client(Db([Result([_repo()]), Result([]), Result(current_prs), Result(current_attrs), Result(previous_prs), Result(previous_attrs)]), monkeypatch)
+
+    response = client.get("/orgs/org_1/developer-leaderboard?days=7&include_trend=true&sort_by=violations")
+
+    rows = {item["login"]: item for item in response.json()["developers"]}
+    assert rows["down"]["trend"]["direction"] == "down"
+    assert rows["flat"]["trend"]["direction"] == "flat"
+    assert rows["new"]["trend"] is None

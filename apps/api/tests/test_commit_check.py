@@ -30,14 +30,18 @@ class Result:
 
 
 class Db:
-    def __init__(self, results: list[Result]) -> None:
+    def __init__(self, results: list[Result], objects: dict[tuple[object, str], object] | None = None) -> None:
         self.results = results
+        self.objects = objects or {}
         self.committed = False
 
     async def execute(self, statement):
         if not self.results:
             raise AssertionError(f"Unexpected DB execute: {statement}")
         return self.results.pop(0)
+
+    async def get(self, model, id_):
+        return self.objects.get((model, id_))
 
     async def commit(self):
         self.committed = True
@@ -164,6 +168,50 @@ def test_publish_pr_commit_check_passes_policy_failures_to_check_run(monkeypatch
 
     assert result.risk_tier == "green"
     assert checks[0]["policy_failures"][0]["rule_type"] == "block_on_red"
+
+
+def test_publish_pr_commit_check_stores_signed_manifest(monkeypatch) -> None:
+    from packages.db.models import Org
+
+    repo = _repo()
+    pr = PullRequest(repo_id="repo_1", github_pr_number=44)
+    pr.id = "pr_3"
+    pr.title = "Signed provenance"
+    attribution = PRAttribution(pr_id="pr_3", primary_agent="codex", confidence=0.8)
+    attribution.id = "attr_3"
+    org = SimpleNamespace(id="org_1", api_key="sk-test")
+    db = Db([Result(rows=[]), Result(attribution)], objects={(Org, "org_1"): org})
+    checks: list[dict[str, Any]] = []
+
+    async def fake_fetch(*args, **kwargs):
+        return "diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n+print('ok')"
+
+    async def fake_check(**kwargs):
+        checks.append(kwargs)
+        return True
+
+    async def fake_risk(pr_id, db):
+        attribution.risk_score = 0
+        attribution.risk_tier = "green"
+        attribution.risk_breakdown = {}
+        return {"score": 0, "tier": "green", "breakdown": {}}
+
+    async def fake_policies(org_id, attribution_arg, db):
+        return []
+
+    monkeypatch.setattr(commit_check, "fetch_commit_diff", fake_fetch)
+    monkeypatch.setattr(commit_check, "create_skill_review_check_run", fake_check)
+    monkeypatch.setattr(commit_check, "compute_risk_score", fake_risk)
+    monkeypatch.setattr(commit_check, "evaluate_pr_policies", fake_policies)
+
+    __import__("asyncio").run(
+        commit_check.publish_pr_commit_check(repo=repo, pr=pr, sha="head_sha", db=db, installation_id=123, base_sha="base_sha")
+    )
+
+    assert attribution.signed_manifest is not None
+    assert attribution.signed_manifest["repo"] == "acme/api"
+    assert attribution.signed_manifest["policy_outcome"] == "pass"
+    assert attribution.manifest_signed_at is not None
 
 
 def test_violation_comment_dedupe_marker_is_stable() -> None:

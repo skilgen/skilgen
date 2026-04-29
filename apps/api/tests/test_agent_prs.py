@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from apps.api.api.auth import get_current_org_id
 from apps.api.api.routes import orgs
 from packages.db.database import get_db
-from packages.db.models import AgentSession, PRAttribution, PullRequest
+from packages.db.models import AgentSession, Org, PRAttribution, PullRequest
 
 
 class Result:
@@ -163,3 +163,44 @@ def test_agent_pr_detail_includes_replay_link() -> None:
 
     assert response.status_code == 200
     assert response.json()["sessions"][0]["replay_url"] == "/dashboard/repos/repo_1/sessions/session_1"
+
+
+def test_agent_pr_manifest_endpoint_returns_signed_manifest() -> None:
+    pr = _pr(1, "Manifest me")
+    attr = _attr("pr_1", "codex", 90)
+    attr.signed_manifest = {"version": "1", "signature": "abc"}
+    attr.manifest_signed_at = datetime(2026, 4, 28, 11, 0, 0)
+    from packages.db.models import Repo
+
+    db = Db(
+        [Result(attr)],
+        objects={(PullRequest, "pr_1"): pr, (Repo, "repo_1"): _repo()},
+    )
+    client = _client(db)
+
+    response = client.get("/orgs/org_1/agent-prs/pr_1/manifest")
+
+    assert response.status_code == 200
+    assert response.json()["manifest"]["signature"] == "abc"
+    assert response.json()["signed_at"] == "2026-04-28T11:00:00"
+
+
+def test_agent_pr_manifest_verify_endpoint() -> None:
+    from apps.api.api.services.manifest import build_manifest
+    from packages.db.models import Repo
+
+    pr = _pr(1, "Verify me")
+    repo = _repo()
+    attr = _attr("pr_1", "codex", 20)
+    org = SimpleNamespace(id="org_1", api_key="sk-test")
+    manifest = build_manifest(pr=pr, attribution=attr, repo=repo, org_api_key="sk-test")
+    db = Db(
+        [],
+        objects={(PullRequest, "pr_1"): pr, (Repo, "repo_1"): repo, (Org, "org_1"): org},
+    )
+    client = _client(db)
+
+    response = client.post("/orgs/org_1/agent-prs/pr_1/manifest/verify", json={"manifest": manifest})
+
+    assert response.status_code == 200
+    assert response.json() == {"valid": True, "message": "Manifest signature is valid."}

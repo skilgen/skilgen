@@ -149,6 +149,11 @@ export type AgentPrDetail = AgentPrCard & {
   checks: Array<{ name: string; status: string; conclusion: string | null; details_url: string | null }>;
 };
 
+export type AgentPrManifestResponse = {
+  manifest: Record<string, unknown>;
+  signed_at: string | null;
+};
+
 export type MyCodeTodaySession = {
   session_id: string;
   agent_runtime: string;
@@ -231,6 +236,12 @@ export type DeveloperLeaderboardEntry = {
   risk_distribution: { red: number; yellow: number; green: number };
   top_violations: string[];
   last_active: string | null;
+  trend?: {
+    compliance_delta: number;
+    violations_delta: number;
+    direction: "up" | "down" | "flat";
+  } | null;
+  sparkline?: Array<number | null>;
 };
 
 export type DeveloperLeaderboardResponse = {
@@ -1311,8 +1322,9 @@ export async function getAgentScorecard(accessToken: string | null, orgId: strin
   return apiFetch<AgentScorecardResponse>(`/orgs/${orgId}/agent-scorecard?${params.toString()}`, { accessToken, cache: "no-store" });
 }
 
-export async function getDeveloperLeaderboard(accessToken: string | null, orgId: string, days = 30, sortBy = "compliance"): Promise<DeveloperLeaderboardResponse | null> {
+export async function getDeveloperLeaderboard(accessToken: string | null, orgId: string, days = 30, sortBy = "compliance", includeTrend = false): Promise<DeveloperLeaderboardResponse | null> {
   const params = new URLSearchParams({ days: String(days), sort_by: sortBy });
+  if (includeTrend) params.set("include_trend", "true");
   return apiFetch<DeveloperLeaderboardResponse>(`/orgs/${orgId}/developer-leaderboard?${params.toString()}`, { accessToken, cache: "no-store" });
 }
 
