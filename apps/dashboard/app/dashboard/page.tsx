@@ -8,6 +8,7 @@ import {
   getEvalROI,
   getEvalSkillGaps,
   getMyOrg,
+  getOrgMemoryScore,
   getOrgRepos,
   getOrgSetupStatus,
   getOrgSkillHeatmap,
@@ -319,7 +320,7 @@ async function resolveOrg(): Promise<{ accessToken: string; org: Org | null; fir
 
 export default async function OverviewPage() {
   const { accessToken, org, firstName } = await resolveOrg();
-  const [stats, heatmap, repos, setupStatus, actionItems, roi, skillGaps] = org
+  const [stats, heatmap, repos, setupStatus, actionItems, roi, skillGaps, memoryScore] = org
     ? await Promise.all([
         getOrgStats(accessToken, org.id),
         getOrgSkillHeatmap(accessToken, org.id),
@@ -328,8 +329,9 @@ export default async function OverviewPage() {
         getOrgActionItems(accessToken, org.id),
         getEvalROI(accessToken, org.id),
         getEvalSkillGaps(accessToken, org.id, "open"),
+        getOrgMemoryScore(accessToken, org.id),
       ])
-    : [null, null, null, null, null, null, null];
+    : [null, null, null, null, null, null, null, null];
 
   const repoList = repos ?? [];
   const attentionRepos = [...repoList]
@@ -373,10 +375,29 @@ export default async function OverviewPage() {
             </Link>
           ) : null}
           {showTodayActions ? <TodayActions items={actionItems?.items ?? []} /> : null}
+          <Link className="block rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6 hover:border-[color:var(--accent-primary)]" href="/dashboard/skills">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">Skills Health</div>
+                <div className="mt-3 flex flex-wrap items-end gap-4">
+                  <span className="text-5xl font-semibold text-[color:var(--text-primary)]">{stats?.skill_count ?? heatmap?.summary.total_skills ?? 0}</span>
+                  <span className="rounded-full bg-[color:var(--accent-primary)]/15 px-3 py-1 text-sm font-semibold text-[color:var(--accent-primary)]">Avg {stats?.avg_score ?? 0}/100</span>
+                  <span className="text-sm text-[color:var(--text-secondary)]">{skillsBelowThreshold} skills need attention</span>
+                </div>
+              </div>
+              <svg className="h-20 w-full max-w-[360px]" viewBox="0 0 360 80" role="img" aria-label="Skill score trend">
+                {(stats?.score_trend ?? []).slice(-5).map((point, index) => {
+                  const height = Math.max(8, Math.min(70, point.score));
+                  return <rect fill={scoreTone(point.score)} height={height} key={`${point.date}-${index}`} rx="4" width="46" x={index * 70 + 8} y={76 - height} />;
+                })}
+              </svg>
+            </div>
+          </Link>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
             <MetricCard label="Repos Connected" value={stats?.repo_count ?? repoList.length} sub="Connected repositories" />
             <MetricCard label="Skills Generated" value={stats?.skill_count ?? heatmap?.summary.total_skills ?? 0} sub="Tracked skill inventory" />
             <MetricCard label="Avg Skilgen Score" value={`${stats?.avg_score ?? 0}/100`} sub="Org-wide average" ringScore={stats?.avg_score ?? 0} />
+            <MetricCard label="Memory Score" value={`${memoryScore?.score ?? 0}`} sub={`Grade ${memoryScore?.grade ?? "F"} · ${memoryScore?.trend ?? "Stable"}`} ringScore={memoryScore?.score ?? 0} href="/dashboard/memory" />
             {showPerformance ? <MetricCard label="Performance" value={`${roi?.multiplier}x`} sub="Agent task improvement" href="/dashboard/eval" /> : null}
             <MetricCard label="Dead Skills" value={deadSkills} sub="Skills with no recent usage" tone={deadSkills > 0 ? "danger" : "default"} href="/dashboard/analytics" />
             <MetricCard label="Stale + Active" value={staleActive} sub="Agents still loading outdated context" tone={staleActive > 0 ? "warning" : "default"} href="/dashboard/analytics" />

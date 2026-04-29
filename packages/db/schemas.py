@@ -34,6 +34,7 @@ class OrgSettingsResponse(BaseModel):
     slack_webhook_url: str | None
     notify_on_pr: bool
     notify_on_stale: bool
+    anthropic_api_key_set: bool = False
     github_app_installed: bool
     github_installation_id: int | None
     webhook_url: str

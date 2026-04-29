@@ -25,10 +25,11 @@ import {
   type PolicyCheckResult,
   type PolicyRule,
 } from "../../../lib/data";
-import { AgentIntegrationPanel } from "./agent-integration-panel";
 import { ApiAccessPanel } from "./api-access-panel";
 import { ManageBillingButton } from "./billing/manage-billing-button";
-import { LlmSettingsPanel, PolicySettingsPanel, SiemSettingsPanel } from "./enterprise-settings";
+import { LLMConfigPanel } from "./llm-config-panel";
+import { AgentIntegrationPanel } from "./agent-integration-panel";
+import { PolicySettingsPanel, SiemSettingsPanel } from "./enterprise-settings";
 import { SettingsControls } from "./settings-controls";
 
 export const dynamic = "force-dynamic";
@@ -134,7 +135,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
     accessToken = session.accessToken || "";
     const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
     if (org) {
-      settings = (await getOrgSettings(accessToken, org.id)) ?? { ...settings, ...org };
+      settings = { ...settings, ...org, ...((await getOrgSettings(accessToken, org.id)) ?? {}) };
       policies = (await getOrgPolicies(accessToken, org.id)) ?? policies;
       policyRules = await getPolicies(accessToken, org.id);
       policyTemplates = await getPolicyTemplates(accessToken, org.id);
@@ -148,7 +149,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
   } catch {
     const org = await getBootstrapOrg();
     if (org) {
-      settings = (await getOrgSettings("", org.id)) ?? { ...settings, ...org };
+      settings = { ...settings, ...org, ...((await getOrgSettings("", org.id)) ?? {}) };
       policies = (await getOrgPolicies("", org.id)) ?? policies;
       policyRules = await getPolicies("", org.id);
       policyTemplates = await getPolicyTemplates("", org.id);
@@ -194,7 +195,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
         {tab === "general" || tab === "notifications" ? (
           <SettingsControls accessToken={accessToken} initialPolicies={policies.policies} initialSettings={settings} orgId={settings.id} tab={tab} />
         ) : null}
-        {tab === "llm" ? <LlmSettingsPanel accessToken={accessToken} initialConfig={llmConfig} orgId={settings.id} /> : null}
+        {tab === "llm" ? <LLMConfigPanel accessToken={accessToken} initialConfig={llmConfig} orgId={settings.id} /> : null}
         {tab === "policies" ? <PolicySettingsPanel accessToken={accessToken} initialCheck={policyCheck} initialPolicies={policyRules} orgId={settings.id} templates={policyTemplates} /> : null}
         {tab === "siem" ? <SiemSettingsPanel accessToken={accessToken} orgId={settings.id} /> : null}
         {tab === "agents" ? <AgentIntegrationPanel accessToken={accessToken} apiKey={apiKey} orgId={settings.id} repos={repos} setupStatus={setupStatus} /> : null}

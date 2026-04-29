@@ -1,9 +1,11 @@
 from packages.db.models.agent_session import AgentSession
 from packages.db.models.analysis_run import AnalysisRun
 from packages.db.models.audit_event import AuditEvent
+from packages.db.models.autopilot_task import AutopilotTask
 from packages.db.models.base import Base
 from packages.db.models.dependency import Dependency
 from packages.db.models.eval import ABTest, AgentTask, EvalSession, SkillGap
+from packages.db.models.flag_dismissal import FlagDismissal
 from packages.db.models.half_life import SkillHalfLife
 from packages.db.models.org import Org
 from packages.db.models.org_llm_config import OrgLLMConfig
@@ -17,6 +19,7 @@ from packages.db.models.skill import Skill
 from packages.db.models.skill_memory_stub import SkillMemoryStub
 from packages.db.models.skill_usage_event import SkillUsageEvent
 from packages.db.models.skill_version import SkillVersion
+from packages.db.models.sla_policy import SLAPolicy
 
 __all__ = [
     "AgentSession",
@@ -24,9 +27,11 @@ __all__ = [
     "AnalysisRun",
     "ABTest",
     "AuditEvent",
+    "AutopilotTask",
     "Base",
     "Dependency",
     "EvalSession",
+    "FlagDismissal",
     "MarketplaceInstall",
     "Org",
     "OrgLLMConfig",
@@ -43,4 +48,5 @@ __all__ = [
     "SkillRegistryEntry",
     "SkillUsageEvent",
     "SkillVersion",
+    "SLAPolicy",
 ]

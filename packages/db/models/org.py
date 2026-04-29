@@ -30,6 +30,7 @@ class Org(Base):
     notify_on_pr: Mapped[bool] = mapped_column(default=True)
     notify_on_stale: Mapped[bool] = mapped_column(default=True)
     notification_settings: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True, default=dict)
+    settings: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True, default=dict)
     siem_webhook_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     siem_webhook_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
     siem_webhook_enabled: Mapped[bool] = mapped_column(default=False)

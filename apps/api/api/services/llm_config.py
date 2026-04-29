@@ -1,42 +1,17 @@
 from __future__ import annotations
 
-import logging
 from contextlib import contextmanager
 import os
 
-from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.db.config import settings
+from packages.db.llm_key import decrypt_key, encrypt_key as _encrypt_key, key_hint
 from packages.db.models import OrgLLMConfig, Repo
 
 
-LOGGER = logging.getLogger(__name__)
-_EPHEMERAL_KEY: bytes | None = None
-
-
-def _get_fernet_key() -> bytes:
-    global _EPHEMERAL_KEY
-    configured = settings.SKILLAYER_ENCRYPTION_KEY.strip()
-    if configured:
-        return configured.encode()
-    if _EPHEMERAL_KEY is None:
-        _EPHEMERAL_KEY = Fernet.generate_key()
-        LOGGER.warning("WARNING: Using ephemeral encryption key. Set SKILLAYER_ENCRYPTION_KEY in prod.")
-    return _EPHEMERAL_KEY
-
-
-def encrypt_key(api_key: str) -> bytes:
-    return Fernet(_get_fernet_key()).encrypt(api_key.encode())
-
-
-def decrypt_key(encrypted: bytes) -> str:
-    return Fernet(_get_fernet_key()).decrypt(encrypted).decode()
-
-
-def key_hint(api_key: str) -> str:
-    return "..." + api_key[-4:] if len(api_key) >= 4 else "****"
+def encrypt_key(raw_key: str) -> bytes:
+    return _encrypt_key(raw_key).encode()
 
 
 async def get_repo_llm_config(db: AsyncSession, repo_id: str) -> OrgLLMConfig | None:

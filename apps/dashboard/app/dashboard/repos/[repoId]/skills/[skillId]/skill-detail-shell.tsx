@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, Copy, FileText, Lightbulb, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, FileText, Lightbulb, Loader2, Sparkles } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SkillDetailViewer } from "@/components/skill-detail-viewer";
@@ -260,6 +260,7 @@ function ImprovementPlanPanel({
   const [loading, setLoading] = useState(true);
   const [improving, setImproving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [aiConfigMissing, setAiConfigMissing] = useState(false);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   async function loadPlan() {
@@ -281,6 +282,7 @@ function ImprovementPlanPanel({
   async function improveWithAi() {
     setImproving(true);
     setMessage(null);
+    setAiConfigMissing(false);
     const before = plan?.current_score ?? score.total;
     const response = await fetch(`${apiUrl}/repos/${repoId}/skills/${skillId}/improve`, {
       method: "POST",
@@ -292,8 +294,14 @@ function ImprovementPlanPanel({
     });
     const payload = await response.json().catch(() => null);
     setImproving(false);
+    const reason = String(payload?.reason ?? payload?.detail?.error ?? payload?.detail?.message ?? payload?.detail ?? payload?.code ?? "");
+    if (response.status === 402 || reason.includes("llm_not_configured")) {
+      setAiConfigMissing(true);
+      setMessage(null);
+      return;
+    }
     if (!response.ok || !payload?.improved) {
-      setMessage(payload?.reason || "Unable to improve this skill right now.");
+      setMessage(payload?.reason || payload?.detail || "Unable to improve this skill right now.");
       return;
     }
     const nextScore = Math.round(Number(payload.new_score ?? before));
@@ -347,7 +355,7 @@ function ImprovementPlanPanel({
             className="inline-flex items-center gap-2 rounded-md bg-[color:var(--accent-primary)] px-4 py-2 text-[13px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)] disabled:cursor-not-allowed disabled:opacity-70"
             disabled={improving}
             onClick={improveWithAi}
-            title="Configure ANTHROPIC_API_KEY in settings to enable AI improvement"
+            title="Configure an AI model in settings to enable AI improvement"
             type="button"
           >
             {improving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
@@ -360,7 +368,33 @@ function ImprovementPlanPanel({
         </div>
       </div>
 
-      {message ? <div className={`mb-4 rounded-lg border px-4 py-3 text-[13px] ${message.includes("improved") || message.includes("copied") ? "border-green-500/30 bg-green-500/10 text-green-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}`}>{message}</div> : null}
+      {aiConfigMissing ? (
+        <div className="mb-4 rounded-lg border border-amber-500/35 bg-amber-500/10 px-4 py-4 text-[13px] text-amber-100">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+            <div>
+              <div className="font-semibold text-amber-100">AI model configuration required</div>
+              <p className="mt-1 leading-5 text-amber-100/80">Improve with AI needs a saved provider, model, and API key before it can rewrite this skill.</p>
+              <Link className="mt-3 inline-flex rounded-md bg-[color:var(--accent-primary)] px-3 py-2 text-[12px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)]" href="/dashboard/settings#ai-model">
+                Configure AI Model
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : message ? (
+        <div className={`mb-4 rounded-lg border px-4 py-3 text-[13px] ${message.includes("improved") || message.includes("copied") ? "border-green-500/30 bg-green-500/10 text-green-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}`}>
+              {message.toLowerCase().includes("llm_not_configured") ? (
+                <>
+                  AI improvement needs an AI model configured.{" "}
+                  <Link className="font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]" href="/dashboard/settings#ai-model">
+                    Configure AI model
+                  </Link>
+                </>
+          ) : (
+            message
+          )}
+        </div>
+      ) : null}
 
       <div className="grid gap-3">
         {plan.issues.map((issue) => (

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BookOpen, ChevronRight, LibraryBig, Search, Sparkles } from "lucide-react";
+import { ArrowRight, BookOpen, ChevronRight, HelpCircle, LibraryBig, Search, Sparkles } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
@@ -198,6 +198,32 @@ function matchesSearch(skill: SkillLibraryRow, query: string): boolean {
   return haystack.includes(query);
 }
 
+function matchesNaturalSearch(skill: SkillLibraryRow, query: string, mode: string): boolean {
+  if (!query.trim()) return false;
+  const normalized = query.toLowerCase();
+  const haystack = `${skill.domain} ${skill.repo_name} ${skill.repoFullName} ${skill.skill_path} ${skill.skill_category ?? ""} ${skill.source_type ?? ""}`.toLowerCase();
+  if (mode === "skillql") {
+    const clauses = normalized.split(/\s+/).filter(Boolean);
+    return clauses.every((clause) => {
+      const [rawKey, ...rest] = clause.split(":");
+      const value = rest.join(":");
+      if (!value) return haystack.includes(rawKey);
+      if (rawKey === "repo") return skill.repo_name.toLowerCase().includes(value) || skill.repoFullName.toLowerCase().includes(value);
+      if (rawKey === "domain") return skill.domain.toLowerCase().includes(value);
+      if (rawKey === "category") return String(skill.skill_category ?? "").toLowerCase().includes(value);
+      if (rawKey === "source") return normalizeSourceType(skill.source_type).toLowerCase().includes(value);
+      if (rawKey === "stale") return String(skill.is_stale) === value;
+      if (rawKey === "score<") return skill.score.total < Number(value);
+      if (rawKey === "score>") return skill.score.total > Number(value);
+      return haystack.includes(clause);
+    });
+  }
+  const wantsRisk = /\b(stale|low|weak|risk|bad|needs work)\b/.test(normalized);
+  const wantsRecentLoads = /\b(loaded|used|active)\b/.test(normalized);
+  const textMatch = normalized.split(/\s+/).some((term) => term.length > 2 && haystack.includes(term));
+  return textMatch || (wantsRisk && (skill.is_stale || skill.score.total < 70)) || (wantsRecentLoads && skill.load_count_30d > 0);
+}
+
 function categoryCoverage(skills: SkillLibraryRow[]): CategoryOption[] {
   const covered = new Set(skills.map((skill) => skill.skill_category).filter(Boolean) as SkillCategory[]);
   return CATEGORY_OPTIONS.filter((option) => covered.has(option.value));
@@ -211,6 +237,9 @@ function averageScore(skills: SkillLibraryRow[]): number {
 export default async function SkillsPage({ searchParams }: SkillsPageProps) {
   const params = searchParams ? await searchParams : {};
   const search = firstValue(params.search).trim();
+  const smartQuery = firstValue(params.q).trim();
+  const smartMode = firstValue(params.mode) === "skillql" ? "skillql" : "natural";
+  const smartActive = smartQuery.length > 0;
   const normalizedSearch = search.toLowerCase();
   const selectedCategory = firstValue(params.category);
   const selectedSourceType = firstValue(params.source_type);
@@ -242,6 +271,15 @@ export default async function SkillsPage({ searchParams }: SkillsPageProps) {
       if (scoreDelta !== 0) return scoreDelta;
       return left.domain.localeCompare(right.domain);
     });
+  const smartResults = smartActive
+    ? skills
+        .filter((skill) => matchesNaturalSearch(skill, smartQuery, smartMode))
+        .sort((left, right) => {
+          const staleDelta = Number(right.is_stale) - Number(left.is_stale);
+          if (staleDelta !== 0) return staleDelta;
+          return left.score.total - right.score.total;
+        })
+    : [];
 
   const coveredCategories = categoryCoverage(skills);
   const coveredCategorySet = new Set(coveredCategories.map((category) => category.value));
@@ -272,6 +310,61 @@ export default async function SkillsPage({ searchParams }: SkillsPageProps) {
           {filteredCountLabel} in view
         </div>
       </div>
+
+      <SectionErrorBoundary section="skills value story">
+        <section className="mb-6 rounded-xl border border-[color:var(--bg-border)] bg-[radial-gradient(circle_at_top,rgb(var(--accent-primary-rgb)/0.16),rgb(var(--bg-surface-rgb)/0.96)_42%)] p-5">
+          <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--accent-primary)]">How skills improve your code</div>
+              <h2 className="mt-2 text-[22px] font-semibold text-[color:var(--text-primary)]">Generic agents become repo-aware engineers.</h2>
+            </div>
+            <div className="text-[12px] text-[color:var(--text-tertiary)]">BAD CODE → SKILLS LOADED → GOOD CODE</div>
+          </div>
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_56px_minmax(0,1fr)_56px_minmax(0,1fr)]">
+            <article className="rounded-lg border border-red-500/25 bg-red-950/20 p-4">
+              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-red-300">Without Skillayer</div>
+              <h3 className="text-[16px] font-semibold text-[color:var(--text-primary)]">Agent writes generic code</h3>
+              <p className="mt-1 text-[13px] leading-5 text-[color:var(--text-secondary)]">No institutional context. Agents guess at your patterns.</p>
+              <pre className="mt-4 overflow-x-auto rounded-md border border-red-500/20 bg-black/35 p-3 font-mono text-[12px] leading-5 text-red-100">{`# Agent uses raw SQL (violates your pattern)
+result = db.execute(f"SELECT * FROM users WHERE id = {user_id}")
+# No error handling, wrong naming convention`}</pre>
+            </article>
+
+            <div className="hidden items-center justify-center xl:flex">
+              <ArrowRight className="h-8 w-8 animate-pulse text-[color:var(--accent-primary)]" />
+            </div>
+
+            <article className="rounded-lg border border-[rgb(var(--accent-primary-rgb)/0.45)] bg-[rgb(var(--accent-primary-rgb)/0.1)] p-4 shadow-[0_0_38px_rgb(var(--accent-primary-rgb)/0.12)]">
+              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--accent-primary)]">Skillayer loads your skills</div>
+              <h3 className="text-[16px] font-semibold text-[color:var(--text-primary)]">SKILL.md context enters the prompt</h3>
+              <pre className="mt-4 overflow-x-auto rounded-md border border-[rgb(var(--accent-primary-rgb)/0.24)] bg-black/35 p-3 font-mono text-[12px] leading-5 text-[color:var(--text-secondary)]">{`## Key patterns
+- Always use SQLAlchemy ORM, never raw SQL
+- snake_case for all variables
+- Wrap DB calls in try/except with logging`}</pre>
+              <div className="mt-4 inline-flex rounded-full border border-[rgb(var(--accent-primary-rgb)/0.26)] bg-[rgb(var(--accent-primary-rgb)/0.12)] px-3 py-1 text-[12px] font-semibold text-[color:var(--accent-primary)]">
+                3 loads in last 30d · agents/SKILL.md
+              </div>
+            </article>
+
+            <div className="hidden items-center justify-center xl:flex">
+              <ArrowRight className="h-8 w-8 animate-pulse text-[color:var(--accent-green)]" />
+            </div>
+
+            <article className="rounded-lg border border-[rgb(var(--accent-green-rgb)/0.28)] bg-[rgb(var(--accent-green-rgb)/0.1)] p-4">
+              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--accent-green)]">Agent writes your code</div>
+              <h3 className="text-[16px] font-semibold text-[color:var(--text-primary)]">Agent writes YOUR code</h3>
+              <p className="mt-1 text-[13px] leading-5 text-[color:var(--text-secondary)]">Follows your patterns, passes review first time.</p>
+              <pre className="mt-4 overflow-x-auto rounded-md border border-[rgb(var(--accent-green-rgb)/0.2)] bg-black/35 p-3 font-mono text-[12px] leading-5 text-green-100">{`# Agent follows your skill — ORM, error handling, naming
+try:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+except SQLAlchemyError as e:
+    logger.error("DB query failed: %s", e)
+    raise`}</pre>
+            </article>
+          </div>
+        </section>
+      </SectionErrorBoundary>
 
       <SectionErrorBoundary section="skills hero">
         <section className="mb-6 overflow-hidden rounded-xl border border-[color:var(--bg-border)] bg-[linear-gradient(180deg,rgb(var(--bg-surface-rgb)/1),rgb(var(--bg-surface-rgb)/0.92))]">
@@ -364,6 +457,54 @@ export default async function SkillsPage({ searchParams }: SkillsPageProps) {
         </section>
       ) : null}
 
+      <SectionErrorBoundary section="skillql search">
+        <section className="mb-4 rounded-xl border border-[rgb(var(--accent-primary-rgb)/0.28)] bg-[rgb(var(--accent-primary-rgb)/0.08)] p-4">
+          <form className="grid gap-3 xl:grid-cols-[auto_minmax(0,1fr)_auto]">
+            <div className="inline-flex h-11 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-1">
+              <Link className={smartMode === "natural" ? "inline-flex items-center rounded px-3 text-[12px] font-semibold bg-[color:var(--accent-primary)] text-[color:var(--bg-base)]" : "inline-flex items-center rounded px-3 text-[12px] font-semibold text-[color:var(--text-secondary)]"} href={`/dashboard/skills?mode=natural${smartQuery ? `&q=${encodeURIComponent(smartQuery)}` : ""}`}>
+                Natural
+              </Link>
+              <Link className={smartMode === "skillql" ? "inline-flex items-center rounded px-3 text-[12px] font-semibold bg-[color:var(--accent-primary)] text-[color:var(--bg-base)]" : "inline-flex items-center rounded px-3 text-[12px] font-semibold text-[color:var(--text-secondary)]"} href={`/dashboard/skills?mode=skillql${smartQuery ? `&q=${encodeURIComponent(smartQuery)}` : ""}`}>
+                SkillQL
+              </Link>
+            </div>
+            <label className="relative block">
+              <span className="sr-only">Natural language or SkillQL search</span>
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--text-tertiary)]" />
+              <input className="h-11 w-full rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] pl-9 pr-10 text-[14px] text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)] focus:border-[color:var(--accent-primary)]" defaultValue={smartQuery} name="q" placeholder={smartMode === "skillql" ? "repo:api category:testing score<70" : "Find stale auth skills used by agents"} type="search" />
+              <span title="Natural search understands intent words like stale, low, active. SkillQL supports repo:, domain:, category:, source:, stale:true, score&lt;, score&gt;." className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--text-tertiary)]">
+                <HelpCircle className="h-4 w-4" />
+              </span>
+            </label>
+            <div className="flex gap-3">
+              <input name="mode" type="hidden" value={smartMode} />
+              <button className="inline-flex h-11 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)]" type="submit">
+                Search
+              </button>
+              {smartActive ? (
+                <Link className="inline-flex h-11 items-center justify-center rounded-md border border-[color:var(--bg-border)] px-4 text-[13px] font-semibold text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]" href="/dashboard/skills">
+                  Clear
+                </Link>
+              ) : null}
+            </div>
+          </form>
+        </section>
+      </SectionErrorBoundary>
+
+      <section className="mb-4 flex flex-col gap-3 rounded-xl border border-[rgb(var(--accent-primary-rgb)/0.26)] bg-[rgb(var(--accent-primary-rgb)/0.12)] px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="text-[14px] font-semibold text-[color:var(--text-primary)]">The more specific your skills, the better your agents code.</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {["Add anti-patterns", "Add code examples", "Add a Last verified date"].map((tip) => (
+              <span className="rounded-full bg-black/20 px-2.5 py-1 text-[11px] font-semibold text-[color:var(--accent-primary)]" key={tip}>{tip}</span>
+            ))}
+          </div>
+        </div>
+        <Link className="text-[13px] font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]" href="/dashboard/repos">
+          See improvement guide →
+        </Link>
+      </section>
+
       <SectionErrorBoundary section="skills filters">
         <form className="mb-6 grid gap-3 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4 xl:grid-cols-[minmax(0,1fr)_220px_220px_auto]">
           <label className="relative block">
@@ -424,7 +565,36 @@ export default async function SkillsPage({ searchParams }: SkillsPageProps) {
       </SectionErrorBoundary>
 
       <SectionErrorBoundary section="skills table">
-        {skills.length === 0 ? (
+        {smartActive ? (
+          <section className="overflow-hidden rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
+            <div className="border-b border-[color:var(--bg-border)] px-5 py-4">
+              <h2 className="text-[16px] font-semibold text-[color:var(--text-primary)]">{smartResults.length} smart result{smartResults.length === 1 ? "" : "s"}</h2>
+              <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">{smartMode === "skillql" ? "SkillQL" : "Natural"} query: <span className="font-mono text-[color:var(--accent-primary)]">{smartQuery}</span></p>
+            </div>
+            {smartResults.length ? (
+              <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+                {smartResults.map((skill) => (
+                  <Link className="rounded-lg border border-[color:var(--bg-border)] bg-black/10 p-4 hover:border-[rgb(var(--accent-primary-rgb)/0.4)]" href={`/dashboard/repos/${skill.repo_id}/skills/${skill.id}`} key={skill.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-[14px] font-semibold text-[color:var(--text-primary)]">{skill.domain}</div>
+                        <div className="mt-1 truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">{skill.skill_path}</div>
+                      </div>
+                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-[12px] font-semibold ${scorePillClass(skill.score.total)}`}>{skill.score.total}</span>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span className="rounded-full bg-[color:var(--bg-elevated)] px-2 py-1 text-[11px] text-[color:var(--text-secondary)]">{skill.repo_name}</span>
+                      <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${staleBadgeClass(skill.is_stale)}`}>{skill.is_stale ? "Stale" : "Fresh"}</span>
+                      <span className="rounded-full bg-[rgb(var(--accent-primary-rgb)/0.12)] px-2 py-1 text-[11px] text-[color:var(--accent-primary)]">{categoryLabel(skill.skill_category)}</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="px-8 py-14 text-center text-[color:var(--text-secondary)]">No smart search results. Try a broader natural query or a simpler SkillQL clause.</div>
+            )}
+          </section>
+        ) : skills.length === 0 ? (
           <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-8 py-14 text-center">
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[rgb(var(--accent-primary-rgb)/0.12)] text-[color:var(--accent-primary)]">
               <BookOpen className="h-6 w-6" />

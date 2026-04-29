@@ -27,6 +27,7 @@ import {
   ShieldAlert,
   Timer,
   Users2,
+  Zap,
 } from "lucide-react";
 import { signOut, withAuth } from "@workos-inc/authkit-nextjs";
 import { redirect } from "next/navigation";
@@ -34,7 +35,7 @@ import { cache } from "react";
 
 import { mockOrg, mockUser } from "@/lib/mock-data";
 import { DashboardNavLink } from "@/components/dashboard-nav-link";
-import { getAuditLogStats, getBootstrapOrg, getEvalSkillGaps, getMemoryQueue, getMyOrg, getOrgRedFlags, getOrgSetupStatus, type Org } from "../../lib/data";
+import { getAuditLogStats, getAutopilotQueue, getBootstrapOrg, getEvalSkillGaps, getMemoryQueue, getMyOrg, getOrgRedFlags, getOrgSetupStatus, type Org } from "../../lib/data";
 
 type ShellUser = Pick<typeof mockUser, "email" | "firstName" | "lastName">;
 
@@ -115,7 +116,7 @@ async function loadShellUser(): Promise<ShellUser> {
   return mockUser;
 }
 
-const loadNavBadges = cache(async (): Promise<{ memory: boolean; redFlags: boolean; audit: boolean; agentLoads: boolean; skillGapCount: number }> => {
+const loadNavBadges = cache(async (): Promise<{ memory: boolean; redFlags: boolean; audit: boolean; agentLoads: boolean; skillGapCount: number; pendingAutopilotCount: number }> => {
   let accessToken = "";
   try {
     const session = await withAuth({ ensureSignedIn: false });
@@ -124,13 +125,14 @@ const loadNavBadges = cache(async (): Promise<{ memory: boolean; redFlags: boole
     // Auth can be unavailable in local preview; badges fall back below.
   }
   const org = await getBootstrapOrg();
-  if (!org?.id) return { memory: false, redFlags: false, audit: false, agentLoads: true, skillGapCount: 0 };
-  const [memory, redFlags, auditStats, setupStatus, skillGaps] = await Promise.all([
+  if (!org?.id) return { memory: false, redFlags: false, audit: false, agentLoads: true, skillGapCount: 0, pendingAutopilotCount: 0 };
+  const [memory, redFlags, auditStats, setupStatus, skillGaps, autopilotQueue] = await Promise.all([
     getMemoryQueue(accessToken, org.id, { status: "pending", limit: 1 }),
     getOrgRedFlags(accessToken, org.id, "critical"),
     getAuditLogStats(accessToken, org.id),
     getOrgSetupStatus(accessToken, org.id, 300),
     getEvalSkillGaps(accessToken, org.id, "open"),
+    getAutopilotQueue(accessToken, org.id),
   ]);
   return {
     memory: (memory?.pending_count ?? 0) > 0,
@@ -138,6 +140,7 @@ const loadNavBadges = cache(async (): Promise<{ memory: boolean; redFlags: boole
     audit: (auditStats?.critical_events_7d ?? 0) > 0,
     agentLoads: setupStatus?.has_agent_loads ?? true,
     skillGapCount: skillGaps?.length ?? 0,
+    pendingAutopilotCount: (autopilotQueue ?? []).filter((task) => task.status === "pending").length,
   };
 });
 
@@ -168,6 +171,7 @@ export default async function DashboardLayout({
     History,
     ShieldCheck,
     FlaskConical,
+    Zap,
   };
   type IconName = keyof typeof icons;
   type NavItem = {
@@ -182,11 +186,11 @@ export default async function DashboardLayout({
   const navBadges = await loadNavBadges();
   const navGroups: Array<{ label: string; items: NavItem[] }> = [
     {
-      label: "WORKSPACE",
+      label: "PRODUCT",
       items: [
         { href: "/dashboard", label: "Overview", icon: "LayoutDashboard" },
-        { href: "/dashboard/repos", label: "Repos", icon: "GitBranch" },
         { href: "/dashboard/skills", label: "Skills", icon: "BookOpen" },
+        { href: "/dashboard/repos", label: "Repos", icon: "GitBranch" },
         { href: "/dashboard/sources", label: "Sources", icon: "Database" },
       ],
     },
@@ -195,6 +199,7 @@ export default async function DashboardLayout({
       items: [
         { href: "/dashboard/heatmap", label: "Heatmap", icon: "BarChart3" },
         { href: "/dashboard/intelligence", label: "Intelligence", icon: "BarChart2" },
+        { href: "/dashboard/memory", label: "Memory Score", icon: "Brain" },
         { href: "/dashboard/analytics", label: "Analytics", icon: "ClipboardList" },
         { href: "/dashboard/eval", label: "Agent Performance", icon: "BarChart2" },
         { href: "/dashboard/eval/gaps", label: "Skill Gaps", icon: "AlertTriangle", badge: navBadges.skillGapCount ? `${navBadges.skillGapCount} open gaps` : undefined, badgeVariant: "dot" },
@@ -212,12 +217,15 @@ export default async function DashboardLayout({
       label: "TOOLS",
       items: [
         { href: "/dashboard/review", label: "Code Review", icon: "ShieldCheck" },
+        { href: "/dashboard/autopilot", label: "Autopilot", icon: "Zap", badge: navBadges.pendingAutopilotCount > 0 ? `${navBadges.pendingAutopilotCount} pending` : undefined, badgeVariant: "dot" },
       ],
     },
     {
       label: "QUALITY",
       items: [
         { href: "/dashboard/debt", label: "Skill Debt", icon: "AlertTriangle" },
+        { href: "/dashboard/knowledge-risk", label: "Knowledge Risk", icon: "Users2" },
+        { href: "/dashboard/sla", label: "Coverage SLA", icon: "ClipboardList" },
         { href: "/dashboard/red-flags", label: "Red Flags", icon: "ShieldAlert", badge: navBadges.redFlags ? "Critical red flags" : undefined, badgeVariant: "dot" },
         { href: "/dashboard/half-life", label: "Half-life", icon: "Timer" },
       ],
@@ -234,7 +242,6 @@ export default async function DashboardLayout({
       items: [
         { href: "/dashboard/connect", label: "Connect Agent", icon: "Plug", badge: navBadges.agentLoads ? undefined : "No agent loads", badgeVariant: "dot" },
         { href: "/dashboard/teams", label: "Teams", icon: "Users2" },
-        { href: "/dashboard/memory", label: "Memory", icon: "Brain", badge: navBadges.memory ? "Pending memory" : undefined, badgeVariant: "dot" },
       ],
     },
     {

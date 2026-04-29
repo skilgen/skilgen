@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { ArrowLeft, ClipboardCopy, GitBranch } from "lucide-react";
+import { ArrowLeft, ClipboardCopy, GitBranch, History } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
@@ -544,6 +544,40 @@ function CoverageMap({ coverage }: { coverage: RepoSkillSources | null }) {
   );
 }
 
+function CertificationBadgeSection({ repoId, score }: { repoId: string; score: number }) {
+  const badgeUrl = `${API_URL}/repos/${repoId}/badge.svg`;
+  const markdown = `![Skillayer](${badgeUrl})`;
+  const greenReady = score >= 80;
+
+  return (
+    <section className="mb-8 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-[15px] font-semibold text-[color:var(--text-primary)]">Certification Badge</h2>
+          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Add this to your README to signal AI readiness to contributors and investors</p>
+        </div>
+        <span className={greenReady ? "rounded-full bg-[rgb(var(--accent-green-rgb)/0.14)] px-3 py-1 text-[12px] font-semibold text-[color:var(--accent-green)]" : "rounded-full bg-amber-500/15 px-3 py-1 text-[12px] font-semibold text-amber-300"}>
+          Current: {score}/100
+        </span>
+      </div>
+      <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="rounded-lg border border-[color:var(--bg-border)] bg-black/20 p-4">
+          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--text-tertiary)]">Live preview</div>
+          <img alt="Skillayer AI readiness badge" className="h-5 w-[180px]" src={badgeUrl} />
+        </div>
+        <div className="rounded-lg border border-[color:var(--bg-border)] bg-black/20 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--text-tertiary)]">Markdown</div>
+            <CopyTextButton label="Copy" text={markdown} title="Copy badge markdown" />
+          </div>
+          <code className="block break-all rounded-md bg-black/25 px-3 py-2 font-mono text-[12px] text-[color:var(--text-secondary)]">{markdown}</code>
+          <p className="mt-3 text-[12px] text-[color:var(--text-tertiary)]">Your repo needs 80+ to show green. Current: {score}/100.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default async function RepoDetailPage({ params }: PageProps) {
   const { repoId } = await params;
   let accessToken = "";
@@ -647,7 +681,13 @@ export default async function RepoDetailPage({ params }: PageProps) {
           </div>
 
           <div className="flex flex-col gap-5 md:flex-row md:items-center">
-            <AnalyseNowButton accessToken={accessToken} apiUrl={API_URL} lastAnalysedAt={repo.last_analysed_at} repoId={repoId} />
+            <div className="flex flex-wrap gap-3">
+              <Link className="inline-flex h-10 items-center rounded-md border border-[color:var(--bg-border)] px-4 text-[13px] font-semibold text-[color:var(--text-primary)] transition-colors hover:border-[color:var(--accent-primary)] hover:text-[color:var(--accent-primary)]" href={`/dashboard/repos/${repoId}/time-machine`}>
+                <History className="mr-2 h-4 w-4" />
+                Time Machine
+              </Link>
+              <AnalyseNowButton accessToken={accessToken} apiUrl={API_URL} lastAnalysedAt={repo.last_analysed_at} repoId={repoId} />
+            </div>
             <ScoreRing score={score?.total} />
           </div>
         </section>
@@ -674,6 +714,10 @@ export default async function RepoDetailPage({ params }: PageProps) {
 
       <SectionErrorBoundary section="score forecast">
         <ForecastSection forecast={scoreForecast} />
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="certification badge">
+        <CertificationBadgeSection repoId={repoId} score={score?.total ?? 0} />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary section="dependencies">

@@ -9,17 +9,17 @@ const CLIENT_API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer
 export function LlmSettingsPanel({ accessToken, orgId, initialConfig }: { accessToken: string; orgId: string; initialConfig: LLMConfig | null }) {
   const [provider, setProvider] = useState(initialConfig?.provider ?? "skillayer");
   const [model, setModel] = useState(initialConfig?.model ?? "");
-  const [endpointUrl, setEndpointUrl] = useState(initialConfig?.endpoint_url ?? "");
+  const [endpointUrl, setEndpointUrl] = useState(initialConfig?.base_url ?? "");
   const [apiKey, setApiKey] = useState("");
   const [status, setStatus] = useState("");
-  const providers = ["skillayer", "anthropic", "openai", "azure_openai", "ollama", "custom"];
+  const providers = ["anthropic", "openai", "gemini", "custom"];
 
   async function save() {
     setStatus("Saving...");
     const response = await fetch(`${CLIENT_API_URL}/orgs/${orgId}/llm-config`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ provider, model: model || null, endpoint_url: endpointUrl || null, api_key: apiKey || null }),
+      body: JSON.stringify({ provider, model: model || "gpt-4o-mini", base_url: endpointUrl || null, api_key: apiKey || "" }),
     });
     setStatus(response.ok ? "Saved ✓" : "Could not save LLM config");
   }
@@ -29,9 +29,10 @@ export function LlmSettingsPanel({ accessToken, orgId, initialConfig }: { access
     const response = await fetch(`${CLIENT_API_URL}/orgs/${orgId}/llm-config/test`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ provider, model: model || "gpt-4o-mini", base_url: endpointUrl || null, api_key: apiKey || "" }),
     });
-    const body = (await response.json()) as { ok?: boolean; latency_ms?: number; error?: string | null };
-    setStatus(body.ok ? `✓ Connected — ${body.latency_ms ?? 0}ms` : body.error || "Connection failed");
+    const body = (await response.json()) as { success?: boolean; response?: string | null; error?: string | null };
+    setStatus(body.success ? `✓ Connected — ${body.response ?? "OK"}` : body.error || "Connection failed");
   }
 
   return (
@@ -51,7 +52,7 @@ export function LlmSettingsPanel({ accessToken, orgId, initialConfig }: { access
           </button>
         ))}
       </div>
-      {provider !== "skillayer" ? (
+      {provider ? (
         <div className="mt-5 space-y-3">
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-[12px] text-amber-300">Source code is analysed using this provider. Ensure your data processing agreement covers AI-assisted code analysis.</div>
           <Input label="API Key" onChange={setApiKey} placeholder={initialConfig?.api_key_hint ? `Current key: ${initialConfig.api_key_hint}` : "sk-..."} type="password" value={apiKey} />

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,9 +27,10 @@ from apps.api.api.analysis import _skill_category_for_domain
 from apps.api.api.routes.webhook import _queue_analysis
 from apps.api.api.services import audit
 from apps.api.api.services.audit import get_actor_login
+from apps.api.api.services.llm import LLMCallError, LLMNotConfiguredError, call_llm
 from apps.api.api.services.memory import run_session_knowledge_extraction
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AnalysisRun, Dependency, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillUsageEvent, SkillVersion
+from packages.db.models import AgentSession, AnalysisRun, Dependency, Org, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillUsageEvent, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
     AnalysisRunResponse,
@@ -153,6 +154,23 @@ class SkillImproveResponse(BaseModel):
     score_delta: float | None = None
     new_version: int | None = None
     content: str | None = None
+
+
+class SkillSnapshotItem(BaseModel):
+    skill_id: str
+    domain: str
+    version_number: int
+    content: str
+    score_total: int
+    score_freshness: int
+    created_at: datetime
+
+
+class SnapshotResponse(BaseModel):
+    at: datetime
+    repo_id: str
+    skill_count: int
+    skills: list[SkillSnapshotItem]
 
 
 class SessionMessage(BaseModel):
@@ -397,23 +415,17 @@ def _skill_improvement_plan(skill: Skill, version: SkillVersion | None = None) -
     )
 
 
-async def _anthropic_skill_improvement(
+async def _llm_skill_improvement(
     *,
+    settings: dict[str, object],
     content: str,
     issues: list[SkillImprovementIssue],
     score: int,
-    api_key: str | None,
 ) -> str | None:
-    """Return AI-improved content, or None when Anthropic is unavailable."""
-    if not api_key:
-        return None
-    try:
-        import httpx
-    except ImportError:
-        return None
+    """Return AI-improved content through the central LLM service."""
     issues_summary = ", ".join(f"{issue.dimension} ({issue.score}/{issue.max})" for issue in issues) or "none"
     specific_fixes = "\n".join(f"- {issue.fix}" for issue in issues) or "- Preserve and clarify the existing guidance."
-    user_prompt = f"""You are improving a software skill document for AI agents. The current skill scored
+    user_prompt = f"""The current skill scored
 {score}/100. The weakest areas are: {issues_summary}.
 
 Current content:
@@ -430,32 +442,12 @@ Rules:
 - Target 400-600 words
 - Return ONLY the improved skill content, no explanation
 """
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-3-5-haiku-20241022",
-                    "max_tokens": 2000,
-                    "temperature": 0.3,
-                    "messages": [{"role": "user", "content": user_prompt}],
-                },
-            )
-        if response.status_code >= 400:
-            return None
-        payload: dict[str, Any] = response.json()
-        parts = payload.get("content")
-        if not isinstance(parts, list):
-            return None
-        text = "\n".join(str(part.get("text", "")) for part in parts if isinstance(part, dict) and part.get("type") == "text").strip()
-        return text or None
-    except Exception:
-        return None
+    return await call_llm(
+        settings,
+        "You are improving a software skill document for AI agents. Return only the improved markdown content.",
+        user_prompt,
+        max_tokens=2000,
+    )
 
 
 async def _latest_repo_skills(db: AsyncSession, repo_id: str) -> list[Skill]:
@@ -580,6 +572,7 @@ async def get_repo(
     response["display_language"] = repo.language or derived_display_language
     return response
 
+
 @router.get("/{repo_id}/score-badge")
 async def get_repo_score_badge(
     repo_id: str,
@@ -593,6 +586,64 @@ async def get_repo_score_badge(
     score_total = await _latest_repo_score_total(db, repo_id)
     svg = render_repo_score_badge_svg(score_total, style=style)
     return Response(content=svg, media_type="image/svg+xml")
+
+
+def _cert_badge_svg(score: int | None, grade: str | None = None) -> str:
+    configured = score is not None
+    safe_score = max(0, min(100, int(score or 0)))
+    color = "#6b7280"
+    right_text = "not configured"
+    if configured:
+        color = "#16a34a" if safe_score >= 80 else "#ca8a04" if safe_score >= 60 else "#dc2626"
+        right_text = f"AI Ready &#183; {safe_score}/100" if not grade else f"Grade {grade} &#183; {safe_score}/100"
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="180" height="20" role="img" aria-label="Skillayer: {right_text}">
+  <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#fff" stop-opacity=".08"/><stop offset="1" stop-opacity=".08"/></linearGradient>
+  <clipPath id="r"><rect width="180" height="20" rx="3" fill="#fff"/></clipPath>
+  <g clip-path="url(#r)"><rect width="78" height="20" fill="#111827"/><rect x="78" width="102" height="20" fill="{color}"/><rect width="180" height="20" fill="url(#s)"/></g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
+    <text x="39" y="15" fill="#010101" fill-opacity=".3">Skillayer</text><text x="39" y="14">Skillayer</text>
+    <text x="129" y="15" fill="#010101" fill-opacity=".3">{right_text}</text><text x="129" y="14">{right_text}</text>
+  </g>
+</svg>"""
+
+
+def _grade_for_score(score: int) -> str:
+    if score >= 80:
+        return "A"
+    if score >= 60:
+        return "B"
+    if score >= 40:
+        return "C"
+    if score >= 20:
+        return "D"
+    return "F"
+
+
+@router.get("/{repo_id}/badge.svg")
+async def get_repo_certification_badge(repo_id: str, db: AsyncSession = Depends(get_db)) -> Response:
+    """Return a public dynamic AI-readiness badge for README embeds."""
+    try:
+        repo = await db.get(Repo, repo_id)
+        if repo is None:
+            svg = _cert_badge_svg(None)
+        else:
+            try:
+                skills = (await db.execute(select(Skill).where(Skill.repo_id == repo_id))).scalars().all()
+            except Exception:
+                skills = []
+            if not skills:
+                score = await _latest_repo_score_total(db, repo_id)
+            else:
+                categories = {str(skill.skill_category or skill_category_for_source_type(skill.source_type)) for skill in skills}
+                coverage = min(1.0, len(categories) / len(SKILL_CATEGORIES))
+                loads = min(1.0, sum(int(skill.load_count_30d or 0) for skill in skills) / 1000)
+                quality = sum(int(skill.score_total or 0) for skill in skills) / len(skills) / 100
+                freshness = sum(1 for skill in skills if int(skill.score_freshness or 0) >= 15) / len(skills)
+                score = round((coverage * 30) + (loads * 30) + (quality * 25) + (freshness * 15))
+            svg = _cert_badge_svg(score)
+        return Response(content=svg, media_type="image/svg+xml", headers={"Cache-Control": "no-cache, max-age=300"})
+    except Exception:
+        return Response(content=_cert_badge_svg(None), media_type="image/svg+xml", headers={"Cache-Control": "no-cache, max-age=300"})
 
 
 @router.get("/{repo_id}/skills")
@@ -714,6 +765,86 @@ async def get_repo_skill_usage_stats(
     )
 
 
+def _parse_snapshot_at(value: str | None) -> datetime:
+    if not value:
+        return datetime.utcnow()
+    normalized = value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    return parsed.replace(tzinfo=None)
+
+
+@router.get("/{repo_id}/skills/snapshot", response_model=SnapshotResponse)
+async def get_skills_snapshot(
+    repo_id: str,
+    at: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> SnapshotResponse:
+    await _repo_in_scope(db, repo_id, current_org_id)
+    at_datetime = _parse_snapshot_at(at)
+    try:
+        skills = (await db.execute(select(Skill).where(Skill.repo_id == repo_id))).scalars().all()
+        items: list[SkillSnapshotItem] = []
+        for skill in skills:
+            version = (
+                await db.execute(
+                    select(SkillVersion)
+                    .where(SkillVersion.skill_id == skill.id, SkillVersion.created_at <= at_datetime)
+                    .order_by(desc(SkillVersion.version_number))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if version is None:
+                continue
+            items.append(
+                SkillSnapshotItem(
+                    skill_id=skill.id,
+                    domain=skill.domain,
+                    version_number=int(version.version_number or 1),
+                    content=version.content,
+                    score_total=int(skill.score_total or 0),
+                    score_freshness=int(skill.score_freshness or 0),
+                    created_at=version.created_at,
+                )
+            )
+        return SnapshotResponse(at=at_datetime, repo_id=repo_id, skill_count=len(items), skills=items)
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to load skill snapshot") from exc
+
+
+@router.get("/{repo_id}/skills/timeline")
+async def get_skills_timeline(
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[dict[str, object]]:
+    await _repo_in_scope(db, repo_id, current_org_id)
+    cutoff = datetime.utcnow() - timedelta(days=90)
+    try:
+        versions = (
+            await db.execute(
+                select(SkillVersion)
+                .where(SkillVersion.repo_id == repo_id, SkillVersion.created_at >= cutoff)
+                .order_by(desc(SkillVersion.created_at))
+                .limit(200)
+            )
+        ).scalars().all()
+        rows: list[dict[str, object]] = []
+        previous_by_skill: dict[str, int] = {}
+        for version in reversed(list(versions)):
+            skill = await db.get(Skill, version.skill_id)
+            score_after = int(skill.score_total or 0) if skill else 0
+            score_before = previous_by_skill.get(version.skill_id)
+            event = "new" if score_before is None else "improved" if score_after >= score_before else "dropped"
+            previous_by_skill[version.skill_id] = score_after
+            rows.append({"date": version.created_at.date().isoformat(), "event": event, "skill_domain": version.domain, "version_number": int(version.version_number or 1), "score_before": score_before, "score_after": score_after})
+        return list(reversed(rows))
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to load skill timeline") from exc
+
+
 @router.get("/{repo_id}/skills/{skill_id}/improvement-plan", response_model=ImprovementPlanResponse)
 async def get_skill_improvement_plan(
     repo_id: str,
@@ -792,23 +923,30 @@ async def improve_skill(
         return SkillImproveResponse(improved=False, queued=True, task_id=str(run.id))
 
     current_content = skill.content or ""
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return SkillImproveResponse(
-            improved=False,
-            reason="AI improvement requires ANTHROPIC_API_KEY to be configured",
+    org = await db.get(Org, repo.org_id)
+    org_settings = org.settings if org is not None and isinstance(org.settings, dict) else {}
+    try:
+        new_content = await _llm_skill_improvement(
+            settings=org_settings,
+            content=current_content,
+            issues=plan.issues,
+            score=plan.current_score,
         )
-
-    new_content = await _anthropic_skill_improvement(
-        content=current_content,
-        issues=plan.issues,
-        score=plan.current_score,
-        api_key=api_key,
-    )
+    except LLMNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "llm_not_configured",
+                "message": "Configure an AI model in Settings to use this feature",
+                "settings_url": "/dashboard/settings",
+            },
+        ) from exc
+    except LLMCallError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     if not new_content:
         return SkillImproveResponse(
             improved=False,
-            reason="Anthropic did not return improved content",
+            reason="AI model did not return improved content",
         )
 
     content_hash = hashlib.sha256(new_content.encode()).hexdigest()

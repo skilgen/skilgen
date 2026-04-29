@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Protocol
 
-import httpx
 from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from packages.db.database import get_sessionmaker
-from packages.db.models import AgentSession, Skill, SkillMemoryStub
+from packages.db.models import AgentSession, Org, Skill, SkillMemoryStub
+from apps.api.api.services.llm import LLMCallError, LLMNotConfiguredError, call_llm
 
 
 class SessionMessageLike(Protocol):
@@ -63,7 +62,9 @@ async def _extract_session_knowledge(
             for skill in existing_skills[:20]
         )
         transcript_text = _build_transcript_text(messages, max_chars=12000)
+        org = await db.get(Org, session.org_id)
         stubs = await _call_extraction_llm(
+            org_settings=org.settings if org is not None and isinstance(org.settings, dict) else {},
             transcript=transcript_text,
             task_description=session.task_description or "",
             files_touched=list(session.files_touched or []),
@@ -132,16 +133,13 @@ def _summarise_transcript(messages: list[SessionMessageLike]) -> str:
 
 
 async def _call_extraction_llm(
+    org_settings: dict | None,
     transcript: str,
     task_description: str,
     files_touched: list[str],
     existing_skills_summary: str,
     skill_paths_loaded: list[str],
 ) -> list[dict[str, object]]:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return []
-
     prompt = f"""You are analyzing a coding agent session to extract novel institutional knowledge discoveries
 that should be added to this organization's skill tree.
 
@@ -183,23 +181,11 @@ LIMIT to maximum 5 discoveries per session.
 If nothing novel was discovered, return an empty array.
 
 Return ONLY a valid JSON array. No explanation, no markdown fence, just the array."""
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-3-5-haiku-20241022",
-                "max_tokens": 2048,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-        )
-        response.raise_for_status()
-        raw = response.json()["content"][0]["text"].strip()
+    try:
+        raw = (await call_llm(org_settings or {}, "Extract institutional coding knowledge as JSON.", prompt, max_tokens=2048)).strip()
+    except (LLMNotConfiguredError, LLMCallError):
+        return []
+    try:
         if raw.startswith("```"):
             raw = "\n".join(raw.split("\n")[1:-1])
         discoveries = json.loads(raw)
@@ -210,3 +196,5 @@ Return ONLY a valid JSON array. No explanation, no markdown fence, just the arra
             for item in discoveries
             if isinstance(item, dict) and float(item.get("confidence", 0)) >= 0.7
         ][:5]
+    except Exception:
+        return []

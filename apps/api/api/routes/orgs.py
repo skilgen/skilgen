@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import logging
 import secrets
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 import csv
@@ -14,10 +14,6 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-try:
-    import httpx
-except ImportError:  # pragma: no cover - optional provider client dependency
-    httpx = None  # type: ignore[assignment]
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -28,11 +24,13 @@ from apps.api.api.github import get_installation_token
 from apps.api.api.notifications import build_test_notification_message, post_slack_message
 from apps.api.api.services import audit
 from apps.api.api.services.audit import get_actor_login
-from apps.api.api.services.llm_config import decrypt_key, encrypt_key, key_hint
+from apps.api.api.services.knowledge_concentration import concentration_response
+from apps.api.api.services.llm import LLMCallError, LLMNotConfiguredError, call_llm
+from packages.db.llm_key import encrypt_key, key_hint
 from apps.api.api.services.policy import POLICY_RULE_TYPES, PolicyViolation, evaluate_policies
 from apps.api.api.services.redflags import compute_repo_red_flags
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AnalysisRun, AuditEvent, Org, OrgLLMConfig, OrgPolicy, Repo, ScoreHistory, Skill, SkillHalfLife, SkillMemoryStub, SkillUsageEvent, SkillVersion
+from packages.db.models import AgentSession, AnalysisRun, AuditEvent, FlagDismissal, Org, OrgLLMConfig, OrgPolicy, Repo, ScoreHistory, Skill, SkillHalfLife, SkillMemoryStub, SkillUsageEvent, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
     AuditLogEventResponse,
@@ -244,6 +242,54 @@ class RedFlagsResponse(BaseModel):
     flags: list[RedFlagResponse]
 
 
+class AnthropicKeyPayload(BaseModel):
+    api_key: str = Field(min_length=1, max_length=4096)
+
+
+class OrgIntegrationSettingsResponse(BaseModel):
+    anthropic_api_key_set: bool
+    anthropic_api_key_hint: str | None = None
+    other: dict[str, object] = Field(default_factory=dict)
+
+
+class RedFlagDismissPayload(BaseModel):
+    flag_type: str = Field(min_length=1, max_length=100)
+    repo_id: str = Field(min_length=1)
+    skill_id: str | None = None
+    reason: str = Field(default="not_a_risk", max_length=255)
+
+
+class RedFlagRestorePayload(BaseModel):
+    flag_type: str = Field(min_length=1, max_length=100)
+    repo_id: str = Field(min_length=1)
+    skill_id: str | None = None
+
+
+class FlagDismissalResponse(BaseModel):
+    id: str
+    org_id: str
+    flag_type: str
+    repo_id: str
+    skill_id: str | None
+    dismissed_by: str
+    reason: str
+    dismissed_at: datetime
+
+
+class MemoryScoreBreakdown(BaseModel):
+    coverage: float
+    load_frequency: float
+    quality: float
+    freshness: float
+
+
+class MemoryScoreResponse(BaseModel):
+    score: int
+    breakdown: MemoryScoreBreakdown
+    trend: str
+    grade: Literal["A", "B", "C", "D", "F"]
+
+
 class AuditEventResponse(BaseModel):
     id: str
     event_type: str
@@ -328,30 +374,50 @@ class PolicyCheckResponse(BaseModel):
 
 
 class OrgLLMConfigResponse(BaseModel):
-    provider: str
+    provider: str | None
     model: str | None
-    endpoint_url: str | None
+    base_url: str | None = None
     api_key_hint: str | None
-    azure_deployment: str | None
-    azure_api_version: str | None
     is_configured: bool
-    last_tested_at: datetime | None
-    last_test_ok: bool | None
 
 
 class LLMConfigUpdate(BaseModel):
-    provider: Literal["skillayer", "anthropic", "openai", "azure_openai", "ollama", "custom"]
-    model: str | None = None
-    endpoint_url: str | None = None
-    api_key: str | None = None
-    azure_deployment: str | None = None
-    azure_api_version: str | None = None
+    provider: Literal["anthropic", "openai", "gemini", "custom"]
+    model: str = Field(min_length=1, max_length=200)
+    api_key: str = Field(min_length=1, max_length=4096)
+    base_url: str | None = Field(default=None, max_length=1024)
 
 
 class LLMConfigTestResponse(BaseModel):
-    ok: bool
-    latency_ms: int
-    error: str | None
+    success: bool
+    response: str | None = None
+    error: str | None = None
+
+
+class SkillSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=1000)
+    mode: Literal["natural", "skillql"] = "natural"
+    limit: int = Field(default=20, ge=1, le=50)
+
+
+class SkillSearchResult(BaseModel):
+    skill_id: str
+    repo_id: str
+    repo_name: str
+    domain: str
+    skill_category: str | None
+    score_total: int
+    load_count_30d: int
+    is_stale: bool
+    content_preview: str
+    relevance_score: int
+
+
+class SkillSearchResponse(BaseModel):
+    query: str
+    mode: Literal["natural", "skillql"]
+    result_count: int
+    results: list[SkillSearchResult]
 
 
 class SetupStatusStep(BaseModel):
@@ -544,30 +610,22 @@ def _policy_check_response(violations: list[PolicyViolation]) -> PolicyCheckResp
     )
 
 
-def _llm_config_response(config: OrgLLMConfig | None) -> OrgLLMConfigResponse:
-    if config is None:
-        return OrgLLMConfigResponse(
-            provider="skillayer",
-            model=None,
-            endpoint_url=None,
-            api_key_hint=None,
-            azure_deployment=None,
-            azure_api_version=None,
-            is_configured=False,
-            last_tested_at=None,
-            last_test_ok=None,
-        )
+def _llm_config_response(org: Org | None) -> OrgLLMConfigResponse:
+    settings_payload = dict(org.settings or {}) if org is not None and isinstance(org.settings, dict) else {}
     return OrgLLMConfigResponse(
-        provider=config.provider,
-        model=config.model,
-        endpoint_url=config.endpoint_url,
-        api_key_hint=config.api_key_hint,
-        azure_deployment=config.azure_deployment,
-        azure_api_version=config.azure_api_version,
-        is_configured=bool(config.is_configured),
-        last_tested_at=config.last_tested_at,
-        last_test_ok=config.last_test_ok,
+        provider=str(settings_payload["llm_provider"]) if settings_payload.get("llm_provider") else None,
+        model=str(settings_payload["llm_model"]) if settings_payload.get("llm_model") else None,
+        api_key_hint=str(settings_payload["llm_api_key_hint"]) if settings_payload.get("llm_api_key_hint") else None,
+        base_url=str(settings_payload["llm_base_url"]) if settings_payload.get("llm_base_url") else None,
+        is_configured=bool(settings_payload.get("llm_api_key_enc")),
     )
+
+
+def _clear_org_llm_settings(org: Org) -> None:
+    settings_payload = dict(org.settings or {}) if isinstance(org.settings, dict) else {}
+    for key in ("llm_provider", "llm_model", "llm_api_key_enc", "llm_base_url", "llm_api_key_hint", "llm_config"):
+        settings_payload.pop(key, None)
+    org.settings = settings_payload
 
 
 async def _latest_repo_score(db: AsyncSession, repo_id: str) -> int:
@@ -671,6 +729,101 @@ def _assert_org_scope(requested_org_id: str, current_org_id: str) -> None:
 def _error(status_code: int, detail: str, code: str) -> JSONResponse:
     """Build a structured JSON error response for organization routes."""
     return JSONResponse(status_code=status_code, content={"detail": detail, "code": code})
+
+
+def _org_settings_dict(org: Org) -> dict[str, object]:
+    return dict(org.settings or {}) if isinstance(org.settings, dict) else {}
+
+
+def _anthropic_settings_response(org: Org) -> OrgIntegrationSettingsResponse:
+    settings = _org_settings_dict(org)
+    encrypted_key = settings.get("anthropic_api_key_encrypted")
+    hint = settings.get("anthropic_api_key_hint")
+    other = {key: value for key, value in settings.items() if not str(key).startswith("anthropic_api_key")}
+    return OrgIntegrationSettingsResponse(
+        anthropic_api_key_set=bool(encrypted_key),
+        anthropic_api_key_hint=str(hint) if hint else None,
+        other=other,
+    )
+
+
+def _memory_grade(score: int) -> Literal["A", "B", "C", "D", "F"]:
+    if score >= 80:
+        return "A"
+    if score >= 60:
+        return "B"
+    if score >= 40:
+        return "C"
+    if score >= 20:
+        return "D"
+    return "F"
+
+
+def build_memory_score_response(
+    repos: list[Repo],
+    skills: list[Skill],
+    total_loads_30d: int,
+    previous_score: int | None = None,
+) -> MemoryScoreResponse:
+    """Compute the board-level organizational memory score."""
+    if not skills:
+        return MemoryScoreResponse(
+            score=0,
+            breakdown=MemoryScoreBreakdown(coverage=0, load_frequency=0, quality=0, freshness=0),
+            trend="Stable",
+            grade="F",
+        )
+
+    skills_by_repo: dict[str, list[Skill]] = {repo.id: [] for repo in repos}
+    for skill in skills:
+        skills_by_repo.setdefault(skill.repo_id, []).append(skill)
+
+    repo_coverage_rates = []
+    for repo in repos:
+        repo_skills = skills_by_repo.get(repo.id, [])
+        covered = {_skill_category(skill) for skill in repo_skills if _skill_category(skill) in SKILL_CATEGORIES}
+        repo_coverage_rates.append(min(1.0, len(covered) / len(SKILL_CATEGORIES)))
+    coverage_rate = sum(repo_coverage_rates) / len(repo_coverage_rates) if repo_coverage_rates else 0
+    load_frequency_score = min(1.0, total_loads_30d / 1000)
+    avg_skill_quality = min(1.0, sum(int(skill.score_total or 0) for skill in skills) / (len(skills) * 100))
+    freshness_rate = sum(1 for skill in skills if int(skill.score_freshness or 0) >= 15) / len(skills)
+
+    raw_score = (
+        coverage_rate * 30
+        + load_frequency_score * 30
+        + avg_skill_quality * 25
+        + freshness_rate * 15
+    )
+    score = round(raw_score)
+    if previous_score is None or previous_score == score:
+        trend = "Stable"
+    else:
+        delta = score - previous_score
+        trend = f"{delta:+d} this week"
+    return MemoryScoreResponse(
+        score=score,
+        breakdown=MemoryScoreBreakdown(
+            coverage=round(coverage_rate, 4),
+            load_frequency=round(load_frequency_score, 4),
+            quality=round(avg_skill_quality, 4),
+            freshness=round(freshness_rate, 4),
+        ),
+        trend=trend,
+        grade=_memory_grade(score),
+    )
+
+
+def _dismissal_response(dismissal: FlagDismissal) -> FlagDismissalResponse:
+    return FlagDismissalResponse(
+        id=str(dismissal.id),
+        org_id=str(dismissal.org_id),
+        flag_type=str(dismissal.flag_type),
+        repo_id=str(dismissal.repo_id),
+        skill_id=str(dismissal.skill_id) if dismissal.skill_id else None,
+        dismissed_by=str(dismissal.dismissed_by),
+        reason=str(dismissal.reason),
+        dismissed_at=dismissal.dismissed_at,
+    )
 
 
 def _skill_category(skill: Skill) -> str:
@@ -817,6 +970,7 @@ def _generate_org_api_key() -> str:
 
 def _org_settings_response(org: Org, installation_id: int | None, recent_runs: list[AnalysisRun]) -> OrgSettingsResponse:
     """Convert an org and its GitHub state into a settings response."""
+    settings_payload = org.settings if isinstance(org.settings, dict) else {}
     return OrgSettingsResponse(
         id=org.id,
         login=org.login,
@@ -826,6 +980,7 @@ def _org_settings_response(org: Org, installation_id: int | None, recent_runs: l
         slack_webhook_url=org.slack_webhook_url,
         notify_on_pr=bool(org.notify_on_pr),
         notify_on_stale=bool(org.notify_on_stale),
+        anthropic_api_key_set=bool(settings_payload.get("anthropic_api_key_encrypted")),
         github_app_installed=installation_id is not None,
         github_installation_id=installation_id,
         webhook_url="/webhook/github",
@@ -1914,6 +2069,101 @@ async def get_org_red_flags(
     )
 
 
+@router.get("/{org_id}/red-flags/dismissed", response_model=list[FlagDismissalResponse])
+async def get_dismissed_red_flags(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> list[FlagDismissalResponse] | JSONResponse:
+    if current_org_id and current_org_id != org_id:
+        return _error(403, "Forbidden", "FORBIDDEN")
+    try:
+        dismissals = (
+            await db.execute(
+                select(FlagDismissal)
+                .where(FlagDismissal.org_id == org_id)
+                .order_by(desc(FlagDismissal.dismissed_at))
+            )
+        ).scalars().all()
+        return [_dismissal_response(item) for item in dismissals]
+    except Exception:
+        await _rollback(db, "red flag dismissals lookup")
+        return _error(400, "Could not load dismissed red flags", "RED_FLAG_DISMISSALS_LOOKUP_FAILED")
+
+
+@router.post("/{org_id}/red-flags/dismiss", response_model=None)
+async def dismiss_red_flag(
+    org_id: str,
+    payload: RedFlagDismissPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> dict[str, bool] | JSONResponse:
+    if current_org_id and current_org_id != org_id:
+        return _error(403, "Forbidden", "FORBIDDEN")
+    try:
+        existing = (
+            await db.execute(
+                select(FlagDismissal).where(
+                    FlagDismissal.org_id == org_id,
+                    FlagDismissal.flag_type == payload.flag_type,
+                    FlagDismissal.repo_id == payload.repo_id,
+                    FlagDismissal.skill_id == payload.skill_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            db.add(
+                FlagDismissal(
+                    org_id=org_id,
+                    flag_type=payload.flag_type,
+                    repo_id=payload.repo_id,
+                    skill_id=payload.skill_id,
+                    dismissed_by=get_actor_login(request) or "unknown",
+                    reason=payload.reason or "not_a_risk",
+                    dismissed_at=datetime.utcnow(),
+                )
+            )
+        else:
+            existing.reason = payload.reason or "not_a_risk"
+            existing.dismissed_at = datetime.utcnow()
+            existing.dismissed_by = get_actor_login(request) or existing.dismissed_by
+        await db.commit()
+        return {"dismissed": True}
+    except Exception:
+        await _rollback(db, "red flag dismissal upsert")
+        return _error(400, "Could not dismiss red flag", "RED_FLAG_DISMISS_FAILED")
+
+
+@router.delete("/{org_id}/red-flags/dismiss", response_model=None)
+async def restore_red_flag(
+    org_id: str,
+    payload: RedFlagRestorePayload,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> dict[str, bool] | JSONResponse:
+    if current_org_id and current_org_id != org_id:
+        return _error(403, "Forbidden", "FORBIDDEN")
+    try:
+        dismissal = (
+            await db.execute(
+                select(FlagDismissal).where(
+                    FlagDismissal.org_id == org_id,
+                    FlagDismissal.flag_type == payload.flag_type,
+                    FlagDismissal.repo_id == payload.repo_id,
+                    FlagDismissal.skill_id == payload.skill_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if dismissal is not None:
+            await db.delete(dismissal)
+        await db.commit()
+        return {"restored": True}
+    except Exception:
+        await _rollback(db, "red flag dismissal restore")
+        return _error(400, "Could not restore red flag", "RED_FLAG_RESTORE_FAILED")
+
+
 @router.get("/{org_id}/skill-debt")
 async def get_skill_debt(
     org_id: str,
@@ -2359,120 +2609,177 @@ async def run_policy_check_ci(
 
 
 @router.get("/{org_id}/llm-config", response_model=OrgLLMConfigResponse)
-async def get_llm_config(
-    org_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
-) -> OrgLLMConfigResponse:
+async def get_llm_config(org_id: str, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> OrgLLMConfigResponse:
     _assert_org_scope(org_id, current_org_id)
-    config = (await db.execute(select(OrgLLMConfig).where(OrgLLMConfig.org_id == org_id))).scalar_one_or_none()
-    return _llm_config_response(config)
+    try:
+        return _llm_config_response(await db.get(Org, org_id))
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not load LLM config") from exc
 
 
 @router.post("/{org_id}/llm-config", response_model=OrgLLMConfigResponse)
-async def save_llm_config(
-    org_id: str,
-    payload: LLMConfigUpdate,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
-) -> OrgLLMConfigResponse:
+async def save_llm_config(org_id: str, payload: LLMConfigUpdate, request: Request, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> OrgLLMConfigResponse:
     _assert_org_scope(org_id, current_org_id)
-    config = (await db.execute(select(OrgLLMConfig).where(OrgLLMConfig.org_id == org_id))).scalar_one_or_none()
-    if config is None:
-        config = OrgLLMConfig(org_id=org_id)
-        db.add(config)
-    config.provider = payload.provider
-    config.model = payload.model
-    config.endpoint_url = payload.endpoint_url
-    config.azure_deployment = payload.azure_deployment
-    config.azure_api_version = payload.azure_api_version
-    config.updated_at = _utc_now_naive()
-    if payload.provider == "skillayer":
-        config.api_key_encrypted = None
-        config.api_key_hint = None
-        config.is_configured = True
-    elif payload.api_key:
-        config.api_key_encrypted = encrypt_key(payload.api_key)
-        config.api_key_hint = key_hint(payload.api_key)
-        config.is_configured = True
-    else:
-        config.is_configured = bool(config.api_key_encrypted or payload.endpoint_url)
-    await audit.emit(
-        db,
-        org_id,
-        "settings.llm_configured",
-        "configured",
-        f"Configured LLM provider {payload.provider}",
-        actor_login=get_actor_login(request),
-        resource_type="settings",
-        metadata={"provider": payload.provider, "model": payload.model, "api_key_hint": config.api_key_hint},
-    )
-    await db.commit()
-    return _llm_config_response(config)
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Org not found")
+        if payload.provider == "custom" and not payload.base_url:
+            raise HTTPException(status_code=422, detail="Custom provider requires base_url")
+        settings_payload = dict(org.settings or {}) if isinstance(org.settings, dict) else {}
+        settings_payload["llm_provider"] = payload.provider
+        settings_payload["llm_model"] = payload.model
+        settings_payload["llm_api_key_enc"] = encrypt_key(payload.api_key)
+        settings_payload["llm_api_key_hint"] = key_hint(payload.api_key)
+        if payload.provider == "custom" and payload.base_url:
+            settings_payload["llm_base_url"] = payload.base_url.rstrip("/")
+        else:
+            settings_payload.pop("llm_base_url", None)
+        if payload.provider == "anthropic":
+            settings_payload["anthropic_api_key_encrypted"] = settings_payload["llm_api_key_enc"]
+            settings_payload["anthropic_api_key_hint"] = settings_payload["llm_api_key_hint"]
+        org.settings = settings_payload
+        await audit.emit(db, org_id, "settings.llm_configured", "configured", f"Configured LLM provider {payload.provider}", actor_login=get_actor_login(request), resource_type="settings", metadata={"provider": payload.provider, "model": payload.model, "api_key_hint": settings_payload["llm_api_key_hint"]})
+        await db.commit()
+        return _llm_config_response(org)
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not save LLM config") from exc
+
+
+@router.delete("/{org_id}/llm-config")
+async def delete_llm_config(org_id: str, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> dict[str, bool]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        org = await db.get(Org, org_id)
+        if org is not None:
+            _clear_org_llm_settings(org)
+        await db.commit()
+        return {"cleared": True}
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not delete LLM config") from exc
 
 
 @router.post("/{org_id}/llm-config/test", response_model=LLMConfigTestResponse)
-async def test_llm_config(
-    org_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
-) -> LLMConfigTestResponse:
+async def test_llm_config(org_id: str, payload: LLMConfigUpdate, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> LLMConfigTestResponse:
     _assert_org_scope(org_id, current_org_id)
-    config = (await db.execute(select(OrgLLMConfig).where(OrgLLMConfig.org_id == org_id))).scalar_one_or_none()
-    if config is None:
-        config = OrgLLMConfig(org_id=org_id, provider="skillayer", is_configured=True)
-        db.add(config)
-    start = time.perf_counter()
-    ok = False
-    error: str | None = None
     try:
-        if config.provider == "skillayer":
-            ok = True
-        elif config.provider == "anthropic":
-            if not config.api_key_encrypted:
-                raise RuntimeError("Missing Anthropic API key")
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={"x-api-key": decrypt_key(config.api_key_encrypted), "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                    json={"model": config.model or "claude-3-5-haiku-20241022", "max_tokens": 1, "messages": [{"role": "user", "content": "ping"}]},
-                )
-                ok = resp.status_code < 400
-                if not ok:
-                    error = f"Provider returned {resp.status_code}"
-        elif config.provider in {"openai", "azure_openai"}:
-            if not config.api_key_encrypted:
-                raise RuntimeError("Missing OpenAI API key")
-            url = config.endpoint_url or "https://api.openai.com/v1/chat/completions"
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    url,
-                    headers={"Authorization": f"Bearer {decrypt_key(config.api_key_encrypted)}", "content-type": "application/json"},
-                    json={"model": config.model or "gpt-4o-mini", "max_tokens": 1, "messages": [{"role": "user", "content": "ping"}]},
-                )
-                ok = resp.status_code < 400
-                if not ok:
-                    error = f"Provider returned {resp.status_code}"
-        else:
-            if not config.endpoint_url:
-                raise RuntimeError("Missing endpoint URL")
-            base = config.endpoint_url.rstrip("/")
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(f"{base}/api/tags")
-                if resp.status_code >= 400:
-                    resp = await client.get(f"{base}/v1/models")
-                ok = resp.status_code < 400
-                if not ok:
-                    error = f"Provider returned {resp.status_code}"
+        test_settings = {"llm_provider": payload.provider, "llm_model": payload.model, "llm_api_key_enc": encrypt_key(payload.api_key), "llm_api_key_hint": key_hint(payload.api_key)}
+        if payload.base_url:
+            test_settings["llm_base_url"] = payload.base_url.rstrip("/")
+        response = await call_llm(test_settings, "You are testing a model connection.", "Reply with OK", max_tokens=8)
+        return LLMConfigTestResponse(success=True, response=response, error=None)
+    except (LLMNotConfiguredError, LLMCallError) as exc:
+        return LLMConfigTestResponse(success=False, response=None, error=str(exc))
     except Exception as exc:
-        ok = False
-        error = str(exc)
-    latency_ms = round((time.perf_counter() - start) * 1000)
-    config.last_tested_at = _utc_now_naive()
-    config.last_test_ok = ok
-    await db.commit()
-    return LLMConfigTestResponse(ok=ok, latency_ms=latency_ms, error=error)
+        await db.rollback()
+        return LLMConfigTestResponse(success=False, response=None, error=str(exc))
+
+
+def _parse_skillql(query: str) -> list[tuple[str, str, str]]:
+    clauses: list[tuple[str, str, str]] = []
+    for raw in query.split():
+        if ":" not in raw:
+            continue
+        field, value = raw.split(":", 1)
+        if field not in {"domain", "score", "category", "loads", "stale", "repo"}:
+            continue
+        op = "="
+        if value.startswith((">", "<")):
+            op, value = value[0], value[1:]
+        clauses.append((field, op, value))
+    return clauses
+
+
+@router.post("/{org_id}/skills/search", response_model=SkillSearchResponse)
+async def search_org_skills(org_id: str, payload: SkillSearchRequest, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> SkillSearchResponse:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)))).scalars().all()
+        repo_ids = [repo.id for repo in repos]
+        if not repo_ids:
+            return SkillSearchResponse(query=payload.query, mode=payload.mode, result_count=0, results=[])
+        repo_lookup = {repo.id: repo for repo in repos}
+        skills = (await db.execute(select(Skill).where(Skill.repo_id.in_(repo_ids)))).scalars().all()
+        clauses = _parse_skillql(payload.query) if payload.mode == "skillql" else []
+        scored: list[tuple[int, Skill]] = []
+        terms = [term.lower() for term in payload.query.replace(":", " ").split() if term.strip()]
+        for skill in skills:
+            repo = repo_lookup.get(skill.repo_id)
+            relevance = 0
+            if clauses:
+                matched = True
+                for field, op, value in clauses:
+                    lowered = value.lower()
+                    if field == "domain":
+                        matched = matched and lowered in str(skill.domain or "").lower()
+                    elif field == "category":
+                        matched = matched and lowered in str(skill.skill_category or "").lower()
+                    elif field == "repo":
+                        matched = matched and lowered in str(repo.name if repo else "").lower()
+                    elif field == "stale":
+                        matched = matched and bool(skill.is_stale) is (lowered == "true")
+                    elif field == "score":
+                        score = int(skill.score_total or 0)
+                        target = int(value or 0)
+                        matched = matched and ((score > target) if op == ">" else (score < target) if op == "<" else score == target)
+                    elif field == "loads":
+                        loads = int(skill.load_count_30d or 0)
+                        target = int(value or 0)
+                        matched = matched and ((loads > target) if op == ">" else (loads < target) if op == "<" else loads == target)
+                if matched:
+                    relevance = 10
+            else:
+                domain = str(skill.domain or "").lower()
+                content = str(skill.content or "").lower()
+                category = str(skill.skill_category or "").lower()
+                for term in terms:
+                    if domain == term:
+                        relevance += 3
+                    elif term in domain:
+                        relevance += 2
+                    if term in content or term in category:
+                        relevance += 1
+            if relevance:
+                scored.append((relevance, skill))
+        scored.sort(key=lambda item: (item[0], int(item[1].score_total or 0)), reverse=True)
+        results = [
+            SkillSearchResult(
+                skill_id=skill.id,
+                repo_id=skill.repo_id,
+                repo_name=repo_lookup[skill.repo_id].name if skill.repo_id in repo_lookup else skill.repo_id,
+                domain=skill.domain,
+                skill_category=skill.skill_category,
+                score_total=int(skill.score_total or 0),
+                load_count_30d=int(skill.load_count_30d or 0),
+                is_stale=bool(skill.is_stale),
+                content_preview=(skill.content or "")[:200],
+                relevance_score=relevance,
+            )
+            for relevance, skill in scored[: payload.limit]
+        ]
+        return SkillSearchResponse(query=payload.query, mode="skillql" if clauses else "natural", result_count=len(results), results=results)
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not search skills") from exc
+
+
+@router.get("/{org_id}/knowledge-concentration")
+async def get_knowledge_concentration(org_id: str, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)))).scalars().all()
+        repo_ids = [repo.id for repo in repos]
+        skills = (await db.execute(select(Skill).where(Skill.repo_id.in_(repo_ids)))).scalars().all() if repo_ids else []
+        return concentration_response(list(repos), list(skills))
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not load knowledge concentration") from exc
 
 
 @router.get("/{org_id}/available-repos")
@@ -2708,22 +3015,69 @@ async def get_org_coverage_summary(
     )
 
 
-@router.get("/{org_id}/settings", response_model=OrgSettingsResponse)
+@router.get("/{org_id}/memory-score", response_model=MemoryScoreResponse)
+async def get_org_memory_score(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> MemoryScoreResponse | JSONResponse:
+    """Return the board-level memory score for an org."""
+    if current_org_id and current_org_id != org_id:
+        return _error(403, "Forbidden", "FORBIDDEN")
+    try:
+        repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)))).scalars().all()
+        repo_ids = [repo.id for repo in repos]
+        skills = (await db.execute(select(Skill).where(Skill.repo_id.in_(repo_ids)))).scalars().all() if repo_ids else []
+        total_loads_30d = sum(int(skill.load_count_30d or 0) for skill in skills)
+        return build_memory_score_response(list(repos), list(skills), total_loads_30d)
+    except Exception:
+        await _rollback(db, "memory score lookup")
+        return _error(400, "Could not load memory score", "MEMORY_SCORE_LOOKUP_FAILED")
+
+
+@router.get("/{org_id}/settings", response_model=None)
 async def get_org_settings(
     org_id: str,
     db: AsyncSession = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id),
-) -> OrgSettingsResponse | JSONResponse:
+) -> dict[str, object] | JSONResponse:
     """Return organization settings for the authenticated organization."""
     _assert_org_scope(org_id, current_org_id)
     try:
         org = await db.get(Org, org_id)
         if org is None:
             return _error(404, "Org not found", "ORG_NOT_FOUND")
-        return await _load_org_settings(db, org)
-    except SQLAlchemyError:
+        response = (await _load_org_settings(db, org)).model_dump()
+        integration = _anthropic_settings_response(org).model_dump()
+        response.update(integration)
+        return response
+    except Exception:
         await _rollback(db, "org settings lookup")
         return _error(400, "Could not load org settings", "ORG_SETTINGS_LOOKUP_FAILED")
+
+
+@router.post("/{org_id}/settings/anthropic-key", response_model=OrgIntegrationSettingsResponse)
+async def save_org_anthropic_key(
+    org_id: str,
+    payload: AnthropicKeyPayload,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgIntegrationSettingsResponse | JSONResponse:
+    """Store an encrypted Anthropic key in org settings."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            return _error(404, "Org not found", "ORG_NOT_FOUND")
+        settings_payload = dict(org.settings or {})
+        settings_payload["anthropic_api_key_encrypted"] = encrypt_key(payload.api_key)
+        settings_payload["anthropic_api_key_hint"] = key_hint(payload.api_key)
+        org.settings = settings_payload
+        await db.commit()
+        return _anthropic_settings_response(org)
+    except Exception:
+        await _rollback(db, "org anthropic key update")
+        return _error(400, "Could not save Anthropic API key", "ANTHROPIC_KEY_UPDATE_FAILED")
 
 
 @router.patch("/{org_id}/settings", response_model=OrgSettingsResponse)

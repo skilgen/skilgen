@@ -31,6 +31,7 @@ export type OrgSettings = {
   github_app_installed: boolean;
   github_installation_id: number | null;
   webhook_url: string;
+  anthropic_api_key_set?: boolean;
   recent_deliveries: {
     id: string;
     status: string;
@@ -39,12 +40,28 @@ export type OrgSettings = {
   }[];
 };
 
+export type OrgAISettings = {
+  anthropic_api_key_set: boolean;
+};
+
 export type OrgStats = {
   repo_count: number;
   avg_score: number;
   skill_count: number;
   active_agents: number;
   score_trend: { date: string; score: number }[];
+};
+
+export type MemoryScore = {
+  score: number;
+  breakdown: {
+    coverage: number;
+    load_frequency: number;
+    quality: number;
+    freshness: number;
+  };
+  trend: string;
+  grade: "A" | "B" | "C" | "D" | "F";
 };
 
 export type SetupStep = {
@@ -279,6 +296,33 @@ export type OrgRedFlags = {
   flags: RedFlag[];
 };
 
+export type RedFlagDismissal = {
+  id: string;
+  org_id: string;
+  flag_type: string;
+  repo_id: string;
+  skill_id: string | null;
+  dismissed_by: string | null;
+  reason: string;
+  dismissed_at: string;
+};
+
+export type AutopilotTask = {
+  id: string;
+  org_id: string;
+  repo_id: string;
+  repo_name?: string | null;
+  skill_id: string | null;
+  skill_name?: string | null;
+  skill_domain?: string | null;
+  task_type: "regenerate" | "archive" | "notify" | string;
+  trigger_reason: string;
+  freshness_at_trigger: number;
+  status: "pending" | "approved" | "skipped" | "done" | string;
+  created_at: string;
+  resolved_at: string | null;
+};
+
 export type AuditLogEvent = {
   id: string;
   event_type: string;
@@ -362,15 +406,11 @@ export type PolicyCheckResult = {
 };
 
 export type LLMConfig = {
-  provider: string;
+  provider: string | null;
   model: string | null;
-  endpoint_url: string | null;
+  base_url: string | null;
   api_key_hint: string | null;
-  azure_deployment: string | null;
-  azure_api_version: string | null;
   is_configured: boolean;
-  last_tested_at: string | null;
-  last_test_ok: boolean | null;
 };
 
 export type SkillUsageDailyLoad = {
@@ -758,6 +798,52 @@ export type CompatibilityMatrix = {
   matrix: Record<string, Record<string, "compatible" | "untested" | "incompatible" | string>>;
 };
 
+export type RepoSnapshot = {
+  id: string;
+  captured_at: string;
+  label: string;
+  summary: string;
+  score_total: number;
+  skill_count: number;
+  changed_paths: string[];
+  content_preview: string;
+  diff_to_now: { added: number; removed: number; summary: string };
+};
+
+export type KnowledgeRiskItem = {
+  risk_type: string;
+  risk_level: "critical" | "high" | "medium" | string;
+  repo_id: string;
+  repo_name: string;
+  domain: string;
+  reason: string;
+  recommendation: string;
+  affected_files: string[];
+  skill_exists: boolean;
+  skill_id: string | null;
+};
+
+export type KnowledgeRiskResponse = {
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  risks: KnowledgeRiskItem[];
+};
+
+export type SLAPolicy = {
+  id: string;
+  org_id: string;
+  repo_id: string | null;
+  repo_name: string | null;
+  name: string;
+  coverage_target_pct: number;
+  alert_email: string | null;
+  is_active: boolean;
+  created_at: string;
+  last_checked_at: string | null;
+  last_status: "compliant" | "breaching" | "unknown" | string;
+};
+
 export type RegistryList = {
   skills: RegistrySkill[];
   total: number;
@@ -848,6 +934,22 @@ export async function getOrgCoverageSummary(accessToken: string | null, orgId: s
 
 export async function getOrgSettings(accessToken: string | null, orgId: string): Promise<OrgSettings | null> {
   return apiFetch<OrgSettings>(`/orgs/${orgId}/settings`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgAISettings(accessToken: string | null, orgId: string): Promise<OrgAISettings | null> {
+  return apiFetch<OrgAISettings>(`/orgs/${orgId}/settings`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgMemoryScore(accessToken: string | null, orgId: string): Promise<MemoryScore | null> {
+  return apiFetch<MemoryScore>(`/orgs/${orgId}/memory-score`, { accessToken, cache: "no-store" });
+}
+
+export async function getAutopilotQueue(accessToken: string | null, orgId: string): Promise<AutopilotTask[] | null> {
+  return apiFetch<AutopilotTask[]>(`/orgs/${orgId}/autopilot/queue`, { accessToken, cache: "no-store" });
+}
+
+export async function getRedFlagDismissals(accessToken: string | null, orgId: string): Promise<RedFlagDismissal[] | null> {
+  return apiFetch<RedFlagDismissal[]>(`/orgs/${orgId}/red-flags/dismissed`, { accessToken, cache: "no-store" });
 }
 
 export async function getOrgSkillHeatmap(accessToken: string | null, orgId: string): Promise<SkillHeatmapResponse | null> {
@@ -968,8 +1070,8 @@ export async function saveLLMConfig(accessToken: string, orgId: string, body: Pa
   return apiFetch<LLMConfig>(`/orgs/${orgId}/llm-config`, { accessToken, method: "POST", body: JSON.stringify(body), cache: "no-store" });
 }
 
-export async function testLLMConfig(accessToken: string, orgId: string): Promise<{ ok: boolean; latency_ms: number; error: string | null } | null> {
-  return apiFetch<{ ok: boolean; latency_ms: number; error: string | null }>(`/orgs/${orgId}/llm-config/test`, { accessToken, method: "POST", cache: "no-store" });
+export async function testLLMConfig(accessToken: string, orgId: string, body: { provider: string; model: string; api_key: string; base_url?: string | null }): Promise<{ success: boolean; response: string | null; error: string | null } | null> {
+  return apiFetch<{ success: boolean; response: string | null; error: string | null }>(`/orgs/${orgId}/llm-config/test`, { accessToken, method: "POST", body: JSON.stringify(body), cache: "no-store" });
 }
 
 export async function getOrgPolicies(accessToken: string | null, orgId: string): Promise<GovernancePoliciesResponse | null> {
@@ -1105,4 +1207,16 @@ export async function getDependencyGraph(accessToken: string | null, orgId: stri
 
 export async function getCompatibilityMatrix(accessToken: string | null, orgId: string): Promise<CompatibilityMatrix | null> {
   return apiFetch<CompatibilityMatrix>(`/registry/orgs/${orgId}/compatibility-matrix`, { accessToken, cache: "no-store" });
+}
+
+export async function getRepoSnapshots(accessToken: string | null, repoId: string): Promise<RepoSnapshot[] | null> {
+  return apiFetch<RepoSnapshot[]>(`/repos/${repoId}/snapshots`, { accessToken, cache: "no-store" });
+}
+
+export async function getKnowledgeRisk(accessToken: string | null, orgId: string): Promise<KnowledgeRiskResponse | null> {
+  return apiFetch<KnowledgeRiskResponse>(`/orgs/${orgId}/knowledge-concentration`, { accessToken, cache: "no-store" });
+}
+
+export async function getSLAPolicies(accessToken: string | null, orgId: string): Promise<SLAPolicy[] | null> {
+  return apiFetch<SLAPolicy[]>(`/orgs/${orgId}/sla`, { accessToken, cache: "no-store" });
 }
