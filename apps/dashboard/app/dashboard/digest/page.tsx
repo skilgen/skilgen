@@ -1,8 +1,15 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { API_URL, getBootstrapOrg, getMyOrg, getOrgApiKey } from "../../../lib/data";
-import { DigestShell } from "./digest-shell";
+import { DigestShell, type Digest, type DigestConfig } from "./digest-shell";
 
-export const dynamic = "force-dynamic";
+async function fetchJson<T>(url: string, token: string): Promise<T | null> {
+  try {
+    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {}, cache: "no-store" });
+    return res.ok ? ((await res.json()) as T) : null;
+  } catch {
+    return null;
+  }
+}
 
 export default async function DigestPage() {
   let accessToken = "";
@@ -16,7 +23,12 @@ export default async function DigestPage() {
   }
   const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   const apiKey = org ? (await getOrgApiKey(accessToken, org.id))?.api_key ?? "" : "";
-  const res = org ? await fetch(`${API_URL}/orgs/${org.id}/digest/preview`, { headers: { Authorization: `Bearer ${apiKey || accessToken}` }, cache: "no-store" }) : null;
-  const digest = res?.ok ? await res.json() : null;
-  return <DigestShell apiKey={apiKey} email={email} initialDigest={digest} orgId={org?.id ?? ""} />;
+  const token = apiKey || accessToken;
+  const [digest, config] = org
+    ? await Promise.all([
+        fetchJson<Digest>(`${API_URL}/orgs/${org.id}/digest/preview`, token),
+        fetchJson<Partial<DigestConfig>>(`${API_URL}/orgs/${org.id}/digest/config`, token),
+      ])
+    : [null, null];
+  return <DigestShell accessToken={accessToken} apiKey={apiKey} email={email} initialConfig={config} initialDigest={digest} orgId={org?.id ?? ""} />;
 }

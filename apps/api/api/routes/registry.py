@@ -16,10 +16,15 @@ from apps.api.api.auth import get_current_org_id, get_current_user
 from apps.api.api.routes.repos import _compute_skill_score
 from apps.api.api.services import audit
 from apps.api.api.services.audit import get_actor_login
+from apps.api.api.services.github_pr import create_skill_pr
 from apps.api.api.services.half_life import check_and_queue_regenerations, compute_half_life
+from apps.api.api.services.llm import LLMCallError, LLMNotConfiguredError, call_llm
+from apps.api.api.services.skill_generator import chat_create_skill
+from apps.api.api.services.dependency_analyzer import compute_cross_repo_dependencies, compute_repo_dependencies
 from packages.db.database import AsyncSessionLocal, get_db
 from packages.db.models import (
     MarketplaceInstall,
+    DependencyGraphCache,
     Org,
     RegistrySkill,
     Repo,
@@ -133,6 +138,69 @@ class CompatibilityMatrixResponse(BaseModel):
     skills: list[dict[str, str]]
     runtimes: list[str]
     matrix: dict[str, dict[str, str]]
+
+
+class SkillMapResponse(BaseModel):
+    nodes: list[dict[str, object]]
+    edges: list[dict[str, object]]
+    domains: list[dict[str, object]]
+    repo_count: int
+    skill_count: int
+
+
+class SkillTreeResponse(BaseModel):
+    name: str
+    type: str
+    children: list[dict[str, object]]
+
+
+class DependencyGraphCacheResponse(BaseModel):
+    nodes: list[dict[str, object]]
+    edges: list[dict[str, object]]
+    opportunities: list[dict[str, object]] = []
+    computed_at: datetime | None = None
+
+
+class ChatCreateMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=8000)
+
+
+class ChatCreatePayload(BaseModel):
+    messages: list[ChatCreateMessage] = Field(min_length=1, max_length=30)
+    repo_id: str | None = None
+
+
+class ChatCreateResponse(BaseModel):
+    assistant_reply: str
+    ready_to_create: bool
+    draft_skill: dict[str, object] | None = None
+
+
+class ChatCreatePushPayload(BaseModel):
+    repo_id: str = Field(min_length=1)
+    domain: str = Field(min_length=1, max_length=255)
+    content: str = Field(min_length=10, max_length=200_000)
+    skill_path: str | None = Field(default=None, max_length=512)
+
+
+class ChatCreatePushResponse(BaseModel):
+    pushed: bool
+    pr_url: str
+    pr_number: int
+    branch: str
+
+
+class RegistrySearchPayload(BaseModel):
+    query: str = Field(min_length=1, max_length=1000)
+    limit: int = Field(default=10, ge=1, le=25)
+    ai: bool = True
+
+
+class RegistrySearchResponse(BaseModel):
+    query: str
+    answer: str | None
+    results: list[dict[str, object]]
 
 
 def _error(status_code: int, message: str, code: str) -> HTTPException:
@@ -252,6 +320,46 @@ async def _scan_dependencies_background(org_id: str, repo_id: str) -> None:
             logger.exception("Dependency scan failed for repo %s", repo_id)
 
 
+async def _enterprise_skill_examples(db: AsyncSession, org_id: str, limit: int = 5) -> list[dict[str, object]]:
+    rows = (
+        await db.execute(
+            select(Skill, Repo)
+            .join(Repo, Repo.id == Skill.repo_id)
+            .where(Repo.org_id == org_id, Skill.is_enterprise.is_(True))
+            .order_by(desc(Skill.created_at))
+            .limit(limit)
+        )
+    ).all()
+    return [
+        {
+            "id": skill.id,
+            "domain": skill.domain,
+            "repo_name": repo.name,
+            "content": skill.content or "",
+            "skill_path": skill.skill_path,
+        }
+        for skill, repo in rows
+    ]
+
+
+async def _repo_context(db: AsyncSession, org_id: str, repo_id: str | None) -> tuple[Repo | None, dict[str, object] | None]:
+    if not repo_id:
+        return None, None
+    repo = await db.get(Repo, repo_id)
+    if repo is None or repo.org_id != org_id:
+        raise _error(404, "Repo not found", "REPO_NOT_FOUND")
+    skills = (await db.execute(select(Skill).where(Skill.repo_id == repo_id).order_by(desc(Skill.created_at)).limit(20))).scalars().all()
+    file_tree_sample = "\n".join(skill.skill_path for skill in skills if skill.skill_path)
+    return repo, {"repo_id": repo.id, "repo_name": repo.name, "full_name": repo.full_name, "file_tree_sample": file_tree_sample}
+
+
+def _skill_path_for_domain(domain: str, provided: str | None = None) -> str:
+    if provided:
+        return provided.strip().lstrip("/")
+    slug = re.sub(r"[^a-z0-9]+", "-", domain.lower()).strip("-") or "generated-skill"
+    return f"skills/{slug}/SKILL.md"
+
+
 @router.post("/orgs/{org_id}/publish", response_model=SkillRegistryEntryResponse)
 async def publish_org_skill(
     org_id: str,
@@ -345,6 +453,215 @@ async def list_org_entries(
         )
     ).all()
     return RegistryEntriesResponse(entries=[_entry_response(row[0], row[1]) for row in rows], total=total, page=page, page_size=page_size)
+
+
+@router.get("/orgs/{org_id}/skill-map", response_model=SkillMapResponse)
+async def org_skill_map(org_id: str, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> SkillMapResponse:
+    if org_id != current_org_id:
+        raise _error(403, "Forbidden", "ORG_FORBIDDEN")
+    rows = (
+        await db.execute(
+            select(Skill, Repo)
+            .join(Repo, Repo.id == Skill.repo_id)
+            .where(Repo.org_id == org_id)
+            .order_by(Repo.name, Skill.domain)
+        )
+    ).all()
+    nodes: list[dict[str, object]] = []
+    domain_counts: dict[str, int] = {}
+    repo_ids: set[str] = set()
+    for skill, repo in rows:
+        repo_ids.add(repo.id)
+        domain = str(skill.domain or "unknown")
+        domain_counts[domain] = domain_counts.get(domain, 0) + 1
+        nodes.append(
+            {
+                "id": skill.id,
+                "type": "skill",
+                "label": domain,
+                "repo_id": repo.id,
+                "repo_name": repo.name,
+                "skill_path": skill.skill_path,
+                "score_total": int(skill.score_total or 0),
+                "is_enterprise": bool(skill.is_enterprise),
+                "is_stale": bool(skill.is_stale),
+                "load_count_30d": int(skill.load_count_30d or 0),
+            }
+        )
+    deps = (
+        await db.execute(
+            select(SkillDependency, SkillRegistryEntry)
+            .join(SkillRegistryEntry, SkillRegistryEntry.id == SkillDependency.target_registry_entry_id)
+            .where(SkillDependency.org_id == org_id)
+        )
+    ).all()
+    edges = [
+        {
+            "source": dep.source_skill_id,
+            "target": dep.target_registry_entry_id,
+            "target_name": entry.name,
+            "relationship": "depends_on",
+        }
+        for dep, entry in deps
+    ]
+    return SkillMapResponse(
+        nodes=nodes,
+        edges=edges,
+        domains=[{"domain": domain, "skill_count": count} for domain, count in sorted(domain_counts.items(), key=lambda item: item[1], reverse=True)],
+        repo_count=len(repo_ids),
+        skill_count=len(nodes),
+    )
+
+
+def _tree_status(skill: Skill) -> str:
+    if int(skill.load_count_30d or 0) == 0:
+        return "never_loaded"
+    if bool(skill.is_stale) or int(skill.score_freshness or 0) < 10:
+        return "stale"
+    if int(skill.score_total or 0) < 50:
+        return "low_score"
+    return "healthy"
+
+
+@router.get("/orgs/{org_id}/skill-tree", response_model=SkillTreeResponse)
+async def org_skill_tree(org_id: str, repo_id: str, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> SkillTreeResponse:
+    if org_id != current_org_id:
+        raise _error(403, "Forbidden", "ORG_FORBIDDEN")
+    repo = await db.get(Repo, repo_id)
+    if repo is None or repo.org_id != org_id:
+        raise _error(404, "Repo not found", "REPO_NOT_FOUND")
+    skills = (await db.execute(select(Skill).where(Skill.repo_id == repo_id).order_by(Skill.domain, Skill.skill_path))).scalars().all()
+    grouped: dict[str, list[Skill]] = {}
+    for skill in skills:
+        grouped.setdefault(skill.skill_category or skill.domain or "unknown", []).append(skill)
+    children: list[dict[str, object]] = []
+    for domain, domain_skills in sorted(grouped.items()):
+        avg = round(sum(int(skill.score_total or 0) for skill in domain_skills) / max(1, len(domain_skills)))
+        children.append(
+            {
+                "name": domain,
+                "type": "domain",
+                "skill_count": len(domain_skills),
+                "avg_score": avg,
+                "children": [
+                    {
+                        "name": skill.domain,
+                        "type": "skill",
+                        "skill_id": skill.id,
+                        "score": int(skill.score_total or 0),
+                        "path": skill.skill_path,
+                        "load_count": int(skill.load_count_30d or 0),
+                        "last_updated": skill.created_at.date().isoformat() if skill.created_at else None,
+                        "status": _tree_status(skill),
+                        "content_preview": (skill.content or "")[:800],
+                    }
+                    for skill in domain_skills
+                ],
+            }
+        )
+    return SkillTreeResponse(name=repo.name, type="repo", children=children)
+
+
+@router.post("/orgs/{org_id}/chat-create", response_model=ChatCreateResponse)
+async def registry_chat_create(org_id: str, payload: ChatCreatePayload, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> ChatCreateResponse:
+    if org_id != current_org_id:
+        raise _error(403, "Forbidden", "ORG_FORBIDDEN")
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise _error(404, "Org not found", "ORG_NOT_FOUND")
+    _repo, repo_context = await _repo_context(db, org_id, payload.repo_id)
+    enterprise_skills = await _enterprise_skill_examples(db, org_id)
+    try:
+        result = await chat_create_skill(
+            dict(org.settings or {}),
+            [message.model_dump() for message in payload.messages],
+            repo_context,
+            enterprise_skills,
+        )
+    except LLMNotConfiguredError as exc:
+        raise HTTPException(status_code=402, detail={"error": "llm_not_configured", "detail": str(exc), "settings_url": "/dashboard/settings"}) from exc
+    except (LLMCallError, ValueError) as exc:
+        raise _error(502, str(exc), "LLM_CALL_FAILED") from exc
+    return ChatCreateResponse(**result)
+
+
+@router.post("/orgs/{org_id}/chat-create/push", response_model=ChatCreatePushResponse)
+async def registry_chat_create_push(
+    org_id: str,
+    payload: ChatCreatePushPayload,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> ChatCreatePushResponse:
+    if org_id != current_org_id:
+        raise _error(403, "Forbidden", "ORG_FORBIDDEN")
+    repo = await db.get(Repo, payload.repo_id)
+    if repo is None or repo.org_id != org_id:
+        raise _error(404, "Repo not found", "REPO_NOT_FOUND")
+    skill_path = _skill_path_for_domain(payload.domain, payload.skill_path)
+    slug = re.sub(r"[^a-z0-9]+", "-", payload.domain.lower()).strip("-") or "skill"
+    branch_name = f"skillayer/ai-skill-{slug}"
+    try:
+        pr = await create_skill_pr(
+            repo,
+            skill_path,
+            payload.content,
+            branch_name,
+            f"Add Skillayer skill for {payload.domain}",
+            f"Adds an AI-generated Skillayer skill at `{skill_path}`.\n\nGenerated from the registry Create skill with AI flow.",
+        )
+    except ValueError as exc:
+        raise _error(400, str(exc), "GITHUB_PR_FAILED") from exc
+    except Exception as exc:
+        raise _error(502, "Could not create GitHub PR", "GITHUB_PR_FAILED") from exc
+    return ChatCreatePushResponse(pushed=True, pr_url=str(pr["pr_url"]), pr_number=int(pr["pr_number"]), branch=str(pr["branch"]))
+
+
+@router.post("/orgs/{org_id}/search", response_model=RegistrySearchResponse)
+async def registry_search(org_id: str, payload: RegistrySearchPayload, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> RegistrySearchResponse:
+    if org_id != current_org_id:
+        raise _error(403, "Forbidden", "ORG_FORBIDDEN")
+    term = f"%{payload.query.strip()}%"
+    rows = (
+        await db.execute(
+            select(SkillRegistryEntry)
+            .where(
+                or_(SkillRegistryEntry.org_id == org_id, SkillRegistryEntry.publisher_org_id == org_id),
+                or_(
+                    SkillRegistryEntry.name.ilike(term),
+                    SkillRegistryEntry.domain.ilike(term),
+                    SkillRegistryEntry.description.ilike(term),
+                    SkillRegistryEntry.content.ilike(term),
+                ),
+            )
+            .order_by(desc(SkillRegistryEntry.score_total), desc(SkillRegistryEntry.updated_at))
+            .limit(payload.limit)
+        )
+    ).scalars().all()
+    results = [
+        {
+            "id": entry.id,
+            "name": entry.name,
+            "domain": entry.domain,
+            "description": entry.description,
+            "score_total": float(entry.score_total or 0),
+            "visibility": entry.visibility,
+            "snippet": entry.content[:500],
+        }
+        for entry in rows
+    ]
+    answer: str | None = None
+    if payload.ai and results:
+        org = await db.get(Org, org_id)
+        try:
+            answer = await call_llm(
+                dict(org.settings or {}) if org else {},
+                "You summarize Skillayer registry search results. Be concise and mention the most relevant skill names.",
+                f"Query: {payload.query}\nResults JSON:\n{results}",
+                max_tokens=300,
+            )
+        except (LLMNotConfiguredError, LLMCallError):
+            answer = None
+    return RegistrySearchResponse(query=payload.query, answer=answer, results=results)
 
 
 @router.get("/orgs/{org_id}/entries/{entry_id}", response_model=SkillRegistryEntryResponse)

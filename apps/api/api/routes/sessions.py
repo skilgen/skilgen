@@ -4,12 +4,14 @@ from datetime import datetime
 import re
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id
+from apps.api.api.services.memory import run_session_knowledge_extraction
+from apps.api.api.services.session_artifacts import append_session_artifact, close_session, parse_tool_artifact
 from packages.db.database import get_db
 from packages.db.models import AgentSession, Repo, Skill, SkillVersion
 
@@ -27,6 +29,20 @@ class UpdateSessionBody(BaseModel):
     outcome: str | None = None
     session_end: datetime | None = None
     notes: str | None = None
+
+
+class SessionArtifactBody(BaseModel):
+    session_id: str | None = None
+    agent_runtime: str = "claude_code"
+    tool: str
+    file_path: str | None = None
+    before_content: str | None = None
+    after_content: str | None = None
+    tool_input: dict | None = None
+    tool_response: dict | None = None
+    task_description: str | None = None
+    engineer_login: str | None = None
+    ts: datetime | None = None
 
 
 def _duration(session: AgentSession) -> int | None:
@@ -48,6 +64,10 @@ def _session_payload(session: AgentSession, repo: Repo | None = None) -> dict:
         "skills_loaded": list(session.skills_loaded or []),
         "skill_paths_loaded": list(session.skill_paths_loaded or []),
         "code_produced": session.code_produced,
+        "produced_artifacts": list(getattr(session, "produced_artifacts", []) or []),
+        "produced_file_hashes": dict(getattr(session, "produced_file_hashes", {}) or {}),
+        "closed_at": session.closed_at.isoformat() if getattr(session, "closed_at", None) else None,
+        "last_artifact_at": session.last_artifact_at.isoformat() if getattr(session, "last_artifact_at", None) else None,
         "outcome": session.outcome or "unknown",
         "notes": session.notes,
         "session_start": (session.session_start or session.created_at).isoformat(),
@@ -95,6 +115,72 @@ async def update_session(repo_id: str, session_id: str, body: UpdateSessionBody,
             setattr(session, field, value)
     session.session_end = body.session_end.replace(tzinfo=None) if body.session_end else datetime.utcnow()
     await db.commit()
+    return _session_payload(session)
+
+
+@router.post("/repos/{repo_id}/sessions/artifacts")
+async def record_session_artifact(
+    repo_id: str,
+    body: SessionArtifactBody,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict:
+    repo = await _repo(db, repo_id, current_org_id)
+    parsed = parse_tool_artifact(body.tool, body.tool_input, body.tool_response)
+    file_path = body.file_path or (parsed.file_path if parsed else None)
+    after_content = body.after_content if body.after_content is not None else (parsed.after_content if parsed else None)
+    if body.tool not in {"Edit", "Write", "NotebookEdit"} or not file_path:
+        raise HTTPException(status_code=400, detail="Unsupported or incomplete artifact payload")
+    try:
+        session, artifact, closed_sessions = await append_session_artifact(
+            db,
+            repo=repo,
+            agent_runtime=body.agent_runtime,
+            file_path=file_path,
+            tool=body.tool,
+            before_content=body.before_content,
+            after_content=after_content,
+            external_session_id=body.session_id,
+            task_description=body.task_description,
+            engineer_login=body.engineer_login,
+            ts=body.ts,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    for closed in closed_sessions:
+        background_tasks.add_task(run_session_knowledge_extraction, closed.id, [], repo_id)
+    return {
+        "session_id": session.id,
+        "external_session_id": session.session_id,
+        "artifact": artifact,
+        "artifact_count": len(session.produced_artifacts or []),
+        "closed_sessions": [closed.id for closed in closed_sessions],
+    }
+
+
+@router.post("/repos/{repo_id}/sessions/{session_id}/close")
+async def close_agent_session(
+    repo_id: str,
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict:
+    await _repo(db, repo_id, current_org_id)
+    try:
+        session = await close_session(db, repo_id=repo_id, session_id=session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        await db.commit()
+    except HTTPException:
+        raise
+    except Exception:
+        await db.rollback()
+        raise
+    background_tasks.add_task(run_session_knowledge_extraction, session.id, [], repo_id)
     return _session_payload(session)
 
 

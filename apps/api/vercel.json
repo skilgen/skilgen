@@ -17,5 +17,8 @@
   ],
   "routes": [
     { "src": "/(.*)", "dest": "apps/api/api/index.py" }
+  ],
+  "crons": [
+    { "path": "/cron/standup", "schedule": "0 9 * * *" }
   ]
 }

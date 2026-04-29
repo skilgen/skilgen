@@ -4,8 +4,6 @@ import { ArrowLeft } from "lucide-react";
 
 import { getRepo, getSkillVersionDiff } from "../../../../../../../../lib/data";
 
-export const dynamic = "force-dynamic";
-
 type PageProps = {
   params: Promise<{ repoId: string; skillId: string; versionId: string }>;
 };

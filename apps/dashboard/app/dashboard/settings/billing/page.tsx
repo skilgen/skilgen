@@ -5,8 +5,6 @@ import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { ManageBillingButton } from "./manage-billing-button";
 import { API_URL } from "../../../../lib/data";
 
-export const dynamic = "force-dynamic";
-
 type BillingPageProps = {
   searchParams: Promise<{ success?: string | string[]; plan?: string | string[] }>;
 };

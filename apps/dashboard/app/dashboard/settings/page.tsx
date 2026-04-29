@@ -30,9 +30,8 @@ import { ManageBillingButton } from "./billing/manage-billing-button";
 import { LLMConfigPanel } from "./llm-config-panel";
 import { AgentIntegrationPanel } from "./agent-integration-panel";
 import { PolicySettingsPanel, SiemSettingsPanel } from "./enterprise-settings";
+import { SlackStandupCard } from "./slack-standup-card";
 import { SettingsControls } from "./settings-controls";
-
-export const dynamic = "force-dynamic";
 
 type SettingsPageProps = {
   searchParams: Promise<{ tab?: string | string[]; success?: string | string[]; plan?: string | string[] }>;
@@ -101,6 +100,8 @@ function fallbackSettings(): OrgSettings {
     plan: "business",
     score_threshold: 60,
     slack_webhook_url: null,
+    slack_standup_enabled: false,
+    slack_standup_hour: 9,
     notify_on_pr: true,
     notify_on_stale: true,
     github_app_installed: false,
@@ -193,7 +194,18 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
 
       <SectionErrorBoundary section={`${tab} settings`}>
         {tab === "general" || tab === "notifications" ? (
-          <SettingsControls accessToken={accessToken} initialPolicies={policies.policies} initialSettings={settings} orgId={settings.id} tab={tab} />
+          <div className="space-y-8">
+            <SettingsControls accessToken={accessToken} initialPolicies={policies.policies} initialSettings={settings} orgId={settings.id} tab={tab} />
+            {tab === "notifications" ? (
+              <SlackStandupCard
+                accessToken={accessToken}
+                initialEnabled={settings.slack_standup_enabled}
+                initialHour={settings.slack_standup_hour}
+                initialWebhookUrl={settings.slack_webhook_url}
+                orgId={settings.id}
+              />
+            ) : null}
+          </div>
         ) : null}
         {tab === "llm" ? <LLMConfigPanel accessToken={accessToken} initialConfig={llmConfig} orgId={settings.id} /> : null}
         {tab === "policies" ? <PolicySettingsPanel accessToken={accessToken} initialCheck={policyCheck} initialPolicies={policyRules} orgId={settings.id} templates={policyTemplates} /> : null}

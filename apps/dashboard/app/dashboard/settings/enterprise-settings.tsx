@@ -73,6 +73,12 @@ export function PolicySettingsPanel({ accessToken, orgId, initialPolicies, templ
   const [policies, setPolicies] = useState(initialPolicies);
   const [check, setCheck] = useState(initialCheck);
   const [status, setStatus] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [policyName, setPolicyName] = useState("");
+  const [ruleType, setRuleType] = useState("block_on_red");
+  const [agentRuntimes, setAgentRuntimes] = useState<string[]>([]);
+  const [threshold, setThreshold] = useState("80");
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   async function runCheck() {
     setStatus("Checking...");
@@ -103,14 +109,66 @@ export function PolicySettingsPanel({ accessToken, orgId, initialPolicies, templ
     }
   }
 
+  async function createPrPolicy() {
+    const rule_config =
+      ruleType === "require_skill_load"
+        ? { agent_runtimes: agentRuntimes }
+        : ruleType === "min_compliance"
+          ? { threshold: Number(threshold) }
+          : {};
+    const response = await fetch(`${CLIENT_API_URL}/orgs/${orgId}/policies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        name: policyName || ruleTypeLabel(ruleType),
+        description: prPolicyDescription(ruleType),
+        rule_type: ruleType,
+        rule_config,
+        severity: "error",
+        enabled: true,
+      }),
+    });
+    if (response.ok) {
+      setPolicies([(await response.json()) as PolicyRule, ...policies]);
+      setPolicyName("");
+      setRuleType("block_on_red");
+      setAgentRuntimes([]);
+      setThreshold("80");
+      setShowForm(false);
+      setStatus("Policy added");
+    } else {
+      const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+      setStatus(body?.detail || "Could not add policy");
+    }
+  }
+
+  async function remove(policy: PolicyRule) {
+    const response = await fetch(`${CLIENT_API_URL}/orgs/${orgId}/policies/${policy.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    });
+    if (response.ok) {
+      setPolicies(policies.filter((item) => item.id !== policy.id));
+      setDeleteId(null);
+      setStatus("Policy deleted");
+    }
+  }
+
+  function toggleRuntime(runtime: string) {
+    setAgentRuntimes((current) => (current.includes(runtime) ? current.filter((item) => item !== runtime) : [...current, runtime]));
+  }
+
   return (
     <section className="rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Policy Enforcement</h2>
-          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Org-wide rules enforced across all repos.</p>
+          <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Policy Engine</h2>
+          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Org-wide governance rules and PR check policies enforced through Skillayer.</p>
         </div>
-        <button className="rounded-full border border-[color:var(--bg-border)] px-4 py-2 text-[13px] font-semibold" onClick={runCheck} type="button">Run check now</button>
+        <div className="flex flex-wrap gap-2">
+          <button className="rounded-full bg-[color:var(--accent-primary)] px-4 py-2 text-[13px] font-semibold text-[color:var(--bg-base)]" onClick={() => setShowForm((value) => !value)} type="button">Add Policy</button>
+          <button className="rounded-full border border-[color:var(--bg-border)] px-4 py-2 text-[13px] font-semibold" onClick={runCheck} type="button">Run check now</button>
+        </div>
       </div>
       {check ? <div className={`mt-4 rounded-xl border p-3 text-[13px] ${check.passed ? "border-green-500/20 bg-green-500/10 text-green-300" : "border-red-500/20 bg-red-500/10 text-red-300"}`}>{check.passed ? "✓ All policies passed" : `✗ ${check.error_count} violations · ${check.warning_count} warnings`}</div> : null}
       {status ? <div className="mt-3 text-[12px] text-[color:var(--text-tertiary)]">{status}</div> : null}
@@ -118,8 +176,49 @@ export function PolicySettingsPanel({ accessToken, orgId, initialPolicies, templ
         <summary className="cursor-pointer text-[13px] font-semibold text-[color:var(--text-primary)]">CI integration (GitHub Actions)</summary>
         <pre className="mt-3 overflow-auto rounded-lg bg-black/40 px-4 py-3 font-mono text-[12px] text-[color:var(--text-secondary)]">{`- name: Skillayer Policy Check\n  run: |\n    curl -f https://api.skillayer.com/orgs/$ORG_ID/policy-check/ci \\\n      || (echo "Skillayer policy violations found" && exit 1)`}</pre>
       </details>
+      {showForm ? (
+        <div className="mt-5 rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <Input label="Policy name" onChange={setPolicyName} placeholder={ruleTypeLabel(ruleType)} value={policyName} />
+            <label className="block text-[12px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
+              Rule type
+              <select className="mt-2 h-11 w-full rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 text-[13px] text-[color:var(--text-primary)] outline-none focus:border-[color:var(--accent-primary)]" onChange={(event) => setRuleType(event.target.value)} value={ruleType}>
+                <option value="block_on_red">Block on Red Risk</option>
+                <option value="require_skill_load">Require Skill Load</option>
+                <option value="min_compliance">Min Compliance %</option>
+              </select>
+            </label>
+          </div>
+          {ruleType === "require_skill_load" ? (
+            <div className="mt-4">
+              <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">Agent runtimes</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {["claude_code", "codex", "copilot", "cursor", "devin"].map((runtime) => (
+                  <button className={`rounded-full border px-3 py-1.5 text-[12px] ${agentRuntimes.includes(runtime) ? "border-[color:var(--accent-primary)] bg-[rgb(var(--accent-primary-rgb)/0.12)] text-[color:var(--text-primary)]" : "border-[color:var(--bg-border)] text-[color:var(--text-secondary)]"}`} key={runtime} onClick={() => toggleRuntime(runtime)} type="button">{runtime.replace("_", " ")}</button>
+                ))}
+                <span className="self-center text-[12px] text-[color:var(--text-tertiary)]">{agentRuntimes.length === 0 ? "All agents" : ""}</span>
+              </div>
+            </div>
+          ) : null}
+          {ruleType === "min_compliance" ? (
+            <div className="mt-4 max-w-xs">
+              <Input label="Minimum compliance %" onChange={setThreshold} placeholder="80" type="number" value={threshold} />
+            </div>
+          ) : null}
+          <div className="mt-4 flex gap-2">
+            <button className="rounded-full bg-[color:var(--accent-primary)] px-4 py-2 text-[13px] font-semibold text-[color:var(--bg-base)]" onClick={() => void createPrPolicy()} type="button">Save policy</button>
+            <button className="rounded-full border border-[color:var(--bg-border)] px-4 py-2 text-[13px] font-semibold text-[color:var(--text-primary)]" onClick={() => setShowForm(false)} type="button">Cancel</button>
+          </div>
+        </div>
+      ) : null}
       <div className="mt-5 divide-y divide-[color:var(--bg-elevated)]">
-        {policies.length === 0 ? <div className="py-4 text-[13px] text-[color:var(--text-secondary)]">No policies configured. Add from templates below.</div> : null}
+        {policies.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[color:var(--bg-border)] px-4 py-6 text-center">
+            <div className="text-[14px] font-semibold text-[color:var(--text-primary)]">No policies configured</div>
+            <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Add a policy to start enforcing coding standards on PR checks.</p>
+            <button className="mt-4 rounded-full bg-[color:var(--accent-primary)] px-4 py-2 text-[13px] font-semibold text-[color:var(--bg-base)]" onClick={() => setShowForm(true)} type="button">Add Policy</button>
+          </div>
+        ) : null}
         {policies.map((policy) => (
           <div className="flex items-center justify-between gap-4 py-3" key={policy.id}>
             <div>
@@ -129,6 +228,14 @@ export function PolicySettingsPanel({ accessToken, orgId, initialPolicies, templ
             <div className="flex items-center gap-3">
               <span className={policy.violation_count > 0 ? "text-[12px] text-red-300" : "text-[12px] text-[color:var(--text-tertiary)]"}>{policy.violation_count} violations</span>
               <button className="rounded-full border border-[color:var(--bg-border)] px-3 py-1.5 text-[12px]" onClick={() => void toggle(policy)} type="button">{policy.enabled ? "Enabled" : "Disabled"}</button>
+              {deleteId === policy.id ? (
+                <>
+                  <button className="rounded-full border border-red-500/40 px-3 py-1.5 text-[12px] text-red-300" onClick={() => void remove(policy)} type="button">Confirm delete</button>
+                  <button className="rounded-full border border-[color:var(--bg-border)] px-3 py-1.5 text-[12px]" onClick={() => setDeleteId(null)} type="button">Cancel</button>
+                </>
+              ) : (
+                <button className="rounded-full border border-[color:var(--bg-border)] px-3 py-1.5 text-[12px] text-[color:var(--text-secondary)]" onClick={() => setDeleteId(policy.id)} type="button">Delete</button>
+              )}
             </div>
           </div>
         ))}
@@ -144,6 +251,20 @@ export function PolicySettingsPanel({ accessToken, orgId, initialPolicies, templ
       </div>
     </section>
   );
+}
+
+function ruleTypeLabel(ruleType: string) {
+  if (ruleType === "block_on_red") return "Block on Red Risk";
+  if (ruleType === "require_skill_load") return "Require Skill Load";
+  if (ruleType === "min_compliance") return "Min Compliance %";
+  return ruleType.replaceAll("_", " ");
+}
+
+function prPolicyDescription(ruleType: string) {
+  if (ruleType === "block_on_red") return "Block PR checks when Skillayer marks a PR as red risk.";
+  if (ruleType === "require_skill_load") return "Require agent-authored PRs to have Skillayer skills loaded.";
+  if (ruleType === "min_compliance") return "Require PRs to meet a minimum skill compliance threshold.";
+  return "Skillayer policy.";
 }
 
 export function SiemSettingsPanel({ accessToken, orgId }: { accessToken: string; orgId: string }) {

@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 from packages.db.config import settings
-from apps.api.api.routes import admin, autopilot, digest, feed, health, me, metrics, orgs, registry, repos, review, sessions, skills, sla, stripe, webhook, worker
+from apps.api.api.routes import admin, agent_runs, autopilot, cron, digest, feed, health, me, metrics, orgs, registry, repos, review, sessions, skills, sla, stripe, webhook, worker
 
 
 eval_router = importlib.import_module("apps.api.api.routes.eval")
@@ -126,8 +126,10 @@ app.include_router(health.router)
 app.include_router(admin.router)
 app.include_router(webhook.router)
 app.include_router(worker.router)
+app.include_router(cron.router)
 app.include_router(me.router)
 app.include_router(orgs.router)
+app.include_router(agent_runs.router)
 app.include_router(autopilot.router)
 app.include_router(digest.router)
 app.include_router(feed.router)

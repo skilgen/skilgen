@@ -29,8 +29,6 @@ import { AnalyseNowButton } from "./analyse-now-button";
 import { CopyTextButton } from "../repos-browser";
 import { RepoSkillsPanel } from "./skill-source-filter";
 
-export const dynamic = "force-dynamic";
-
 // RepoSkillsPanel renders href={`/dashboard/repos/${repoId}/skills/${skill.id}`}.
 
 type PageProps = {

@@ -1,357 +1,150 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { AlertTriangle, ArrowRight, BarChart3, Github, Radio, Sparkles } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import {
+  API_URL,
+  getAnalyticsCriticality,
   getBootstrapOrg,
   getMyOrg,
   getOrgAnalytics,
   getOrgApiKey,
   getOrgRuntimeBreakdown,
-  getOrgSkillHeatmap,
   type AnalyticsSkill,
-  type OrgAnalytics,
+  type CriticalityItem,
   type RuntimeBreakdownItem,
-  type RuntimeBreakdownResponse,
-  type SkillHeatmapResponse,
-  type SkillHeatmapSkill,
 } from "../../../lib/data";
+import { AnalyticsRiskWorkbench, type ColoadTree } from "./coload-tree";
 import { LiveFeed } from "./LiveFeed";
 
 export const dynamic = "force-dynamic";
 
-const runtimeTheme: Record<string, { label: string; color: string; pill: string; initial: string }> = {
-  claude_code: { label: "Claude Code", color: "#7C3AED", pill: "bg-violet-500/15 text-violet-200 ring-1 ring-violet-400/30", initial: "C" },
-  cursor: { label: "Cursor", color: "#2563EB", pill: "bg-blue-500/15 text-blue-200 ring-1 ring-blue-400/30", initial: "C" },
-  codex: { label: "Codex", color: "#16A34A", pill: "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30", initial: "O" },
-  copilot: { label: "Copilot", color: "#1D4ED8", pill: "bg-indigo-500/15 text-indigo-200 ring-1 ring-indigo-400/30", initial: "G" },
-  unknown: { label: "Other", color: "#6B7280", pill: "bg-white/10 text-[color:var(--text-secondary)] ring-1 ring-white/10", initial: "O" },
+const riskClass = {
+  critical: "bg-red-900/30 text-red-300",
+  high: "bg-amber-900/30 text-amber-300",
+  medium: "bg-blue-900/30 text-blue-300",
+  low: "bg-green-900/30 text-green-300",
 };
-
-function toneForScore(score: number): string {
-  if (score < 40) return "#ef4444";
-  if (score < 70) return "#f59e0b";
-  return "#22c55e";
-}
-
-function formatRelativeTime(value: string | null): string {
-  if (!value) return "Never";
-  const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) return "Unknown";
-  const diffMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
-  if (diffMinutes < 1) return "Just now";
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(value));
-}
-
-function formatCategory(value: string | null): string {
-  if (!value) return "General";
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
 
 function MetricPanel({ label, value, sub }: { label: string; value: string | number; sub: string }) {
   return (
-    <article className="rounded-[24px] border border-[color:var(--bg-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.18)]">
-      <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">{label}</div>
-      <div className="text-[32px] font-semibold leading-none text-[color:var(--text-primary)]">{value}</div>
-      <div className="mt-4 border-t border-white/6 pt-3 text-[12px] text-[color:var(--text-secondary)]">{sub}</div>
+    <article className="rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">{label}</div>
+      <div className="mt-2 text-[32px] font-semibold text-[color:var(--text-primary)]">{value}</div>
+      <div className="mt-3 text-[12px] text-[color:var(--text-secondary)]">{sub}</div>
     </article>
   );
 }
 
-function Sparkline({ points }: { points: OrgAnalytics["daily_loads"] }) {
-  const width = 720;
-  const height = 180;
-  const maxLoads = Math.max(1, ...points.map((point) => point.loads));
-  const coordinates = points.map((point, index) => {
-    const x = points.length <= 1 ? width / 2 : (index / (points.length - 1)) * width;
-    const y = height - (point.loads / maxLoads) * (height - 18) - 9;
-    return `${x},${y}`;
-  });
-  const areaPoints = [`0,${height}`, ...coordinates, `${width},${height}`].join(" ");
-
-  return (
-    <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[radial-gradient(circle_at_top,rgba(201,151,58,0.18),rgba(16,16,24,0.96)_52%)] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.22)]">
-      <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">30-day activity</h2>
-          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Daily skill loads recorded by connected agents across your org.</p>
-        </div>
-        <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[12px] font-semibold text-[color:var(--accent-primary)]">
-          {points.reduce((sum, point) => sum + point.loads, 0)} total loads
-        </div>
-      </div>
-      <svg aria-label="30-day skill usage sparkline" className="h-[180px] w-full" preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`}>
-        <defs>
-          <linearGradient id="analytics-line" x1="0" x2="1" y1="0" y2="1">
-            <stop offset="0%" stopColor="#f5d07a" />
-            <stop offset="100%" stopColor="#C9973A" />
-          </linearGradient>
-          <linearGradient id="analytics-fill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="rgba(201,151,58,0.28)" />
-            <stop offset="100%" stopColor="rgba(201,151,58,0)" />
-          </linearGradient>
-        </defs>
-        <polygon fill="url(#analytics-fill)" points={areaPoints} />
-        <polyline fill="none" points={coordinates.join(" ")} stroke="url(#analytics-line)" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
-      </svg>
-    </section>
-  );
+function RiskBadge({ risk }: { risk: CriticalityItem["risk_level"] }) {
+  return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${riskClass[risk]}`}>{risk}</span>;
 }
 
-function TopSkillsChart({ skills }: { skills: AnalyticsSkill[] }) {
-  const maxLoads = Math.max(1, ...skills.map((skill) => skill.loads ?? 0));
-
-  return (
-    <section className="rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
-      <div className="mb-5">
-        <h2 className="text-[16px] font-semibold text-[color:var(--text-primary)]">Top skills</h2>
-        <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Most loaded skills in the last 30 days.</p>
-      </div>
-      <div className="space-y-4">
-        {skills.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[color:var(--bg-border)] p-6 text-[13px] text-[color:var(--text-secondary)]">No skill loads recorded yet.</div>
-        ) : (
-          skills.map((skill) => {
-            const loads = skill.loads ?? 0;
-            const width = `${Math.max(4, (loads / maxLoads) * 100)}%`;
-            return (
-              <div key={skill.id}>
-                <div className="mb-1 flex items-center justify-between gap-4 text-[13px]">
-                  <div className="min-w-0">
-                    <div className="truncate font-medium text-[color:var(--text-primary)]">{skill.domain}</div>
-                    <div className="truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">{skill.repo_full_name}</div>
-                  </div>
-                  <span className="font-semibold text-[color:var(--accent-primary)]">{loads}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-white/10">
-                  <div className="h-full rounded-full bg-[#C9973A]" style={{ width }} />
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </section>
-  );
+async function getSkillColoadTree(accessToken: string | null, orgId: string): Promise<ColoadTree | null> {
+  try {
+    const response = await fetch(`${API_URL}/orgs/${orgId}/analytics/skill-coload-tree`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as ColoadTree;
+  } catch {
+    return null;
+  }
 }
 
-function ScoreRing({ score }: { score: number }) {
-  const radius = 34;
-  const circumference = 2 * Math.PI * radius;
-  const clamped = Math.max(0, Math.min(100, score));
-  const offset = circumference - (clamped / 100) * circumference;
-  const stroke = toneForScore(clamped);
-
-  return (
-    <div className="relative h-20 w-20">
-      <svg className="h-20 w-20 -rotate-90" viewBox="0 0 96 96">
-        <circle cx="48" cy="48" fill="none" r={radius} stroke="rgba(255,255,255,0.08)" strokeWidth="10" />
-        <circle cx="48" cy="48" fill="none" r={radius} stroke={stroke} strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" strokeWidth="10" />
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center text-[22px] font-semibold text-[color:var(--text-primary)]">{clamped}</div>
-    </div>
-  );
-}
-
-function RuntimeBadge({ runtime }: { runtime: string }) {
-  const theme = runtimeTheme[runtime] ?? runtimeTheme.unknown;
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${theme.pill}`}>{theme.label}</span>;
-}
-
-function CriticalityCard({ skill }: { skill: SkillHeatmapSkill }) {
-  return (
-    <Link
-      className="group relative overflow-hidden rounded-[24px] border border-[color:var(--bg-border)] bg-[linear-gradient(160deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-5 transition-transform duration-200 hover:-translate-y-0.5 hover:border-[rgb(var(--accent-primary-rgb)/0.32)]"
-      href={`/dashboard/repos/${skill.repo_id}/skills/${skill.skill_id}`}
-    >
-      <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,151,58,0.7),transparent)] opacity-70" />
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="truncate text-[18px] font-semibold text-[color:var(--text-primary)]">{skill.domain}</div>
-          <div className="mt-1 truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">{skill.repo_name}</div>
-        </div>
-        <ScoreRing score={skill.criticality_score} />
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        {skill.agent_runtimes.length ? skill.agent_runtimes.map((runtime) => <RuntimeBadge key={runtime} runtime={runtime} />) : <RuntimeBadge runtime="unknown" />}
-      </div>
-
-      <div className="mt-5 flex items-center justify-between gap-4 text-[13px] text-[color:var(--text-secondary)]">
-        <span>
-          {skill.loads_30d} loads · 7d: {skill.loads_7d}
-        </span>
-        <span>{formatRelativeTime(skill.last_loaded_at)}</span>
-      </div>
-
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <div className="text-[12px] font-medium text-[color:var(--text-tertiary)]">{formatCategory(skill.skill_category)}</div>
-        {skill.alert === "stale_but_active" ? (
-          <span className="inline-flex items-center gap-2 rounded-full bg-red-500/12 px-3 py-1 text-[12px] font-semibold text-red-300">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
-            Stale but active
-          </span>
-        ) : null}
-        {skill.alert === "dead_skill" ? (
-          <span className="inline-flex items-center gap-2 rounded-full bg-white/8 px-3 py-1 text-[12px] font-semibold text-[color:var(--text-secondary)]">
-            <span className="text-[11px]">💤</span>
-            Never loaded
-          </span>
-        ) : null}
-      </div>
-    </Link>
-  );
-}
-
-function CriticalityHeatmap({ heatmap }: { heatmap: SkillHeatmapResponse }) {
-  const skills = [...heatmap.skills].sort((left, right) => right.criticality_score - left.criticality_score).slice(0, 12);
-
+function SkillRiskRegister({ items }: { items: CriticalityItem[] }) {
+  const allLow = items.length > 0 && items.every((item) => item.risk_level === "low");
   return (
     <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
-      <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h2 className="text-[20px] font-semibold text-[color:var(--text-primary)]">Skill Criticality</h2>
-          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Which skills are most critical to your agents right now.</p>
-        </div>
-        <Link className="inline-flex items-center gap-2 text-[13px] font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]" href="/dashboard/skills?sort=criticality">
-          View all
-          <ArrowRight className="h-4 w-4" />
-        </Link>
+      <div className="mb-5">
+        <h2 className="text-[20px] font-semibold text-[color:var(--text-primary)]">Skill Risk Register</h2>
+        <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Skills your agents depend on most — sorted by risk, not score.</p>
       </div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {skills.length === 0 ? (
-          <div className="col-span-full rounded-2xl border border-dashed border-[color:var(--bg-border)] p-8 text-[13px] text-[color:var(--text-secondary)]">
-            No skill usage has been recorded yet.
+      {allLow ? <div className="mb-4 rounded-xl border border-[color:var(--accent-green)]/30 bg-[color:var(--accent-green)]/10 p-4 text-sm text-[color:var(--accent-green)]">✓ All skills your agents depend on are high quality — no urgent action needed.</div> : null}
+      <div className="overflow-hidden rounded-xl border border-[color:var(--bg-border)]">
+        <div className="grid grid-cols-[70px_1.1fr_1fr_110px_2fr_80px] gap-3 bg-black/20 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">
+          <span>Rank</span><span>Domain</span><span>Repo</span><span>Risk</span><span>Why</span><span>Action</span>
+        </div>
+        {items.slice(0, 12).map((item) => (
+          <div className="grid grid-cols-[70px_1.1fr_1fr_110px_2fr_80px] gap-3 border-t border-[color:var(--bg-border)] px-4 py-3 text-sm" key={item.skill_id}>
+            <span className="font-semibold text-[color:var(--text-secondary)]">#{item.dependency_rank}</span>
+            <span className="font-medium text-[color:var(--text-primary)]">{item.domain}</span>
+            <span className="text-[color:var(--text-secondary)]">{item.repo_name}</span>
+            <RiskBadge risk={item.risk_level} />
+            <span className="text-[color:var(--text-secondary)]">{item.risk_reason}</span>
+            <Link className="font-semibold text-[color:var(--accent-primary)]" href={`/dashboard/repos/${item.repo_id}/skills/${item.skill_id}${item.risk_level === "critical" || item.risk_level === "high" ? "?tab=edit" : ""}`}>
+              {item.risk_level === "critical" ? "Fix →" : item.risk_level === "high" ? "Update →" : "OK"}
+            </Link>
           </div>
-        ) : (
-          skills.map((skill) => <CriticalityCard key={skill.skill_id} skill={skill} />)
-        )}
-      </div>
-    </section>
-  );
-}
-
-function RuntimeRow({ item, total }: { item: RuntimeBreakdownItem; total: number }) {
-  const theme = runtimeTheme[item.runtime] ?? runtimeTheme.unknown;
-  const width = total > 0 ? `${Math.max(6, (item.loads_30d / total) * 100)}%` : "0%";
-
-  return (
-    <div className="grid gap-3 rounded-2xl border border-white/6 bg-black/10 p-4 md:grid-cols-[220px_minmax(0,1fr)_170px] md:items-center">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full text-[13px] font-semibold text-white" style={{ backgroundColor: theme.color }}>
-          {theme.initial}
-        </div>
-        <div>
-          <div className="font-semibold text-[color:var(--text-primary)]">{item.display_name || theme.label}</div>
-          <div className="text-[12px] text-[color:var(--text-tertiary)]">{item.top_skill_domain ? `Top domain: ${item.top_skill_domain}` : "No dominant skill yet"}</div>
-        </div>
-      </div>
-      <div className="h-3 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full rounded-full" style={{ width, backgroundColor: theme.color }} />
-      </div>
-      <div className="text-right text-[13px] text-[color:var(--text-secondary)]">
-        <div className="font-semibold text-[color:var(--text-primary)]">{item.loads_30d} loads</div>
-        <div>{item.unique_skills} unique skills</div>
-      </div>
-    </div>
-  );
-}
-
-function RuntimeBreakdownSection({ runtimeBreakdown }: { runtimeBreakdown: RuntimeBreakdownResponse | null }) {
-  return (
-    <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
-      <div className="mb-6">
-        <h2 className="text-[20px] font-semibold text-[color:var(--text-primary)]">Agent Runtimes</h2>
-        <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Which coding agents are loading your skills.</p>
-      </div>
-      {!runtimeBreakdown || runtimeBreakdown.total_loads_30d === 0 || runtimeBreakdown.runtimes.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-[color:var(--bg-border)] p-8 text-[14px] text-[color:var(--text-secondary)]">
-          No agent activity recorded yet. Skills are loaded automatically when agents run in repos with Skilgen installed.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {runtimeBreakdown.runtimes.map((item) => (
-            <RuntimeRow item={item} key={item.runtime} total={runtimeBreakdown.total_loads_30d} />
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function EmptyAnalyticsState({
-  hasSkills = false,
-  hasRepos = false,
-}: {
-  hasSkills?: boolean;
-  hasRepos?: boolean;
-}) {
-  const title = !hasRepos ? "Connect a repository to start analytics" : !hasSkills ? "Run analysis to create measurable skills" : "No agent activity yet";
-  const body = !hasRepos
-    ? "Analytics starts after Skillayer can see at least one repository."
-    : !hasSkills
-      ? "Skill usage appears after a connected repository has generated SKILL.md files."
-      : "Analytics appears once coding agents load generated skills from your repositories.";
-  const href = !hasRepos ? "/dashboard/connect" : !hasSkills ? "/dashboard/repos" : "/dashboard/heatmap";
-  const label = !hasRepos ? "Connect repos" : !hasSkills ? "Open Repos" : "Open Heatmap";
-  const Icon = !hasRepos ? Github : !hasSkills ? Sparkles : Radio;
-
-  return (
-    <div className="rounded-[28px] border border-[color:var(--bg-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-12 text-center">
-      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-[rgb(var(--accent-primary-rgb)/0.2)] bg-[rgb(var(--accent-primary-rgb)/0.1)] text-[color:var(--accent-primary)]">
-        <Icon className="h-6 w-6" />
-      </div>
-      <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">{title}</h2>
-      <p className="mx-auto mt-2 max-w-md text-[14px] text-[color:var(--text-secondary)]">
-        {body}
-      </p>
-      <Link
-        className="mt-6 inline-flex h-10 items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-4 text-[13px] font-semibold text-[color:var(--bg-base)] hover:bg-[color:var(--accent-bright)]"
-        href={hasRepos && hasSkills ? "/dashboard/connect" : href}
-      >
-        {hasRepos && hasSkills ? "Connect Claude Code" : label}
-      </Link>
-      {hasRepos && hasSkills ? (
-        <div className="mt-3 flex flex-wrap justify-center gap-2">
-          <Link className="rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-[12px] font-semibold text-[color:var(--text-primary)] hover:bg-white/5" href="/dashboard/connect">Connect Cursor</Link>
-          <Link className="rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-[12px] font-semibold text-[color:var(--text-primary)] hover:bg-white/5" href="/dashboard/connect">Connect Codex</Link>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PredictedCriticality({ heatmap }: { heatmap: SkillHeatmapResponse | null }) {
-  const skills = [...(heatmap?.skills ?? [])].sort((left, right) => left.score_total - right.score_total).slice(0, 6);
-  if (skills.length === 0) return null;
-  return (
-    <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
-      <div className="mb-5">
-        <h2 className="text-[20px] font-semibold text-[color:var(--text-primary)]">Predicted criticality</h2>
-        <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Estimated by score — connect your agent to see actual load-based criticality.</p>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {skills.map((skill) => (
-          <Link className="rounded-lg border border-[color:var(--bg-border)] bg-black/15 p-4 hover:border-[rgb(var(--accent-primary-rgb)/0.32)]" href={`/dashboard/repos/${skill.repo_id}/skills/${skill.skill_id}`} key={skill.skill_id}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate text-[15px] font-semibold text-[color:var(--text-primary)]">{skill.domain}</div>
-                <div className="truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">{skill.repo_name}</div>
-              </div>
-              <span className="rounded-full px-2.5 py-1 text-[12px] font-semibold" style={{ color: toneForScore(skill.score_total), backgroundColor: "rgba(255,255,255,0.06)" }}>{skill.score_total}/100</span>
-            </div>
-          </Link>
         ))}
       </div>
+    </section>
+  );
+}
+
+function TopSkillsActionPanels({ criticality, neverLoaded }: { criticality: CriticalityItem[]; neverLoaded: AnalyticsSkill[] }) {
+  const loaded = criticality.filter((item) => item.load_count_30d > 0).sort((a, b) => b.load_count_30d - a.load_count_30d).slice(0, 8);
+  const max = Math.max(1, ...loaded.map((item) => item.load_count_30d));
+  const uniform = loaded.length > 1 && loaded.every((item) => item.load_count_30d === loaded[0].load_count_30d);
+  return (
+    <section className="grid gap-4 lg:grid-cols-2">
+      <article className="rounded-[24px] border border-[color:var(--accent-primary)]/35 bg-[color:var(--bg-surface)] p-5">
+        <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Most relied on</h2>
+        <p className="mt-1 text-sm text-[color:var(--text-secondary)]">These skills shape the most agent output. Fix high-risk rows first.</p>
+        {uniform ? <div className="mt-4 rounded-lg border border-[color:var(--bg-border)] bg-black/20 p-3 text-sm text-[color:var(--text-secondary)]">Codex loaded all skills uniformly in setup — real differentiation will appear after more agent sessions.</div> : null}
+        <div className="mt-4 space-y-4">
+          {loaded.map((item) => (
+            <div key={item.skill_id}>
+              <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                <div><span className="font-semibold">{item.domain}</span><span className="text-[color:var(--text-tertiary)]"> · {item.repo_name}</span></div>
+                <div className="flex items-center gap-2"><span>{item.load_count_30d} loads</span>{item.is_every_session ? <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs">every session</span> : null}{item.risk_level === "critical" || item.risk_level === "high" ? <RiskBadge risk={item.risk_level} /> : null}</div>
+              </div>
+              <div className="h-2 rounded-full bg-white/10"><div className="h-2 rounded-full bg-[color:var(--accent-primary)]" style={{ width: `${Math.max(4, (item.load_count_30d / max) * 100)}%` }} /></div>
+            </div>
+          ))}
+        </div>
+      </article>
+      <article className="rounded-[24px] border border-red-500/35 bg-[color:var(--bg-surface)] p-5">
+        <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Loaded but never used</h2>
+        <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Skills with zero loads are generating zero value. Check agent references.</p>
+        <div className="mt-4 space-y-3">
+          {neverLoaded.length ? neverLoaded.slice(0, 8).map((skill) => (
+            <Link className="block rounded-lg border border-[color:var(--bg-border)] bg-black/15 p-3 text-sm" href={`/dashboard/repos/${skill.repo_id}/skills/${skill.id}`} key={skill.id}>
+              <span className="font-semibold">{skill.domain}</span><span className="text-[color:var(--text-tertiary)]"> · {skill.repo_name}</span>
+              <div className="mt-1 text-xs text-[color:var(--text-secondary)]">Not referenced in CLAUDE.md?</div>
+            </Link>
+          )) : <div className="rounded-lg border border-[color:var(--accent-green)]/30 bg-[color:var(--accent-green)]/10 p-4 text-sm text-[color:var(--accent-green)]">✓ All skills are being referenced by agents.</div>}
+        </div>
+      </article>
+    </section>
+  );
+}
+
+function RuntimeComparison({ runtimes }: { runtimes: RuntimeBreakdownItem[] }) {
+  const low = runtimes.find((item) => item.avg_skill_score < 60);
+  const narrow = runtimes.find((item) => item.unique_domains <= 2 && item.loads_30d > 0);
+  const insight = low
+    ? `⚠️ ${low.display_name} is loading low-quality skills on average. Improving skill scores will directly improve ${low.display_name}'s code output quality.`
+    : narrow
+      ? `💡 ${narrow.display_name} only loads ${narrow.unique_domains} domain(s) — it may be missing context from other areas. Check that CLAUDE.md references all relevant skills.`
+      : "✓ All agents are loading broad, high-quality skill sets.";
+  return (
+    <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
+      <h2 className="text-[20px] font-semibold text-[color:var(--text-primary)]">Agent Runtimes</h2>
+      <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Which agents are getting the most value from your skills?</p>
+      <div className="mt-5 overflow-hidden rounded-xl border border-[color:var(--bg-border)]">
+        <div className="grid grid-cols-[1fr_90px_150px_140px_150px_1.4fr] gap-3 bg-black/20 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]"><span>Agent</span><span>Sessions</span><span>Unique skills loaded</span><span>Domains covered</span><span>Avg skill quality</span><span>Pattern</span></div>
+        {runtimes.map((item) => (
+          <div className="grid grid-cols-[1fr_90px_150px_140px_150px_1.4fr] gap-3 border-t border-[color:var(--bg-border)] px-4 py-3 text-sm" key={item.runtime}>
+            <span className="font-semibold">{item.display_name}</span><span>{item.loads_30d}</span><span>{item.unique_skills}</span><span>{item.unique_domains}</span><span>{item.avg_skill_score}/100</span><span className="text-[color:var(--text-secondary)]">{item.pattern}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 rounded-xl border border-[color:var(--bg-border)] bg-black/20 p-4 text-sm text-[color:var(--text-secondary)]">{insight}</div>
     </section>
   );
 }
@@ -362,116 +155,46 @@ async function resolveOrgAndToken() {
     const session = await withAuth({ ensureSignedIn: false });
     accessToken = session?.accessToken || "";
   } catch {
-    // Auth can be unavailable in local preview; continue with bootstrap data.
+    accessToken = "";
   }
-
   const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   return { accessToken, org };
 }
 
 export default async function AnalyticsPage() {
   const { accessToken, org } = await resolveOrgAndToken();
-  const [analytics, heatmap, runtimeBreakdown, orgApiKey] = org
+  const [analytics, criticality, runtimeBreakdown, orgApiKey, coloadTree] = org
     ? await Promise.all([
         getOrgAnalytics(accessToken, org.id),
-        getOrgSkillHeatmap(accessToken, org.id),
+        getAnalyticsCriticality(accessToken, org.id),
         getOrgRuntimeBreakdown(accessToken, org.id),
         getOrgApiKey(accessToken, org.id),
+        getSkillColoadTree(accessToken, org.id),
       ])
-    : [null, null, null, null];
-
-  const summary = heatmap?.summary;
-  const showAlertBar = (summary?.stale_but_active ?? 0) > 0;
-  const hasRepos = Boolean(analytics) || (summary?.total_skills ?? 0) > 0;
-  const hasSkills = (analytics?.total_skills ?? summary?.total_skills ?? 0) > 0;
+    : [null, null, null, null, null];
   const hasActivity = (analytics?.total_loads_30d ?? 0) > 0;
 
   return (
     <div className="space-y-6">
-      <div className="mb-2">
+      <header>
         <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">Analytics</h1>
-        <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Live usage intelligence for the skills your agents rely on.</p>
-      </div>
-
-      {showAlertBar ? (
-        <div className="flex flex-col gap-3 rounded-[24px] border border-red-500/30 bg-[linear-gradient(135deg,rgba(127,29,29,0.88),rgba(69,10,10,0.88))] p-5 shadow-[0_24px_60px_rgba(69,10,10,0.3)] md:flex-row md:items-center md:justify-between">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-200" />
-            <p className="text-[14px] font-medium text-red-50">
-              {summary?.stale_but_active} skills are stale but still being loaded by agents. Agents are acting on outdated context right now.
-            </p>
-          </div>
-          <Link className="inline-flex items-center gap-2 text-[13px] font-semibold text-red-100 hover:text-white" href="/dashboard/skills?alert=stale_but_active">
-            View affected skills
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
-      ) : null}
-
+        <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Usage intelligence that explains which skills matter and what to fix next.</p>
+      </header>
       <SectionErrorBoundary section="analytics metrics">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricPanel label="Total loads" value={analytics?.total_loads_30d ?? 0} sub="Observed in the last 30 days" />
-          <MetricPanel label="Critical skills" value={summary?.total_skills ?? 0} sub={`${summary?.healthy ?? 0} healthy, ${summary?.dead_skills ?? 0} dead`} />
-          {hasActivity ? (
-            <MetricPanel label="Most active repo" value={analytics?.most_active_repo?.name ?? "—"} sub={analytics?.most_active_repo ? `${analytics.most_active_repo.loads} loads this month` : "No repo activity yet"} />
-          ) : (
-            <Link className="rounded-[24px] border border-amber-500/30 bg-amber-500/10 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.18)]" href="/dashboard/connect">
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">Agent Setup</div>
-              <div className="text-[28px] font-semibold leading-none text-amber-200">Not connected</div>
-              <div className="mt-4 border-t border-white/6 pt-3 text-[12px] text-[color:var(--text-secondary)]">Connect your agent</div>
-            </Link>
-          )}
-          <MetricPanel
-            label="Most loaded skill"
-            value={analytics?.most_loaded_skill?.domain ?? "—"}
-            sub={analytics?.most_loaded_skill ? `${analytics.most_loaded_skill.loads ?? 0} loads in 30d` : "No dominant skill yet"}
-          />
+          <MetricPanel label="Skills loaded" value={analytics?.unique_skills_loaded ?? 0} sub={`${analytics?.total_skills ?? 0} skills available`} />
+          <MetricPanel label="Most active repo" value={analytics?.most_active_repo?.name ?? "—"} sub={analytics?.most_active_repo ? `${analytics.most_active_repo.loads} loads this month` : "No repo activity yet"} />
+          <MetricPanel label="Most loaded skill" value={analytics?.most_loaded_skill?.domain ?? "—"} sub={analytics?.most_loaded_skill ? `${analytics.most_loaded_skill.loads ?? 0} loads in 30d` : "No dominant skill yet"} />
         </div>
       </SectionErrorBoundary>
-
-      {analytics && hasActivity ? (
-        <>
-          <SectionErrorBoundary section="analytics activity">
-            <Sparkline points={analytics.daily_loads} />
-          </SectionErrorBoundary>
-
-          <SectionErrorBoundary section="analytics heatmap">
-            {heatmap ? <CriticalityHeatmap heatmap={heatmap} /> : <EmptyAnalyticsState hasRepos={hasRepos} hasSkills={hasSkills} />}
-          </SectionErrorBoundary>
-
-          <SectionErrorBoundary section="analytics runtimes">
-            <RuntimeBreakdownSection runtimeBreakdown={runtimeBreakdown} />
-          </SectionErrorBoundary>
-
-          <SectionErrorBoundary section="analytics top skills">
-            <TopSkillsChart skills={analytics.top_skills} />
-          </SectionErrorBoundary>
-
-          {org?.id && orgApiKey?.api_key ? <LiveFeed apiKey={orgApiKey.api_key} orgId={org.id} /> : null}
-        </>
-      ) : (
-        <>
-          <EmptyAnalyticsState hasRepos={hasRepos} hasSkills={hasSkills} />
-          <PredictedCriticality heatmap={heatmap} />
-          {analytics && hasSkills ? (
-            <SectionErrorBoundary section="analytics inventory">
-              <section className="grid gap-4 md:grid-cols-2">
-                <TopSkillsChart skills={analytics.top_skills} />
-                <div className="rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
-                  <div className="mb-4 flex items-center gap-2">
-                    <BarChart3 className="h-4 w-4 text-[color:var(--accent-primary)]" />
-                    <h2 className="text-[16px] font-semibold text-[color:var(--text-primary)]">Inventory ready</h2>
-                  </div>
-                  <p className="text-[13px] leading-6 text-[color:var(--text-secondary)]">
-                    {analytics.total_skills} generated skill{analytics.total_skills === 1 ? "" : "s"} are ready for agent usage tracking. Once agents load them, this page will fill with runtime and activity charts.
-                  </p>
-                </div>
-              </section>
-            </SectionErrorBoundary>
-          ) : null}
-          {org?.id && orgApiKey?.api_key ? <LiveFeed apiKey={orgApiKey.api_key} orgId={org.id} /> : null}
-        </>
-      )}
+      {!hasActivity ? (
+        <div className="rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-8 text-center text-[color:var(--text-secondary)]">No agent activity yet. Connect Claude Code or Codex so Skillayer can show which skills agents depend on.</div>
+      ) : null}
+      {org?.id ? <AnalyticsRiskWorkbench accessToken={accessToken} criticality={criticality ?? []} orgId={org.id} tree={coloadTree} /> : <SkillRiskRegister items={criticality ?? []} />}
+      <TopSkillsActionPanels criticality={criticality ?? []} neverLoaded={analytics?.never_loaded ?? []} />
+      <RuntimeComparison runtimes={runtimeBreakdown?.runtimes ?? []} />
+      {org?.id && orgApiKey?.api_key ? <LiveFeed apiKey={orgApiKey.api_key} orgId={org.id} /> : null}
     </div>
   );
 }

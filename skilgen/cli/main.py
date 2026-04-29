@@ -20,6 +20,7 @@ from skilgen.api.service import analytics_payload, analyze_payload, architecture
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
+from skilgen.commands.check import run_check_command, run_install_hook_command
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
 from skilgen.core.analytics import log_skill_usage
 from skilgen.core.dependency_risk import analyze_dependency_risks, render_dependency_risk_report
@@ -813,6 +814,15 @@ def build_parser() -> argparse.ArgumentParser:
     eval_gaps.add_argument("--org-id", default="")
     eval_gaps.add_argument("--api-url", default="")
 
+    check = subparsers.add_parser("check", help="Scan a diff against org skills and fail on violations.")
+    check.add_argument("--project-root", default=".")
+    check.add_argument("--diff", help="Read a unified diff from a file. Reads stdin when omitted.")
+    check.add_argument("--staged", action="store_true", help="Run git diff --cached and check staged changes.")
+    check.add_argument("--api-url", default="", help="Skillayer API base URL. Defaults to config or SKILGEN_API_URL.")
+
+    install_hook = subparsers.add_parser("install-hook", help="Install a pre-commit hook that runs skilgen check --staged.")
+    install_hook.add_argument("--project-root", default=".")
+
     status = subparsers.add_parser("status", help="Show the current generated output status for a project root.")
     status.add_argument("--project-root", default=".")
 
@@ -1454,6 +1464,10 @@ def main() -> None:
             result = _eval_api_request(api_url, f"/eval/orgs/{org_id}/skill-gaps?status=open", api_key)
             _print_eval_gaps(result if isinstance(result, list) else [])
             return
+    if args.command == "check":
+        sys.exit(run_check_command(args))
+    if args.command == "install-hook":
+        sys.exit(run_install_hook_command(args))
     if args.command == "status":
         print(json.dumps(status_payload(Path(args.project_root).resolve()), indent=2))
         return

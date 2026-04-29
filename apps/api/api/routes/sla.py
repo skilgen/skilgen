@@ -90,7 +90,17 @@ async def list_sla(org_id: str, db: AsyncSession = Depends(get_db), current_org_
 async def create_sla(org_id: str, payload: SLAPolicyPayload, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> SLAPolicyResponse:
     _assert_org_scope(org_id, current_org_id)
     try:
-        policy = SLAPolicy(org_id=org_id, repo_id=payload.repo_id, name=payload.name, coverage_target_pct=payload.coverage_target_pct, alert_email=payload.alert_email, created_at=datetime.utcnow())
+        policy = SLAPolicy(
+            org_id=org_id,
+            repo_id=payload.repo_id,
+            name=payload.name,
+            coverage_target_pct=payload.coverage_target_pct,
+            alert_email=payload.alert_email,
+            is_active=True,
+            created_at=datetime.utcnow(),
+            last_checked_at=None,
+            last_status="unknown",
+        )
         db.add(policy)
         await db.commit()
         await db.refresh(policy)

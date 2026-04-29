@@ -14,9 +14,11 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.analysis import run_analysis
+from apps.api.api.services.commit_check import publish_pr_commit_check
+from apps.api.api.services.pr_attribution import attribute_pr
 from packages.db.config import settings
 from packages.db.database import AsyncSessionLocal, get_db
-from packages.db.models import AnalysisRun, Org, Repo
+from packages.db.models import AnalysisRun, Commit, Org, PullRequest, Repo
 
 
 router = APIRouter(tags=["webhook"])
@@ -90,6 +92,214 @@ async def _upsert_repo(db: AsyncSession, org: Org, repo_payload: dict[str, Any],
     return repo
 
 
+def _parse_github_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=None)
+        except ValueError:
+            return None
+    return None
+
+
+def _normalize_pr_state(pr_payload: dict[str, Any]) -> str:
+    if pr_payload.get("merged"):
+        return "merged"
+    state = str(pr_payload.get("state") or "open").lower()
+    if state == "closed":
+        return "closed"
+    return "open"
+
+
+def _github_user_login(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return value.get("login") or value.get("username") or value.get("name")
+    return None
+
+
+def _upsert_check_run_raw(raw: dict[str, Any] | None, check_run: dict[str, Any], action: str | None) -> dict[str, Any]:
+    existing = dict(raw or {})
+    runs = list(existing.get("check_runs") or [])
+    name = str(check_run.get("name") or "")
+    head_sha = str(check_run.get("head_sha") or "")
+    summary = {
+        "name": name,
+        "head_sha": head_sha,
+        "status": check_run.get("status"),
+        "conclusion": check_run.get("conclusion"),
+        "started_at": check_run.get("started_at"),
+        "completed_at": check_run.get("completed_at"),
+        "html_url": check_run.get("html_url"),
+        "external_id": check_run.get("external_id"),
+        "action": action,
+        "raw": check_run,
+    }
+    replaced = False
+    for index, item in enumerate(runs):
+        if item.get("name") == name and item.get("head_sha") == head_sha:
+            runs[index] = summary
+            replaced = True
+            break
+    if not replaced:
+        runs.append(summary)
+    existing["check_runs"] = runs
+    return existing
+
+
+def _pr_raw(current_raw: dict[str, Any] | None, pull_request: dict[str, Any], payload: dict[str, Any], action: str | None) -> dict[str, Any]:
+    raw = dict(current_raw or {})
+    raw["github"] = pull_request
+    raw["last_event"] = action
+    raw["repository"] = payload.get("repository") or {}
+    raw["sender"] = payload.get("sender") or {}
+    raw.setdefault("check_runs", [])
+    return raw
+
+
+async def _upsert_pull_request_record(db: AsyncSession, repo: Repo, payload: dict[str, Any], action: str | None) -> PullRequest:
+    pull_request = payload.get("pull_request") or {}
+    pr_number = int(payload.get("number") or pull_request.get("number") or 0)
+    result = await db.execute(
+        select(PullRequest).where(PullRequest.repo_id == repo.id, PullRequest.github_pr_number == pr_number)
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        record = PullRequest(repo_id=repo.id, github_pr_number=pr_number)
+        db.add(record)
+        await db.flush()
+
+    user = pull_request.get("user") or {}
+    head = pull_request.get("head") or {}
+    base = pull_request.get("base") or {}
+    record.author_login = user.get("login")
+    record.author_type = user.get("type")
+    record.head_sha = head.get("sha")
+    record.base_sha = base.get("sha")
+    record.title = pull_request.get("title")
+    record.body = pull_request.get("body")
+    record.state = _normalize_pr_state(pull_request)
+    record.opened_at = _parse_github_datetime(pull_request.get("created_at"))
+    record.merged_at = _parse_github_datetime(pull_request.get("merged_at"))
+    record.closed_at = _parse_github_datetime(pull_request.get("closed_at"))
+    record.additions = pull_request.get("additions")
+    record.deletions = pull_request.get("deletions")
+    record.changed_files = pull_request.get("changed_files")
+    record.raw = _pr_raw(record.raw, pull_request, payload, action)
+    record.updated_at = datetime.utcnow()
+    return record
+
+
+async def _upsert_commit_record(
+    db: AsyncSession,
+    repo: Repo,
+    commit_payload: dict[str, Any],
+    pr: PullRequest | None = None,
+) -> Commit | None:
+    sha = str(commit_payload.get("id") or commit_payload.get("sha") or "")
+    if not sha:
+        return None
+    result = await db.execute(select(Commit).where(Commit.repo_id == repo.id, Commit.sha == sha))
+    record = result.scalar_one_or_none()
+    if record is None:
+        record = Commit(repo_id=repo.id, sha=sha)
+        db.add(record)
+        await db.flush()
+
+    commit = commit_payload.get("commit") or commit_payload
+    author = commit.get("author") or commit_payload.get("author") or {}
+    committer = commit.get("committer") or commit_payload.get("committer") or {}
+    stats = commit_payload.get("stats") or {}
+    record.author_login = _github_user_login(commit_payload.get("author")) or _github_user_login(author)
+    record.author_email = author.get("email") if isinstance(author, dict) else None
+    record.committer_login = _github_user_login(commit_payload.get("committer")) or _github_user_login(committer)
+    record.message = commit.get("message") or commit_payload.get("message")
+    record.authored_at = _parse_github_datetime(author.get("date") if isinstance(author, dict) else None)
+    record.committed_at = _parse_github_datetime(committer.get("date") if isinstance(committer, dict) else commit_payload.get("timestamp"))
+    added = commit_payload.get("added")
+    removed = commit_payload.get("removed")
+    record.additions = (
+        stats.get("additions")
+        if isinstance(stats, dict) and "additions" in stats
+        else (len(added) if isinstance(added, list) else None)
+    )
+    record.deletions = (
+        stats.get("deletions")
+        if isinstance(stats, dict) and "deletions" in stats
+        else (len(removed) if isinstance(removed, list) else None)
+    )
+    if pr is not None:
+        record.pr_id = pr.id
+    record.raw = commit_payload
+    record.updated_at = datetime.utcnow()
+    return record
+
+
+async def _upsert_check_run_record(db: AsyncSession, payload: dict[str, Any], action: str | None) -> PullRequest | None:
+    repo_payload = payload.get("repository") or {}
+    full_name = str(repo_payload.get("full_name") or "")
+    result = await db.execute(select(Repo).where(Repo.full_name == full_name))
+    repo = result.scalar_one_or_none()
+    if repo is None or not repo.is_active:
+        return None
+    check_run = payload.get("check_run") or {}
+    head_sha = str(check_run.get("head_sha") or "")
+    if not head_sha:
+        return None
+    result = await db.execute(select(PullRequest).where(PullRequest.repo_id == repo.id, PullRequest.head_sha == head_sha))
+    pr = result.scalar_one_or_none()
+    if pr is None:
+        return None
+    pr.raw = _upsert_check_run_raw(pr.raw, check_run, action)
+    pr.updated_at = datetime.utcnow()
+    return pr
+
+
+async def _append_pr_review_event(db: AsyncSession, payload: dict[str, Any], action: str | None) -> PullRequest | None:
+    if action != "submitted":
+        return None
+    repo_payload = payload.get("repository") or {}
+    full_name = str(repo_payload.get("full_name") or "")
+    result = await db.execute(select(Repo).where(Repo.full_name == full_name))
+    repo = result.scalar_one_or_none()
+    if repo is None or not repo.is_active:
+        return None
+    pull_request = payload.get("pull_request") or {}
+    pr_number = int(payload.get("number") or pull_request.get("number") or 0)
+    result = await db.execute(select(PullRequest).where(PullRequest.repo_id == repo.id, PullRequest.github_pr_number == pr_number))
+    pr = result.scalar_one_or_none()
+    if pr is None:
+        pr = await _upsert_pull_request_record(db, repo, payload, action)
+    review = payload.get("review") or {}
+    raw = dict(pr.raw or {})
+    reviews = list(raw.get("reviews") or [])
+    review_id = review.get("id")
+    summary = {
+        "id": review_id,
+        "state": review.get("state"),
+        "author_login": _github_user_login(review.get("user")),
+        "submitted_at": review.get("submitted_at"),
+        "body": review.get("body"),
+        "html_url": review.get("html_url"),
+        "raw": review,
+    }
+    replaced = False
+    for index, item in enumerate(reviews):
+        if item.get("id") == review_id:
+            reviews[index] = summary
+            replaced = True
+            break
+    if not replaced:
+        reviews.append(summary)
+    raw["reviews"] = reviews
+    pr.raw = raw
+    pr.updated_at = datetime.utcnow()
+    return pr
+
+
 async def publish_to_qstash(body: dict[str, Any]) -> bool:
     token = os.getenv("QSTASH_TOKEN", "")
     if not token:
@@ -156,6 +366,26 @@ async def _run_development_job(payload: dict[str, Any]) -> None:
             base_score=payload.get("base_score"),
             head_sha=payload.get("head_sha"),
         )
+
+
+async def _run_attribution_job(pr_id: str) -> None:
+    async with AsyncSessionLocal() as db:
+        try:
+            await attribute_pr(pr_id, db)
+        except Exception:
+            logger.exception("PR attribution failed for %s", pr_id)
+
+
+async def _run_pr_commit_check_job(repo_id: str, pr_id: str, sha: str, installation_id: int, base_sha: str | None = None) -> None:
+    async with AsyncSessionLocal() as db:
+        try:
+            repo = await db.get(Repo, repo_id)
+            pr = await db.get(PullRequest, pr_id)
+            if repo is None or pr is None:
+                return
+            await publish_pr_commit_check(repo=repo, pr=pr, sha=sha, db=db, installation_id=installation_id, base_sha=base_sha)
+        except Exception:
+            logger.exception("PR commit check failed for %s", pr_id)
 
 
 async def _queue_analysis(request: Request, background_tasks: BackgroundTasks, payload: dict[str, Any]) -> bool:
@@ -233,6 +463,12 @@ async def github_webhook(
             repo = result.scalar_one_or_none()
             if repo is None or not repo.is_active:
                 return {"ignored": True}
+            linked_pr: PullRequest | None = None
+            pr_payload = payload.get("pull_request")
+            if isinstance(pr_payload, dict):
+                linked_pr = await _upsert_pull_request_record(db, repo, {"pull_request": pr_payload, "number": pr_payload.get("number"), "repository": repo_payload}, action)
+            for commit_payload in payload.get("commits") or []:
+                await _upsert_commit_record(db, repo, commit_payload, linked_pr)
             run = AnalysisRun(
                 repo_id=repo.id,
                 trigger="push",
@@ -270,7 +506,7 @@ async def github_webhook(
             raise
 
     if x_github_event == "pull_request":
-        if action not in {"opened", "synchronize", "reopened"}:
+        if action not in {"opened", "synchronize", "closed", "merged", "reopened", "edited"}:
             return {"ignored": True}
         try:
             repo_payload = payload.get("repository") or {}
@@ -283,9 +519,18 @@ async def github_webhook(
                 return {"ignored": True}
 
             pr_number = int(payload.get("number") or pull_request.get("number") or 0)
+            pr_record = await _upsert_pull_request_record(db, repo, payload, action)
+            for commit_payload in payload.get("commits") or []:
+                await _upsert_commit_record(db, repo, commit_payload, pr_record)
             installation_id = int((payload.get("installation") or {}).get("id") or 0)
             base_score = await _latest_push_score(db, repo)
             repo.github_installation_id = installation_id or repo.github_installation_id
+
+            if action in {"closed", "merged", "edited"}:
+                await db.commit()
+                if action in {"closed", "merged"}:
+                    background_tasks.add_task(_run_attribution_job, pr_record.id)
+                return {"captured": True, "pr_id": pr_record.id}
 
             run = AnalysisRun(
                 repo_id=repo.id,
@@ -299,6 +544,12 @@ async def github_webhook(
             db.add(run)
             await db.flush()
             await db.commit()
+            if action in {"opened", "synchronize"}:
+                background_tasks.add_task(_run_attribution_job, pr_record.id)
+                head_sha = str(head.get("sha") or "")
+                base_sha = str((pull_request.get("base") or {}).get("sha") or "")
+                if head_sha and installation_id:
+                    background_tasks.add_task(_run_pr_commit_check_job, repo.id, pr_record.id, head_sha, installation_id, base_sha)
 
             try:
                 success = await _queue_analysis(
@@ -325,6 +576,30 @@ async def github_webhook(
             logger.error(traceback.format_exc())
             print(f"WEBHOOK ERROR: {exc}")
             print(traceback.format_exc())
+            raise
+
+    if x_github_event == "pull_request_review":
+        try:
+            pr = await _append_pr_review_event(db, payload, action)
+            if pr is None:
+                return {"ignored": True}
+            await db.commit()
+            return {"captured": True, "pr_id": pr.id}
+        except Exception as exc:
+            logger.error(f"Webhook pull_request_review handler error: {exc}")
+            logger.error(traceback.format_exc())
+            raise
+
+    if x_github_event == "check_run":
+        try:
+            pr = await _upsert_check_run_record(db, payload, action)
+            if pr is None:
+                return {"ignored": True}
+            await db.commit()
+            return {"captured": True, "pr_id": pr.id}
+        except Exception as exc:
+            logger.error(f"Webhook check_run handler error: {exc}")
+            logger.error(traceback.format_exc())
             raise
 
     return {"ignored": True}

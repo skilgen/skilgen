@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, JSON, String, Text
+from sqlalchemy import Boolean, ForeignKey, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from packages.db.models.base import Base, new_uuid, utcnow
@@ -60,6 +60,7 @@ class Skill(Base):
     score_freshness: Mapped[int] = mapped_column(default=0)
     score_structure: Mapped[int] = mapped_column(default=0)
     is_stale: Mapped[bool] = mapped_column(default=False)
+    is_enterprise: Mapped[bool] = mapped_column(Boolean, default=False)
     anti_patterns: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     load_count_30d: Mapped[int] = mapped_column(default=0)
     last_loaded_at: Mapped[datetime | None] = mapped_column(nullable=True)

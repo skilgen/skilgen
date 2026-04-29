@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
@@ -42,6 +43,30 @@ def _provider_settings(org_settings: dict[str, Any] | None) -> tuple[str, str, s
 def _snippet(response: httpx.Response) -> str:
     text = response.text.replace("\n", " ").strip()
     return text[:500]
+
+
+def _openai_max_tokens_param(model: str, max_tokens: int) -> dict[str, int]:
+    """
+    Newer OpenAI reasoning models use max_completion_tokens instead of max_tokens.
+    Keep custom/OpenAI-compatible defaults backward-compatible unless the model ID
+    clearly belongs to the newer OpenAI family.
+    """
+    model_lower = (model or "").lower()
+    if re.match(r"^o\d", model_lower):
+        return {"max_completion_tokens": max_tokens}
+    if re.match(r"^gpt-(4\.5|[5-9])", model_lower):
+        return {"max_completion_tokens": max_tokens}
+    return {"max_tokens": max_tokens}
+
+
+def _build_openai_messages(model: str, system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
+    model_lower = (model or "").lower()
+    if re.match(r"^o\d", model_lower):
+        return [{"role": "user", "content": f"{system_prompt}\n\n{user_prompt}"}]
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
 
 
 async def _post_json(url: str, *, headers: dict[str, str], json: dict[str, Any], params: dict[str, str] | None = None) -> dict[str, Any]:
@@ -95,8 +120,8 @@ async def call_llm(
             headers={"Authorization": f"Bearer {api_key}", "content-type": "application/json"},
             json={
                 "model": model or "gpt-4o-mini",
-                "max_tokens": max_tokens,
-                "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                **_openai_max_tokens_param(model or "gpt-4o-mini", max_tokens),
+                "messages": _build_openai_messages(model or "gpt-4o-mini", system_prompt, user_prompt),
             },
         )
         choices = payload.get("choices")

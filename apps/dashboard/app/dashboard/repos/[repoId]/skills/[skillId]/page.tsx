@@ -7,8 +7,6 @@ import { SkillViewTracker } from "@/components/skill-view-tracker";
 import { getRepo, getRepoSkillUsageStats, getSkill, getSkillVersions, type Repo, type Skill, type SkillUsageStats, type SkillVersionSummary } from "../../../../../../lib/data";
 import { SkillDetailShell } from "./skill-detail-shell";
 
-export const dynamic = "force-dynamic";
-
 type PageProps = {
   params: Promise<{ repoId: string; skillId: string }>;
 };

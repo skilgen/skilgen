@@ -32,7 +32,8 @@ DOMAIN_FILE_HINTS = {
 def _related_files(repo: Repo, domain: str, skill_count: int) -> list[str]:
     base = repo.full_name.split("/")[-1] if repo.full_name else repo.name
     count = max(0, min(6, skill_count + 2))
-    return [f"{base}/{hint}_{index}.py" for index, hint in enumerate(DOMAIN_FILE_HINTS[domain], start=1)][:count]
+    hints = DOMAIN_FILE_HINTS.get(domain, ("src", "lib", "app"))
+    return [f"{base}/{hint}_{index}.py" for index, hint in enumerate(hints, start=1)][:count]
 
 
 def compute_knowledge_concentration(repo: Repo, skills: list[Skill]) -> list[ConcentrationRisk]:

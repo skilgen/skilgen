@@ -4,8 +4,6 @@ import { ArrowLeft, GitCompare, History, Search } from "lucide-react";
 
 import { getRepo, getRepoSnapshots, getRepoSkills, type RepoSnapshot, type Skill } from "../../../../../lib/data";
 
-export const dynamic = "force-dynamic";
-
 type PageProps = {
   params: Promise<{ repoId: string }>;
   searchParams?: Promise<{ at?: string | string[] }>;
@@ -20,8 +18,28 @@ function formatDate(value: string): string {
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
+function snapshotTime(value: string): number {
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
+}
+
+function selectedSnapshot(snapshots: RepoSnapshot[], selectedAt: string): RepoSnapshot | null {
+  if (!snapshots.length) return null;
+  if (!selectedAt) return snapshots[0];
+
+  const exact = snapshots.find((snapshot) => snapshot.captured_at === selectedAt || snapshot.id === selectedAt);
+  if (exact) return exact;
+
+  const target = new Date(selectedAt).getTime();
+  if (Number.isNaN(target)) return snapshots[0];
+
+  return [...snapshots].sort((left, right) => Math.abs(snapshotTime(left.captured_at) - target) - Math.abs(snapshotTime(right.captured_at) - target))[0] ?? snapshots[0];
+}
+
 function fallbackSnapshots(skills: Skill[]): RepoSnapshot[] {
-  const now = Date.now();
+  const base = new Date();
+  base.setMinutes(0, 0, 0);
+  const now = base.getTime();
   return [0, 7, 21, 45].map((age, index) => {
     const date = new Date(now - age * 86400000).toISOString();
     const score = Math.max(28, Math.round((skills.reduce((sum, skill) => sum + skill.score.total, 0) / Math.max(1, skills.length)) - index * 4));
@@ -67,7 +85,7 @@ export default async function TimeMachinePage({ params, searchParams }: PageProp
     getRepoSnapshots(accessToken, repoId),
   ]);
   const snapshots = (snapshotsPayload?.length ? snapshotsPayload : fallbackSnapshots(skills ?? [])).sort((left, right) => new Date(right.captured_at).getTime() - new Date(left.captured_at).getTime());
-  const selected = snapshots.find((snapshot) => snapshot.captured_at === selectedAt) ?? snapshots[0] ?? null;
+  const selected = selectedSnapshot(snapshots, selectedAt);
 
   return (
     <div>
@@ -119,7 +137,7 @@ export default async function TimeMachinePage({ params, searchParams }: PageProp
 
       {selected ? (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-          <section className="overflow-hidden rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
+          <section className="overflow-hidden rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]" key={selected.id}>
             <div className="grid grid-cols-[1fr_110px_110px_140px] border-b border-[color:var(--bg-border)] px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--text-tertiary)]">
               <span>Snapshot</span>
               <span>Score</span>

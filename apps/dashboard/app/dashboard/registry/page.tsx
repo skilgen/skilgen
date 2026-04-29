@@ -1,9 +1,7 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
 import { getBootstrapOrg, getCompatibilityMatrix, getMarketplaceEntries, getMyOrg, getOrgRegistryEntries } from "../../../lib/data";
-import { RegistryShell } from "./registry-shell";
-
-export const dynamic = "force-dynamic";
+import { RegistryAIClient } from "./registry-ai-client";
 
 type RegistryPageProps = {
   searchParams?: Promise<{ tab?: string }>;
@@ -20,13 +18,13 @@ export default async function RegistryPage({ searchParams }: RegistryPageProps) 
   const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   const orgId = org?.id ?? "";
   const resolved = searchParams ? await searchParams : {};
-  const activeTab = resolved.tab === "marketplace" || resolved.tab === "import" || resolved.tab === "compatibility" ? resolved.tab : "org";
+  const activeTab = resolved.tab === "marketplace" || resolved.tab === "import" || resolved.tab === "compatibility" || resolved.tab === "skill-map" ? resolved.tab : "org";
   const [orgEntries, marketplace, compatibility] = orgId
     ? await Promise.all([getOrgRegistryEntries(accessToken, orgId), getMarketplaceEntries(), getCompatibilityMatrix(accessToken, orgId)])
     : [null, null, null];
 
   return (
-    <RegistryShell
+    <RegistryAIClient
       accessToken={accessToken}
       activeTab={activeTab}
       compatibility={compatibility}

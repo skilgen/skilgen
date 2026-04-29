@@ -4,8 +4,6 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
-export const dynamic = "force-dynamic";
-
 type Session = { id: string; repo_id: string; repo_name: string | null; agent_runtime: string; duration_seconds: number | null; skills_loaded: string[]; outcome: string; notes: string | null; code_produced: string | null; created_at: string };
 type Replay = { chunk_index: number; code: string; matched_skill: string | null; confidence: number };
 

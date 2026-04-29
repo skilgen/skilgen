@@ -5,8 +5,6 @@ import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { UpgradeButton } from "@/components/upgrade-button";
 import { UpgradePageTracker } from "@/components/upgrade-page-tracker";
 
-export const dynamic = "force-dynamic";
-
 type Plan = {
   name: "Free" | "Team" | "Enterprise";
   price: string;

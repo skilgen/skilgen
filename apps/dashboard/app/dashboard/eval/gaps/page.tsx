@@ -1,9 +1,7 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
-import { getBootstrapOrg, getEvalSkillGaps, getMyOrg } from "../../../../lib/data";
+import { getBootstrapOrg, getEvalSkillGapsResponse, getMyOrg } from "../../../../lib/data";
 import { GapsShell } from "./gaps-shell";
-
-export const dynamic = "force-dynamic";
 
 async function load(): Promise<{ accessToken: string; orgId: string }> {
   let accessToken = "";
@@ -22,7 +20,7 @@ async function load(): Promise<{ accessToken: string; orgId: string }> {
 export default async function SkillGapsPage({ searchParams }: { searchParams: Promise<{ status?: string }> }): Promise<React.ReactElement> {
   const { accessToken, orgId } = await load();
   const params = await searchParams;
-  const status = params.status ?? "open";
-  const gaps = (await getEvalSkillGaps(accessToken, orgId, status)) ?? [];
-  return <GapsShell accessToken={accessToken} gaps={gaps} orgId={orgId} status={status} />;
+  const status = params.status ?? "all";
+  const response = await getEvalSkillGapsResponse(accessToken, orgId, status);
+  return <GapsShell accessToken={accessToken} orgId={orgId} response={response} status={status} />;
 }

@@ -9,7 +9,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from packages.db.models.base import Base, new_uuid, utcnow
 
 if TYPE_CHECKING:
+    from packages.db.models.digest_config import DigestConfig
     from packages.db.models.repo import Repo
+    from packages.db.models.source_connection import SourceConnection
 
 
 class Org(Base):
@@ -27,6 +29,8 @@ class Org(Base):
     plan_seat_limit: Mapped[int] = mapped_column(default=3)
     score_threshold: Mapped[int] = mapped_column(default=60)
     slack_webhook_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    slack_standup_enabled: Mapped[bool] = mapped_column(default=False)
+    slack_standup_hour: Mapped[int] = mapped_column(default=9)
     notify_on_pr: Mapped[bool] = mapped_column(default=True)
     notify_on_stale: Mapped[bool] = mapped_column(default=True)
     notification_settings: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True, default=dict)
@@ -42,3 +46,5 @@ class Org(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
     repos: Mapped[list["Repo"]] = relationship(back_populates="org")
+    source_connections: Mapped[list["SourceConnection"]] = relationship(back_populates="org")
+    digest_config: Mapped["DigestConfig | None"] = relationship(back_populates="org")

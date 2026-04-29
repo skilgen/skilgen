@@ -8,10 +8,10 @@ import type { LLMConfig } from "../../../lib/data";
 const CLIENT_API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
 
 const PROVIDERS = [
-  { id: "anthropic", name: "Anthropic", note: "Claude models", models: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-3-5"], placeholder: "sk-ant-..." },
-  { id: "openai", name: "OpenAI", note: "GPT-4o, etc.", models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"], placeholder: "sk-..." },
-  { id: "gemini", name: "Gemini", note: "Google AI", models: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"], placeholder: "AIza..." },
-  { id: "custom", name: "Custom", note: "OpenAI-compatible", models: ["llama-3.1-70b"], placeholder: "Your API key" },
+  { id: "anthropic", name: "Anthropic", note: "Claude models", models: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-3-5"], placeholder: "sk-ant-...", hint: "claude-opus-4-5, claude-sonnet-4-5, claude-haiku-3-5" },
+  { id: "openai", name: "OpenAI", note: "GPT-4o, o-series", models: ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1-mini", "gpt-4-turbo"], placeholder: "sk-...", hint: "gpt-4o, gpt-4o-mini, o3-mini, o1-mini, gpt-4-turbo" },
+  { id: "gemini", name: "Gemini", note: "Google AI", models: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"], placeholder: "AIza...", hint: "gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash" },
+  { id: "custom", name: "Custom", note: "OpenAI-compatible", models: ["llama-3.1-70b"], placeholder: "Your API key", hint: "your-model-id (depends on your endpoint)" },
 ] as const;
 
 type ProviderId = (typeof PROVIDERS)[number]["id"];
@@ -37,6 +37,23 @@ function emptyConfig(): LLMConfig {
   };
 }
 
+function commonFix(error: string, model: string): string | null {
+  const lower = error.toLowerCase();
+  if (lower.includes("max_tokens") || lower.includes("max_completion_tokens")) {
+    return "ℹ This model requires max_completion_tokens. Skillayer has applied this fix automatically. Try Test connection again.";
+  }
+  if (lower.includes("system") && lower.includes("role")) {
+    return "ℹ This model does not support system prompts. Skillayer has applied the o-series fix. Try again.";
+  }
+  if (lower.includes("invalid api key") || lower.includes("401")) {
+    return "ℹ Check that your API key is correct and has not expired.";
+  }
+  if (lower.includes("model not found") || lower.includes("404")) {
+    return `ℹ Model name '${model}' was not found. Check the exact model ID.`;
+  }
+  return null;
+}
+
 export function LLMConfigPanel({ accessToken, initialConfig, orgId }: { accessToken: string; initialConfig: LLMConfig | null; orgId: string }) {
   const initial = initialConfig ?? emptyConfig();
   const [provider, setProvider] = useState<ProviderId>((PROVIDERS.some((item) => item.id === initial.provider) ? initial.provider : "custom") as ProviderId);
@@ -54,6 +71,7 @@ export function LLMConfigPanel({ accessToken, initialConfig, orgId }: { accessTo
     tone: initial.is_configured ? "ok" : "warn",
     text: initial.is_configured ? `Using ${providerName(initial.provider ?? "")} · ${initial.model ?? "model"} · key ending in ${initial.api_key_hint ?? "saved"}` : "Choose a provider and save an API key to enable Improve with AI.",
   });
+  const [fixHint, setFixHint] = useState<string | null>(null);
 
   const selectedProvider = useMemo(() => PROVIDERS.find((item) => item.id === provider) ?? PROVIDERS[0], [provider]);
   const needsBaseUrl = provider === "custom";
@@ -64,6 +82,7 @@ export function LLMConfigPanel({ accessToken, initialConfig, orgId }: { accessTo
       return;
     }
     setSaving(true);
+    setFixHint(null);
     setStatus({ tone: "warn", text: "Saving model configuration..." });
     try {
       const response = await fetch(`${CLIENT_API_URL}/orgs/${orgId}/llm-config`, {
@@ -92,6 +111,7 @@ export function LLMConfigPanel({ accessToken, initialConfig, orgId }: { accessTo
 
   async function testConnection() {
     setTesting(true);
+    setFixHint(null);
     setStatus({ tone: "warn", text: "Testing provider connection..." });
     try {
       const response = await fetch(`${CLIENT_API_URL}/orgs/${orgId}/llm-config/test`, {
@@ -103,7 +123,9 @@ export function LLMConfigPanel({ accessToken, initialConfig, orgId }: { accessTo
       if (!response.ok || body.success === false) throw new Error(body.error || body.detail || "Connection test failed.");
       setStatus({ tone: "ok", text: `Connected! Response: ${body.response ?? "OK"}` });
     } catch (error) {
-      setStatus({ tone: "error", text: error instanceof Error ? error.message : "Connection test failed." });
+      const text = error instanceof Error ? error.message : "Connection test failed.";
+      setStatus({ tone: "error", text });
+      setFixHint(commonFix(text, model.trim()));
     } finally {
       setTesting(false);
     }
@@ -150,6 +172,7 @@ export function LLMConfigPanel({ accessToken, initialConfig, orgId }: { accessTo
 
       <div className={`mb-5 rounded-md border px-4 py-3 text-[13px] ${status.tone === "ok" ? "border-green-500/30 bg-green-500/10 text-green-200" : status.tone === "error" ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}`}>
         {status.text}
+        {fixHint ? <div className="mt-2 border-t border-current/20 pt-2 text-[12px] leading-5">{fixHint}</div> : null}
       </div>
 
       <div className="grid gap-3 lg:grid-cols-4">
@@ -182,6 +205,7 @@ export function LLMConfigPanel({ accessToken, initialConfig, orgId }: { accessTo
           <datalist id="llm-models">
             {selectedProvider.models.map((option) => <option key={option} value={option} />)}
           </datalist>
+          <span className="mt-1.5 block text-[11px] text-[color:var(--text-tertiary)]">Suggested IDs: {selectedProvider.hint}</span>
         </label>
 
         <label className="block">

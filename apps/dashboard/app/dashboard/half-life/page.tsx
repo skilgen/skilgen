@@ -3,8 +3,6 @@ import { withAuth } from "@workos-inc/authkit-nextjs";
 import { getBootstrapOrg, getHalfLifeSummary, getMyOrg } from "../../../lib/data";
 import { HalfLifeShell } from "./half-life-shell";
 
-export const dynamic = "force-dynamic";
-
 export default async function HalfLifePage() {
   let accessToken = "";
   try {

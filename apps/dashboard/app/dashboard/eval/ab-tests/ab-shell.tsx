@@ -3,6 +3,7 @@
 import { FlaskConical, Plus } from "lucide-react";
 import type { ReactElement } from "react";
 import { useMemo, useState } from "react";
+import useSWR from "swr";
 
 import type { ABTest } from "../../../../lib/data";
 
@@ -19,6 +20,15 @@ function pct(value: number | null | undefined): string {
 }
 
 export function ABShell({ accessToken, orgId, skills, tests }: { accessToken: string; orgId: string; skills: SkillOption[]; tests: ABTest[] }): ReactElement {
+  const fetcher = async (url: string): Promise<ABTest[]> => {
+    const response = await fetch(url, { headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {} });
+    if (!response.ok) throw new Error("Could not load A/B tests");
+    return response.json() as Promise<ABTest[]>;
+  };
+  const { data: liveTests = tests, mutate, isValidating } = useSWR(`${API_URL}/eval/orgs/${orgId}/ab-tests`, fetcher, {
+    fallbackData: tests,
+    refreshInterval: 10000,
+  });
   const [open, setOpen] = useState(false);
   const [skillId, setSkillId] = useState(skills[0]?.id ?? "");
   const selected = skills.find((skill) => skill.id === skillId);
@@ -33,23 +43,24 @@ export function ABShell({ accessToken, orgId, skills, tests }: { accessToken: st
       headers: { "Content-Type": "application/json", ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
       body: JSON.stringify({ skill_id: skillId, name: name || defaultName, control_version_id: control.id, treatment_version_id: treatment.id }),
     });
-    window.location.reload();
+    await mutate();
+    setOpen(false);
   }
   async function conclude(testId: string): Promise<void> {
     await fetch(`${API_URL}/eval/orgs/${orgId}/ab-tests/${testId}/conclude`, { method: "POST", headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {} });
-    window.location.reload();
+    await mutate();
   }
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">A/B Skill Tests</h1>
-          <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Compare skill versions against real agent tasks.</p>
+          <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Compare skill versions against real agent tasks. {isValidating ? "Refreshing status..." : "Live status refreshes every 10 seconds."}</p>
         </div>
         <button className="inline-flex items-center gap-2 rounded-md bg-[color:var(--accent-primary)] px-4 py-2 text-sm font-semibold text-black" onClick={() => setOpen(true)} type="button"><Plus className="h-4 w-4" />New A/B Test</button>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        {tests.map((test) => (
+        {liveTests.map((test) => (
           <article className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5" key={test.id}>
             <div className="flex items-center justify-between"><h2 className="font-semibold">{test.skill_name ?? test.name}</h2><span className="rounded-full border border-[color:var(--bg-border)] px-2 py-1 text-xs capitalize">{test.status}</span></div>
             {test.status === "completed" ? (

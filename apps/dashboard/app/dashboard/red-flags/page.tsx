@@ -4,8 +4,6 @@ import { withAuth } from "@workos-inc/authkit-nextjs";
 import { getBootstrapOrg, getOrgRedFlags, type OrgRedFlags } from "../../../lib/data";
 import { RedFlagsShell } from "./red-flags-shell";
 
-export const dynamic = "force-dynamic";
-
 export default async function RedFlagsPage() {
   let accessToken = "";
   try {

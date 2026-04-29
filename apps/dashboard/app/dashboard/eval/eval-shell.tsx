@@ -1,130 +1,117 @@
 "use client";
 
 import Link from "next/link";
-import { BarChart2, Clipboard, TrendingUp } from "lucide-react";
+import { BarChart2, Clipboard } from "lucide-react";
 import type { ReactElement } from "react";
+import { useState } from "react";
 
-import type { EvalROI } from "../../../lib/data";
+import type { EvalSessionQuality, EvalSummary } from "../../../lib/data";
 
-function pct(value: number | null | undefined): string {
-  return typeof value === "number" ? `${Math.round(value * 100)}%` : "n/a";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
+
+function qualityClass(signal: string): string {
+  if (signal === "strong") return "bg-[color:var(--accent-green)]/15 text-[color:var(--accent-green)]";
+  if (signal === "mixed") return "bg-amber-500/15 text-amber-300";
+  return "bg-red-500/15 text-red-300";
 }
 
-function rateColor(value: number | null | undefined): string {
-  if (typeof value !== "number") return "text-[color:var(--text-tertiary)]";
-  if (value >= 0.7) return "text-[color:var(--accent-green)]";
-  if (value >= 0.4) return "text-[#f59e0b]";
-  return "text-[#ef4444]";
+function TrendChart({ points }: { points: EvalSummary["weekly_trend"] }): ReactElement {
+  if (points.filter((point) => point.sessions > 0).length < 2) {
+    return <div className="rounded-lg border border-dashed border-[color:var(--bg-border)] p-8 text-center text-sm text-[color:var(--text-secondary)]">📊 Trend appears after 2 weeks of sessions.</div>;
+  }
+  const width = 720;
+  const height = 220;
+  const x = (index: number) => (points.length <= 1 ? width / 2 : (index / (points.length - 1)) * width);
+  const y = (value: number) => height - 28 - (Math.max(0, Math.min(100, value)) / 100) * (height - 52);
+  const strong = points.map((point, index) => `${x(index)},${y(point.strong_pct)}`).join(" ");
+  const weak = points.map((point, index) => `${x(index)},${y(point.weak_pct)}`).join(" ");
+  return (
+    <svg className="h-[220px] w-full" preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`}>
+      <polyline fill="none" points={strong} stroke="var(--accent-green)" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
+      <polyline fill="none" points={weak} stroke="#ef4444" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
+      {points.map((point, index) => <text fill="rgba(238,238,245,0.55)" fontSize="11" key={point.week} textAnchor="middle" x={x(index)} y={height - 6}>{`W${index + 1}`}</text>)}
+    </svg>
+  );
 }
 
 function SetupGuide({ orgId }: { orgId: string }): ReactElement {
-  const cli = "skilgen eval record --outcome success --repo-id <repo-id>";
+  const cli = "SKILLAYER_API_KEY=sk-... skilgen analytics --upload --repo-id <repo-id>";
   const api = `POST https://api.skillayer.com/eval/orgs/${orgId}/tasks\n{ "outcome": "success", "skills_loaded": [...] }`;
   return (
-    <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-8 text-center">
-      <BarChart2 className="mx-auto h-12 w-12 text-[color:var(--accent-primary)]" />
-      <h2 className="mt-5 text-2xl font-semibold text-[color:var(--text-primary)]">Start measuring agent performance</h2>
-      <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[color:var(--text-secondary)]">Record task outcomes to see how skill quality affects your agents&apos; success rate.</p>
-      <div className="mx-auto mt-7 grid max-w-3xl gap-4 text-left">
-        {[["Option 1 - CLI", cli], ["Option 2 - API", api]].map(([title, code]) => (
+    <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
+      <h2 className="text-lg font-semibold text-[color:var(--text-primary)]">Connect session quality data</h2>
+      <p className="mt-2 text-sm text-[color:var(--text-secondary)]">Once your agents start loading skills, Skillayer will show whether each session had strong, mixed, or weak guidance. Use this setup only if sessions are not appearing automatically.</p>
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        {[["CLI", cli], ["API", api]].map(([title, code]) => (
           <div className="rounded-lg border border-[color:var(--bg-border)] bg-black/20 p-4" key={title}>
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-[color:var(--text-primary)]">{title}</h3>
-              <button className="inline-flex items-center gap-2 rounded-md border border-[color:var(--bg-border)] px-3 py-1.5 text-xs text-[color:var(--text-secondary)]" onClick={() => navigator.clipboard.writeText(code)} type="button">
-                <Clipboard className="h-3.5 w-3.5" />
-                Copy
-              </button>
-            </div>
+            <div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-semibold">{title}</h3><button className="inline-flex items-center gap-2 rounded-md border border-[color:var(--bg-border)] px-3 py-1.5 text-xs" onClick={() => navigator.clipboard.writeText(code)} type="button"><Clipboard className="h-3.5 w-3.5" />Copy</button></div>
             <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-6 text-[color:var(--text-secondary)]">{code}</pre>
           </div>
         ))}
-      </div>
-      <div className="mt-6 text-sm text-[color:var(--text-secondary)]">
-        Claude Code hook setup lives in <Link className="font-semibold text-[color:var(--accent-primary)]" href="/dashboard/connect">Connect Agent</Link>.
       </div>
     </section>
   );
 }
 
-function TrendChart({ roi }: { roi: EvalROI }): ReactElement {
-  const points = roi.trend.length ? roi.trend : [];
-  const width = 720;
-  const height = 220;
-  const x = (index: number) => (points.length <= 1 ? width / 2 : (index / (points.length - 1)) * width);
-  const yRate = (value: number | null) => height - 28 - ((value ?? 0) * (height - 52));
-  const yScore = (value: number | null) => height - 28 - (((value ?? 0) / 100) * (height - 52));
-  const success = points.map((point, index) => `${x(index)},${yRate(point.success_rate)}`).join(" ");
-  const score = points.map((point, index) => `${x(index)},${yScore(point.avg_skill_score)}`).join(" ");
-  return (
-    <svg className="h-[220px] w-full" preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`}>
-      <polyline fill="none" points={success} stroke="var(--accent-green)" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
-      <polyline fill="none" points={score} stroke="var(--accent-primary)" strokeDasharray="8 8" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />
-      {points.map((point, index) => (
-        <text fill="rgba(238,238,245,0.5)" fontSize="11" key={point.week} textAnchor="middle" x={x(index)} y={height - 6}>
-          {`W${index + 1}`}
-        </text>
-      ))}
-    </svg>
-  );
-}
-
-export function EvalShell({ orgId, roi }: { orgId: string; roi: EvalROI }): ReactElement {
-  if (roi.total_tasks === 0) return <SetupGuide orgId={orgId} />;
-  const openGaps = roi.skill_gaps.length;
+export function EvalShell({ accessToken, orgId, sessions, summary }: { accessToken: string; orgId: string; sessions: EvalSessionQuality[]; summary: EvalSummary | null }): ReactElement {
+  const [rows, setRows] = useState(sessions);
+  async function tagOutcome(sessionId: string, outcome: "success" | "needs_rework") {
+    setRows((current) => current.map((row) => row.session_id === sessionId ? { ...row, outcome } : row));
+    await fetch(`${API_URL}/orgs/${orgId}/sessions/${sessionId}/tag`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+      body: JSON.stringify({ outcome }),
+    });
+  }
+  const safeSummary = summary ?? { total_sessions: 0, strong_sessions: 0, mixed_sessions: 0, weak_sessions: 0, strong_pct: 0, top_skill_impact: [], weekly_trend: [], insight: "No sessions recorded yet." };
+  const hasImpactData = safeSummary.top_skill_impact.length > 0;
+  if (safeSummary.total_sessions === 0) {
+    return (
+      <div className="space-y-6">
+        <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center">
+          <BarChart2 className="mx-auto h-12 w-12 text-[color:var(--accent-primary)]" />
+          <h1 className="mt-5 text-2xl font-semibold text-[color:var(--text-primary)]">No agent sessions recorded yet</h1>
+          <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[color:var(--text-secondary)]">Once your agents start loading skills, you&apos;ll see session quality trends here.</p>
+        </section>
+        <SetupGuide orgId={orgId} />
+      </div>
+    );
+  }
   return (
     <div className="space-y-6">
-      <div>
+      <header>
         <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">Agent Performance</h1>
-        <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Measure how skill quality affects your agents&apos; success rate.</p>
-      </div>
-      <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-8 text-center">
-        {roi.multiplier ? (
-          <>
-            <div className="text-7xl font-semibold text-[color:var(--accent-primary)]">{roi.multiplier}x</div>
-            <p className="mt-3 text-lg font-semibold text-[color:var(--text-primary)]">better task success with high-quality skills</p>
-            <p className="mt-4 text-sm text-[color:var(--text-secondary)]">Skilgen Score &gt;=70 -&gt; {pct(roi.high_skill_success_rate)} agent success rate</p>
-            <p className="text-sm text-[color:var(--text-secondary)]">Skilgen Score &lt;40 -&gt; {pct(roi.low_skill_success_rate)} agent success rate</p>
-          </>
-        ) : (
-          <>
-            <div className="text-4xl font-semibold text-[color:var(--text-primary)]">Collect more task data</div>
-            <p className="mt-3 text-sm text-[color:var(--text-secondary)]">At least 5 high-score and 5 low-score tasks are needed to show the ROI multiplier.</p>
-          </>
-        )}
+        <p className="mt-1 text-sm text-[color:var(--text-secondary)]">How well-guided were your agents? Skill quality during each session shapes code quality.</p>
+      </header>
+      <section className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-lg border border-[color:var(--accent-green)]/30 bg-[color:var(--bg-surface)] p-5"><div className="text-xs text-[color:var(--text-tertiary)]">Strong sessions</div><div className="mt-2 text-3xl font-semibold text-[color:var(--accent-green)]">{safeSummary.strong_sessions} ({safeSummary.strong_pct}%)</div></div>
+        <div className="rounded-lg border border-amber-500/30 bg-[color:var(--bg-surface)] p-5"><div className="text-xs text-[color:var(--text-tertiary)]">Mixed sessions</div><div className="mt-2 text-3xl font-semibold text-amber-300">{safeSummary.mixed_sessions}</div></div>
+        <div className="rounded-lg border border-red-500/30 bg-[color:var(--bg-surface)] p-5"><div className="text-xs text-[color:var(--text-tertiary)]">Weak sessions</div><div className="mt-2 text-3xl font-semibold text-red-300">{safeSummary.weak_sessions}</div><p className="mt-1 text-xs text-[color:var(--text-secondary)]">needs attention</p></div>
       </section>
-      <section className="grid gap-4 md:grid-cols-4">
-        <div className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4"><div className="text-xs text-[color:var(--text-tertiary)]">Total tasks</div><div className="mt-2 text-2xl font-semibold">{roi.total_tasks}</div></div>
-        <div className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4"><div className="text-xs text-[color:var(--text-tertiary)]">Success rate</div><div className={`mt-2 text-2xl font-semibold ${rateColor(roi.success_rate)}`}>{pct(roi.success_rate)}</div></div>
-        <div className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4"><div className="text-xs text-[color:var(--text-tertiary)]">Open skill gaps</div><div className={openGaps ? "mt-2 text-2xl font-semibold text-[#ef4444]" : "mt-2 text-2xl font-semibold text-[color:var(--accent-green)]"}>{openGaps}</div></div>
-        <div className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4"><div className="text-xs text-[color:var(--text-tertiary)]">A/B tests</div><div className="mt-2 text-2xl font-semibold">Active</div></div>
-      </section>
+      <div className="rounded-xl border border-[color:var(--bg-border)] bg-black/20 p-4 text-sm text-[color:var(--text-secondary)]">{safeSummary.insight}</div>
+      <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5"><h2 className="text-lg font-semibold">Weekly quality trend</h2><TrendChart points={safeSummary.weekly_trend} /></section>
       <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
-        <h2 className="text-lg font-semibold">Success rate by skill score</h2>
-        <div className="mt-5 space-y-4">
-          {roi.by_skill_score_bucket.map((bucket) => (
-            <div className="grid grid-cols-[70px_1fr_54px] items-center gap-3" key={bucket.bucket}>
-              <span className="text-sm text-[color:var(--text-secondary)]">{bucket.bucket}</span>
-              <div className="h-3 rounded-full bg-black/30"><div className="h-3 rounded-full bg-[color:var(--accent-primary)]" style={{ width: `${Math.round((bucket.success_rate ?? 0) * 100)}%` }} /></div>
-              <span className="text-right text-sm font-semibold">{pct(bucket.success_rate)}</span>
-            </div>
-          ))}
+        <h2 className="text-lg font-semibold">Session quality breakdown</h2>
+        <div className="mt-4 overflow-x-auto rounded-lg border border-[color:var(--bg-border)]">
+          <table className="w-full min-w-[980px] text-left text-sm">
+            <thead className="bg-black/20 text-xs uppercase tracking-wide text-[color:var(--text-tertiary)]"><tr><th className="p-3">Date/Time</th><th>Agent</th><th>Repo</th><th>Context</th><th>Skills loaded</th><th>Guidance quality</th><th>Outcome</th><th>Tag</th></tr></thead>
+            <tbody>{rows.map((row) => <tr className="border-t border-[color:var(--bg-border)]" key={row.session_id}><td className="p-3">{new Date(row.started_at).toLocaleString()}</td><td>{row.agent_display_name ?? row.agent_runtime}</td><td>{row.repo_name}</td><td>{row.session_context}</td><td>{row.skills_loaded.slice(0, 4).join(", ")}</td><td><span className={`rounded-full px-2 py-1 text-xs font-semibold capitalize ${qualityClass(row.quality_signal)}`}>{row.quality_signal}</span></td><td>{row.outcome}</td><td><select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-2 py-1 text-xs" onChange={(event) => { if (event.target.value) void tagOutcome(row.session_id, event.target.value as "success" | "needs_rework"); }} value={row.outcome === "unknown" ? "" : row.outcome}><option value="">Tag outcome</option><option value="success">Success</option><option value="needs_rework">Needs rework</option></select></td></tr>)}</tbody>
+          </table>
         </div>
-        <p className="mt-4 text-xs text-[color:var(--text-tertiary)]">Tasks are grouped by the average score of skills loaded during that task.</p>
       </section>
       <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
-        <div className="mb-3 flex items-center gap-2"><TrendingUp className="h-4 w-4 text-[color:var(--accent-primary)]" /><h2 className="text-lg font-semibold">8-week trend</h2></div>
-        <TrendChart roi={roi} />
-        <p className="text-xs text-[color:var(--text-tertiary)]">As skill quality improves, task success rate follows.</p>
-      </section>
-      <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
-        <h2 className="text-lg font-semibold">By agent runtime</h2>
+        <h2 className="text-lg font-semibold">Which skills make the biggest difference?</h2>
         <div className="mt-4 overflow-hidden rounded-lg border border-[color:var(--bg-border)]">
-          <div className="grid grid-cols-4 bg-black/20 px-4 py-3 text-xs text-[color:var(--text-tertiary)]"><span>Agent</span><span>Tasks</span><span>Success</span><span>Avg tokens</span></div>
-          {roi.by_agent_runtime.map((row) => (
-            <div className="grid grid-cols-4 border-t border-[color:var(--bg-border)] px-4 py-3 text-sm" key={row.runtime}><span>{row.runtime}</span><span>{row.task_count}</span><span>{pct(row.success_rate)}</span><span>{row.avg_token_count ?? "n/a"}</span></div>
-          ))}
+          <div className="grid grid-cols-4 bg-black/20 px-4 py-3 text-xs uppercase tracking-wide text-[color:var(--text-tertiary)]"><span>Domain</span><span>Times in strong sessions</span><span>Times in weak sessions</span><span>Net impact</span></div>
+          {!hasImpactData ? (
+            <div className="border-t border-[color:var(--bg-border)] px-4 py-8 text-center text-sm text-[color:var(--text-secondary)]">Skill impact rankings appear after at least 3 sessions with clear strong or weak guidance signals.</div>
+          ) : safeSummary.top_skill_impact.map((item) => {
+            const net = item.strong_appearances - item.weak_appearances;
+            return <div className="grid grid-cols-4 border-t border-[color:var(--bg-border)] px-4 py-3 text-sm" key={item.domain}><span>{item.domain}</span><span>{item.strong_appearances}</span><span>{item.weak_appearances}</span><span className={net >= 0 ? "text-[color:var(--accent-green)]" : "text-red-300"}>{net >= 0 ? "+" : ""}{net}</span></div>;
+          })}
         </div>
       </section>
+      <Link className="text-sm font-semibold text-[color:var(--accent-primary)]" href="/dashboard/eval/gaps">Review skill gaps →</Link>
     </div>
   );
 }

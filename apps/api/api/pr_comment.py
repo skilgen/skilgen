@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 
 import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from packages.db.models import PRComment
 
 
 ScoreDict = dict[str, int]
@@ -282,3 +287,206 @@ async def post_pr_comment(
             score_threshold,
         )
     return comment_ok and check_ok
+
+
+def _violation_marker(marker: str) -> str:
+    return f"<!-- skillayer-violation:{marker} -->"
+
+
+def violation_marker(file_path: str, line: int | None, skill_name: str, message: str = "") -> str:
+    raw = f"{file_path}:{line or 0}:{skill_name}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def build_violation_comment(
+    *,
+    marker: str,
+    skill_name: str,
+    severity: str,
+    explanation: str,
+    suggested_fix: str | None,
+    dashboard_skill_url: str,
+    dashboard_settings_url: str,
+    dashboard_pr_url: str | None = None,
+) -> str:
+    fix_line = f"\n> **Suggested fix:** {suggested_fix}\n>" if suggested_fix else ""
+    inbox_link = f" · [View in PR Inbox]({dashboard_pr_url})" if dashboard_pr_url else ""
+    return f"""{_violation_marker(marker)}
+> ⚠️ **{skill_name}** — {severity}
+>
+> {explanation}
+>{fix_line}
+> [View skill]({dashboard_skill_url}){inbox_link} · [Configure]({dashboard_settings_url}) · Powered by Skillayer"""
+
+
+async def find_existing_violation_comment(
+    full_name: str,
+    pr_number: int,
+    installation_id: int,
+    marker: str,
+) -> int | None:
+    try:
+        token = get_installation_token(installation_id)
+        url = f"https://api.github.com/repos/{full_name}/issues/{pr_number}/comments"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+                timeout=10.0,
+            )
+            if not _response_ok(response):
+                return None
+            needle = _violation_marker(marker)
+            for comment in response.json():
+                if needle in str(comment.get("body") or ""):
+                    return int(comment["id"])
+    except (httpx.HTTPError, RuntimeError, ValueError, KeyError) as exc:
+        LOGGER.warning("GitHub violation comment lookup failed", extra={"error": str(exc)})
+    return None
+
+
+async def post_or_update_violation_comment(
+    *,
+    full_name: str,
+    pr_number: int,
+    installation_id: int,
+    marker: str,
+    body: str,
+) -> bool:
+    existing_id = await find_existing_violation_comment(full_name, pr_number, installation_id, marker)
+    if existing_id is not None:
+        return await update_pr_comment(full_name, existing_id, installation_id, body)
+    try:
+        token = get_installation_token(installation_id)
+        url = f"https://api.github.com/repos/{full_name}/issues/{pr_number}/comments"
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                json={"body": body},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                timeout=10.0,
+            )
+            return response.status_code == 201
+    except (httpx.HTTPError, RuntimeError) as exc:
+        LOGGER.warning("GitHub violation comment post failed", extra={"error": str(exc)})
+        return False
+
+
+async def post_or_update_tracked_violation_comment(
+    *,
+    db: AsyncSession,
+    pr_id: str,
+    full_name: str,
+    pr_number: int,
+    installation_id: int,
+    marker: str,
+    body: str,
+) -> bool:
+    tracked = (
+        await db.execute(
+            select(PRComment).where(PRComment.pr_id == pr_id, PRComment.violation_hash == marker)
+        )
+    ).scalar_one_or_none()
+    if tracked and tracked.github_comment_id:
+        ok = await update_pr_comment(full_name, int(tracked.github_comment_id), installation_id, body)
+        if ok:
+            await db.commit()
+            return True
+        tracked.github_comment_id = None
+
+    existing_id = await find_existing_violation_comment(full_name, pr_number, installation_id, marker)
+    if existing_id is not None:
+        ok = await update_pr_comment(full_name, existing_id, installation_id, body)
+        if ok:
+            if tracked is None:
+                tracked = PRComment(pr_id=pr_id, violation_hash=marker, github_comment_id=existing_id)
+                db.add(tracked)
+            else:
+                tracked.github_comment_id = existing_id
+            await db.commit()
+        return ok
+
+    try:
+        token = get_installation_token(installation_id)
+        url = f"https://api.github.com/repos/{full_name}/issues/{pr_number}/comments"
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                json={"body": body},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                timeout=10.0,
+            )
+            if response.status_code != 201:
+                return False
+            github_comment_id = int(response.json().get("id"))
+            if tracked is None:
+                tracked = PRComment(pr_id=pr_id, violation_hash=marker, github_comment_id=github_comment_id)
+                db.add(tracked)
+            else:
+                tracked.github_comment_id = github_comment_id
+            await db.commit()
+            return True
+    except (httpx.HTTPError, RuntimeError, ValueError, KeyError) as exc:
+        LOGGER.warning("GitHub tracked violation comment post failed", extra={"error": str(exc)})
+        return False
+
+
+async def create_skill_review_check_run(
+    *,
+    full_name: str,
+    installation_id: int,
+    head_sha: str,
+    violations: list[dict],
+    warnings: list[dict],
+    skills_checked: int,
+    policy_failures: list[dict] | None = None,
+) -> bool:
+    policy_failures = policy_failures or []
+    if policy_failures:
+        conclusion = "action_required"
+    elif violations:
+        conclusion = "failure"
+    elif warnings:
+        conclusion = "neutral"
+    else:
+        conclusion = "success"
+    summary = f"{len(violations)} violations · {len(warnings)} warnings · {skills_checked} skills checked"
+    if policy_failures:
+        messages = "\n".join(f"- {failure.get('message') or failure.get('name') or 'Policy failed'}" for failure in policy_failures)
+        summary = f"{summary}\n\nPolicy Violations\n{messages}"
+    payload = {
+        "name": "Skillayer Skill Review",
+        "head_sha": head_sha,
+        "status": "completed",
+        "conclusion": conclusion,
+        "output": {
+            "title": "Skillayer Skill Review",
+            "summary": summary,
+        },
+    }
+    try:
+        token = get_installation_token(installation_id)
+        url = f"https://api.github.com/repos/{full_name}/check-runs"
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                timeout=10.0,
+            )
+            return response.status_code == 201
+    except (httpx.HTTPError, RuntimeError, KeyError, ValueError) as exc:
+        LOGGER.warning("GitHub skill review check run failed", extra={"error": str(exc)})
+        return False

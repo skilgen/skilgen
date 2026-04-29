@@ -10,6 +10,7 @@ from packages.db.models.base import Base, new_uuid, utcnow
 
 if TYPE_CHECKING:
     from packages.db.models.analysis_run import AnalysisRun
+    from packages.db.models.pull_request import Commit, PullRequest
     from packages.db.models.dependency import Dependency
     from packages.db.models.org import Org
     from packages.db.models.skill import Skill
@@ -29,9 +30,12 @@ class Repo(Base):
     is_monorepo: Mapped[bool] = mapped_column(default=False)
     is_active: Mapped[bool] = mapped_column(default=True)
     last_analysed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_debt_analysis_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     org: Mapped["Org"] = relationship(back_populates="repos")
     runs: Mapped[list["AnalysisRun"]] = relationship(back_populates="repo")
+    pull_requests: Mapped[list["PullRequest"]] = relationship(back_populates="repo")
+    commits: Mapped[list["Commit"]] = relationship(back_populates="repo")
     skills: Mapped[list["Skill"]] = relationship(back_populates="repo")
     dependencies: Mapped[list["Dependency"]] = relationship(back_populates="repo")

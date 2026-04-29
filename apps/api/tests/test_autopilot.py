@@ -5,7 +5,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from apps.api.api.routes.autopilot import approve_autopilot_task, skip_autopilot_task
-from apps.api.api.services.autopilot import compute_autopilot_queue
+from apps.api.api.services.autopilot import compute_autopilot_queue, deduplicate_pending_autopilot_tasks
 from packages.db.models import AutopilotTask
 
 
@@ -93,6 +93,21 @@ def test_autopilot_queue_stale() -> None:
     assert tasks[0].status == "pending"
     assert tasks[0].task_type == "regenerate"
     assert tasks[0].trigger_reason == "Freshness 14/25 — below 60% threshold"
+
+
+def test_autopilot_deduplicate_marks_older_pending_duplicates_skipped() -> None:
+    newer = AutopilotTask(id="task_new", org_id="org_1", repo_id="repo_1", skill_id="skill_1", task_type="regenerate", trigger_reason="new", freshness_at_trigger=8, status="pending", created_at=datetime.utcnow())
+    older = AutopilotTask(id="task_old", org_id="org_1", repo_id="repo_1", skill_id="skill_1", task_type="regenerate", trigger_reason="old", freshness_at_trigger=8, status="pending", created_at=datetime(2024, 1, 1))
+    db = QueueDb()
+    db.expected_lookup_calls = 0
+    db.tasks = [newer, older]
+
+    deduplicated = asyncio.run(deduplicate_pending_autopilot_tasks(db, "org_1"))
+
+    assert deduplicated == 1
+    assert newer.status == "pending"
+    assert older.status == "skipped"
+    assert older.resolved_at is not None
 
 
 def test_autopilot_skip() -> None:

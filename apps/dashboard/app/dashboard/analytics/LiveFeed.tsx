@@ -1,9 +1,24 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Tag } from "lucide-react";
 
-type FeedEvent = { id: string; repo: string; skill: string; agent: string; ts: string };
+type QualitySignal = "strong" | "mixed" | "weak";
+type FeedEvent = {
+  id: string;
+  session_id: string;
+  agent_runtime: string;
+  agent?: string;
+  repo_name: string;
+  repo?: string;
+  loaded_at: string;
+  ts?: string;
+  skills_loaded: string[];
+  session_context: string;
+  skill_count: number;
+  quality_signal: QualitySignal;
+  quality_reason: string;
+};
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
 
@@ -11,18 +26,17 @@ function label(agent: string): string {
   return ({ claude_code: "Claude Code", codex: "Codex", cursor: "Cursor", unknown: "Unknown" } as Record<string, string>)[agent] || agent;
 }
 
-function pill(agent: string): string {
-  if (agent === "claude_code") return "bg-violet-500/15 text-violet-200 ring-1 ring-violet-400/30";
-  if (agent === "codex") return "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30";
-  if (agent === "cursor") return "bg-blue-500/15 text-blue-200 ring-1 ring-blue-400/30";
-  return "bg-white/10 text-[color:var(--text-secondary)] ring-1 ring-white/10";
-}
-
 function relative(ts: string, now: number): string {
   const diff = Math.max(0, Math.floor((now - new Date(ts).getTime()) / 1000));
   if (diff < 60) return `${diff}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   return `${Math.floor(diff / 3600)}h ago`;
+}
+
+function signalTone(signal: QualitySignal): string {
+  if (signal === "strong") return "bg-[color:var(--accent-green)]";
+  if (signal === "mixed") return "bg-[#f59e0b]";
+  return "bg-[#ef4444]";
 }
 
 export function LiveFeed({ orgId, apiKey }: { orgId: string; apiKey: string }) {
@@ -44,7 +58,7 @@ export function LiveFeed({ orgId, apiKey }: { orgId: string; apiKey: string }) {
       const response = await fetch(`${API_URL}/orgs/${orgId}/feed/recent`, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (response.ok) {
         const body = (await response.json()) as { events: FeedEvent[] };
-        setEvents(body.events.slice(0, 50));
+        setEvents(body.events.slice(0, 10));
       }
     }
 
@@ -52,10 +66,6 @@ export function LiveFeed({ orgId, apiKey }: { orgId: string; apiKey: string }) {
       source?.close();
       source = new EventSource(`${API_URL}/orgs/${orgId}/feed/stream?key=${encodeURIComponent(apiKey)}`);
       source.onopen = () => setStatus("connected");
-      source.onmessage = (message) => {
-        const event = JSON.parse(message.data) as FeedEvent;
-        setEvents((current) => [event, ...current.filter((item) => item.id !== event.id)].slice(0, 50));
-      };
       source.onerror = () => {
         source?.close();
         setStatus("reconnecting");
@@ -84,26 +94,42 @@ export function LiveFeed({ orgId, apiKey }: { orgId: string; apiKey: string }) {
 
   return (
     <section className="rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[color:var(--accent-green)]" />
-          <h2 className="text-[16px] font-semibold text-[color:var(--text-primary)]">Live Agent Activity</h2>
-          <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-[color:var(--text-secondary)]">{events.length}</span>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Recent Agent Sessions</h2>
+          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">What your agents were working on and whether they had the right guidance.</p>
         </div>
         <span className={`text-[12px] font-semibold capitalize ${statusClass}`}>{status === "reconnecting" ? "Reconnecting..." : status}</span>
       </div>
-      <div className="max-h-[400px] space-y-2 overflow-y-auto">
+      <div className="space-y-3">
         {events.length ? (
-          events.map((event) => (
-            <div className="grid gap-2 rounded-lg border border-white/6 bg-black/10 p-3 text-[13px] md:grid-cols-[120px_1fr_1fr_80px] md:items-center" key={event.id}>
-              <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-[11px] font-semibold ${pill(event.agent)}`}>{label(event.agent)}</span>
-              <span className="font-medium text-[color:var(--text-primary)]">{event.repo}</span>
-              <span className="inline-flex items-center gap-1 text-[color:var(--text-secondary)]"><Tag className="h-3.5 w-3.5" />{event.skill}</span>
-              <span className="text-right text-[color:var(--text-tertiary)]">{relative(event.ts, now)}</span>
-            </div>
-          ))
+          events.map((event) => {
+            const visible = event.skills_loaded.slice(0, 4);
+            const extra = Math.max(0, event.skills_loaded.length - visible.length);
+            return (
+              <article className="rounded-xl border border-white/6 bg-black/10 p-4" key={event.session_id}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="font-semibold text-[color:var(--text-primary)]">{label(event.agent_runtime)} · {event.repo_name ?? event.repo}</div>
+                  <div className="text-sm text-[color:var(--text-secondary)]">{event.session_context} · {relative(event.loaded_at ?? event.ts ?? "", now)}</div>
+                </div>
+                <p className="mt-3 text-sm text-[color:var(--text-secondary)]">
+                  Skills loaded: {visible.join(", ")}{extra ? ` (+${extra} more)` : ""}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="inline-flex items-center gap-2 text-sm text-[color:var(--text-secondary)]">
+                    <span className={`h-2.5 w-2.5 rounded-full ${signalTone(event.quality_signal)}`} />
+                    <span className="capitalize">{event.quality_signal}</span>
+                    <span>{event.quality_reason}</span>
+                  </div>
+                  <Link className="text-sm font-semibold text-[color:var(--accent-primary)]" href={`/dashboard/sessions/${event.session_id}`}>View session details →</Link>
+                </div>
+              </article>
+            );
+          })
         ) : (
-          <div className="rounded-lg border border-dashed border-[color:var(--bg-border)] p-6 text-center text-[13px] text-[color:var(--text-secondary)]">Waiting for agent activity...</div>
+          <div className="rounded-lg border border-dashed border-[color:var(--bg-border)] p-6 text-center text-[13px] text-[color:var(--text-secondary)]">
+            No agent sessions recorded yet. Start a coding session with Claude Code or Codex and load skills to see activity here.
+          </div>
         )}
       </div>
     </section>

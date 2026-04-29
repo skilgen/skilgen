@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { X, ChevronDown, ChevronRight, Wand2, CheckCircle2, Copy } from "lucide-react";
+import { X, ChevronDown, ChevronRight, Wand2, CheckCircle2, Copy, GitPullRequest, Loader2 } from "lucide-react";
 
 import type { OrgRedFlags, RedFlag, RedFlagDismissal } from "../../../lib/data";
 
@@ -125,7 +125,7 @@ function groupFlags(flags: RedFlag[]): GroupedFlag[] {
 
 // ─── fix modal ───────────────────────────────────────────────────────────────
 
-function FixModal({ flag, onClose }: { flag: RedFlag; onClose: () => void }) {
+function FixModal({ accessToken, flag, onClose, orgId }: { accessToken: string; flag: RedFlag; onClose: () => void; orgId: string }) {
   const fix = autoFixSuggestion(flag);
   const [copied, setCopied] = useState(false);
 
@@ -188,6 +188,16 @@ function FixModal({ flag, onClose }: { flag: RedFlag; onClose: () => void }) {
             <pre className="max-h-48 overflow-y-auto p-4 text-[11px] leading-5 text-[color:var(--text-secondary)]">{fix.skillTemplate}</pre>
           </div>
         ) : null}
+
+        <SkillAIActionPanel
+          accessToken={accessToken}
+          affectedFiles={[]}
+          domain={flag.domain || flag.flag_type.replaceAll("_", " ")}
+          orgId={orgId}
+          reason={`${flag.title}. ${flag.description} Recommended action: ${flag.action}`}
+          repoId={flag.repo_id}
+          source="red_flag"
+        />
 
         <div className="flex gap-3">
           {flag.action_url ? (
@@ -297,6 +307,132 @@ function buildHeaders(accessToken: string): HeadersInit {
     "Content-Type": "application/json",
     ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
   };
+}
+
+type SkillPreview = {
+  repo_id: string;
+  repo_name: string;
+  domain: string;
+  skill_path: string;
+  branch_name: string;
+  pr_title: string;
+  pr_body: string;
+  content: string;
+};
+
+export function SkillAIActionPanel({
+  accessToken,
+  orgId,
+  repoId,
+  domain,
+  reason,
+  affectedFiles,
+  source,
+}: {
+  accessToken: string;
+  orgId: string;
+  repoId: string;
+  domain: string;
+  reason: string;
+  affectedFiles: string[];
+  source: "knowledge_risk" | "red_flag";
+}) {
+  const [preview, setPreview] = useState<SkillPreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [prUrl, setPrUrl] = useState<string | null>(null);
+
+  async function previewSkill() {
+    setLoading(true);
+    setMessage(null);
+    setPrUrl(null);
+    try {
+      const response = await fetch(`${CLIENT_API_URL}/orgs/${orgId}/skill-ai-actions/preview`, {
+        method: "POST",
+        headers: buildHeaders(accessToken),
+        body: JSON.stringify({ repo_id: repoId, domain, reason, affected_files: affectedFiles, source }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 402 || body.code === "llm_not_configured") {
+        setMessage("AI model configuration is required before generating a preview.");
+        return;
+      }
+      if (!response.ok) throw new Error(body.detail || "Could not generate preview.");
+      setPreview(body as SkillPreview);
+      setMessage("Preview generated. Review the draft, then push a PR.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not generate preview.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function pushPr() {
+    if (!preview) return;
+    setPushing(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${CLIENT_API_URL}/orgs/${orgId}/skill-ai-actions/push`, {
+        method: "POST",
+        headers: buildHeaders(accessToken),
+        body: JSON.stringify({
+          repo_id: preview.repo_id,
+          domain: preview.domain,
+          skill_path: preview.skill_path,
+          content: preview.content,
+          branch_name: preview.branch_name,
+          pr_title: preview.pr_title,
+          pr_body: preview.pr_body,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail || "Could not create PR.");
+      setPrUrl(String(body.pr_url));
+      setMessage(`PR #${body.pr_number} created.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create PR.");
+    } finally {
+      setPushing(false);
+    }
+  }
+
+  return (
+    <div className="mt-5 rounded-xl border border-[rgb(var(--accent-primary-rgb)/0.24)] bg-[rgb(var(--accent-primary-rgb)/0.08)] p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-[12px] font-semibold uppercase tracking-wide text-[color:var(--accent-primary)]">AI action</div>
+          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Generate a SKILL.md preview, then open a GitHub PR.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button className="inline-flex h-9 items-center rounded-md bg-[color:var(--accent-primary)] px-3 text-[12px] font-semibold text-[color:var(--bg-base)] disabled:cursor-wait disabled:opacity-60" disabled={loading} onClick={previewSkill} type="button">
+            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+            Preview
+          </button>
+          <button className="inline-flex h-9 items-center rounded-md border border-[color:var(--bg-border)] px-3 text-[12px] font-semibold text-[color:var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50" disabled={!preview || pushing} onClick={pushPr} type="button">
+            {pushing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GitPullRequest className="mr-2 h-4 w-4" />}
+            Push PR
+          </button>
+        </div>
+      </div>
+
+      {message ? (
+        <div className="mb-3 rounded-md border border-[color:var(--bg-border)] bg-black/20 px-3 py-2 text-[12px] text-[color:var(--text-secondary)]">
+          {message} {message.includes("configuration") ? <Link className="font-semibold text-[color:var(--accent-primary)]" href="/dashboard/settings#ai-model">Configure AI Model</Link> : null}
+        </div>
+      ) : null}
+
+      {preview ? (
+        <div className="overflow-hidden rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-base)]">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[color:var(--bg-border)] px-3 py-2 text-[12px]">
+            <code className="text-[color:var(--accent-primary)]">{preview.skill_path}</code>
+            {prUrl ? <Link className="font-semibold text-[color:var(--accent-primary)]" href={prUrl} target="_blank">Open PR →</Link> : null}
+          </div>
+          <pre className="max-h-64 overflow-auto p-3 text-[11px] leading-5 text-[color:var(--text-secondary)]">{preview.content}</pre>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function SingleFlagRow({
@@ -564,7 +700,7 @@ export function RedFlagsShell({ accessToken, orgId, redFlags }: { accessToken: s
       ) : null}
 
       {fixModalFlag ? (
-        <FixModal flag={fixModalFlag} onClose={() => setFixModalFlag(null)} />
+        <FixModal accessToken={accessToken} flag={fixModalFlag} onClose={() => setFixModalFlag(null)} orgId={orgId} />
       ) : null}
     </div>
   );

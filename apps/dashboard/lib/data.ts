@@ -26,6 +26,8 @@ export type OrgSettings = {
   plan: string;
   score_threshold: number;
   slack_webhook_url: string | null;
+  slack_standup_enabled?: boolean;
+  slack_standup_hour?: number;
   notify_on_pr: boolean;
   notify_on_stale: boolean;
   github_app_installed: boolean;
@@ -52,16 +54,163 @@ export type OrgStats = {
   score_trend: { date: string; score: number }[];
 };
 
+export type OverviewScoreTrendPoint = {
+  week: string;
+  date: string;
+  score: number;
+  delta: number;
+  repos_changed: number;
+  events: Array<{
+    repo_id: string;
+    repo_name: string;
+    score: number;
+    date: string;
+  }>;
+};
+
 export type MemoryScore = {
   score: number;
   breakdown: {
     coverage: number;
     load_frequency: number;
-    quality: number;
+    compliance: number;
+    quality?: number;
     freshness: number;
   };
-  trend: string;
+  trend_7d: number;
+  trend_30d: number;
+  computed_at: string;
+  trend?: string | null;
   grade: "A" | "B" | "C" | "D" | "F";
+};
+
+export type AgentName = "claude_code" | "codex" | "cursor" | "copilot" | "devin" | "human" | "mixed" | string;
+
+export type AgentPrCard = {
+  pr_id: string;
+  repo_id: string;
+  repo_name: string;
+  github_pr_number: number;
+  title: string;
+  url: string | null;
+  author_login: string | null;
+  primary_agent: AgentName;
+  confidence: number;
+  lines_by_agent: Record<string, number>;
+  additions: number;
+  deletions: number;
+  changed_files: number;
+  skills_loaded: string[];
+  violation_count: number;
+  warning_count: number;
+  risk_score: number;
+  risk_tier: "green" | "yellow" | "red" | string;
+  ci_status: string;
+  opened_at: string | null;
+  merged_at: string | null;
+  session_ids: string[];
+};
+
+export type AgentPrListResponse = {
+  items: AgentPrCard[];
+  next_cursor: string | null;
+  total_count: number;
+};
+
+export type AgentPrDetail = AgentPrCard & {
+  attribution: {
+    id: string;
+    primary_agent: AgentName;
+    confidence: number;
+    lines_by_agent: Record<string, number>;
+    lines_by_human: number;
+    sessions: string[];
+    skills_loaded: string[];
+    skills_violated: Array<Record<string, unknown>>;
+    computed_at: string | null;
+  } | null;
+  risk_breakdown: Record<string, { points?: number; explanation?: string }>;
+  violations: Array<{
+    file: string;
+    line: number | null;
+    skill_name: string;
+    severity: string;
+    explanation: string;
+    fix_suggestion: string | null;
+    skill_url: string;
+  }>;
+  sessions: Array<{
+    id: string;
+    agent_runtime: string;
+    started_at: string | null;
+    skills_loaded: string[];
+    replay_url: string;
+  }>;
+  checks: Array<{ name: string; status: string; conclusion: string | null; details_url: string | null }>;
+};
+
+export type MyCodeTodaySession = {
+  session_id: string;
+  agent_runtime: string;
+  started_at: string;
+  ended_at: string | null;
+  files_touched: string[];
+  skills_loaded: string[];
+  outcome: string | null;
+  pr: {
+    id: string;
+    github_pr_number: number;
+    title: string;
+    state: string;
+    risk_tier: "green" | "yellow" | "red" | string;
+  } | null;
+};
+
+export type MyCodeTodayResponse = {
+  date: string;
+  login: string;
+  sessions: MyCodeTodaySession[];
+  summary: {
+    total_sessions: number;
+    total_files: number;
+    skills_used: string[];
+    prs_opened: number;
+    prs_merged: number;
+    violations: number;
+    warnings: number;
+  };
+};
+
+export type AgentScorecardRow = {
+  agent: AgentName;
+  agent_label?: string | null;
+  prs: number;
+  merged: number;
+  violations: number;
+  compliance_percent: number;
+  avg_risk: number;
+  risk_distribution: {
+    green: number;
+    yellow: number;
+    red: number;
+  };
+  top_skills: string[];
+  top_violations: string[];
+};
+
+export type AgentScorecardSummary = {
+  total_prs: number;
+  total_merged: number;
+  total_violations: number;
+  avg_compliance_percent: number;
+  avg_risk: number;
+};
+
+export type AgentScorecardResponse = {
+  days: number;
+  generated_at: string | null;
+  summary: AgentScorecardSummary;
+  agents: AgentScorecardRow[];
 };
 
 export type SetupStep = {
@@ -129,12 +278,67 @@ export type SkillHeatmapResponse = {
   summary: SkillHeatmapSummary;
 };
 
+export type SourceConnection = {
+  id: string;
+  source_type: string;
+  display_name: string;
+  repo_id?: string | null;
+  connected: boolean;
+  skill_count: number;
+  last_skill_generated_at: string | null;
+  can_generate_skills: boolean;
+  generate_command: string | null;
+  coverage_domains: string[];
+};
+
+export type OrgSessionSkill = {
+  domain: string;
+  score: number;
+  loaded_at: string;
+};
+
+export type OrgSessionItem = {
+  session_id: string;
+  agent_runtime: string;
+  agent_display_name?: string;
+  repo_id: string;
+  repo_name: string;
+  started_at: string;
+  ended_at: string;
+  duration_minutes: number;
+  skills_loaded: OrgSessionSkill[];
+  skill_count: number;
+  session_context: string;
+  quality_signal: "strong" | "mixed" | "weak";
+  avg_skill_score: number;
+};
+
+export type OrgSessionsResponse = {
+  sessions: OrgSessionItem[];
+  total: number;
+};
+
+export type IntelligenceInsight = {
+  type: "anomaly" | "opportunity" | "trend" | "gap";
+  title: string;
+  description: string;
+  cta_label: string | null;
+  cta_url: string | null;
+  severity: "high" | "medium" | "low";
+};
+
 export type RuntimeBreakdownItem = {
   runtime: string;
   display_name: string;
   loads_30d: number;
   unique_skills: number;
   top_skill_domain: string | null;
+  unique_domains: number;
+  avg_skill_score: number;
+  top_domains: string[];
+  knowledge_breadth_score: number;
+  most_recent_load: string | null;
+  pattern: string;
 };
 
 export type RuntimeBreakdownResponse = {
@@ -217,6 +421,21 @@ export type OrgIntelligence = {
   category_matrix: Record<string, CategoryMatrixEntry[]>;
   stale_alerts: StaleAlert[];
   top_skills: TopSkill[];
+};
+
+export type IntelligenceBehaviorBar = {
+  label: string;
+  value: number;
+  total?: number | null;
+  tone?: "good" | "warning" | "danger" | "neutral" | string;
+};
+
+export type IntelligenceRepoRing = {
+  repo_id: string;
+  repo_name: string;
+  score: number;
+  label?: string | null;
+  href?: string | null;
 };
 
 export type DiscoveryType =
@@ -315,10 +534,20 @@ export type AutopilotTask = {
   skill_id: string | null;
   skill_name?: string | null;
   skill_domain?: string | null;
+  skill_path?: string | null;
   task_type: "regenerate" | "archive" | "notify" | string;
   trigger_reason: string;
   freshness_at_trigger: number;
   status: "pending" | "approved" | "skipped" | "done" | string;
+  improvement_status?: "generated" | "approved" | "rejected" | "failed" | string | null;
+  original_content?: string | null;
+  generated_content?: string | null;
+  final_content?: string | null;
+  generation_error?: string | null;
+  pr_url?: string | null;
+  pr_number?: number | null;
+  generated_at?: string | null;
+  reviewed_at?: string | null;
   created_at: string;
   resolved_at: string | null;
 };
@@ -568,18 +797,90 @@ export type EvalTrendPoint = {
 };
 
 export type EvalSkillGap = {
-  id?: string;
+  id: string;
+  repo_id: string;
+  repo_name: string;
   domain: string;
-  failure_count: number;
-  gap_type: string;
+  gap_type: "missing_skill" | "low_quality" | "stale" | "never_loaded" | "implied_need";
+  severity: "critical" | "high" | "medium";
+  current_score: number | null;
+  evidence: string;
+  recommendation: string;
+  fix_command: string | null;
+  estimated_impact: string;
+  status: "open" | "acknowledged" | "resolved";
+  failure_count?: number;
   existing_skill_id?: string | null;
   existing_skill_score?: number | null;
   existing_score?: number | null;
-  status?: string;
   suggested_action?: string;
   detected_at?: string;
   task_ids?: string[];
   failed_tasks?: Array<{ id: string; description: string | null; outcome: string; failure_reason: string | null; started_at: string }>;
+};
+
+export type EvalSkillGapsResponse = {
+  total_gaps: number;
+  critical_gap_count: number;
+  high_gap_count: number;
+  medium_gap_count: number;
+  checked_repos: number;
+  checked_skills: number;
+  checked_domains: number;
+  last_scan: string;
+  gaps: EvalSkillGap[];
+};
+
+export type EvalSummary = {
+  total_sessions: number;
+  strong_sessions: number;
+  mixed_sessions: number;
+  weak_sessions: number;
+  strong_pct: number;
+  top_skill_impact: Array<{
+    domain: string;
+    load_count: number;
+    avg_score: number;
+    strong_appearances: number;
+    weak_appearances: number;
+    impact_label: string;
+  }>;
+  weekly_trend: Array<{ week: string; sessions: number; avg_quality: number; strong_pct: number; weak_pct: number }>;
+  insight: string;
+};
+
+export type EvalSessionQuality = {
+  session_id: string;
+  agent_runtime: string;
+  agent_display_name?: string;
+  repo_id: string;
+  repo_name: string;
+  started_at: string;
+  duration_seconds: number | null;
+  skills_loaded: string[];
+  avg_skill_quality: number;
+  quality_signal: "strong" | "mixed" | "weak";
+  session_context: string;
+  outcome: "success" | "needs_rework" | "unknown";
+};
+
+export type EvalSessionsResponse = {
+  total: number;
+  sessions: EvalSessionQuality[];
+};
+
+export type CriticalityItem = {
+  skill_id: string;
+  domain: string;
+  repo_id: string;
+  repo_name: string;
+  load_count_30d: number;
+  score_total: number;
+  risk_level: "critical" | "high" | "medium" | "low";
+  risk_reason: string;
+  dependency_rank: number;
+  is_every_session: boolean;
+  last_loaded_at: string | null;
 };
 
 export type EvalROI = {
@@ -662,12 +963,18 @@ export type SkillDebtSkill = {
   domain: string;
   repo_id: string;
   score_total: number;
+  score_groundedness?: number | null;
+  score_coverage?: number | null;
+  score_freshness?: number | null;
+  score_structure?: number | null;
   is_stale: boolean;
   load_count_30d: number;
 };
 
 export type SkillDebtResponse = {
   debt_score: number;
+  health_score?: number;
+  estimated_if_fixed?: number;
   total_skills: number;
   stale_skills: SkillDebtSkill[];
   low_score_skills: SkillDebtSkill[];
@@ -676,8 +983,10 @@ export type SkillDebtResponse = {
   repo_coverage_gaps: Array<{
     repo_id: string;
     repo_name: string;
+    last_debt_analysis_at?: string | null;
     covered_categories: string[];
     missing_categories: string[];
+    gaps?: Array<{ gap_id: string; domain: string; gap_type: string; status: string; skill_id?: string | null }>;
     coverage_score: number;
   }>;
   summary: {
@@ -686,6 +995,7 @@ export type SkillDebtResponse = {
     never_loaded_count: number;
     zero_subscore_count: number;
     repos_with_gaps: number;
+    last_debt_analysis_at?: string | null;
   };
 };
 
@@ -790,6 +1100,13 @@ export type DependencyGraph = {
   nodes: { skill_id: string; name: string; domain: string; repo_id: string; repo_name: string; score_total: number }[];
   edges: { source_skill_id: string; target_entry_id: string; target_name: string }[];
   stale_upstream_count: number;
+};
+
+export type DependencyGraphCache = {
+  nodes: Array<Record<string, unknown>>;
+  edges: Array<Record<string, unknown>>;
+  opportunities: Array<Record<string, unknown>>;
+  computed_at: string | null;
 };
 
 export type CompatibilityMatrix = {
@@ -908,6 +1225,10 @@ export async function getOrgStats(accessToken: string | null, orgId: string): Pr
   return apiFetch<OrgStats>(`/orgs/${orgId}/stats`, { accessToken, cache: "no-store" });
 }
 
+export async function getOverviewScoreTrend(accessToken: string | null, orgId: string, weeks = 30): Promise<OverviewScoreTrendPoint[] | null> {
+  return apiFetch<OverviewScoreTrendPoint[]>(`/orgs/${orgId}/overview/score-trend?weeks=${weeks}`, { accessToken, cache: "no-store" });
+}
+
 export async function getOrgSetupStatus(accessToken: string | null, orgId: string, revalidate?: number): Promise<SetupStatus | null> {
   return apiFetch<SetupStatus>(`/orgs/${orgId}/setup-status`, { accessToken, ...(revalidate ? { revalidate } : { cache: "no-store" }) });
 }
@@ -942,6 +1263,26 @@ export async function getOrgAISettings(accessToken: string | null, orgId: string
 
 export async function getOrgMemoryScore(accessToken: string | null, orgId: string): Promise<MemoryScore | null> {
   return apiFetch<MemoryScore>(`/orgs/${orgId}/memory-score`, { accessToken, cache: "no-store" });
+}
+
+export async function getAgentPrs(accessToken: string | null, orgId: string, params?: URLSearchParams): Promise<AgentPrListResponse | null> {
+  const query = params?.toString();
+  return apiFetch<AgentPrListResponse>(`/orgs/${orgId}/agent-prs${query ? `?${query}` : ""}`, { accessToken, cache: "no-store" });
+}
+
+export async function getAgentPrDetail(accessToken: string | null, orgId: string, prId: string): Promise<AgentPrDetail | null> {
+  return apiFetch<AgentPrDetail>(`/orgs/${orgId}/agent-prs/${prId}`, { accessToken, cache: "no-store" });
+}
+
+export async function getMyCodeToday(accessToken: string | null, orgId: string, login: string, date?: string): Promise<MyCodeTodayResponse | null> {
+  const params = new URLSearchParams({ login });
+  if (date) params.set("date", date);
+  return apiFetch<MyCodeTodayResponse>(`/orgs/${orgId}/my-code-today?${params.toString()}`, { accessToken, cache: "no-store" });
+}
+
+export async function getAgentScorecard(accessToken: string | null, orgId: string, days = 30): Promise<AgentScorecardResponse | null> {
+  const params = new URLSearchParams({ days: String(days) });
+  return apiFetch<AgentScorecardResponse>(`/orgs/${orgId}/agent-scorecard?${params.toString()}`, { accessToken, cache: "no-store" });
 }
 
 export async function getAutopilotQueue(accessToken: string | null, orgId: string): Promise<AutopilotTask[] | null> {
@@ -1161,13 +1502,34 @@ export async function getOrgSkillDebt(accessToken: string | null, orgId: string)
   return apiFetch<SkillDebtResponse>(`/orgs/${orgId}/skill-debt`, { accessToken, cache: "no-store" });
 }
 
+export async function runDebtAnalysis(accessToken: string | null, orgId: string): Promise<{ health_score: number; repos_analyzed: number; gaps_found: number; analysis_id: string } | null> {
+  return apiFetch<{ health_score: number; repos_analyzed: number; gaps_found: number; analysis_id: string }>(`/orgs/${orgId}/debt/run-analysis`, { accessToken, method: "POST", cache: "no-store" });
+}
+
 export async function getEvalROI(accessToken: string | null, orgId: string, params?: URLSearchParams): Promise<EvalROI | null> {
   const query = params?.toString();
   return apiFetch<EvalROI>(`/eval/orgs/${orgId}/roi${query ? `?${query}` : ""}`, { accessToken, cache: "no-store" });
 }
 
 export async function getEvalSkillGaps(accessToken: string | null, orgId: string, status = "open"): Promise<EvalSkillGap[] | null> {
-  return apiFetch<EvalSkillGap[]>(`/eval/orgs/${orgId}/skill-gaps?status=${encodeURIComponent(status)}`, { accessToken, cache: "no-store" });
+  const response = await getEvalSkillGapsResponse(accessToken, orgId, status);
+  return response?.gaps ?? null;
+}
+
+export async function getEvalSkillGapsResponse(accessToken: string | null, orgId: string, status = "all"): Promise<EvalSkillGapsResponse | null> {
+  return apiFetch<EvalSkillGapsResponse>(`/eval/orgs/${orgId}/skill-gaps?status=${encodeURIComponent(status)}`, { accessToken, cache: "no-store" });
+}
+
+export async function getEvalSummary(accessToken: string | null, orgId: string): Promise<EvalSummary | null> {
+  return apiFetch<EvalSummary>(`/eval/orgs/${orgId}/eval/summary`, { accessToken, cache: "no-store" });
+}
+
+export async function getEvalSessions(accessToken: string | null, orgId: string): Promise<EvalSessionsResponse | null> {
+  return apiFetch<EvalSessionsResponse>(`/eval/orgs/${orgId}/eval/sessions`, { accessToken, cache: "no-store" });
+}
+
+export async function getAnalyticsCriticality(accessToken: string | null, orgId: string): Promise<CriticalityItem[] | null> {
+  return apiFetch<CriticalityItem[]>(`/orgs/${orgId}/analytics/criticality`, { accessToken, cache: "no-store" });
 }
 
 export async function getABTests(accessToken: string | null, orgId: string): Promise<ABTest[] | null> {
@@ -1205,6 +1567,14 @@ export async function getDependencyGraph(accessToken: string | null, orgId: stri
   return apiFetch<DependencyGraph>(`/registry/orgs/${orgId}/dependency-graph`, { accessToken, cache: "no-store" });
 }
 
+export async function getRepoDependencyGraph(accessToken: string | null, orgId: string, repoId: string): Promise<DependencyGraphCache | null> {
+  return apiFetch<DependencyGraphCache>(`/orgs/${orgId}/dependency-graph/repo/${repoId}`, { accessToken, cache: "no-store" });
+}
+
+export async function getCrossRepoDependencyGraph(accessToken: string | null, orgId: string): Promise<DependencyGraphCache | null> {
+  return apiFetch<DependencyGraphCache>(`/orgs/${orgId}/dependency-graph/cross-repo`, { accessToken, cache: "no-store" });
+}
+
 export async function getCompatibilityMatrix(accessToken: string | null, orgId: string): Promise<CompatibilityMatrix | null> {
   return apiFetch<CompatibilityMatrix>(`/registry/orgs/${orgId}/compatibility-matrix`, { accessToken, cache: "no-store" });
 }
@@ -1219,4 +1589,16 @@ export async function getKnowledgeRisk(accessToken: string | null, orgId: string
 
 export async function getSLAPolicies(accessToken: string | null, orgId: string): Promise<SLAPolicy[] | null> {
   return apiFetch<SLAPolicy[]>(`/orgs/${orgId}/sla`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgSources(accessToken: string | null, orgId: string): Promise<SourceConnection[] | null> {
+  return apiFetch<SourceConnection[]>(`/orgs/${orgId}/sources`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgSessions(accessToken: string | null, orgId: string): Promise<OrgSessionsResponse | null> {
+  return apiFetch<OrgSessionsResponse>(`/orgs/${orgId}/sessions`, { accessToken, cache: "no-store" });
+}
+
+export async function getIntelligenceInsights(accessToken: string | null, orgId: string): Promise<IntelligenceInsight[] | null> {
+  return apiFetch<IntelligenceInsight[]>(`/orgs/${orgId}/intelligence/insights`, { accessToken, cache: "no-store" });
 }

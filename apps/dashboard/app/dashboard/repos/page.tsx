@@ -8,8 +8,6 @@ import { API_URL, type Org, type Repo } from "../../../lib/data";
 import { AddReposButton } from "./add-repos-button";
 import { ReposBrowser, type RepoListItem } from "./repos-browser";
 
-export const dynamic = "force-dynamic";
-
 export default async function ReposPage() {
   let accessToken = "";
   let orgId = "";

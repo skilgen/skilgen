@@ -3,8 +3,7 @@ import { withAuth } from "@workos-inc/authkit-nextjs";
 import { CheckCircle2, Users2 } from "lucide-react";
 
 import { getBootstrapOrg, getKnowledgeRisk, getMyOrg } from "../../../lib/data";
-
-export const dynamic = "force-dynamic";
+import { SkillAIActionPanel } from "../red-flags/red-flags-shell";
 
 const levels = ["critical", "high", "medium"] as const;
 const types = ["missing_skill", "zero_load", "stale_high_load"] as const;
@@ -77,7 +76,20 @@ export default async function KnowledgeRiskPage() {
               </div>
               <p className="mt-4 rounded-md bg-[color:var(--bg-base)] p-3 text-sm text-[color:var(--text-primary)]">{risk.recommendation}</p>
               <div className="mt-4 flex flex-wrap gap-2 text-xs text-[color:var(--text-tertiary)]">{risk.affected_files.map((file) => <span className="rounded bg-black/20 px-2 py-1 font-mono" key={file}>{file}</span>)}</div>
-              <Link className="mt-4 inline-flex text-sm font-semibold text-[color:var(--accent-primary)]" href={risk.skill_exists && risk.skill_id ? `/dashboard/repos/${risk.repo_id}/skills/${risk.skill_id}` : `/dashboard/repos/${risk.repo_id}`}>{risk.skill_exists ? "View skill" : "Create skill"} →</Link>
+              <div className="mt-4">
+                <Link className="inline-flex text-sm font-semibold text-[color:var(--accent-primary)]" href={risk.skill_exists && risk.skill_id ? `/dashboard/repos/${risk.repo_id}/skills/${risk.skill_id}` : `/dashboard/repos/${risk.repo_id}`}>{risk.skill_exists ? "View skill" : "Open repo"} →</Link>
+              </div>
+              {org ? (
+                <SkillAIActionPanel
+                  accessToken={accessToken}
+                  affectedFiles={risk.affected_files}
+                  domain={risk.domain}
+                  orgId={org.id}
+                  reason={`${risk.reason} Recommendation: ${risk.recommendation}`}
+                  repoId={risk.repo_id}
+                  source="knowledge_risk"
+                />
+              ) : null}
             </article>
           ))}
         </section>

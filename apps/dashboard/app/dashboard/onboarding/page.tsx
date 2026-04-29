@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { ArrowRight, BookOpen, Github, Sparkles } from "lucide-react";
 
-export const dynamic = "force-dynamic";
-
 export default function OnboardingPage() {
   return (
     <div>

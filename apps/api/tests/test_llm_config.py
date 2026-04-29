@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from apps.api.api.services.llm import LLMNotConfiguredError, call_llm
+from apps.api.api.services.llm import LLMNotConfiguredError, _build_openai_messages, _openai_max_tokens_param, call_llm
 from packages.db.llm_key import decrypt_key, encrypt_key, key_hint
 
 
@@ -32,6 +32,37 @@ def test_save_custom_config() -> None:
 def test_call_llm_not_configured() -> None:
     with pytest.raises(LLMNotConfiguredError):
         asyncio.run(call_llm({}, "system", "user"))
+
+
+def test_openai_max_tokens_o1() -> None:
+    params = _openai_max_tokens_param("o1", 1024)
+    assert params == {"max_completion_tokens": 1024}
+
+
+def test_openai_max_tokens_o3_mini() -> None:
+    params = _openai_max_tokens_param("o3-mini", 1024)
+    assert params == {"max_completion_tokens": 1024}
+
+
+def test_openai_max_tokens_gpt4o() -> None:
+    params = _openai_max_tokens_param("gpt-4o", 1024)
+    assert params == {"max_tokens": 1024}
+
+
+def test_openai_max_tokens_gpt5() -> None:
+    params = _openai_max_tokens_param("gpt-5", 1024)
+    assert params == {"max_completion_tokens": 1024}
+
+
+def test_build_messages_o_series_no_system_role() -> None:
+    msgs = _build_openai_messages("o1-mini", "system text", "user text")
+    assert all(message["role"] != "system" for message in msgs)
+    assert "system text" in msgs[0]["content"]
+
+
+def test_build_messages_gpt4_has_system_role() -> None:
+    msgs = _build_openai_messages("gpt-4o", "system text", "user text")
+    assert msgs[0]["role"] == "system"
 
 
 class FakeResponse:

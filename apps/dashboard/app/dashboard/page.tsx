@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { AlertTriangle, ArrowRight, BookOpen, ChevronRight, Eye, GitBranch, Play, PlusCircle, RefreshCw, TrendingUp, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowRight, ChevronRight, Eye, GitBranch, PlusCircle, RefreshCw, Wrench } from "lucide-react";
 
 import {
   getOrgActionItems,
@@ -9,17 +9,20 @@ import {
   getEvalSkillGaps,
   getMyOrg,
   getOrgMemoryScore,
+  getOverviewScoreTrend,
   getOrgRepos,
+  getOrgSkillDebt,
   getOrgSetupStatus,
   getOrgSkillHeatmap,
   getOrgStats,
   type ActionItem,
+  type MemoryScore,
   type Org,
   type Repo,
 } from "../../lib/data";
 import { AgentSetupBanner } from "./agent-setup-banner";
-
-export const dynamic = "force-dynamic";
+import { AnalyseRepoButton, QuickActions as OverviewQuickActions } from "./overview-actions";
+import { OverviewChart } from "./overview-chart";
 
 function todayLabel(): string {
   return new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date());
@@ -74,7 +77,7 @@ function MetricCard({
   href?: string;
 }) {
   const content = (
-    <article className="rounded-[24px] border border-[color:var(--bg-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-5 shadow-[0_22px_60px_rgba(0,0,0,0.18)]">
+    <article className="group relative cursor-pointer rounded-[24px] border border-[color:var(--bg-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-5 shadow-[0_22px_60px_rgba(0,0,0,0.18)] transition-colors hover:border-[color:var(--accent-primary)]">
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">{label}</div>
@@ -89,75 +92,63 @@ function MetricCard({
         {typeof ringScore === "number" ? <ScoreRing score={ringScore} /> : null}
       </div>
       <div className="mt-5 border-t border-white/6 pt-3 text-[12px] text-[color:var(--text-secondary)]">{sub}</div>
+      <span className="absolute bottom-4 right-5 text-[16px] text-[color:var(--accent-primary)] opacity-0 transition-opacity group-hover:opacity-100">→</span>
     </article>
   );
   return href ? <Link href={href}>{content}</Link> : content;
 }
 
-function ScoreTrend({ points, avgScore, skillsBelowThreshold }: { points: { date: string; score: number }[]; avgScore: number; skillsBelowThreshold: number }) {
-  const width = 920;
-  const height = 210;
-  const chartHeight = 176;
-  const safe = points.length ? points : [{ date: "", score: 0 }];
-  const coordinates = safe.map((point, index) => {
-    const x = safe.length === 1 ? width / 2 : (index / (safe.length - 1)) * width;
-    const y = chartHeight - (Math.max(0, Math.min(100, point.score)) / 100) * (chartHeight - 16) - 8;
-    return `${x},${y}`;
-  });
-  const areaPoints = [`0,${chartHeight}`, ...coordinates, `${width},${chartHeight}`].join(" ");
-  const targetY = chartHeight - 0.7 * (chartHeight - 16) - 8;
-  const weekLabels = safe.map((_, index) => ({
-    x: safe.length === 1 ? width / 2 : (index / (safe.length - 1)) * width,
-    label: `Week ${index + 1}`,
-  }));
-  const caption =
-    avgScore < 70
-      ? `You're ${Math.max(0, 70 - avgScore)} points from the 70+ threshold where agents perform best.`
-      : `Your skills are performing well. ${skillsBelowThreshold} skills still below threshold.`;
-
+function MemoryScoreHero({ score }: { score: MemoryScore | null }) {
+  const safe = score ?? {
+    score: 0,
+    grade: "F" as const,
+    trend_7d: 0,
+    trend_30d: 0,
+    computed_at: "",
+    breakdown: { coverage: 0, load_frequency: 0, compliance: 0, freshness: 0 },
+  };
+  const tone = safe.score >= 80 ? "text-[color:var(--accent-green)]" : safe.score >= 50 ? "text-amber-300" : "text-red-300";
+  const compliance = safe.breakdown.compliance ?? safe.breakdown.quality ?? 0;
+  const trendLabel = `${safe.trend_7d >= 0 ? "+" : ""}${safe.trend_7d} this week`;
+  const sparkY = 30 - Math.min(24, Math.max(0, safe.score) / 4);
+  const subScores = [
+    ["Coverage", safe.breakdown.coverage],
+    ["Load frequency", safe.breakdown.load_frequency],
+    ["Compliance", compliance],
+    ["Freshness", safe.breakdown.freshness],
+  ];
   return (
-    <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[radial-gradient(circle_at_top,rgba(201,151,58,0.18),rgba(16,16,24,0.96)_50%)] p-6">
-      <div className="mb-5 flex items-center justify-between gap-4">
+    <Link className="block rounded-[28px] border border-[color:var(--bg-border)] bg-[linear-gradient(135deg,rgba(16,185,129,0.10),rgba(13,13,20,0.98)_48%)] p-6 transition-colors hover:border-[color:var(--accent-primary)]" href="/dashboard/ai-readiness">
+      <div className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)_360px] xl:items-center">
         <div>
-          <h2 className="text-[20px] font-semibold text-[color:var(--text-primary)]">Score Trend</h2>
-          <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">30-day average Skilgen score across your org.</p>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">Org Memory Score</div>
+          <div className={`mt-3 text-[54px] font-semibold leading-none ${tone}`}>{safe.score}</div>
+          <div className="mt-2 text-sm text-[color:var(--text-secondary)]">Coverage, load frequency, compliance, and freshness.</div>
         </div>
-        <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[12px] font-semibold text-[color:var(--accent-primary)]">
-          <TrendingUp className="h-4 w-4" />
-          {safe[safe.length - 1]?.score ?? 0}/100
+        <div>
+          <div className="flex items-center gap-3">
+            <span className={`rounded-full border px-3 py-1 text-sm font-semibold ${safe.trend_7d >= 0 ? "border-[color:var(--accent-green)]/30 text-[color:var(--accent-green)]" : "border-red-500/30 text-red-300"}`}>{trendLabel}</span>
+            <span className="text-sm text-[color:var(--text-secondary)]">{safe.trend_30d >= 0 ? "+" : ""}{safe.trend_30d} in 30d</span>
+          </div>
+          <svg className="mt-5 h-16 w-full max-w-[420px]" viewBox="0 0 240 64" role="img" aria-label="Flat memory score sparkline">
+            <path d={`M4 ${sparkY} H236`} fill="none" stroke="var(--accent-primary)" strokeLinecap="round" strokeWidth="3" />
+            <circle cx="236" cy={sparkY} fill="var(--accent-primary)" r="4" />
+          </svg>
+          <p className="mt-2 text-xs text-[color:var(--text-tertiary)]">Flat sparkline reflects the current score only; historical Memory Score trend is planned for Phase 3.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {subScores.map(([label, value]) => (
+            <div className="rounded-xl border border-[color:var(--bg-border)] bg-black/15 p-3" key={label as string}>
+              <div className="text-xs text-[color:var(--text-secondary)]">{label as string}</div>
+              <div className="mt-2 flex items-center gap-3">
+                <ScoreRing score={Math.round(Number(value) * 100)} />
+                <span className="text-lg font-semibold">{Math.round(Number(value) * 100)}%</span>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
-      {points.some((point) => point.score > 0) ? (
-        <svg aria-label="Org score trend" className="h-[210px] w-full" preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`}>
-          <defs>
-            <linearGradient id="overview-line" x1="0" x2="1" y1="0" y2="1">
-              <stop offset="0%" stopColor="#f5d07a" />
-              <stop offset="100%" stopColor="#C9973A" />
-            </linearGradient>
-            <linearGradient id="overview-fill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="rgba(201,151,58,0.28)" />
-              <stop offset="100%" stopColor="rgba(201,151,58,0)" />
-            </linearGradient>
-          </defs>
-          <line stroke="#f59e0b" strokeDasharray="8 8" strokeOpacity="0.7" strokeWidth="2" x1="0" x2={width} y1={targetY} y2={targetY} />
-          <text fill="#f59e0b" fontSize="12" fontWeight="600" x={width - 58} y={targetY - 8}>
-            Target
-          </text>
-          <polygon fill="url(#overview-fill)" points={areaPoints} />
-          <polyline fill="none" points={coordinates.join(" ")} stroke="url(#overview-line)" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
-          {weekLabels.map((week) => (
-            <text fill="rgba(238,238,245,0.48)" fontSize="11" key={`${week.label}-${week.x}`} textAnchor="middle" x={week.x} y={height - 8}>
-              {week.label}
-            </text>
-          ))}
-        </svg>
-      ) : (
-        <div className="rounded-2xl border border-dashed border-[color:var(--bg-border)] p-8 text-[14px] text-[color:var(--text-secondary)]">
-          Analyse repos regularly to build score history.
-        </div>
-      )}
-      <p className="mt-3 text-[13px] text-[color:var(--text-secondary)]">{caption}</p>
-    </section>
+    </Link>
   );
 }
 
@@ -208,7 +199,7 @@ function TodayActions({ items }: { items: ActionItem[] }) {
   );
 }
 
-function AttentionTable({ repos }: { repos: Repo[] }) {
+function AttentionTable({ accessToken, orgId, repos }: { accessToken: string; orgId: string; repos: Repo[] }) {
   return (
     <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
       <div className="mb-5 flex items-center justify-between gap-4">
@@ -231,7 +222,7 @@ function AttentionTable({ repos }: { repos: Repo[] }) {
         {repos.map((repo) => (
           <div className="grid grid-cols-[minmax(0,1.3fr)_120px_140px_140px] items-center border-t border-[color:var(--bg-border)] px-4 py-4 text-[13px]" key={repo.id}>
             <div className="min-w-0">
-              <div className="truncate font-semibold text-[color:var(--text-primary)]">{repo.name}</div>
+              <Link className="truncate font-semibold text-[color:var(--text-primary)] hover:text-[color:var(--accent-primary)]" href={`/dashboard/repos/${repo.id}`}>{repo.name}</Link>
               <div className="truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">{repo.full_name}</div>
             </div>
             <div>
@@ -239,41 +230,11 @@ function AttentionTable({ repos }: { repos: Repo[] }) {
             </div>
             <div className="text-[color:var(--text-secondary)]">{formatRelativeTime(repo.last_analysed_at)}</div>
             <div>
-              <Link className="inline-flex items-center gap-2 rounded-full border border-[rgb(var(--accent-primary-rgb)/0.28)] px-3 py-1.5 text-[12px] font-semibold text-[color:var(--accent-primary)] hover:bg-[rgb(var(--accent-primary-rgb)/0.08)]" href={`/dashboard/repos/${repo.id}`}>
-                Analyse now
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
+              <AnalyseRepoButton accessToken={accessToken} orgId={orgId} repo={repo} />
             </div>
           </div>
         ))}
       </div>
-    </section>
-  );
-}
-
-function QuickActions() {
-  const actions = [
-    { href: "/dashboard/repos", label: "Connect Repo", icon: GitBranch },
-    { href: "/dashboard/repos", label: "New Analysis", icon: Play },
-    { href: "/dashboard/skills", label: "View Skills", icon: BookOpen },
-    { href: "/dashboard/analytics", label: "Analytics", icon: TrendingUp },
-  ];
-  return (
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {actions.map((action) => {
-        const Icon = action.icon;
-        return (
-          <Link className="group rounded-[22px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5 transition-transform hover:-translate-y-0.5 hover:border-[rgb(var(--accent-primary-rgb)/0.32)]" href={action.href} key={action.label}>
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[rgb(var(--accent-primary-rgb)/0.22)] bg-[rgb(var(--accent-primary-rgb)/0.08)]">
-                <Icon className="h-5 w-5 text-[color:var(--accent-primary)]" />
-              </div>
-              <ArrowRight className="h-4 w-4 text-[color:var(--text-tertiary)] transition-transform group-hover:translate-x-0.5" />
-            </div>
-            <div className="mt-5 text-[16px] font-semibold text-[color:var(--text-primary)]">{action.label}</div>
-          </Link>
-        );
-      })}
     </section>
   );
 }
@@ -320,9 +281,10 @@ async function resolveOrg(): Promise<{ accessToken: string; org: Org | null; fir
 
 export default async function OverviewPage() {
   const { accessToken, org, firstName } = await resolveOrg();
-  const [stats, heatmap, repos, setupStatus, actionItems, roi, skillGaps, memoryScore] = org
+  const [stats, scoreTrend, heatmap, repos, setupStatus, actionItems, roi, skillGaps, memoryScore, skillDebt] = org
     ? await Promise.all([
         getOrgStats(accessToken, org.id),
+        getOverviewScoreTrend(accessToken, org.id, 30),
         getOrgSkillHeatmap(accessToken, org.id),
         getOrgRepos(accessToken, org.id),
         getOrgSetupStatus(accessToken, org.id),
@@ -330,8 +292,9 @@ export default async function OverviewPage() {
         getEvalROI(accessToken, org.id),
         getEvalSkillGaps(accessToken, org.id, "open"),
         getOrgMemoryScore(accessToken, org.id),
+        getOrgSkillDebt(accessToken, org.id),
       ])
-    : [null, null, null, null, null, null, null, null];
+    : [null, null, null, null, null, null, null, null, null, null];
 
   const repoList = repos ?? [];
   const attentionRepos = [...repoList]
@@ -368,6 +331,7 @@ export default async function OverviewPage() {
       ) : (
         <>
           {showSetupBanner ? <AgentSetupBanner /> : null}
+          <MemoryScoreHero score={memoryScore} />
           {(skillGaps?.length ?? 0) > 0 ? (
             <Link className="flex items-center justify-between gap-4 rounded-xl border border-[#f59e0b]/30 bg-[#f59e0b]/10 p-4 text-sm text-amber-100" href="/dashboard/eval/gaps">
               <span>⚠ {skillGaps?.length} skill gaps — agents failing on {gapDomains.join(", ")}</span>
@@ -394,18 +358,19 @@ export default async function OverviewPage() {
             </div>
           </Link>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-            <MetricCard label="Repos Connected" value={stats?.repo_count ?? repoList.length} sub="Connected repositories" />
-            <MetricCard label="Skills Generated" value={stats?.skill_count ?? heatmap?.summary.total_skills ?? 0} sub="Tracked skill inventory" />
-            <MetricCard label="Avg Skilgen Score" value={`${stats?.avg_score ?? 0}/100`} sub="Org-wide average" ringScore={stats?.avg_score ?? 0} />
-            <MetricCard label="Memory Score" value={`${memoryScore?.score ?? 0}`} sub={`Grade ${memoryScore?.grade ?? "F"} · ${memoryScore?.trend ?? "Stable"}`} ringScore={memoryScore?.score ?? 0} href="/dashboard/memory" />
+            <MetricCard href="/dashboard/repos" label="Repos Connected" value={stats?.repo_count ?? repoList.length} sub="Connected repositories" />
+            <MetricCard href="/dashboard/skills" label="Skills Generated" value={stats?.skill_count ?? heatmap?.summary.total_skills ?? 0} sub="Tracked skill inventory" />
+            <MetricCard href="/dashboard/ai-readiness" label="Avg Skilgen Score" value={`${stats?.avg_score ?? 0}/100`} sub="Org-wide average" ringScore={stats?.avg_score ?? 0} />
+            <MetricCard label="Skill Health" value={`${skillDebt?.health_score ?? Math.max(0, 100 - (skillDebt?.debt_score ?? 100))}/100`} sub="Higher is better" ringScore={skillDebt?.health_score ?? Math.max(0, 100 - (skillDebt?.debt_score ?? 100))} href="/dashboard/debt" />
+            <MetricCard label="AI Readiness" value={`${memoryScore?.score ?? 0}`} sub={`Grade ${memoryScore?.grade ?? "F"} · ${memoryScore?.trend ?? "Stable"}`} ringScore={memoryScore?.score ?? 0} href="/dashboard/ai-readiness" />
             {showPerformance ? <MetricCard label="Performance" value={`${roi?.multiplier}x`} sub="Agent task improvement" href="/dashboard/eval" /> : null}
-            <MetricCard label="Dead Skills" value={deadSkills} sub="Skills with no recent usage" tone={deadSkills > 0 ? "danger" : "default"} href="/dashboard/analytics" />
-            <MetricCard label="Stale + Active" value={staleActive} sub="Agents still loading outdated context" tone={staleActive > 0 ? "warning" : "default"} href="/dashboard/analytics" />
+            <MetricCard label="Dead Skills" value={deadSkills} sub="Skills with no recent usage" tone={deadSkills > 0 ? "danger" : "default"} href="/dashboard/analytics?view=never-loaded" />
+            <MetricCard label="Stale + Active" value={staleActive} sub="Agents still loading outdated context" tone={staleActive > 0 ? "warning" : "default"} href="/dashboard/red-flags" />
           </section>
 
-          <ScoreTrend avgScore={stats?.avg_score ?? 0} points={stats?.score_trend ?? []} skillsBelowThreshold={skillsBelowThreshold} />
-          <AttentionTable repos={attentionRepos} />
-          <QuickActions />
+          <OverviewChart points={scoreTrend ?? []} />
+          <AttentionTable accessToken={accessToken} orgId={org?.id ?? ""} repos={attentionRepos} />
+          <OverviewQuickActions accessToken={accessToken} orgId={org?.id ?? ""} repos={repoList} />
         </>
       )}
     </div>

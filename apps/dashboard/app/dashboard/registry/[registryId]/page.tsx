@@ -6,8 +6,6 @@ import { getBootstrapOrg, getRegistrySkillDetail } from "../../../../lib/data";
 import { CopyValueButton, SkillActions } from "./skill-actions";
 import { ImportOwnButton } from "./import-own-button";
 
-export const dynamic = "force-dynamic";
-
 type PageProps = {
   params: Promise<{ registryId: string }>;
 };

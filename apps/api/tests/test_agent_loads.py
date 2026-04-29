@@ -77,10 +77,11 @@ def _call(headers: dict[str, str], current_org_id: str | None):
 
 def test_agent_load_variants_create_usage_events_with_runtime_detection() -> None:
     variants = [
-        ({"Authorization": "Bearer generic"}, "org_1", "unknown"),
-        ({"API-Key": "sk-test"}, None, "unknown"),
-        ({"API-Key": "sk-test", "User-Agent": "codex/1.0"}, None, "codex"),
+        ({"Authorization": "Bearer generic"}, "org_1", "unidentified_agent"),
+        ({"API-Key": "sk-test"}, None, "unidentified_agent"),
+        ({"API-Key": "sk-test", "User-Agent": "codex/1.0"}, None, "codex_cli"),
         ({"API-Key": "sk-test", "User-Agent": "claude-code/1.0 anthropic"}, None, "claude_code"),
+        ({"API-Key": "sk-test", "X-Agent": "gemini"}, None, "gemini_cli"),
     ]
 
     all_events = []
@@ -92,4 +93,4 @@ def test_agent_load_variants_create_usage_events_with_runtime_detection() -> Non
         assert db.events[0].agent_runtime == expected_runtime
         all_events.extend(db.events)
 
-    assert len(all_events) == 4
+    assert len(all_events) == 5

@@ -14,6 +14,7 @@ import {
   GitBranch,
   FlaskConical,
   History,
+  Inbox,
   LayoutDashboard,
   LogOut,
   Package,
@@ -26,6 +27,7 @@ import {
   AlertTriangle,
   ShieldAlert,
   Timer,
+  User,
   Users2,
   Zap,
 } from "lucide-react";
@@ -60,7 +62,7 @@ async function handleSignOut() {
 /**
  * Loads the org used by the dashboard shell and falls back to preview data.
  */
-async function loadShellOrg(): Promise<Pick<Org, "name" | "plan">> {
+async function loadShellOrg(): Promise<Pick<Org, "id" | "name" | "plan">> {
   let accessToken = "";
 
   try {
@@ -166,9 +168,11 @@ export default async function DashboardLayout({
     ShieldAlert,
     ScrollText,
     Timer,
+    User,
     Settings,
     Mail,
     History,
+    Inbox,
     ShieldCheck,
     FlaskConical,
     Zap,
@@ -189,6 +193,9 @@ export default async function DashboardLayout({
       label: "PRODUCT",
       items: [
         { href: "/dashboard", label: "Overview", icon: "LayoutDashboard" },
+        { href: "/dashboard/agent-prs", label: "PR Inbox", icon: "Inbox" },
+        { href: "/dashboard/agent-scorecard", label: "Agent Scorecard", icon: "BarChart3" },
+        { href: "/dashboard/my-code-today", label: "My Code Today", icon: "User" },
         { href: "/dashboard/skills", label: "Skills", icon: "BookOpen" },
         { href: "/dashboard/repos", label: "Repos", icon: "GitBranch" },
         { href: "/dashboard/sources", label: "Sources", icon: "Database" },
@@ -199,7 +206,7 @@ export default async function DashboardLayout({
       items: [
         { href: "/dashboard/heatmap", label: "Heatmap", icon: "BarChart3" },
         { href: "/dashboard/intelligence", label: "Intelligence", icon: "BarChart2" },
-        { href: "/dashboard/memory", label: "Memory Score", icon: "Brain" },
+        { href: "/dashboard/ai-readiness", label: "AI Readiness", icon: "Brain" },
         { href: "/dashboard/analytics", label: "Analytics", icon: "ClipboardList" },
         { href: "/dashboard/eval", label: "Agent Performance", icon: "BarChart2" },
         { href: "/dashboard/eval/gaps", label: "Skill Gaps", icon: "AlertTriangle", badge: navBadges.skillGapCount ? `${navBadges.skillGapCount} open gaps` : undefined, badgeVariant: "dot" },
@@ -272,7 +279,17 @@ export default async function DashboardLayout({
                 {group.items.map((item) => {
                   const Icon = icons[item.icon];
 
-                  return <DashboardNavLink badge={item.badge} badgeVariant={item.badgeVariant} key={item.href} href={item.href} icon={<Icon className="h-4 w-4" />} label={item.label} />;
+                  return (
+                    <DashboardNavLink
+                      badge={item.badge}
+                      badgeVariant={item.badgeVariant}
+                      key={item.href}
+                      href={item.href}
+                      icon={<Icon className="h-4 w-4" />}
+                      label={item.label}
+                      unreadStorageKey={item.href === "/dashboard/agent-prs" && shellOrg.id ? `skillayer.agentPrInbox.unreadCount.${shellOrg.id}` : undefined}
+                    />
+                  );
                 })}
               </div>
             </div>

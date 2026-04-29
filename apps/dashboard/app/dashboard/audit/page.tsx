@@ -4,8 +4,6 @@ import Link from "next/link";
 import { AuditClient } from "./audit-client";
 import { exportAuditLogCsvUrl, getAuditLogStats, getBootstrapOrg, getMyOrg, getOrgAuditLog } from "../../../lib/data";
 
-export const dynamic = "force-dynamic";
-
 export default async function AuditPage() {
   let accessToken = "";
   try {

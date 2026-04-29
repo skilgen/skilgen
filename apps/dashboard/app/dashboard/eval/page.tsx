@@ -1,9 +1,7 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
-import { getBootstrapOrg, getEvalROI, getMyOrg, type EvalROI } from "../../../lib/data";
+import { getBootstrapOrg, getEvalSessions, getEvalSummary, getMyOrg } from "../../../lib/data";
 import { EvalShell } from "./eval-shell";
-
-export const dynamic = "force-dynamic";
 
 async function loadOrg(): Promise<{ accessToken: string; orgId: string }> {
   let accessToken = "";
@@ -21,18 +19,6 @@ async function loadOrg(): Promise<{ accessToken: string; orgId: string }> {
 
 export default async function EvalPage(): Promise<React.ReactElement> {
   const { accessToken, orgId } = await loadOrg();
-  const roi: EvalROI =
-    (await getEvalROI(accessToken, orgId)) ?? {
-      total_tasks: 0,
-      success_rate: null,
-      multiplier: null,
-      high_skill_success_rate: null,
-      low_skill_success_rate: null,
-      by_skill_score_bucket: [],
-      by_agent_runtime: [],
-      skill_gaps: [],
-      trend: [],
-      benchmark: {},
-    };
-  return <EvalShell orgId={orgId} roi={roi} />;
+  const [summary, sessions] = await Promise.all([getEvalSummary(accessToken, orgId), getEvalSessions(accessToken, orgId)]);
+  return <EvalShell accessToken={accessToken} orgId={orgId} sessions={sessions?.sessions ?? []} summary={summary} />;
 }

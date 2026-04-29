@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from packages.db.models.base import Base, new_uuid, utcnow
@@ -29,6 +29,15 @@ class AutopilotTask(Base):
     trigger_reason: Mapped[str] = mapped_column(String(512), nullable=False)
     freshness_at_trigger: Mapped[int] = mapped_column(default=0, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    improvement_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    original_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generation_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pr_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)
     resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
 

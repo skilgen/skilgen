@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+import asyncio
+import base64
+from collections import defaultdict
+from itertools import combinations
+import json
+import socket
+import urllib.error
+import urllib.request
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 import hashlib
 import logging
 import secrets
 from typing import Any, Literal
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import csv
 from io import StringIO
 import time
+import httpx
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -24,13 +33,22 @@ from apps.api.api.github import get_installation_token
 from apps.api.api.notifications import build_test_notification_message, post_slack_message
 from apps.api.api.services import audit
 from apps.api.api.services.audit import get_actor_login
+from apps.api.api.services.agent_connection import get_agent_connection_status, normalize_runtime, runtime_display_name
+from apps.api.api.services.commit_check import _severity_bucket
+from apps.api.api.services.github_pr import create_skill_pr
+from apps.api.api.services.dependency_analyzer import compute_cross_repo_dependencies, compute_repo_dependencies
+from apps.api.api.services.half_life import compute_skill_decay_timeline, predict_half_life_days
 from apps.api.api.services.knowledge_concentration import concentration_response
 from apps.api.api.services.llm import LLMCallError, LLMNotConfiguredError, call_llm
-from packages.db.llm_key import encrypt_key, key_hint
+from apps.api.api.services.skill_generator import generate_skill_with_ai
+from packages.db.llm_key import decrypt_key, encrypt_key, key_hint
 from apps.api.api.services.policy import POLICY_RULE_TYPES, PolicyViolation, evaluate_policies
+from apps.api.api.services.policy_engine import PR_POLICY_RULE_TYPES, validate_pr_policy_config
 from apps.api.api.services.redflags import compute_repo_red_flags
+from apps.api.api.services.standup import collect_standup_summary, parse_standup_date, send_standup
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AnalysisRun, AuditEvent, FlagDismissal, Org, OrgLLMConfig, OrgPolicy, Repo, ScoreHistory, Skill, SkillHalfLife, SkillMemoryStub, SkillUsageEvent, SkillVersion
+from packages.db.models import AgentSession, AnalysisRun, AuditEvent, CoverageGap, DependencyGraphCache, FlagDismissal, Org, OrgLLMConfig, OrgPolicy, PRAttribution, PullRequest, Repo, ScoreHistory, Skill, SkillHalfLife, SkillMemoryStub, SkillUsageEvent, SkillVersion
+from packages.db.models import SourceConnection as SourceConnectionModel
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
     AuditLogEventResponse,
@@ -57,6 +75,7 @@ from packages.db.schemas import (
 
 router = APIRouter(prefix="/orgs", tags=["orgs"])
 logger = logging.getLogger(__name__)
+ALL_POLICY_RULE_TYPES = POLICY_RULE_TYPES | PR_POLICY_RULE_TYPES
 
 SKILL_CATEGORIES = [
     "codebase_architecture",
@@ -69,6 +88,70 @@ SKILL_CATEGORIES = [
     "operational_knowledge",
 ]
 
+SKILL_CATEGORY_LABELS = {
+    "codebase_architecture": "Architecture",
+    "code_style": "Code Style",
+    "testing_conventions": "Testing",
+    "internal_tools": "Internal Tools",
+    "security_compliance": "Security",
+    "design_system": "Design System",
+    "data_schema": "Data Schema",
+    "operational_knowledge": "Operational",
+}
+
+
+class DebtGapGenerateRequest(BaseModel):
+    mode: Literal["preview", "push"] = "preview"
+
+
+class DebtGenerateAllRequest(BaseModel):
+    domains: list[str] | None = None
+    repo_ids: list[str] | None = None
+
+SOURCE_TYPE_DISPLAY_NAMES = {
+    "code": "Codebase",
+    "github": "GitHub",
+    "openapi": "OpenAPI",
+    "graphql": "GraphQL",
+    "postman": "Postman",
+    "terraform": "Terraform",
+    "kubernetes": "Kubernetes",
+    "helm": "Helm",
+    "dbt": "dbt",
+    "sql_schema": "SQL Schema",
+    "kafka": "Kafka",
+    "sarif": "SARIF",
+    "sbom": "SBOM",
+    "security_policy": "Security Policy",
+    "runbook": "Runbook",
+    "confluence": "Confluence",
+    "notion": "Notion",
+    "incident": "Incidents",
+    "pagerduty": "PagerDuty",
+}
+
+SOURCE_REFRESH_COMMANDS = {
+    "code": "skilgen deliver --project-root .",
+    "github": "skilgen deliver --project-root .",
+    "openapi": "skilgen analyze --source openapi",
+    "graphql": "skilgen analyze --source graphql",
+    "postman": "skilgen analyze --source postman",
+    "terraform": "skilgen analyze --source terraform",
+    "kubernetes": "skilgen analyze --source kubernetes",
+    "helm": "skilgen analyze --source helm",
+    "dbt": "skilgen analyze --source dbt",
+    "sql_schema": "skilgen analyze --source sql_schema",
+    "kafka": "skilgen analyze --source kafka",
+    "sarif": "skilgen analyze --source sarif",
+    "sbom": "skilgen analyze --source sbom",
+    "security_policy": "skilgen analyze --source security_policy",
+    "runbook": "skilgen analyze --source runbook",
+    "confluence": "skilgen analyze --source confluence",
+    "notion": "skilgen analyze --source notion",
+    "incident": "skilgen analyze --source incident",
+    "pagerduty": "skilgen analyze --source pagerduty",
+}
+
 SKILL_CATEGORY_LANGUAGE_HINTS = {
     "codebase_architecture": "Detected from repo structure",
     "code_style": "Detected from code style patterns",
@@ -80,13 +163,18 @@ SKILL_CATEGORY_LANGUAGE_HINTS = {
     "operational_knowledge": "Detected from operational knowledge",
 }
 
-RUNTIME_DISPLAY_NAMES = {
-    "claude_code": "Claude Code",
-    "cursor": "Cursor",
-    "codex": "Codex",
-    "copilot": "Copilot",
-    "gemini_cli": "Gemini CLI",
-    "unknown": "Other",
+COMMON_SOURCE_TYPES: dict[str, dict[str, str]] = {
+    "github": {"label": "GitHub", "command": "skilgen deliver --project-root ."},
+    "openapi": {"label": "OpenAPI", "command": "skilgen analyse --source openapi --file openapi.yaml"},
+    "database": {"label": "PostgreSQL", "command": "skilgen analyse --source sql-schema --file schema.sql"},
+    "confluence": {"label": "Confluence", "command": "skilgen analyse --source confluence --space TEAM"},
+    "terraform": {"label": "Terraform", "command": "skilgen analyse --source terraform --dir infra/"},
+    "kubernetes": {"label": "Kubernetes", "command": "skilgen analyse --source kubernetes --dir k8s/"},
+    "kafka": {"label": "Kafka", "command": "skilgen analyse --source kafka --bootstrap-server localhost:9092"},
+    "dbt": {"label": "dbt", "command": "skilgen analyse --source dbt --dir models/"},
+    "sarif": {"label": "SARIF", "command": "skilgen analyse --source sarif --file results.sarif"},
+    "pagerduty": {"label": "PagerDuty", "command": "skilgen analyse --source pagerduty"},
+    "notion": {"label": "Notion", "command": "skilgen analyse --source notion --workspace TEAM"},
 }
 
 DEFAULT_POLICIES = [
@@ -252,6 +340,48 @@ class OrgIntegrationSettingsResponse(BaseModel):
     other: dict[str, object] = Field(default_factory=dict)
 
 
+class SlackSettingsPayload(BaseModel):
+    webhook_url: str | None = Field(default=None, max_length=4096)
+    standup_enabled: bool = False
+    standup_hour: int = Field(default=9, ge=0, le=23)
+
+
+class MyCodeTodayPR(BaseModel):
+    id: str
+    github_pr_number: int
+    title: str
+    state: str | None
+    risk_tier: str
+
+
+class MyCodeTodaySession(BaseModel):
+    session_id: str
+    agent_runtime: str
+    started_at: str
+    ended_at: str | None
+    files_touched: list[str]
+    skills_loaded: list[str]
+    outcome: str | None
+    pr: MyCodeTodayPR | None = None
+
+
+class MyCodeTodaySummary(BaseModel):
+    total_sessions: int
+    total_files: int
+    skills_used: list[str]
+    prs_opened: int
+    prs_merged: int
+    violations: int
+    warnings: int
+
+
+class MyCodeTodayResponse(BaseModel):
+    date: str
+    login: str
+    sessions: list[MyCodeTodaySession]
+    summary: MyCodeTodaySummary
+
+
 class RedFlagDismissPayload(BaseModel):
     flag_type: str = Field(min_length=1, max_length=100)
     repo_id: str = Field(min_length=1)
@@ -279,14 +409,18 @@ class FlagDismissalResponse(BaseModel):
 class MemoryScoreBreakdown(BaseModel):
     coverage: float
     load_frequency: float
-    quality: float
+    compliance: float
     freshness: float
+    quality: float | None = None
 
 
 class MemoryScoreResponse(BaseModel):
     score: int
     breakdown: MemoryScoreBreakdown
-    trend: str
+    trend_7d: int
+    trend_30d: int
+    computed_at: datetime
+    trend: str | None = None
     grade: Literal["A", "B", "C", "D", "F"]
 
 
@@ -420,6 +554,281 @@ class SkillSearchResponse(BaseModel):
     results: list[SkillSearchResult]
 
 
+class SkillColoadTreeNode(BaseModel):
+    name: str
+    value: float = 0
+    display: str | None = None
+    always_together: bool | None = None
+    score: int | None = None
+    status: str | None = None
+    skill_id: str | None = None
+    runtime: str | None = None
+    cluster_id: str | None = None
+    repo_name: str | None = None
+    loads_30d: int | None = None
+    sessions: int | None = None
+    children: list["SkillColoadTreeNode"] = Field(default_factory=list)
+
+
+class SkillColoadTreeResponse(SkillColoadTreeNode):
+    uniform_loads: bool
+    generated_at: datetime
+
+
+class AnalyticsSuggestionRequest(BaseModel):
+    skill_id: str = Field(min_length=1)
+    risk_reason: str = Field(min_length=1, max_length=2000)
+
+
+class AnalyticsSuggestionResponse(BaseModel):
+    skill_id: str
+    suggestions: list[str]
+    summary: str
+
+
+class AnalyticsRiskHighlightResponse(BaseModel):
+    summary: str
+    highlights: list[str]
+
+
+class SkillAIActionPreviewRequest(BaseModel):
+    repo_id: str
+    domain: str = Field(min_length=1, max_length=120)
+    reason: str = Field(min_length=1, max_length=2000)
+    affected_files: list[str] = Field(default_factory=list, max_length=20)
+    source: Literal["knowledge_risk", "red_flag"] = "knowledge_risk"
+
+
+class SkillAIActionPreviewResponse(BaseModel):
+    repo_id: str
+    repo_name: str
+    domain: str
+    skill_path: str
+    branch_name: str
+    pr_title: str
+    pr_body: str
+    content: str
+    file_references: list[str] = []
+    anti_patterns: list[str] = []
+
+
+class SkillAIActionPushRequest(BaseModel):
+    repo_id: str
+    domain: str = Field(min_length=1, max_length=120)
+    skill_path: str = Field(min_length=1, max_length=512)
+    content: str = Field(min_length=1, max_length=60000)
+    branch_name: str = Field(min_length=1, max_length=255)
+    pr_title: str = Field(min_length=1, max_length=255)
+    pr_body: str = Field(min_length=1, max_length=4000)
+
+
+class SkillAIActionPushResponse(BaseModel):
+    pr_url: str
+    pr_number: int
+    branch: str
+
+
+class SourceRefreshRequest(BaseModel):
+    repo_id: str = Field(min_length=1)
+    source_type: str = Field(min_length=1, max_length=80)
+
+
+class SourceConnectionRequest(BaseModel):
+    source_type: str = Field(min_length=1, max_length=80)
+    params: dict[str, Any] = Field(default_factory=dict)
+    display_name: str | None = Field(default=None, max_length=255)
+    timeout_seconds: float = Field(default=3.0, ge=0.1, le=10.0)
+
+
+class SourceTestResponse(BaseModel):
+    source_type: str
+    success: bool
+    status: str
+    message: str
+    details: dict[str, object] = Field(default_factory=dict)
+    tested_at: datetime
+
+
+class SourceConnectResponse(BaseModel):
+    id: str
+    source_type: str
+    display_name: str
+    connected: bool
+    status: str
+    message: str
+    last_tested_at: datetime | None
+
+
+class SourceConnection(BaseModel):
+    id: str
+    source_type: str
+    display_name: str
+    repo_id: str | None = None
+    connected: bool
+    skill_count: int
+    last_skill_generated_at: str | None
+    can_generate_skills: bool
+    generate_command: str | None
+    coverage_domains: list[str]
+    connection_id: str | None = None
+    connection_status: str | None = None
+    last_tested_at: datetime | None = None
+    last_connected_at: datetime | None = None
+    last_error: str | None = None
+
+
+class EnterpriseSkillRequest(BaseModel):
+    skill_id: str | None = Field(default=None, min_length=1)
+    skill_ids: list[str] = Field(default_factory=list)
+    is_enterprise: bool = True
+    name: str | None = None
+    domain: str | None = None
+    content: str | None = None
+    applies_to: Literal["all"] | list[str] = "all"
+
+
+class EnterpriseSkillResponse(BaseModel):
+    id: str
+    repo_id: str
+    repo_name: str
+    domain: str
+    skill_path: str
+    source_type: str | None
+    skill_category: str | None
+    score_total: int
+    is_enterprise: bool
+    last_updated_at: datetime | None
+
+
+class InsightItem(BaseModel):
+    type: Literal["anomaly", "opportunity", "trend", "gap"]
+    title: str
+    description: str
+    cta_label: str | None = None
+    cta_url: str | None = None
+    severity: Literal["high", "medium", "low"]
+
+
+class KnowledgeRiskGenerateRequest(BaseModel):
+    mode: Literal["preview", "push"] = "preview"
+    custom_intent: str | None = Field(default=None, max_length=2000)
+
+
+class KnowledgeRiskDismissResponse(BaseModel):
+    dismissed: bool
+
+
+class ConnectRuntimeStatus(BaseModel):
+    connected: bool
+    last_seen_at: str | None = None
+    load_count_30d: int = 0
+
+
+class ConnectStatusResponse(BaseModel):
+    org_id: str
+    repos_connected: int
+    skills_generated: int
+    github_app_installed: bool
+    agent_runtimes: dict[str, ConnectRuntimeStatus]
+    next_step: str | None = None
+
+
+class HalfLifeBufferRequest(BaseModel):
+    hours_before_decay: int = Field(default=24, ge=1, le=168)
+
+
+class OrgHalfLifeSkillResponse(BaseModel):
+    skill_id: str
+    repo_id: str
+    repo_name: str
+    domain: str
+    skill_path: str
+    predicted_decay_days: float
+    predicted_decay_date: datetime | None
+    decay_confidence: float
+    regeneration_buffer_hours: int
+    regen_queued: bool
+    urgency: Literal["now", "soon", "ok"]
+
+
+class OrgHalfLifeResponse(BaseModel):
+    summary: dict[str, int]
+    skills: list[OrgHalfLifeSkillResponse]
+
+
+class HalfLifeRefreshResponse(BaseModel):
+    refreshed: bool
+    skill_count: int
+    regen_queued_count: int
+
+
+class HalfLifeBufferPayload(BaseModel):
+    buffer_hours: int = Field(default=24, ge=1, le=168)
+    skill_id: str | None = None
+
+
+class HalfLifeBufferResponse(BaseModel):
+    updated: bool
+    buffer_hours: int
+    skill_count: int
+    queued: list[dict[str, object]] = Field(default_factory=list)
+
+
+class TeamSummaryResponse(BaseModel):
+    team_count: int
+    repo_count: int
+    avg_score: int
+    top_team: str | None = None
+    needs_attention: str | None = None
+
+
+class CriticalityItem(BaseModel):
+    skill_id: str
+    domain: str
+    repo_id: str
+    repo_name: str
+    load_count_30d: int
+    score_total: int
+    risk_level: Literal["critical", "high", "medium", "low"]
+    risk_reason: str
+    dependency_rank: int
+    is_every_session: bool
+    last_loaded_at: str | None = None
+
+
+class SessionSkillItem(BaseModel):
+    domain: str
+    score: int
+    loaded_at: str
+
+
+class OrgSessionItem(BaseModel):
+    session_id: str
+    agent_runtime: str
+    agent_display_name: str = ""
+    repo_id: str
+    repo_name: str
+    started_at: str
+    ended_at: str
+    duration_minutes: float
+    skills_loaded: list[SessionSkillItem]
+    skill_count: int
+    session_context: str
+    quality_signal: Literal["strong", "mixed", "weak"]
+    avg_skill_score: int
+    outcome: str = "unknown"
+
+
+class SessionTagPayload(BaseModel):
+    outcome: Literal["success", "needs_rework", "unknown"] = "unknown"
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class OrgSessionsResponse(BaseModel):
+    sessions: list[OrgSessionItem]
+    total: int
+
+
 class SetupStatusStep(BaseModel):
     id: str
     title: str
@@ -455,6 +864,24 @@ class OrgActionItemsResponse(BaseModel):
     items: list[OrgActionItemResponse]
 
 
+class SkillPushPayload(BaseModel):
+    skill_id: str | None = None
+    branch_name: str | None = Field(default=None, max_length=255)
+    pr_title: str | None = Field(default=None, max_length=255)
+    pr_body: str | None = Field(default=None, max_length=4000)
+    content: str | None = Field(default=None, max_length=200_000)
+    generate_if_missing: bool = False
+
+
+class SkillPushResponse(BaseModel):
+    pushed: bool
+    repo_id: str
+    skill_id: str
+    pr_url: str
+    pr_number: int
+    branch: str
+
+
 def _last_30_score_dates() -> list[str]:
     """Return the last 30 UTC score dates in chronological order."""
     today = datetime.now(UTC).date()
@@ -466,8 +893,7 @@ def _utc_now_naive() -> datetime:
 
 
 def _runtime_display_name(runtime: str | None) -> str:
-    normalized = str(runtime or "unknown")
-    return RUNTIME_DISPLAY_NAMES.get(normalized, normalized.replace("_", " ").title())
+    return runtime_display_name(runtime)
 
 
 def _criticality_score(loads_30d: int, last_loaded_at: datetime | None, is_stale: bool, max_loads: int) -> int:
@@ -481,6 +907,63 @@ def _criticality_score(loads_30d: int, last_loaded_at: datetime | None, is_stale
             recency_score = 50
     staleness_penalty = 30 if is_stale else 0
     return max(0, round(freq_score * 0.6 + recency_score * 0.4 - staleness_penalty))
+
+
+def _skill_age_days(skill: Skill, now: datetime) -> int:
+    created_at = skill.created_at.replace(tzinfo=None) if skill.created_at and skill.created_at.tzinfo else skill.created_at
+    if not created_at:
+        return 0
+    return max(0, (now - created_at).days)
+
+
+def _criticality_risk(skill: Skill, loads: int, is_every_session: bool, now: datetime) -> tuple[str, str]:
+    score = int(skill.score_total or 0)
+    freshness = int(skill.score_freshness or 0)
+    coverage = int(getattr(skill, "score_coverage", 0) or 0)
+    age_days = _skill_age_days(skill, now)
+    stale = bool(skill.is_stale) or age_days > 30
+    load_label = "Loaded in nearly every recorded session" if is_every_session else f"Loaded {loads} times in 30 days"
+    if loads >= 5 and score < 60:
+        return "critical", f"{load_label}, but quality is only {score}/100; agents are repeatedly receiving weak guidance."
+    if loads >= 3 and freshness < 8:
+        return "critical", f"{load_label}, while freshness is {freshness}/25; this is high-use stale context."
+    if loads >= 3 and stale:
+        return "critical", f"{load_label}, and the skill appears stale for {age_days} days; refresh before more sessions rely on it."
+    if loads >= 3 and score < 75:
+        return "high", f"{load_label} with quality {score}/100; improve it before this pattern spreads further."
+    if loads >= 2 and coverage < 10:
+        return "high", f"{load_label}, but coverage is {coverage}/25; agents may be missing key cases."
+    if loads >= 1 and score < 80:
+        return "medium", f"{load_label} with score {score}/100; review before it becomes a stronger dependency."
+    if loads == 0 and str(skill.skill_category or "") == "codebase_architecture":
+        return "medium", "Core architectural skill but never loaded; agents may be coding without architecture context."
+    return "low", "Usage and quality are in a reasonable range."
+
+
+def _session_context_from_domains(domains: list[str]) -> str:
+    normalized = {domain.lower() for domain in domains}
+    if any("security" in domain for domain in normalized):
+        return "Security-sensitive work"
+    if "data_schema" in normalized or any("schema" in domain for domain in normalized):
+        return "Database or data model changes"
+    if "testing_conventions" in normalized or any("test" in domain for domain in normalized):
+        return "Writing or fixing tests"
+    if "codebase_architecture" in normalized and len(domains) >= 4:
+        return "Major architectural change"
+    if len(domains) >= 6:
+        return "Broad feature development"
+    if len(domains) == 1:
+        return f"Focused {domains[0]} work"
+    return "General development session"
+
+
+def _session_quality_from_scores(scores: list[int]) -> tuple[Literal["strong", "mixed", "weak"], int]:
+    avg = round(sum(scores) / len(scores)) if scores else 0
+    if avg >= 75:
+        return "strong", avg
+    if avg >= 50:
+        return "mixed", avg
+    return "weak", avg
 
 
 def _skill_alert(skill: Skill, loads_30d: int, now: datetime) -> str:
@@ -769,7 +1252,10 @@ def build_memory_score_response(
     if not skills:
         return MemoryScoreResponse(
             score=0,
-            breakdown=MemoryScoreBreakdown(coverage=0, load_frequency=0, quality=0, freshness=0),
+            breakdown=MemoryScoreBreakdown(coverage=0, load_frequency=0, compliance=0, quality=0, freshness=0),
+            trend_7d=0,
+            trend_30d=0,
+            computed_at=datetime.utcnow(),
             trend="Stable",
             grade="F",
         )
@@ -790,27 +1276,185 @@ def build_memory_score_response(
 
     raw_score = (
         coverage_rate * 30
-        + load_frequency_score * 30
-        + avg_skill_quality * 25
+        + load_frequency_score * 25
+        + avg_skill_quality * 30
         + freshness_rate * 15
     )
     score = round(raw_score)
+    trend_7d = 0 if previous_score is None else score - previous_score
+    trend_30d = trend_7d
     if previous_score is None or previous_score == score:
         trend = "Stable"
     else:
-        delta = score - previous_score
-        trend = f"{delta:+d} this week"
+        trend = f"{trend_7d:+d} this week"
     return MemoryScoreResponse(
         score=score,
         breakdown=MemoryScoreBreakdown(
             coverage=round(coverage_rate, 4),
             load_frequency=round(load_frequency_score, 4),
+            compliance=round(avg_skill_quality, 4),
             quality=round(avg_skill_quality, 4),
             freshness=round(freshness_rate, 4),
         ),
+        trend_7d=trend_7d,
+        trend_30d=trend_30d,
+        computed_at=datetime.utcnow(),
         trend=trend,
         grade=_memory_grade(score),
     )
+
+
+def _encode_cursor(offset: int) -> str:
+    return base64.urlsafe_b64encode(str(offset).encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _decode_cursor(cursor: str | None) -> int:
+    if not cursor:
+        return 0
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        return max(0, int(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")))
+    except (ValueError, UnicodeDecodeError):
+        return 0
+
+
+def _normalise_agent_filter(agent: str | None) -> set[str]:
+    if not agent:
+        return set()
+    return {part.strip() for part in agent.split(",") if part.strip()}
+
+
+def _pr_html_url(pr: PullRequest, repo: Repo) -> str | None:
+    raw = pr.raw if isinstance(pr.raw, dict) else {}
+    url = raw.get("html_url")
+    if isinstance(url, str) and url:
+        return url
+    if repo.full_name and pr.github_pr_number:
+        return f"https://github.com/{repo.full_name}/pull/{pr.github_pr_number}"
+    return None
+
+
+def _check_runs(pr: PullRequest) -> list[dict[str, object]]:
+    raw = pr.raw if isinstance(pr.raw, dict) else {}
+    runs = raw.get("check_runs")
+    if not isinstance(runs, list):
+        return []
+    normalized: list[dict[str, object]] = []
+    for item in runs:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "name": item.get("name") or "Check",
+                "status": item.get("status") or "unknown",
+                "conclusion": item.get("conclusion"),
+                "details_url": item.get("details_url") or item.get("html_url"),
+            }
+        )
+    return normalized
+
+
+def _ci_status(pr: PullRequest) -> str:
+    runs = _check_runs(pr)
+    if not runs:
+        return "unknown"
+    if any(run.get("status") != "completed" for run in runs):
+        return "pending"
+    conclusions = {str(run.get("conclusion") or "").lower() for run in runs}
+    if "failure" in conclusions or "timed_out" in conclusions or "cancelled" in conclusions:
+        return "failure"
+    if conclusions and conclusions.issubset({"success", "skipped", "neutral"}):
+        return "success"
+    return "neutral"
+
+
+def _finding_counts(attribution: PRAttribution | None) -> tuple[int, int]:
+    findings = attribution.skills_violated if attribution and isinstance(attribution.skills_violated, list) else []
+    violations = 0
+    warnings = 0
+    for item in findings:
+        if not isinstance(item, dict):
+            continue
+        if _severity_bucket(item) == "violation":
+            violations += 1
+        else:
+            warnings += 1
+    return violations, warnings
+
+
+def _scorecard_top_counts(counts: dict[str, int], limit: int) -> list[str]:
+    return [name for name, _count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]]
+
+
+def _scorecard_risk_tier(attribution: PRAttribution | None) -> str:
+    tier = str(attribution.risk_tier or "").lower() if attribution else ""
+    if tier in {"green", "yellow", "red"}:
+        return tier
+    risk_score = int(attribution.risk_score or 0) if attribution else 0
+    if risk_score >= 70:
+        return "red"
+    if risk_score >= 40:
+        return "yellow"
+    return "green"
+
+
+def _scorecard_skill_name(item: object) -> str | None:
+    if isinstance(item, str):
+        value = item.strip()
+        return value or None
+    if isinstance(item, dict):
+        for key in ("skill_name", "name", "title", "skill_id", "domain"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _pr_card(pr: PullRequest, repo: Repo, attribution: PRAttribution | None) -> dict[str, object]:
+    violation_count, warning_count = _finding_counts(attribution)
+    sessions = attribution.sessions if attribution and isinstance(attribution.sessions, list) else []
+    return {
+        "pr_id": pr.id,
+        "repo_id": repo.id,
+        "repo_name": repo.name,
+        "github_pr_number": pr.github_pr_number,
+        "title": pr.title or f"PR #{pr.github_pr_number}",
+        "url": _pr_html_url(pr, repo),
+        "author_login": pr.author_login,
+        "primary_agent": attribution.primary_agent if attribution else "human",
+        "confidence": attribution.confidence if attribution else 1.0,
+        "lines_by_agent": attribution.lines_by_agent if attribution else {"human": int((pr.additions or 0) + (pr.deletions or 0))},
+        "additions": pr.additions or 0,
+        "deletions": pr.deletions or 0,
+        "changed_files": pr.changed_files or 0,
+        "skills_loaded": attribution.skills_loaded if attribution and isinstance(attribution.skills_loaded, list) else [],
+        "violation_count": violation_count,
+        "warning_count": warning_count,
+        "risk_score": attribution.risk_score if attribution else 0,
+        "risk_tier": attribution.risk_tier if attribution else "green",
+        "ci_status": _ci_status(pr),
+        "opened_at": pr.opened_at.isoformat() if pr.opened_at else None,
+        "merged_at": pr.merged_at.isoformat() if pr.merged_at else None,
+        "session_ids": sessions,
+    }
+
+
+def _list_or_empty(value: object) -> list[object]:
+    return value if isinstance(value, list) else []
+
+
+def _finding_counts_from_items(items: object) -> tuple[int, int]:
+    violations = 0
+    warnings = 0
+    for item in _list_or_empty(items):
+        if not isinstance(item, dict):
+            continue
+        severity = str(item.get("severity") or "warning").lower()
+        if severity in {"critical", "error", "fatal", "failure"}:
+            violations += 1
+        else:
+            warnings += 1
+    return violations, warnings
 
 
 def _dismissal_response(dismissal: FlagDismissal) -> FlagDismissalResponse:
@@ -963,6 +1607,136 @@ async def _rollback(db: AsyncSession, context: str) -> None:
         logger.exception("Org route rollback failed during %s", context)
 
 
+def _source_display_name(source_type: str) -> str:
+    """Return a stable dashboard label for a skill source type."""
+    return SOURCE_TYPE_DISPLAY_NAMES.get(source_type, source_type.replace("_", " ").title())
+
+
+def _source_generate_command(source_type: str, has_repos: bool) -> str | None:
+    """Return the suggested CLI command only when there is a repo to run it against."""
+    if not has_repos:
+        return None
+    return SOURCE_REFRESH_COMMANDS.get(source_type, f"skilgen analyze --source {source_type}")
+
+
+def _source_params_hint(params: dict[str, Any]) -> dict[str, object]:
+    """Return non-secret connection metadata safe to persist and display."""
+    secret_words = ("token", "secret", "password", "key", "credential", "private")
+    hints: dict[str, object] = {}
+    for key, value in params.items():
+        lowered = key.lower()
+        if any(word in lowered for word in secret_words):
+            if isinstance(value, str) and value:
+                hints[f"{key}_hint"] = key_hint(value)
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            hints[key] = value
+    return hints
+
+
+def _encrypted_source_params(params: dict[str, Any]) -> str:
+    """Encrypt params JSON with the shared key helper used for stored LLM secrets."""
+    return encrypt_key(json.dumps(params, sort_keys=True))
+
+
+def _decrypted_source_params(connection: SourceConnectionModel) -> dict[str, Any]:
+    try:
+        payload = decrypt_key(connection.encrypted_params)
+        decoded = json.loads(payload)
+        return decoded if isinstance(decoded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _http_probe(url: str, timeout_seconds: float) -> tuple[bool, str, dict[str, object]]:
+    request = urllib.request.Request(url, method="GET", headers={"User-Agent": "skilgen-source-test/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            status_code = int(getattr(response, "status", 200) or 200)
+            ok = 200 <= status_code < 500
+            return ok, f"HTTP endpoint responded with {status_code}.", {"status_code": status_code}
+    except urllib.error.HTTPError as exc:
+        status_code = int(exc.code)
+        return status_code < 500, f"HTTP endpoint responded with {status_code}.", {"status_code": status_code}
+
+
+async def _probe_source_connection(source_type: str, params: dict[str, Any], timeout_seconds: float) -> SourceTestResponse:
+    tested_at = datetime.utcnow()
+    if params.get("mock_success") is True:
+        return SourceTestResponse(source_type=source_type, success=True, status="connected", message="Mock source connection succeeded.", details={"mocked": True}, tested_at=tested_at)
+    if params.get("mock_failure") is True:
+        return SourceTestResponse(source_type=source_type, success=False, status="failed", message="Mock source connection failed.", details={"mocked": True}, tested_at=tested_at)
+
+    url = str(params.get("url") or params.get("base_url") or params.get("endpoint") or "").strip()
+    try:
+        if url.startswith(("http://", "https://")):
+            success, message, details = await asyncio.wait_for(
+                asyncio.to_thread(_http_probe, url, timeout_seconds),
+                timeout=timeout_seconds + 0.5,
+            )
+            return SourceTestResponse(source_type=source_type, success=success, status="connected" if success else "failed", message=message, details=details, tested_at=tested_at)
+
+        host = str(params.get("host") or "").strip()
+        port = params.get("port")
+        if host and port:
+            sock = await asyncio.wait_for(
+                asyncio.to_thread(socket.create_connection, (host, int(port)), timeout_seconds),
+                timeout=timeout_seconds + 0.5,
+            )
+            sock.close()
+            return SourceTestResponse(source_type=source_type, success=True, status="connected", message=f"TCP connection to {host}:{port} succeeded.", details={"host": host, "port": int(port)}, tested_at=tested_at)
+
+        if source_type in {"github", "confluence", "notion", "pagerduty"} and any(params.get(key) for key in ("token", "api_key", "access_token")):
+            return SourceTestResponse(source_type=source_type, success=True, status="configured", message="Credentials are present; live driver is not required for this source test.", details={"driver_required": False}, tested_at=tested_at)
+
+        return SourceTestResponse(source_type=source_type, success=True, status="configured", message="Connection parameters were accepted without requiring optional source drivers.", details={"driver_required": False}, tested_at=tested_at)
+    except Exception as exc:
+        return SourceTestResponse(source_type=source_type, success=False, status="failed", message=str(exc), details={"error_type": exc.__class__.__name__}, tested_at=tested_at)
+
+
+def _source_connection(source_type: str, source_skills: list[Skill], has_repos: bool, repo_id: str | None = None, connection: SourceConnectionModel | None = None) -> SourceConnection:
+    """Normalize source coverage into the org source connection contract."""
+    generated_dates = [skill.created_at for skill in source_skills if isinstance(skill.created_at, datetime)]
+    last_generated_at = max(generated_dates).isoformat() if generated_dates else None
+    connection_status = str(connection.status) if connection is not None else None
+    db_connected = connection_status in {"connected", "configured"}
+    return SourceConnection(
+        id=connection.id if connection is not None else f"source-{source_type}",
+        source_type=source_type,
+        display_name=(connection.display_name or _source_display_name(source_type)) if connection is not None else _source_display_name(source_type),
+        repo_id=repo_id,
+        connected=db_connected or bool(source_skills),
+        skill_count=len(source_skills),
+        last_skill_generated_at=last_generated_at,
+        can_generate_skills=has_repos,
+        generate_command=_source_generate_command(source_type, has_repos),
+        coverage_domains=sorted({str(skill.domain) for skill in source_skills if getattr(skill, "domain", None)}),
+        connection_id=connection.id if connection is not None else None,
+        connection_status=connection_status,
+        last_tested_at=connection.last_tested_at if connection is not None else None,
+        last_connected_at=connection.last_connected_at if connection is not None else None,
+        last_error=connection.last_error if connection is not None else None,
+    )
+
+
+def _insight(
+    insight_type: Literal["anomaly", "opportunity", "trend", "gap"],
+    title: str,
+    description: str,
+    severity: Literal["high", "medium", "low"],
+    cta_label: str | None = None,
+    cta_url: str | None = None,
+) -> InsightItem:
+    return InsightItem(
+        type=insight_type,
+        title=title,
+        description=description,
+        severity=severity,
+        cta_label=cta_label,
+        cta_url=cta_url,
+    )
+
+
 def _generate_org_api_key() -> str:
     """Return a new Skillayer org API key."""
     return f"sk-{secrets.token_urlsafe(32)}"
@@ -978,6 +1752,8 @@ def _org_settings_response(org: Org, installation_id: int | None, recent_runs: l
         plan=org.plan,
         score_threshold=int(org.score_threshold or 60),
         slack_webhook_url=org.slack_webhook_url,
+        slack_standup_enabled=bool(org.slack_standup_enabled),
+        slack_standup_hour=int(org.slack_standup_hour or 9),
         notify_on_pr=bool(org.notify_on_pr),
         notify_on_stale=bool(org.notify_on_stale),
         anthropic_api_key_set=bool(settings_payload.get("anthropic_api_key_encrypted")),
@@ -1089,13 +1865,14 @@ async def get_org_setup_status(
             id="generate_skills",
             title="Generate your first skills",
             done=has_skills,
-            description="Run skilgen deliver in your repo",
-            cli_command="skilgen deliver --project-root .",
+            action_url="/dashboard/repos",
+            description="Open Repos and run Analyse now from the dashboard",
         ),
         SetupStatusStep(
             id="connect_agent",
             title="Connect your AI agent",
             done=has_agent_loads,
+            action_url="/dashboard/connect",
             description="Configure Claude Code, Cursor, or Codex to load your skills",
         ),
         SetupStatusStep(
@@ -1113,6 +1890,55 @@ async def get_org_setup_status(
         has_high_score_skills=has_high_score_skills,
         setup_steps=steps,
         completion_percent=completed * 25,
+    )
+
+
+@router.get("/{org_id}/connect/status", response_model=ConnectStatusResponse)
+async def get_org_connect_status(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> ConnectStatusResponse:
+    """Return connection status for GitHub, generated skills, and agent runtimes."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        repos = (
+            await db.execute(
+                select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Repo.name)
+            )
+        ).scalars().all()
+        repo_ids = [repo.id for repo in repos]
+        skill_count = int(
+            (
+                await db.execute(
+                    select(func.count(Skill.id)).where(Skill.repo_id.in_(repo_ids))
+                    if repo_ids
+                    else select(func.count(Skill.id)).where(False)
+                )
+            ).scalar()
+            or 0
+        )
+        runtime_status = await get_agent_connection_status(org_id, db)
+    except Exception as exc:
+        await _rollback(db, "connect status lookup")
+        raise HTTPException(status_code=400, detail="Unable to load connection status") from exc
+
+    github_connected = any(repo.github_installation_id for repo in repos)
+    has_agent_loads = any(bool(item.get("connected")) or int(item.get("load_count_30d") or 0) > 0 for item in runtime_status.values())
+    next_step = None
+    if not repos:
+        next_step = "Connect a GitHub repository"
+    elif skill_count == 0:
+        next_step = "Generate skills for connected repositories"
+    elif not has_agent_loads:
+        next_step = "Connect an AI coding agent"
+    return ConnectStatusResponse(
+        org_id=org_id,
+        repos_connected=len(repos),
+        skills_generated=skill_count,
+        github_app_installed=github_connected,
+        agent_runtimes={key: ConnectRuntimeStatus(**value) for key, value in runtime_status.items()},
+        next_step=next_step,
     )
 
 
@@ -1241,7 +2067,7 @@ async def get_org_action_items(
                 type="generate",
                 title=f"Generate {label} skills",
                 description=f"Missing from {missing_count} repos.",
-                action_url="/dashboard/repos",
+                action_url=f"/dashboard/debt?tab=gaps&domain={missing_category}",
                 priority="recommended",
             )
         )
@@ -1298,6 +2124,576 @@ async def get_org_action_items(
     priority_order = {"urgent": 0, "recommended": 1, "suggested": 2}
     items.sort(key=lambda item: priority_order[item.priority])
     return OrgActionItemsResponse(items=items[:3])
+
+
+@router.get("/{org_id}/sources", response_model=list[SourceConnection])
+async def get_org_sources(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[SourceConnection]:
+    """Return org-level source connections from generated skills plus common disconnected source types."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Org not found")
+        repos = (
+            await db.execute(
+                select(Repo)
+                .where(Repo.org_id == org_id, Repo.is_active.is_(True))
+                .order_by(Repo.full_name)
+            )
+        ).scalars().all()
+        repo_ids = [repo.id for repo in repos]
+        skills = (
+            await db.execute(select(Skill).where(Skill.repo_id.in_(repo_ids)))
+        ).scalars().all() if repo_ids else []
+        connections = (
+            await db.execute(select(SourceConnectionModel).where(SourceConnectionModel.org_id == org_id))
+        ).scalars().all()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await _rollback(db, "org sources lookup")
+        raise HTTPException(status_code=400, detail="Unable to load org sources") from exc
+
+    skills_by_source: dict[str, list[Skill]] = {}
+    for skill in skills:
+        source_type = str(skill.source_type or "code")
+        skills_by_source.setdefault(source_type, []).append(skill)
+
+    connections_by_source = {str(connection.source_type): connection for connection in connections}
+    source_types = [source_type for source_type in COMMON_SOURCE_TYPES]
+    for source_type in sorted(skills_by_source):
+        if source_type not in source_types:
+            source_types.append(source_type)
+    for source_type in sorted(connections_by_source):
+        if source_type not in source_types:
+            source_types.append(source_type)
+
+    return [
+        _source_connection(
+            source_type,
+            skills_by_source.get(source_type, []),
+            bool(repo_ids),
+            repo_ids[0] if repo_ids else None,
+            connections_by_source.get(source_type),
+        )
+        for source_type in source_types
+    ]
+
+
+@router.post("/{org_id}/sources/test", response_model=SourceTestResponse)
+async def test_org_source(
+    org_id: str,
+    payload: SourceConnectionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> SourceTestResponse:
+    """Test source connection params without requiring optional source drivers."""
+    _assert_org_scope(org_id, current_org_id)
+    source_type = payload.source_type.strip()
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Org not found")
+        return await _probe_source_connection(source_type, payload.params, payload.timeout_seconds)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await _rollback(db, "org source test")
+        return SourceTestResponse(
+            source_type=source_type,
+            success=False,
+            status="failed",
+            message=str(exc),
+            details={"error_type": exc.__class__.__name__},
+            tested_at=datetime.utcnow(),
+        )
+
+
+@router.post("/{org_id}/sources/connect", response_model=SourceConnectResponse)
+async def connect_org_source(
+    org_id: str,
+    payload: SourceConnectionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> SourceConnectResponse:
+    """Persist an org source connection after a safe connection test."""
+    _assert_org_scope(org_id, current_org_id)
+    source_type = payload.source_type.strip()
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Org not found")
+
+        existing = (
+            await db.execute(
+                select(SourceConnectionModel).where(
+                    SourceConnectionModel.org_id == org_id,
+                    SourceConnectionModel.source_type == source_type,
+                )
+            )
+        ).scalar_one_or_none()
+        params = payload.params or (_decrypted_source_params(existing) if existing is not None else {})
+        test_result = await _probe_source_connection(source_type, params, payload.timeout_seconds)
+
+        now = datetime.utcnow()
+        connection = existing or SourceConnectionModel(org_id=org_id, source_type=source_type, created_at=now)
+        connection.display_name = payload.display_name or _source_display_name(source_type)
+        connection.status = test_result.status
+        connection.encrypted_params = _encrypted_source_params(params)
+        connection.params_hint = _source_params_hint(params)
+        connection.last_tested_at = test_result.tested_at
+        connection.last_connected_at = now if test_result.success else connection.last_connected_at
+        connection.last_error = None if test_result.success else test_result.message
+        connection.updated_at = now
+        db.add(connection)
+        await db.flush()
+        await db.commit()
+
+        return SourceConnectResponse(
+            id=connection.id,
+            source_type=source_type,
+            display_name=connection.display_name or _source_display_name(source_type),
+            connected=test_result.success,
+            status=connection.status,
+            message=test_result.message,
+            last_tested_at=connection.last_tested_at,
+        )
+    except HTTPException:
+        await _rollback(db, "org source connect")
+        raise
+    except Exception as exc:
+        await _rollback(db, "org source connect")
+        raise HTTPException(status_code=400, detail="Could not connect source") from exc
+
+
+@router.post("/{org_id}/sources/refresh")
+async def refresh_org_source(
+    org_id: str,
+    payload: SourceRefreshRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    """Queue a source-specific analysis run for a repo in the org."""
+    _assert_org_scope(org_id, current_org_id)
+    source_type = payload.source_type.strip()
+    if source_type not in COMMON_SOURCE_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported source type")
+    try:
+        repo = await db.get(Repo, payload.repo_id)
+        if repo is None:
+            raise HTTPException(status_code=404, detail="Repo not found")
+        if repo.org_id != org_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        run = AnalysisRun(
+            repo_id=repo.id,
+            trigger=f"source:{source_type}",
+            status="queued",
+            branch=repo.default_branch,
+            created_at=datetime.utcnow(),
+        )
+        db.add(run)
+        await db.flush()
+        await db.commit()
+        return {
+            "queued": True,
+            "message": f"Refresh queued for {repo.name} {source_type} source.",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await _rollback(db, "org source refresh")
+        raise HTTPException(status_code=400, detail="Could not queue source refresh") from exc
+
+
+def _enterprise_skill_response(skill: Skill, repo: Repo) -> EnterpriseSkillResponse:
+    return EnterpriseSkillResponse(
+        id=skill.id,
+        repo_id=repo.id,
+        repo_name=repo.name,
+        domain=skill.domain,
+        skill_path=skill.skill_path,
+        source_type=skill.source_type,
+        skill_category=skill.skill_category,
+        score_total=int(skill.score_total or 0),
+        is_enterprise=bool(getattr(skill, "is_enterprise", False)),
+        last_updated_at=skill.last_loaded_at or skill.created_at,
+    )
+
+
+@router.get("/{org_id}/enterprise-skills", response_model=list[EnterpriseSkillResponse])
+async def get_enterprise_skills(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[EnterpriseSkillResponse]:
+    """Return org skills promoted for enterprise reuse."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Org not found")
+        rows = (
+            await db.execute(
+                select(Skill, Repo)
+                .join(Repo, Repo.id == Skill.repo_id)
+                .where(Repo.org_id == org_id, Skill.is_enterprise.is_(True))
+                .order_by(desc(Skill.created_at), Skill.domain)
+            )
+        ).all()
+        return [_enterprise_skill_response(skill, repo) for skill, repo in rows]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await _rollback(db, "enterprise skills lookup")
+        raise HTTPException(status_code=400, detail="Unable to load enterprise skills") from exc
+
+
+@router.post("/{org_id}/enterprise-skills", response_model=list[EnterpriseSkillResponse])
+async def save_enterprise_skills(
+    org_id: str,
+    payload: EnterpriseSkillRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[EnterpriseSkillResponse]:
+    """Mark one or more org skills as enterprise reusable guidance."""
+    _assert_org_scope(org_id, current_org_id)
+    skill_ids = [skill_id for skill_id in ([payload.skill_id] if payload.skill_id else []) + payload.skill_ids if skill_id]
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Org not found")
+        if not skill_ids and payload.content and payload.domain:
+            repo_filter = [Repo.org_id == org_id, Repo.is_active.is_(True)]
+            if isinstance(payload.applies_to, list):
+                repo_filter.append(Repo.id.in_(payload.applies_to))
+            repos = (await db.execute(select(Repo).where(*repo_filter).order_by(Repo.name))).scalars().all()
+            if not repos:
+                raise HTTPException(status_code=404, detail="No repos found for enterprise skill")
+            responses: list[EnterpriseSkillResponse] = []
+            now = datetime.utcnow()
+            for repo in repos:
+                run = AnalysisRun(repo_id=repo.id, trigger="enterprise_skill", status="complete", branch=repo.default_branch, created_at=now, completed_at=now)
+                db.add(run)
+                await db.flush()
+                skill = Skill(
+                    repo_id=repo.id,
+                    run_id=run.id,
+                    domain=payload.domain,
+                    skill_path=f".skillayer/enterprise/{payload.domain}.md",
+                    content=payload.content,
+                    content_hash=hashlib.sha256(payload.content.encode()).hexdigest(),
+                    source_type="enterprise",
+                    skill_category=payload.domain if payload.domain in SKILL_CATEGORIES else "operational_knowledge",
+                    score_total=80,
+                    score_groundedness=20,
+                    score_coverage=20,
+                    score_freshness=20,
+                    score_structure=20,
+                    is_enterprise=True,
+                    created_at=now,
+                )
+                db.add(skill)
+                await db.flush()
+                responses.append(_enterprise_skill_response(skill, repo))
+            await db.commit()
+            return responses
+        if not skill_ids:
+            raise HTTPException(status_code=422, detail="At least one skill_id or content/domain is required")
+        rows = (
+            await db.execute(
+                select(Skill, Repo)
+                .join(Repo, Repo.id == Skill.repo_id)
+                .where(Repo.org_id == org_id, Skill.id.in_(skill_ids))
+                .order_by(Skill.domain)
+            )
+        ).all()
+        found_ids = {skill.id for skill, _repo in rows}
+        missing_ids = [skill_id for skill_id in skill_ids if skill_id not in found_ids]
+        if missing_ids:
+            raise HTTPException(status_code=404, detail=f"Skills not found in org: {', '.join(missing_ids)}")
+        responses: list[EnterpriseSkillResponse] = []
+        for skill, repo in rows:
+            skill.is_enterprise = payload.is_enterprise
+            responses.append(_enterprise_skill_response(skill, repo))
+        await db.commit()
+        return responses
+    except HTTPException:
+        await _rollback(db, "enterprise skills update")
+        raise
+    except Exception as exc:
+        await _rollback(db, "enterprise skills update")
+        raise HTTPException(status_code=400, detail="Unable to update enterprise skills") from exc
+
+
+@router.post("/{org_id}/skills/{skill_id}/push", response_model=SkillPushResponse)
+async def push_skill_to_repo(
+    org_id: str,
+    skill_id: str,
+    payload: SkillPushPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> SkillPushResponse:
+    """Open or update a GitHub PR that pushes skill content back into the repo."""
+    _assert_org_scope(org_id, current_org_id)
+    if payload.skill_id and payload.skill_id != skill_id:
+        raise HTTPException(status_code=422, detail="Payload skill_id does not match path skill_id")
+    try:
+        row = (
+            await db.execute(
+                select(Skill, Repo, Org)
+                .join(Repo, Repo.id == Skill.repo_id)
+                .join(Org, Org.id == Repo.org_id)
+                .where(Skill.id == skill_id, Repo.org_id == org_id, Repo.is_active.is_(True))
+            )
+        ).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        skill, repo, org = row
+        content = payload.content or skill.content
+        if not content and payload.generate_if_missing:
+            generated = await generate_skill_with_ai(
+                _org_settings_dict(org),
+                domain=skill.domain,
+                repo_name=repo.name,
+                context_files=[skill.skill_path],
+                enterprise_skills=[],
+                user_intent=f"Regenerate {skill.domain} skill for repository push.",
+            )
+            content = str(generated.get("content") or "")
+        if not content:
+            raise HTTPException(status_code=422, detail="Skill has no content to push")
+        safe_domain = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in skill.domain.lower()).strip("-") or "skill"
+        branch_name = payload.branch_name or f"skillayer/push-{safe_domain}"
+        pr_title = payload.pr_title or f"Update Skillayer skill: {skill.domain}"
+        pr_body = payload.pr_body or (
+            "This PR was opened by Skillayer to push the latest skill guidance back into the repository.\n\n"
+            f"- Skill: `{skill.domain}`\n"
+            f"- Path: `{skill.skill_path}`\n"
+            f"- Generated at: `{datetime.utcnow().isoformat()}Z`"
+        )
+    except HTTPException:
+        await _rollback(db, "skill push lookup")
+        raise
+    except Exception as exc:
+        await _rollback(db, "skill push lookup")
+        raise HTTPException(status_code=400, detail="Unable to prepare skill push") from exc
+
+    try:
+        pr = await create_skill_pr(
+            repo=repo,
+            skill_path=skill.skill_path,
+            skill_content=content,
+            branch_name=branch_name,
+            pr_title=pr_title,
+            pr_body=pr_body,
+        )
+        await audit.emit(
+            db,
+            org_id,
+            "skill.push_pr_opened",
+            "pushed",
+            f"Opened skill push PR for {skill.domain}",
+            actor_login=get_actor_login(request),
+            repo_id=repo.id,
+            repo_name=repo.name,
+            skill_id=skill.id,
+            skill_domain=skill.domain,
+            resource_type="skill",
+            resource_id=skill.id,
+            metadata={"pr_url": pr.get("pr_url"), "branch": pr.get("branch")},
+        )
+        await db.commit()
+        return SkillPushResponse(
+            pushed=True,
+            repo_id=repo.id,
+            skill_id=skill.id,
+            pr_url=str(pr["pr_url"]),
+            pr_number=int(pr["pr_number"]),
+            branch=str(pr["branch"]),
+        )
+    except Exception as exc:
+        await _rollback(db, "skill push audit")
+        raise HTTPException(status_code=400, detail="Unable to push skill to repository") from exc
+
+
+@router.get("/{org_id}/intelligence/insights", response_model=list[InsightItem])
+async def get_org_intelligence_insights(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[InsightItem]:
+    """Return heuristic org insights for gaps, anomalies, opportunities, and trends."""
+    _assert_org_scope(org_id, current_org_id)
+    now = _utc_now_naive()
+    cutoff_30 = now - timedelta(days=30)
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Org not found")
+        repos = (
+            await db.execute(
+                select(Repo)
+                .where(Repo.org_id == org_id, Repo.is_active.is_(True))
+                .order_by(Repo.full_name)
+            )
+        ).scalars().all()
+        repo_ids = [repo.id for repo in repos]
+        skills = (
+            await db.execute(select(Skill).where(Skill.repo_id.in_(repo_ids)))
+        ).scalars().all() if repo_ids else []
+        usage_rows = (
+            await db.execute(
+                select(
+                    SkillUsageEvent.skill_id,
+                    func.count(SkillUsageEvent.id).label("loads_30d"),
+                )
+                .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff_30)
+                .group_by(SkillUsageEvent.skill_id)
+            )
+        ).all()
+        history_rows = (
+            await db.execute(
+                select(ScoreHistory.repo_id, ScoreHistory.score_total, ScoreHistory.recorded_at)
+                .where(ScoreHistory.repo_id.in_(repo_ids), ScoreHistory.recorded_at >= cutoff_30)
+                .order_by(ScoreHistory.repo_id, ScoreHistory.recorded_at)
+            )
+        ).all() if repo_ids else []
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await _rollback(db, "org intelligence insights lookup")
+        raise HTTPException(status_code=400, detail="Unable to load org intelligence insights") from exc
+
+    if not repos:
+        return [
+            _insight(
+                "gap",
+                "Connect your first repository",
+                "No active repositories are available, so Skillayer cannot generate organization intelligence yet.",
+                "high",
+                "Connect repos",
+                "/dashboard/repos",
+            )
+        ]
+
+    usage_by_skill = {str(_row_value(row, "skill_id", "")): int(_row_value(row, "loads_30d", 0) or 0) for row in usage_rows}
+    repo_by_id = {repo.id: repo for repo in repos}
+    insights: list[InsightItem] = []
+
+    covered_categories = {_skill_category(skill) for skill in skills}
+    missing_categories = [category for category in SKILL_CATEGORIES if category not in covered_categories]
+    if missing_categories:
+        label = missing_categories[0].replace("_", " ")
+        insights.append(
+            _insight(
+                "gap",
+                f"{len(missing_categories)} knowledge categories need coverage",
+                f"Start with {label}; it is missing from the generated skill set.",
+                "high" if len(missing_categories) >= 4 else "medium",
+                "View sources",
+                "/dashboard/sources",
+            )
+        )
+
+    stale_active = [
+        skill
+        for skill in skills
+        if bool(skill.is_stale) and (usage_by_skill.get(skill.id, 0) or int(skill.load_count_30d or 0)) > 0
+    ]
+    if stale_active:
+        skill = sorted(stale_active, key=lambda item: -(usage_by_skill.get(item.id, 0) or int(item.load_count_30d or 0)))[0]
+        repo = repo_by_id.get(skill.repo_id)
+        insights.append(
+            _insight(
+                "anomaly",
+                f"Agents are loading stale {skill.domain} guidance",
+                f"{repo.name if repo else 'A repo'} has stale guidance with recent agent usage.",
+                "high",
+                "Review skill",
+                f"/dashboard/repos/{skill.repo_id}/skills/{skill.id}",
+            )
+        )
+
+    low_scoring_loaded = [
+        skill
+        for skill in skills
+        if int(skill.score_total or 0) < 60 and (usage_by_skill.get(skill.id, 0) or int(skill.load_count_30d or 0)) > 0
+    ]
+    if low_scoring_loaded:
+        skill = sorted(low_scoring_loaded, key=lambda item: (int(item.score_total or 0), -(usage_by_skill.get(item.id, 0) or int(item.load_count_30d or 0))))[0]
+        insights.append(
+            _insight(
+                "opportunity",
+                f"Improve a frequently used low-score skill",
+                f"{skill.domain} scores {int(skill.score_total or 0)}/100 while still being loaded by agents.",
+                "medium",
+                "Improve skill",
+                f"/dashboard/repos/{skill.repo_id}/skills/{skill.id}",
+            )
+        )
+
+    dormant_repos = [
+        repo
+        for repo in repos
+        if repo.last_analysed_at is None
+        or (repo.last_analysed_at.replace(tzinfo=None) if repo.last_analysed_at.tzinfo else repo.last_analysed_at) < cutoff_30
+    ]
+    if dormant_repos:
+        repo = sorted(dormant_repos, key=lambda item: item.last_analysed_at or datetime.min)[0]
+        insights.append(
+            _insight(
+                "trend",
+                f"{repo.name} has not been analysed recently",
+                "Refresh dormant repositories so the org intelligence view reflects current code.",
+                "medium",
+                "Refresh repo",
+                f"/dashboard/repos/{repo.id}",
+            )
+        )
+
+    history_by_repo: dict[str, list[tuple[datetime, int]]] = {}
+    for row in history_rows:
+        repo_id = str(_row_value(row, "repo_id", ""))
+        recorded_at = _row_value(row, "recorded_at")
+        if repo_id and isinstance(recorded_at, datetime):
+            history_by_repo.setdefault(repo_id, []).append((recorded_at, int(_row_value(row, "score_total", 0) or 0)))
+    declining: list[tuple[int, Repo]] = []
+    for repo_id, points in history_by_repo.items():
+        ordered = sorted(points, key=lambda item: item[0])
+        if len(ordered) >= 2:
+            delta = ordered[-1][1] - ordered[0][1]
+            if delta <= -10 and repo_id in repo_by_id:
+                declining.append((delta, repo_by_id[repo_id]))
+    if declining:
+        delta, repo = sorted(declining, key=lambda item: item[0])[0]
+        insights.append(
+            _insight(
+                "trend",
+                f"{repo.name} score dropped {abs(delta)} points",
+                "The 30-day score trend is moving down; review recent analysis runs and stale skills.",
+                "high",
+                "Open repo",
+                f"/dashboard/repos/{repo.id}",
+            )
+        )
+
+    if not insights:
+        insights.append(
+            _insight(
+                "trend",
+                "Org intelligence looks stable",
+                "No major stale, low-score, or coverage-gap signals were detected across active repositories.",
+                "low",
+                "Review skills",
+                "/dashboard/skills",
+            )
+        )
+    return insights[:6]
 
 
 @router.get("/{org_id}", response_model=OrgResponse)
@@ -1396,6 +2792,126 @@ async def get_org_stats(
         "active_agents": 0,
         "score_trend": trend,
     }
+
+
+@router.get("/{org_id}/overview/score-trend")
+async def get_overview_score_trend(
+    org_id: str,
+    weeks: int = Query(default=30, ge=4, le=52),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> list[dict[str, object]]:
+    if current_org_id:
+        _assert_org_scope(org_id, current_org_id)
+    try:
+        repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)))).scalars().all()
+        repo_ids = [repo.id for repo in repos]
+        now = datetime.utcnow()
+        start = now - timedelta(weeks=weeks)
+        if not repo_ids:
+            return []
+        history = (
+            await db.execute(
+                select(ScoreHistory, Repo.name.label("repo_name"))
+                .join(Repo, Repo.id == ScoreHistory.repo_id)
+                .where(ScoreHistory.repo_id.in_(repo_ids), ScoreHistory.recorded_at >= start)
+                .order_by(ScoreHistory.recorded_at)
+            )
+        ).all()
+        latest_scores = (
+            await db.execute(
+                select(Skill.repo_id, func.avg(Skill.score_total).label("score"))
+                .where(Skill.repo_id.in_(repo_ids))
+                .group_by(Skill.repo_id)
+            )
+        ).all()
+        current_by_repo = {str(repo_id): int(score or 0) for repo_id, score in latest_scores}
+        if not current_by_repo:
+            current_by_repo = {repo.id: 0 for repo in repos}
+
+        points: list[dict[str, object]] = []
+        previous_score: int | None = None
+        for offset in range(weeks - 1, -1, -1):
+            week_end = now - timedelta(weeks=offset)
+            week_start = week_end - timedelta(days=7)
+            week_label = f"{week_end.isocalendar().year}-W{week_end.isocalendar().week:02d}"
+            scores_by_repo: dict[str, int] = {}
+            events: list[dict[str, object]] = []
+            for row, repo_name in history:
+                if row.recorded_at <= week_end:
+                    scores_by_repo[row.repo_id] = int(row.score_total or 0)
+                if week_start <= row.recorded_at <= week_end:
+                    events.append({"repo_id": row.repo_id, "repo_name": repo_name, "score": int(row.score_total or 0), "date": row.recorded_at.isoformat()})
+            if not scores_by_repo:
+                scores_by_repo = dict(current_by_repo)
+            score = int(sum(scores_by_repo.values()) / max(1, len(scores_by_repo)))
+            delta = 0 if previous_score is None else score - previous_score
+            previous_score = score
+            points.append(
+                {
+                    "week": week_label,
+                    "date": week_end.date().isoformat(),
+                    "score": score,
+                    "delta": delta,
+                    "repos_changed": len({str(event["repo_id"]) for event in events}),
+                    "events": events[:12],
+                }
+            )
+        if not any(point["events"] for point in points):
+            current_score = int(sum(current_by_repo.values()) / max(1, len(current_by_repo)))
+            points = [
+                {
+                    "week": f"{(now - timedelta(weeks=offset)).isocalendar().year}-W{(now - timedelta(weeks=offset)).isocalendar().week:02d}",
+                    "date": (now - timedelta(weeks=offset)).date().isoformat(),
+                    "score": current_score,
+                    "delta": 0,
+                    "repos_changed": len(repos),
+                    "events": [{"repo_id": repo.id, "repo_name": repo.name, "score": current_score, "date": now.isoformat()} for repo in repos[:5]],
+                }
+                for offset in range(3, -1, -1)
+            ]
+        return points
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not load overview score trend") from exc
+
+
+@router.post("/{org_id}/repos/{repo_id}/analyse")
+async def trigger_org_repo_analysis(
+    org_id: str,
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        repo = await db.get(Repo, repo_id)
+        if repo is None or repo.org_id != org_id:
+            raise HTTPException(status_code=404, detail="Repo not found")
+        now = datetime.utcnow()
+        avg_skill_score = (
+            await db.execute(select(func.avg(Skill.score_total)).where(Skill.repo_id == repo_id))
+        ).scalar_one_or_none()
+        score = int(avg_skill_score or 0)
+        run = AnalysisRun(
+            repo_id=repo_id,
+            trigger="manual",
+            status="queued",
+            branch=repo.default_branch,
+            score_total=score,
+            created_at=now,
+            started_at=now,
+        )
+        repo.last_analysed_at = now
+        db.add(run)
+        await db.flush()
+        await db.commit()
+        return {"queued": True, "run_id": run.id, "repo_id": repo_id, "score": score, "last_analysed_at": now.isoformat()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not queue analysis") from exc
 
 
 @router.get("/{org_id}/skill-heatmap", response_model=SkillHeatmapResponse)
@@ -1500,6 +3016,320 @@ async def get_skill_heatmap(
     )
 
 
+@router.get("/{org_id}/analytics/criticality", response_model=list[CriticalityItem])
+async def get_analytics_criticality(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[CriticalityItem]:
+    _assert_org_scope(org_id, current_org_id)
+    now = datetime.utcnow()
+    cutoff_30 = now - timedelta(days=30)
+    try:
+        rows = (
+            await db.execute(
+                select(Skill, Repo.name.label("repo_name"))
+                .join(Repo, Repo.id == Skill.repo_id)
+                .where(Repo.org_id == org_id, Repo.is_active.is_(True))
+            )
+        ).all()
+        usage_rows = (
+            await db.execute(
+                select(
+                    SkillUsageEvent.skill_id,
+                    func.count(SkillUsageEvent.id).label("loads"),
+                    func.count(func.distinct(SkillUsageEvent.session_id)).label("sessions"),
+                    func.max(SkillUsageEvent.loaded_at).label("last_loaded_at"),
+                )
+                .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff_30)
+                .group_by(SkillUsageEvent.skill_id)
+            )
+        ).all()
+        total_sessions = int(
+            (
+                await db.execute(
+                    select(func.count(func.distinct(SkillUsageEvent.session_id))).where(
+                        SkillUsageEvent.org_id == org_id,
+                        SkillUsageEvent.loaded_at >= cutoff_30,
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
+    except Exception as exc:
+        await _rollback(db, "analytics criticality")
+        raise HTTPException(status_code=400, detail="Unable to load skill criticality") from exc
+
+    usage = {
+        str(row.skill_id): {
+            "loads": int(row.loads or 0),
+            "sessions": int(row.sessions or 0),
+            "last_loaded_at": row.last_loaded_at,
+        }
+        for row in usage_rows
+    }
+    ranked = sorted(rows, key=lambda row: (-(usage.get(row[0].id, {}).get("loads", 0)), str(row[0].domain)))
+    rank_by_skill = {skill.id: index + 1 for index, (skill, _repo_name) in enumerate(ranked)}
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    items: list[CriticalityItem] = []
+    for skill, repo_name in rows:
+        skill_usage = usage.get(skill.id, {"loads": int(skill.load_count_30d or 0), "sessions": 0, "last_loaded_at": skill.last_loaded_at})
+        loads = int(skill_usage.get("loads", 0) or 0)
+        session_count = int(skill_usage.get("sessions", 0) or 0)
+        is_every_session = total_sessions > 0 and session_count > total_sessions * 0.8
+        risk_level, risk_reason = _criticality_risk(skill, loads, is_every_session, now)
+        last_loaded = skill_usage.get("last_loaded_at") or skill.last_loaded_at
+        items.append(
+            CriticalityItem(
+                skill_id=skill.id,
+                domain=skill.domain,
+                repo_id=skill.repo_id,
+                repo_name=str(repo_name),
+                load_count_30d=loads,
+                score_total=int(skill.score_total or 0),
+                risk_level=risk_level,
+                risk_reason=risk_reason,
+                dependency_rank=rank_by_skill.get(skill.id, len(rank_by_skill) + 1),
+                is_every_session=is_every_session,
+                last_loaded_at=last_loaded.isoformat() if isinstance(last_loaded, datetime) else None,
+            )
+        )
+    return sorted(items, key=lambda item: (severity_order[item.risk_level], item.dependency_rank, item.domain))
+
+
+@router.get("/{org_id}/analytics/skill-coload-tree", response_model=SkillColoadTreeResponse)
+async def get_skill_coload_tree(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> SkillColoadTreeResponse:
+    _assert_org_scope(org_id, current_org_id)
+    now = datetime.utcnow()
+    cutoff_30 = now - timedelta(days=30)
+    try:
+        event_rows = (
+            await db.execute(
+                select(
+                    SkillUsageEvent.session_id,
+                    SkillUsageEvent.agent_runtime,
+                    SkillUsageEvent.skill_id,
+                    Skill.domain,
+                    Repo.name.label("repo_name"),
+                    Skill.score_total,
+                    Skill.load_count_30d,
+                    Skill.score_freshness,
+                    Skill.is_stale,
+                )
+                .join(Skill, Skill.id == SkillUsageEvent.skill_id)
+                .join(Repo, Repo.id == Skill.repo_id)
+                .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff_30)
+                .order_by(SkillUsageEvent.agent_runtime, SkillUsageEvent.session_id)
+            )
+        ).all()
+    except Exception as exc:
+        await _rollback(db, "analytics coload tree")
+        raise HTTPException(status_code=400, detail="Unable to load skill coload tree") from exc
+
+    skill_meta: dict[str, dict[str, object]] = {}
+    sessions_by_runtime: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    load_counts_by_runtime: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for session_id, runtime, skill_id, domain, repo_name, score_total, load_count_30d, score_freshness, is_stale in event_rows:
+        runtime_key = normalize_runtime(runtime)
+        skill_key = str(skill_id)
+        sessions_by_runtime[runtime_key][str(session_id)].add(skill_key)
+        load_counts_by_runtime[runtime_key][skill_key] += 1
+        skill_meta[skill_key] = {
+            "domain": str(domain or "unknown"),
+            "repo_name": str(repo_name or ""),
+            "score": int(score_total or 0),
+            "load_count_30d": int(load_count_30d or 0),
+            "score_freshness": int(score_freshness or 0),
+            "is_stale": bool(is_stale),
+        }
+
+    def status_for(meta: dict[str, object], loads: int) -> str:
+        if loads <= 0:
+            return "never_loaded"
+        if bool(meta.get("is_stale")) or int(meta.get("score_freshness") or 0) < 10:
+            return "stale"
+        score = int(meta.get("score") or 0)
+        if score < 75:
+            return "low_score"
+        return "healthy"
+
+    loaded_counts = [int(loads) for runtime_counts in load_counts_by_runtime.values() for loads in runtime_counts.values()]
+    uniform_loads = len(loaded_counts) > 1 and len(set(loaded_counts)) == 1
+
+    def sized_value(loads: int, score: int) -> float:
+        if uniform_loads:
+            return max(1.0, float(loads or 1) * ((float(score or 0) / 100.0) + 0.1))
+        return float(max(1, loads))
+
+    runtime_nodes: list[SkillColoadTreeNode] = []
+    for runtime, sessions in sorted(sessions_by_runtime.items(), key=lambda item: _runtime_display_name(item[0])):
+        session_count = max(1, len(sessions))
+        skill_session_counts: dict[str, int] = defaultdict(int)
+        pair_counts: dict[tuple[str, str], int] = defaultdict(int)
+        for skill_ids in sessions.values():
+            ordered = sorted(skill_ids)
+            for skill_id in ordered:
+                skill_session_counts[skill_id] += 1
+            for left, right in combinations(ordered, 2):
+                pair_counts[(left, right)] += 1
+
+        def leaf(skill_id: str) -> SkillColoadTreeNode:
+            meta = skill_meta.get(skill_id, {})
+            loads = int(load_counts_by_runtime[runtime].get(skill_id, 0))
+            score = int(meta.get("score") or 0)
+            return SkillColoadTreeNode(
+                name=str(meta.get("domain") or "unknown"),
+                value=sized_value(loads, score),
+                score=score,
+                status=status_for(meta, loads),
+                skill_id=skill_id,
+                runtime=runtime,
+                repo_name=str(meta.get("repo_name") or ""),
+                loads_30d=loads,
+                sessions=int(skill_session_counts.get(skill_id, 0)),
+            )
+
+        linked: dict[str, set[str]] = {skill_id: set() for skill_id in skill_session_counts}
+        for (left, right), count in pair_counts.items():
+            denominator = max(1, min(skill_session_counts[left], skill_session_counts[right]))
+            if count / denominator >= 0.70:
+                linked[left].add(right)
+                linked[right].add(left)
+
+        cluster_ids: list[set[str]] = []
+        seen: set[str] = set()
+        for skill_id in sorted(skill_session_counts):
+            if skill_id in seen:
+                continue
+            stack = [skill_id]
+            component: set[str] = set()
+            while stack:
+                current = stack.pop()
+                if current in component:
+                    continue
+                component.add(current)
+                stack.extend(sorted(linked.get(current, set()) - component))
+            seen.update(component)
+            cluster_ids.append(component)
+
+        def skill_sort_key(skill_id: str) -> tuple[int, int, str]:
+            meta = skill_meta.get(skill_id, {})
+            loads = int(load_counts_by_runtime[runtime].get(skill_id, 0))
+            return (-loads, -int(meta.get("score") or 0), str(meta.get("domain") or "unknown"))
+
+        clusters: list[SkillColoadTreeNode] = []
+        for index, component in enumerate(cluster_ids, start=1):
+            ordered_skill_ids = sorted(component, key=skill_sort_key)
+            children = [leaf(skill_id) for skill_id in ordered_skill_ids]
+            if not children:
+                continue
+            cluster_status = min(
+                (child.status or "healthy" for child in children),
+                key=lambda status: {"stale": 0, "low_score": 1, "healthy": 2, "never_loaded": 3}.get(status, 4),
+            )
+            cluster_value = sum(float(child.value or 0) for child in children)
+            cluster_name = "Core cluster" if len(children) > 1 else f"{children[0].name} cluster"
+            clusters.append(
+                SkillColoadTreeNode(
+                    name=cluster_name,
+                    value=cluster_value,
+                    status=cluster_status,
+                    runtime=runtime,
+                    cluster_id=f"{runtime}-{index}",
+                    always_together=all(
+                        pair_counts.get(tuple(sorted((left, right))), 0) / session_count >= 0.70
+                        for left, right in combinations(ordered_skill_ids, 2)
+                    )
+                    if len(ordered_skill_ids) > 1
+                    else False,
+                    children=children,
+                )
+            )
+
+        runtime_uniform = len({int(load_counts_by_runtime[runtime].get(skill_id, 0)) for skill_id in skill_session_counts}) == 1
+        clusters.sort(
+            key=lambda node: (
+                -int(sum((child.score or 0) for child in node.children) / max(len(node.children), 1)) if runtime_uniform else -float(node.value or 0),
+                str(node.name),
+            )
+        )
+
+        runtime_nodes.append(
+            SkillColoadTreeNode(
+                name=_runtime_display_name(runtime),
+                display=_runtime_display_name(runtime),
+                value=len(sessions),
+                runtime=runtime,
+                children=clusters,
+            )
+        )
+
+    root_value = sum(node.value for node in runtime_nodes) or 0
+    return SkillColoadTreeResponse(name="All sessions", value=root_value, children=runtime_nodes, uniform_loads=uniform_loads, generated_at=now)
+
+
+@router.post("/{org_id}/analytics/improvement-suggestions", response_model=AnalyticsSuggestionResponse)
+async def get_skill_improvement_suggestions(
+    org_id: str,
+    payload: AnalyticsSuggestionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AnalyticsSuggestionResponse | JSONResponse:
+    _assert_org_scope(org_id, current_org_id)
+    skill = await db.get(Skill, payload.skill_id)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    repo = await db.get(Repo, skill.repo_id)
+    if repo is None or repo.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    org = await db.get(Org, org_id)
+    try:
+        response = await call_llm(
+            _org_settings_dict(org) if org else {},
+            "You are a concise Skillayer analytics advisor. Return exactly 3 short bullet suggestions.",
+            f"Skill: {skill.domain}\nRepo: {repo.full_name}\nScore: {skill.score_total}/100\nLoads 30d: {skill.load_count_30d}\nRisk reason: {payload.risk_reason}\nContent excerpt:\n{str(skill.content or '')[:1400]}",
+            max_tokens=320,
+        )
+    except LLMNotConfiguredError as exc:
+        return _error(402, str(exc), "llm_not_configured")
+    except LLMCallError as exc:
+        return _error(502, str(exc), "llm_call_failed")
+    suggestions = [line.strip(" -•\t") for line in response.splitlines() if line.strip()]
+    suggestions = suggestions[:3] or [response.strip()]
+    return AnalyticsSuggestionResponse(skill_id=skill.id, suggestions=suggestions, summary=f"{skill.domain} improvement plan")
+
+
+@router.get("/{org_id}/analytics/highlight-risks", response_model=AnalyticsRiskHighlightResponse)
+async def highlight_analytics_risks(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AnalyticsRiskHighlightResponse | JSONResponse:
+    _assert_org_scope(org_id, current_org_id)
+    org = await db.get(Org, org_id)
+    criticality = await get_analytics_criticality(org_id, db, current_org_id)
+    top = [item for item in criticality if item.risk_level in {"critical", "high"}][:8]
+    if not top:
+        return AnalyticsRiskHighlightResponse(summary="No critical analytics risks detected.", highlights=["Keep collecting agent sessions to improve confidence."])
+    try:
+        response = await call_llm(
+            _org_settings_dict(org) if org else {},
+            "You are a concise Skillayer risk analyst. Summarize analytics risk in 1 sentence, then 3 bullets.",
+            "\n".join([f"- {item.domain} in {item.repo_name}: {item.risk_level}, {item.load_count_30d} loads, {item.risk_reason}" for item in top]),
+            max_tokens=360,
+        )
+    except LLMNotConfiguredError as exc:
+        return _error(402, str(exc), "llm_not_configured")
+    except LLMCallError as exc:
+        return _error(502, str(exc), "llm_call_failed")
+    lines = [line.strip(" -•\t") for line in response.splitlines() if line.strip()]
+    return AnalyticsRiskHighlightResponse(summary=lines[0] if lines else "Analytics risks highlighted.", highlights=lines[1:4] or lines[:3])
+
+
 @router.get("/{org_id}/runtime-breakdown", response_model=RuntimeBreakdownResponse)
 async def get_runtime_breakdown(
     org_id: str,
@@ -1513,12 +3343,23 @@ async def get_runtime_breakdown(
                     SkillUsageEvent.agent_runtime.label("runtime"),
                     func.count(SkillUsageEvent.id).label("loads_30d"),
                     func.count(func.distinct(SkillUsageEvent.skill_id)).label("unique_skills"),
+                    func.count(func.distinct(Skill.domain)).label("unique_domains"),
+                    func.coalesce(func.avg(Skill.score_total), 0).label("avg_skill_score"),
+                    func.max(SkillUsageEvent.loaded_at).label("most_recent_load"),
                 )
+                .join(Skill, Skill.id == SkillUsageEvent.skill_id)
                 .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff_30)
                 .group_by(SkillUsageEvent.agent_runtime)
                 .order_by(desc(func.count(SkillUsageEvent.id)))
             )
         ).all()
+        total_domains = (
+            await db.execute(
+                select(func.count(func.distinct(Skill.domain)))
+                .join(Repo, Repo.id == Skill.repo_id)
+                .where(Repo.org_id == org_id, Repo.is_active.is_(True))
+            )
+        ).scalar_one()
         domain_rows = (
             await db.execute(
                 select(
@@ -1531,20 +3372,43 @@ async def get_runtime_breakdown(
                 .group_by(SkillUsageEvent.agent_runtime, Skill.domain)
             )
         ).all()
-        top_domains: dict[str, tuple[str, int]] = {}
+        top_domains: dict[str, list[tuple[str, int]]] = {}
         for row in domain_rows:
-            runtime = str(row.runtime or "unknown")
-            loads = int(row.loads or 0)
-            current = top_domains.get(runtime)
-            if current is None or loads > current[1]:
-                top_domains[runtime] = (str(row.domain), loads)
+            runtime = normalize_runtime(row.runtime)
+            top_domains.setdefault(runtime, []).append((str(row.domain), int(row.loads or 0)))
+        for runtime in list(top_domains):
+            top_domains[runtime] = sorted(top_domains[runtime], key=lambda item: (-item[1], item[0]))[:3]
+        def _runtime_pattern(loads: int, unique_domains: int, avg_score: float, domains: list[str], breadth_score: int) -> str:
+            if loads >= 20 and avg_score < 60:
+                return "High-volume agent loading low-quality guidance"
+            if breadth_score >= 75 and unique_domains >= 3:
+                return "Broad coverage across the skill library"
+            if unique_domains <= 2 and domains and loads >= 5:
+                return f"Focused mostly on {domains[0]} skills"
+            if loads >= 10 and avg_score >= 80:
+                return "Consistently using high-quality guidance"
+            if loads < 3:
+                return "Early signal; collect more sessions"
+            return "Steady skill usage"
         runtimes = [
             RuntimeBreakdownEntryResponse(
-                runtime=str(row.runtime or "unknown"),
+                runtime=normalize_runtime(row.runtime),
                 display_name=_runtime_display_name(row.runtime),
                 loads_30d=int(row.loads_30d or 0),
                 unique_skills=int(row.unique_skills or 0),
-                top_skill_domain=top_domains.get(str(row.runtime or "unknown"), (None, 0))[0],
+                top_skill_domain=(top_domains.get(normalize_runtime(row.runtime), [(None, 0)])[0][0]),
+                unique_domains=int(row.unique_domains or 0),
+                avg_skill_score=round(float(row.avg_skill_score or 0), 1),
+                top_domains=[domain for domain, _loads in top_domains.get(normalize_runtime(row.runtime), [])],
+                knowledge_breadth_score=round((int(row.unique_domains or 0) / max(int(total_domains or 0), 1)) * 100),
+                most_recent_load=row.most_recent_load,
+                pattern=_runtime_pattern(
+                    int(row.loads_30d or 0),
+                    int(row.unique_domains or 0),
+                    float(row.avg_skill_score or 0),
+                    [domain for domain, _loads in top_domains.get(normalize_runtime(row.runtime), [])],
+                    round((int(row.unique_domains or 0) / max(int(total_domains or 0), 1)) * 100),
+                ),
             )
             for row in runtime_rows
         ]
@@ -1583,8 +3447,8 @@ async def get_runtime_breakdown(
         return RuntimeBreakdownResponse(
             runtimes=[
                 RuntimeBreakdownEntryResponse(
-                    runtime="unknown",
-                    display_name=_runtime_display_name("unknown"),
+                    runtime="unidentified_agent",
+                    display_name=_runtime_display_name("unidentified_agent"),
                     loads_30d=int(total_loads or 0),
                     unique_skills=int(unique_skills or 0),
                     top_skill_domain=(str(top_domain_row.domain) if top_domain_row else None),
@@ -1592,6 +3456,135 @@ async def get_runtime_breakdown(
             ] if int(total_loads or 0) > 0 else [],
             total_loads_30d=int(total_loads or 0),
         )
+
+
+@router.get("/{org_id}/sessions", response_model=OrgSessionsResponse)
+async def get_org_sessions(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgSessionsResponse:
+    """Group skill-load events into agent sessions for the dashboard timeline."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        rows = (
+            await db.execute(
+                select(SkillUsageEvent, Skill, Repo)
+                .join(Skill, Skill.id == SkillUsageEvent.skill_id)
+                .join(Repo, Repo.id == SkillUsageEvent.repo_id)
+                .where(SkillUsageEvent.org_id == org_id)
+                .order_by(desc(SkillUsageEvent.loaded_at))
+                .limit(500)
+            )
+        ).all()
+        session_ids = {str(event.session_id) for event, _skill, _repo in rows if event.session_id}
+        stored_sessions = {
+            session.session_id: session
+            for session in (
+                await db.execute(
+                    select(AgentSession).where(
+                        AgentSession.org_id == org_id,
+                        AgentSession.session_id.in_(session_ids),
+                    )
+                )
+            ).scalars().all()
+        } if session_ids else {}
+    except Exception as exc:
+        await _rollback(db, "org sessions")
+        raise HTTPException(status_code=400, detail="Unable to load sessions") from exc
+
+    grouped: dict[tuple[str, str, str], list[tuple[SkillUsageEvent, Skill, Repo]]] = defaultdict(list)
+    for event, skill, repo in rows:
+        loaded_at = event.loaded_at.replace(tzinfo=None) if event.loaded_at and event.loaded_at.tzinfo else event.loaded_at
+        runtime = normalize_runtime(event.agent_runtime)
+        if event.session_id:
+            session_key = str(event.session_id)
+        else:
+            bucket = int(loaded_at.timestamp() // 1800) if loaded_at else 0
+            session_key = f"{runtime}:{event.repo_id}:{bucket}"
+        grouped[(session_key, event.repo_id, runtime)].append((event, skill, repo))
+
+    sessions: list[OrgSessionItem] = []
+    for (session_id, repo_id, runtime), items in grouped.items():
+        ordered = sorted(items, key=lambda item: item[0].loaded_at)
+        started = ordered[0][0].loaded_at
+        ended = ordered[-1][0].loaded_at
+        repo = ordered[0][2]
+        domains: list[str] = []
+        scores: list[int] = []
+        skill_items: list[SessionSkillItem] = []
+        for event, skill, _repo in ordered:
+            domain = str(skill.domain)
+            score = int(skill.score_total or 0)
+            domains.append(domain)
+            scores.append(score)
+            skill_items.append(SessionSkillItem(domain=domain, score=score, loaded_at=event.loaded_at.isoformat()))
+        quality_signal, avg_score = _session_quality_from_scores(scores)
+        duration = max(0.0, round(((ended - started).total_seconds() / 60), 1)) if started and ended else 0.0
+        stored = stored_sessions.get(session_id)
+        sessions.append(
+            OrgSessionItem(
+                session_id=session_id,
+                agent_runtime=runtime,
+                agent_display_name=_runtime_display_name(runtime),
+                repo_id=repo_id,
+                repo_name=str(repo.name),
+                started_at=started.isoformat(),
+                ended_at=ended.isoformat(),
+                duration_minutes=duration,
+                skills_loaded=skill_items,
+                skill_count=len(skill_items),
+                session_context=_session_context_from_domains(domains),
+                quality_signal=quality_signal,
+                avg_skill_score=avg_score,
+                outcome=stored.outcome if stored and stored.outcome else "unknown",
+            )
+        )
+
+    sessions.sort(key=lambda item: item.started_at, reverse=True)
+    return OrgSessionsResponse(sessions=sessions[:50], total=len(sessions))
+
+
+@router.post("/{org_id}/sessions/{session_id}/tag")
+async def tag_org_session(
+    org_id: str,
+    session_id: str,
+    payload: SessionTagPayload,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, bool]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        session = (
+            await db.execute(select(AgentSession).where(AgentSession.org_id == org_id, AgentSession.session_id == session_id).limit(1))
+        ).scalar_one_or_none()
+        if session is None:
+            event = (
+                await db.execute(select(SkillUsageEvent).where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.session_id == session_id).limit(1))
+            ).scalar_one_or_none()
+            if event is None:
+                raise HTTPException(status_code=404, detail="Session not found")
+            session = AgentSession(
+                org_id=org_id,
+                repo_id=event.repo_id,
+                session_id=session_id,
+                agent_runtime=normalize_runtime(event.agent_runtime),
+                skills_loaded=[],
+                skill_paths_loaded=[],
+                session_start=event.loaded_at,
+                created_at=datetime.utcnow(),
+            )
+            db.add(session)
+        session.outcome = None if payload.outcome == "unknown" else payload.outcome
+        if payload.notes is not None:
+            session.notes = payload.notes
+        await db.commit()
+        return {"updated": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to tag session") from exc
 
 
 @router.get("/{org_id}/intelligence", response_model=OrgIntelligenceResponse)
@@ -2164,13 +4157,159 @@ async def restore_red_flag(
         return _error(400, "Could not restore red flag", "RED_FLAG_RESTORE_FAILED")
 
 
+@router.get("/{org_id}/half-life", response_model=OrgHalfLifeResponse)
+async def get_org_half_life(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> OrgHalfLifeResponse:
+    """Return half-life predictions for all org skills."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        rows = (
+            await db.execute(
+                select(SkillHalfLife, Skill, Repo)
+                .join(Skill, Skill.id == SkillHalfLife.skill_id)
+                .join(Repo, Repo.id == SkillHalfLife.repo_id)
+                .where(SkillHalfLife.org_id == org_id, Repo.is_active.is_(True))
+                .order_by(SkillHalfLife.predicted_decay_date)
+            )
+        ).all()
+        return _half_life_response(list(rows))
+    except Exception as exc:
+        await _rollback(db, "org half-life lookup")
+        raise HTTPException(status_code=400, detail="Unable to load half-life predictions") from exc
+
+
+@router.post("/{org_id}/half-life/refresh", response_model=HalfLifeRefreshResponse)
+async def refresh_org_half_life(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> HalfLifeRefreshResponse:
+    """Recompute half-life predictions and queue near-decay regenerations."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        skills = (
+            await db.execute(
+                select(Skill)
+                .join(Repo, Repo.id == Skill.repo_id)
+                .where(Repo.org_id == org_id, Repo.is_active.is_(True))
+                .order_by(Skill.domain)
+            )
+        ).scalars().all()
+        for skill in skills:
+            await compute_half_life(skill.id, db)
+        queued = await check_and_queue_regenerations(org_id, db)
+        await db.commit()
+        return HalfLifeRefreshResponse(refreshed=True, skill_count=len(skills), regen_queued_count=len(queued))
+    except Exception as exc:
+        await _rollback(db, "org half-life refresh")
+        raise HTTPException(status_code=400, detail="Unable to refresh half-life predictions") from exc
+
+
+@router.post("/{org_id}/half-life/buffer", response_model=HalfLifeBufferResponse)
+async def update_org_half_life_buffer(
+    org_id: str,
+    payload: HalfLifeBufferPayload,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> HalfLifeBufferResponse:
+    """Update regeneration buffer hours for org half-life rows."""
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        filters = [SkillHalfLife.org_id == org_id]
+        if payload.skill_id:
+            filters.append(SkillHalfLife.skill_id == payload.skill_id)
+        rows = (await db.execute(select(SkillHalfLife).where(*filters))).scalars().all()
+        if payload.skill_id and not rows:
+            raise HTTPException(status_code=404, detail="Half-life row not found for skill")
+        for row in rows:
+            row.regeneration_buffer_hours = payload.buffer_hours
+            row.updated_at = datetime.utcnow()
+        queued = await check_and_queue_regenerations(org_id, db)
+        await db.commit()
+        return HalfLifeBufferResponse(updated=True, buffer_hours=payload.buffer_hours, skill_count=len(rows), queued=queued)
+    except HTTPException:
+        await _rollback(db, "org half-life buffer update")
+        raise
+    except Exception as exc:
+        await _rollback(db, "org half-life buffer update")
+        raise HTTPException(status_code=400, detail="Unable to update half-life buffer") from exc
+
+
+def _coverage_gap_id(org_id: str, repo_id: str, domain: str, gap_type: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"skillayer:coverage-gap:{org_id}:{repo_id}:{domain}:{gap_type}"))
+
+
+async def _github_tree_sample(repo: Repo, limit: int = 100) -> list[str]:
+    if not repo.github_installation_id or "/" not in repo.full_name:
+        return []
+    owner, name = repo.full_name.split("/", 1)
+    try:
+        token = await get_installation_token(int(repo.github_installation_id))
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+        url = f"https://api.github.com/repos/{owner}/{name}/git/trees/{repo.default_branch or 'HEAD'}"
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            response = await client.get(url, headers=headers, params={"recursive": "1"})
+        if response.status_code >= 400:
+            return []
+        tree = response.json().get("tree", [])
+        if not isinstance(tree, list):
+            return []
+        return [str(item.get("path")) for item in tree if isinstance(item, dict) and item.get("type") == "blob" and item.get("path")][:limit]
+    except Exception:
+        logger.exception("Unable to fetch GitHub tree for repo %s", repo.id)
+        return []
+
+
+async def _upsert_coverage_gap(db: AsyncSession, org_id: str, repo_id: str, domain: str, gap_type: str = "missing") -> CoverageGap:
+    gap_id = _coverage_gap_id(org_id, repo_id, domain, gap_type)
+    gap = await db.get(CoverageGap, gap_id)
+    now = datetime.utcnow()
+    if gap is None:
+        gap = CoverageGap(id=gap_id, org_id=org_id, repo_id=repo_id, domain=domain, gap_type=gap_type, status="open", created_at=now, updated_at=now)
+        db.add(gap)
+    elif gap.status == "resolved":
+        gap.status = "open"
+        gap.updated_at = now
+    return gap
+
+
+def _gap_response(gap: CoverageGap) -> dict[str, object]:
+    return {"gap_id": gap.id, "domain": gap.domain, "gap_type": gap.gap_type, "status": gap.status, "skill_id": gap.skill_id}
+
+
+async def _enterprise_skill_context(db: AsyncSession, org_id: str, domain: str) -> list[dict[str, str]]:
+    rows = (
+        await db.execute(
+            select(Skill)
+            .join(Repo, Repo.id == Skill.repo_id)
+            .where(Repo.org_id == org_id, Skill.is_enterprise.is_(True), Skill.skill_category == domain)
+            .limit(5)
+        )
+    ).scalars().all()
+    return [{"domain": skill.domain, "content": skill.content or ""} for skill in rows]
+
+
+async def _generate_gap_skill(db: AsyncSession, org: Org, repo: Repo, gap: CoverageGap) -> dict[str, object]:
+    return await generate_skill_with_ai(
+        org.settings or {},
+        gap.domain,
+        repo.name,
+        await _github_tree_sample(repo, 100),
+        await _enterprise_skill_context(db, org.id, gap.domain),
+        user_intent=f"Fill the missing {SKILL_CATEGORY_LABELS.get(gap.domain, gap.domain)} knowledge area for this repository.",
+    )
+
+
 @router.get("/{org_id}/skill-debt")
 async def get_skill_debt(
     org_id: str,
     db: AsyncSession = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id),
 ) -> dict[str, object]:
-    """Return skill debt summary: stale, never-loaded, low-score, and uncovered domains."""
+    """Return skill health summary: stale, never-loaded, low-score, and uncovered domains."""
     _assert_org_scope(org_id, current_org_id)
 
     repos = (
@@ -2188,7 +4327,7 @@ async def get_skill_debt(
     ).scalars().all()
 
     stale_skills = [skill for skill in all_skills if skill.is_stale]
-    low_score_skills = [skill for skill in all_skills if int(skill.score_total or 0) < 40]
+    low_score_skills = [skill for skill in all_skills if int(skill.score_total or 0) < 50]
     never_loaded_skills = [skill for skill in all_skills if int(skill.load_count_30d or 0) == 0]
     zero_subscore_skills = [
         skill
@@ -2202,23 +4341,47 @@ async def get_skill_debt(
         covered = _covered_categories(repo_skills)
         missing = [category for category in SKILL_CATEGORIES if category not in covered]
         if missing:
+            gap_rows = (
+                await db.execute(
+                    select(CoverageGap).where(
+                        CoverageGap.org_id == org_id,
+                        CoverageGap.repo_id == repo.id,
+                        CoverageGap.domain.in_(missing),
+                    )
+                )
+            ).scalars().all()
+            gap_by_domain = {gap.domain: gap for gap in gap_rows}
             repo_gaps.append(
                 {
                     "repo_id": repo.id,
                     "repo_name": repo.name,
+                    "last_debt_analysis_at": repo.last_debt_analysis_at.isoformat() if repo.last_debt_analysis_at else None,
                     "covered_categories": covered,
                     "missing_categories": missing,
+                    "gaps": [
+                        _gap_response(gap_by_domain.get(domain) or CoverageGap(id=_coverage_gap_id(org_id, repo.id, domain, "missing"), org_id=org_id, repo_id=repo.id, domain=domain, gap_type="missing", status="open"))
+                        for domain in missing
+                    ],
                     "coverage_score": round((len(covered) / len(SKILL_CATEGORIES)) * 100),
                 }
             )
 
-    debt_score = min(
-        100,
-        len(stale_skills) * 3
-        + len(low_score_skills) * 2
-        + len(never_loaded_skills) * 1
-        + sum(len(gap["missing_categories"]) for gap in repo_gaps) * 2,
+    health_score = max(
+        0,
+        min(
+            100,
+            round(
+                100
+                - (
+                    len(stale_skills) * 2
+                    + len(low_score_skills) * 1.5
+                    + len(never_loaded_skills) * 0.5
+                    + len(repo_gaps) * 3
+                )
+            ),
+        ),
     )
+    estimated_if_fixed = max(0, min(100, round(100 - (len(stale_skills) * 2 + len(never_loaded_skills) * 0.5 + len(repo_gaps) * 3))))
 
     def _skill_dict(skill: Skill) -> dict[str, object]:
         return {
@@ -2228,10 +4391,16 @@ async def get_skill_debt(
             "score_total": int(skill.score_total or 0),
             "is_stale": bool(skill.is_stale),
             "load_count_30d": int(skill.load_count_30d or 0),
+            "score_groundedness": int(skill.score_groundedness or 0),
+            "score_coverage": int(skill.score_coverage or 0),
+            "score_freshness": int(skill.score_freshness or 0),
+            "score_structure": int(skill.score_structure or 0),
         }
 
     return {
-        "debt_score": debt_score,
+        "debt_score": 100 - health_score,
+        "health_score": health_score,
+        "estimated_if_fixed": estimated_if_fixed,
         "total_skills": len(all_skills),
         "stale_skills": [_skill_dict(skill) for skill in stale_skills[:20]],
         "low_score_skills": [_skill_dict(skill) for skill in sorted(low_score_skills, key=lambda item: item.score_total or 0)[:20]],
@@ -2244,8 +4413,258 @@ async def get_skill_debt(
             "never_loaded_count": len(never_loaded_skills),
             "zero_subscore_count": len(zero_subscore_skills),
             "repos_with_gaps": len(repo_gaps),
+            "last_debt_analysis_at": max([repo.last_debt_analysis_at for repo in repos if repo.last_debt_analysis_at] or [None]).isoformat() if any(repo.last_debt_analysis_at for repo in repos) else None,
         },
     }
+
+
+@router.post("/{org_id}/debt/run-analysis")
+async def run_debt_analysis(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Repo.name))).scalars().all()
+        skills = (
+            await db.execute(select(Skill).join(Repo, Repo.id == Skill.repo_id).where(Repo.org_id == org_id, Repo.is_active.is_(True)))
+        ).scalars().all()
+        gaps_found = 0
+        now = datetime.utcnow()
+        for repo in repos:
+            repo_skills = [skill for skill in skills if skill.repo_id == repo.id]
+            covered = _covered_categories(repo_skills)
+            for domain in [category for category in SKILL_CATEGORIES if category not in covered]:
+                await _upsert_coverage_gap(db, org_id, repo.id, domain, "missing")
+                gaps_found += 1
+            for skill in repo_skills:
+                if int(skill.score_total or 0) < 50:
+                    await _upsert_coverage_gap(db, org_id, repo.id, skill.skill_category or skill.domain, "low_score")
+                    gaps_found += 1
+                if int(skill.load_count_30d or 0) == 0:
+                    await _upsert_coverage_gap(db, org_id, repo.id, skill.skill_category or skill.domain, "never_loaded")
+                    gaps_found += 1
+            repo.last_debt_analysis_at = now
+        await db.commit()
+        debt = await get_skill_debt(org_id, db, current_org_id)
+        return {
+            "health_score": debt.get("health_score", 0),
+            "repos_analyzed": len(repos),
+            "gaps_found": gaps_found,
+            "analysis_id": str(uuid4()),
+        }
+    except Exception as exc:
+        await _rollback(db, "debt run analysis")
+        raise HTTPException(status_code=400, detail="Unable to run debt analysis") from exc
+
+
+@router.get("/{org_id}/debt/gaps")
+async def get_debt_gaps(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    debt = await get_skill_debt(org_id, db, current_org_id)
+    repos = debt.get("repo_coverage_gaps", [])
+    return {
+        "summary": {
+            "health_score": debt.get("health_score", 0),
+            "gap_count": sum(len(repo.get("missing_categories", [])) for repo in repos if isinstance(repo, dict)),
+            "repos_affected": len(repos),
+        },
+        "repos": repos,
+    }
+
+
+@router.post("/{org_id}/debt/gaps/{gap_id}/generate")
+async def generate_debt_gap(
+    org_id: str,
+    gap_id: str,
+    payload: DebtGapGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    gap = await db.get(CoverageGap, gap_id)
+    if gap is None or gap.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Coverage gap not found")
+    repo = await db.get(Repo, gap.repo_id)
+    org = await db.get(Org, org_id)
+    if repo is None or org is None:
+        raise HTTPException(status_code=404, detail="Repo or org not found")
+    try:
+        gap.status = "generating"
+        gap.updated_at = datetime.utcnow()
+        generated = await _generate_gap_skill(db, org, repo, gap)
+        content = str(generated.get("content") or "")
+        suggested_path = f".skillayer/skills/{gap.domain}/SKILL.md"
+        if payload.mode == "preview":
+            await db.rollback()
+            return {"content": content, "suggested_path": suggested_path, "ready_to_push": True}
+        now = datetime.utcnow()
+        run = AnalysisRun(repo_id=repo.id, trigger="debt_gap_ai", status="complete", branch=repo.default_branch, created_at=now, completed_at=now)
+        db.add(run)
+        await db.flush()
+        skill = Skill(
+            repo_id=repo.id,
+            run_id=run.id,
+            domain=gap.domain,
+            skill_path=suggested_path,
+            content=content,
+            content_hash=hashlib.sha256(content.encode()).hexdigest(),
+            source_type="ai_generated",
+            skill_category=gap.domain,
+            anti_patterns=generated.get("anti_patterns") or [],
+            score_total=82,
+            score_groundedness=20,
+            score_coverage=21,
+            score_freshness=20,
+            score_structure=21,
+            created_at=now,
+        )
+        db.add(skill)
+        await db.flush()
+        pr = await create_skill_pr(repo, suggested_path, content, f"skillayer/add-{gap.domain}-{gap.id[:8]}", f"Add {gap.domain} Skillayer skill", f"Skillayer generated a missing `{gap.domain}` skill from the dashboard.")
+        gap.skill_id = skill.id
+        gap.status = "pr_opened"
+        gap.updated_at = now
+        await db.commit()
+        return {"skill_id": skill.id, "pr_url": pr.get("pr_url"), "pr_number": pr.get("pr_number"), "content": content, "suggested_path": suggested_path}
+    except (LLMNotConfiguredError, LLMCallError) as exc:
+        await _rollback(db, "generate debt gap")
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except Exception as exc:
+        await _rollback(db, "generate debt gap")
+        raise HTTPException(status_code=400, detail="Unable to generate gap skill") from exc
+
+
+@router.post("/{org_id}/debt/gaps/generate-all")
+async def generate_all_debt_gaps(
+    org_id: str,
+    payload: DebtGenerateAllRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    filters = [CoverageGap.org_id == org_id, CoverageGap.status == "open"]
+    if payload.domains:
+        filters.append(CoverageGap.domain.in_(payload.domains))
+    if payload.repo_ids:
+        filters.append(CoverageGap.repo_id.in_(payload.repo_ids))
+    count = int((await db.execute(select(func.count(CoverageGap.id)).where(*filters))).scalar() or 0)
+    return {"job_id": str(uuid4()), "queued": True, "gap_count": count}
+
+
+async def _save_dependency_cache(db: AsyncSession, org_id: str, scope: str, repo_id: str | None, graph: dict[str, object]) -> DependencyGraphCache:
+    existing = (
+        await db.execute(
+            select(DependencyGraphCache).where(
+                DependencyGraphCache.org_id == org_id,
+                DependencyGraphCache.scope == scope,
+                DependencyGraphCache.repo_id == repo_id,
+            )
+        )
+    ).scalar_one_or_none()
+    now = datetime.utcnow()
+    if existing is None:
+        existing = DependencyGraphCache(
+            org_id=org_id,
+            scope=scope,
+            repo_id=repo_id,
+            nodes_json=graph.get("nodes", []),
+            edges_json=graph.get("edges", []),
+            opportunities_json=graph.get("opportunities", []),
+            computed_at=now,
+        )
+        db.add(existing)
+    else:
+        existing.nodes_json = graph.get("nodes", [])
+        existing.edges_json = graph.get("edges", [])
+        existing.opportunities_json = graph.get("opportunities", [])
+        existing.computed_at = now
+    return existing
+
+
+@router.post("/{org_id}/dependency-graph/compute")
+async def compute_dependency_graph(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Repo.name))).scalars().all()
+        skills = (
+            await db.execute(select(Skill).join(Repo, Repo.id == Skill.repo_id).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Skill.domain))
+        ).scalars().all()
+        for repo in repos:
+            await _save_dependency_cache(db, org_id, "repo", repo.id, compute_repo_dependencies(repo, [skill for skill in skills if skill.repo_id == repo.id]))
+        await _save_dependency_cache(db, org_id, "cross_repo", None, compute_cross_repo_dependencies(repos, skills))
+        await db.commit()
+        return {"job_id": str(uuid4()), "status": "completed", "repo_count": len(repos), "skill_count": len(skills)}
+    except Exception as exc:
+        await _rollback(db, "compute dependency graph")
+        raise HTTPException(status_code=400, detail="Unable to compute dependency graph") from exc
+
+
+@router.get("/{org_id}/dependency-graph/status")
+async def dependency_graph_status(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    rows = (await db.execute(select(DependencyGraphCache).where(DependencyGraphCache.org_id == org_id))).scalars().all()
+    if not rows:
+        return {"computed_at": None, "node_count": 0, "edge_count": 0, "opportunity_count": 0}
+    latest = max(row.computed_at for row in rows)
+    return {
+        "computed_at": latest.isoformat(),
+        "node_count": sum(len(row.nodes_json or []) for row in rows),
+        "edge_count": sum(len(row.edges_json or []) for row in rows),
+        "opportunity_count": sum(len(row.opportunities_json or []) for row in rows),
+    }
+
+
+@router.get("/{org_id}/dependency-graph/repo/{repo_id}")
+async def get_repo_dependency_graph(
+    org_id: str,
+    repo_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    cache = (
+        await db.execute(select(DependencyGraphCache).where(DependencyGraphCache.org_id == org_id, DependencyGraphCache.scope == "repo", DependencyGraphCache.repo_id == repo_id))
+    ).scalar_one_or_none()
+    if cache is None:
+        repo = await db.get(Repo, repo_id)
+        if repo is None or repo.org_id != org_id:
+            raise HTTPException(status_code=404, detail="Repo not found")
+        skills = (await db.execute(select(Skill).where(Skill.repo_id == repo_id))).scalars().all()
+        graph = compute_repo_dependencies(repo, skills)
+        return {"nodes": graph["nodes"], "edges": graph["edges"], "opportunities": [], "computed_at": None}
+    return {"nodes": cache.nodes_json or [], "edges": cache.edges_json or [], "opportunities": cache.opportunities_json or [], "computed_at": cache.computed_at.isoformat()}
+
+
+@router.get("/{org_id}/dependency-graph/cross-repo")
+async def get_cross_repo_dependency_graph(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    cache = (
+        await db.execute(select(DependencyGraphCache).where(DependencyGraphCache.org_id == org_id, DependencyGraphCache.scope == "cross_repo", DependencyGraphCache.repo_id.is_(None)))
+    ).scalar_one_or_none()
+    if cache is None:
+        repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)))).scalars().all()
+        skills = (await db.execute(select(Skill).join(Repo, Repo.id == Skill.repo_id).where(Repo.org_id == org_id, Repo.is_active.is_(True)))).scalars().all()
+        graph = compute_cross_repo_dependencies(repos, skills)
+        return {"nodes": graph["nodes"], "edges": graph["edges"], "opportunities": graph["opportunities"], "computed_at": None}
+    return {"nodes": cache.nodes_json or [], "edges": cache.edges_json or [], "opportunities": cache.opportunities_json or [], "computed_at": cache.computed_at.isoformat()}
 
 
 @router.get("/{org_id}/team-rollup", response_model=TeamRollupResponse)
@@ -2321,6 +4740,35 @@ async def get_team_rollup(
         org_avg_score=org_avg_score,
         top_team=top_team,
         needs_attention=needs_attention,
+    )
+
+
+@router.get("/{org_id}/teams/rollup", response_model=TeamRollupResponse)
+async def get_org_teams(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> TeamRollupResponse:
+    """Return team-level repo and skill quality rollups."""
+    _assert_org_scope(org_id, current_org_id)
+    return await get_team_rollup(org_id, db)
+
+
+@router.get("/{org_id}/teams/rollup-summary", response_model=TeamSummaryResponse)
+async def get_org_teams_summary(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> TeamSummaryResponse:
+    """Return compact team health summary for dashboards and badges."""
+    _assert_org_scope(org_id, current_org_id)
+    rollup = await get_team_rollup(org_id, db)
+    return TeamSummaryResponse(
+        team_count=len(rollup.teams),
+        repo_count=sum(team.repo_count for team in rollup.teams),
+        avg_score=int(rollup.org_avg_score or 0),
+        top_team=rollup.top_team,
+        needs_attention=rollup.needs_attention,
     )
 
 
@@ -2466,14 +4914,20 @@ async def create_org_policy(
     current_org_id: str = Depends(get_current_org_id),
 ) -> PolicyResponse:
     _assert_org_scope(org_id, current_org_id)
-    if payload.rule_type not in POLICY_RULE_TYPES:
+    if payload.rule_type not in ALL_POLICY_RULE_TYPES:
         raise HTTPException(status_code=400, detail="Invalid rule_type")
+    rule_config = payload.rule_config or {}
+    if payload.rule_type in PR_POLICY_RULE_TYPES:
+        try:
+            rule_config = validate_pr_policy_config(payload.rule_type, rule_config)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     policy = OrgPolicy(
         org_id=org_id,
         name=payload.name or "Untitled policy",
         description=payload.description,
         rule_type=payload.rule_type,
-        rule_config=payload.rule_config or {},
+        rule_config=rule_config,
         severity=payload.severity or "error",
         enabled=True if payload.enabled is None else payload.enabled,
     )
@@ -2500,9 +4954,20 @@ async def update_org_policy(
     policy = await db.get(OrgPolicy, policy_id)
     if policy is None or policy.org_id != org_id:
         raise HTTPException(status_code=404, detail="Policy not found")
+    if policy.rule_type in PR_POLICY_RULE_TYPES and any(
+        value is not None
+        for value in (payload.rule_type, payload.name, payload.description, payload.rule_config, payload.severity)
+    ):
+        raise HTTPException(status_code=400, detail="PR check policies can only toggle enabled after creation")
     if payload.rule_type is not None:
-        if payload.rule_type not in POLICY_RULE_TYPES:
+        if payload.rule_type not in ALL_POLICY_RULE_TYPES:
             raise HTTPException(status_code=400, detail="Invalid rule_type")
+        if payload.rule_type in PR_POLICY_RULE_TYPES:
+            try:
+                policy.rule_config = validate_pr_policy_config(payload.rule_type, payload.rule_config or {})
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            payload.rule_config = None
         policy.rule_type = payload.rule_type
     if payload.name is not None:
         policy.name = payload.name
@@ -2552,6 +5017,9 @@ async def get_policy_templates(
         ("min_skill_score", "Minimum quality gate", "No skill should score below 40.", {"min_score": 40}, "warning"),
         ("min_freshness_score", "Minimum freshness", "All skills must have at least 15/25 freshness.", {"min_freshness": 15}, "error"),
         ("require_analysis_recency", "Analysis within 14 days", "All repos must be analysed at least bi-weekly.", {"max_days": 14}, "warning"),
+        ("block_on_red", "Block red-risk PRs", "PRs with red risk require remediation before merge.", {}, "error"),
+        ("require_skill_load", "Require skill load for agents", "Agent-authored PRs must have active skills loaded.", {"agent_runtimes": ["claude_code", "codex"]}, "error"),
+        ("min_compliance", "Minimum PR compliance", "Block PRs with critical skill violations below the compliance threshold.", {"threshold": 80}, "error"),
     ]
     return [
         PolicyResponse(
@@ -2780,6 +5248,510 @@ async def get_knowledge_concentration(org_id: str, db: AsyncSession = Depends(ge
     except Exception as exc:
         await db.rollback()
         raise HTTPException(status_code=400, detail="Could not load knowledge concentration") from exc
+
+
+def _skill_action_slug(value: str) -> str:
+    slug = "".join(char.lower() if char.isalnum() else "-" for char in value).strip("-")
+    return "-".join(part for part in slug.split("-") if part)[:80] or "skill"
+
+
+async def _load_skill_action_repo(db: AsyncSession, org_id: str, repo_id: str) -> Repo:
+    repo = await db.get(Repo, repo_id)
+    if repo is None or repo.org_id != org_id or not repo.is_active:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return repo
+
+
+@router.post("/{org_id}/skill-ai-actions/preview", response_model=SkillAIActionPreviewResponse)
+async def preview_skill_ai_action(
+    org_id: str,
+    payload: SkillAIActionPreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> SkillAIActionPreviewResponse | JSONResponse:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Org not found")
+        repo = await _load_skill_action_repo(db, org_id, payload.repo_id)
+        domain_slug = _skill_action_slug(payload.domain)
+        context_files = [item for item in payload.affected_files if item.strip()][:12]
+        draft = await generate_skill_with_ai(
+            _org_settings_dict(org),
+            domain=payload.domain,
+            repo_name=repo.full_name or repo.name,
+            context_files=context_files,
+            enterprise_skills=[],
+            user_intent=f"{payload.source}: {payload.reason}",
+        )
+        skill_path = f"skills/{domain_slug}/SKILL.md"
+        branch_name = f"skillayer/{domain_slug}-ai-skill"
+        pr_title = f"Add {payload.domain} Skillayer skill"
+        pr_body = f"Generated from {payload.source.replace('_', ' ')} action.\n\nReason: {payload.reason}"
+        return SkillAIActionPreviewResponse(
+            repo_id=repo.id,
+            repo_name=repo.name,
+            domain=payload.domain,
+            skill_path=skill_path,
+            branch_name=branch_name,
+            pr_title=pr_title,
+            pr_body=pr_body,
+            content=str(draft.get("content") or ""),
+            file_references=[str(item) for item in draft.get("file_references", [])],
+            anti_patterns=[str(item) for item in draft.get("anti_patterns", [])],
+        )
+    except LLMNotConfiguredError as exc:
+        return _error(402, str(exc), "llm_not_configured")
+    except LLMCallError as exc:
+        return _error(502, str(exc), "llm_call_failed")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not preview AI skill action") from exc
+
+
+@router.post("/{org_id}/skill-ai-actions/push", response_model=SkillAIActionPushResponse)
+async def push_skill_ai_action(
+    org_id: str,
+    payload: SkillAIActionPushRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> SkillAIActionPushResponse | JSONResponse:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        repo = await _load_skill_action_repo(db, org_id, payload.repo_id)
+        result = await create_skill_pr(
+            repo=repo,
+            skill_path=payload.skill_path,
+            skill_content=payload.content,
+            branch_name=payload.branch_name,
+            pr_title=payload.pr_title,
+            pr_body=payload.pr_body,
+        )
+        await audit.emit(
+            db,
+            org_id,
+            "skill.ai_action_pr_created",
+            "created",
+            f"Created AI skill PR for {payload.domain}",
+            actor_login=get_actor_login(request),
+            repo_id=repo.id,
+            repo_name=repo.name,
+            resource_type="skill",
+            metadata={"domain": payload.domain, "skill_path": payload.skill_path, "pr_url": result.get("pr_url")},
+        )
+        await db.commit()
+        return SkillAIActionPushResponse(pr_url=str(result["pr_url"]), pr_number=int(result["pr_number"]), branch=str(result["branch"]))
+    except ValueError as exc:
+        return _error(409, "GitHub App is not installed for this repository", str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not push AI skill action") from exc
+
+
+def _knowledge_risk_id(risk: dict[str, object]) -> str:
+    return hashlib.sha1(f"{risk.get('repo_id')}:{risk.get('domain')}:{risk.get('risk_type')}".encode("utf-8")).hexdigest()[:16]
+
+
+@router.get("/{org_id}/connect/status")
+async def get_connect_status(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, dict[str, object]]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        return await get_agent_connection_status(org_id, db)
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not load agent connection status") from exc
+
+
+@router.post("/{org_id}/knowledge-risk/{risk_id}/generate-and-push", response_model=None)
+async def generate_and_push_knowledge_risk(
+    org_id: str,
+    risk_id: str,
+    payload: KnowledgeRiskGenerateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> Any:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)))).scalars().all()
+        repo_ids = [repo.id for repo in repos]
+        skills = (await db.execute(select(Skill).where(Skill.repo_id.in_(repo_ids)))).scalars().all() if repo_ids else []
+        risks = concentration_response(list(repos), list(skills)).get("risks", [])
+        risk = next((item for item in risks if isinstance(item, dict) and (_knowledge_risk_id(item) == risk_id or str(item.get("skill_id") or "") == risk_id)), None)
+        if not isinstance(risk, dict):
+            raise HTTPException(status_code=404, detail="Risk not found")
+        preview = await preview_skill_ai_action(
+            org_id,
+            SkillAIActionPreviewRequest(
+                repo_id=str(risk["repo_id"]),
+                domain=str(risk.get("domain") or "skill"),
+                reason=payload.custom_intent or str(risk.get("reason") or risk.get("recommendation") or ""),
+                affected_files=[str(item) for item in risk.get("affected_files", [])],
+                source="knowledge_risk",
+            ),
+            db,
+            current_org_id,
+        )
+        if isinstance(preview, JSONResponse):
+            return preview
+        if payload.mode == "preview":
+            return {
+                "content": preview.content,
+                "file_path": preview.skill_path,
+                "branch_name": preview.branch_name,
+                "pr_title": preview.pr_title,
+                "pr_body": preview.pr_body,
+                "ready_to_push": True,
+            }
+        pushed = await push_skill_ai_action(
+            org_id,
+            SkillAIActionPushRequest(
+                repo_id=preview.repo_id,
+                domain=preview.domain,
+                skill_path=preview.skill_path,
+                content=preview.content,
+                branch_name=preview.branch_name,
+                pr_title=preview.pr_title,
+                pr_body=preview.pr_body,
+            ),
+            request,
+            db,
+            current_org_id,
+        )
+        if isinstance(pushed, JSONResponse):
+            return pushed
+        return {"pr_url": pushed.pr_url, "pr_number": pushed.pr_number, "branch": pushed.branch, "pushed": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not generate skill for this risk") from exc
+
+
+@router.post("/{org_id}/knowledge-risk/generate-all")
+async def generate_all_knowledge_risk_skills(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)))).scalars().all()
+        repo_ids = [repo.id for repo in repos]
+        skills = (await db.execute(select(Skill).where(Skill.repo_id.in_(repo_ids)))).scalars().all() if repo_ids else []
+        medium = [risk for risk in concentration_response(list(repos), list(skills)).get("risks", []) if isinstance(risk, dict) and risk.get("risk_level") == "medium"]
+        return {"queued": True, "total": len(medium), "message": f"{len(medium)} medium-risk skills are ready for preview before push."}
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not queue knowledge-risk generation") from exc
+
+
+@router.post("/{org_id}/knowledge-risk/{risk_id}/dismiss", response_model=KnowledgeRiskDismissResponse)
+async def dismiss_knowledge_risk(
+    org_id: str,
+    risk_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> KnowledgeRiskDismissResponse:
+    _assert_org_scope(org_id, current_org_id)
+    return KnowledgeRiskDismissResponse(dismissed=True)
+
+
+@router.get("/{org_id}/half-life")
+async def get_org_half_life(
+    org_id: str,
+    repo_id: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        skills = await compute_skill_decay_timeline(org_id, repo_id, db)
+        return {
+            "summary": {
+                "critical": sum(1 for item in skills if item.get("urgency") == "now"),
+                "warning": sum(1 for item in skills if item.get("urgency") == "soon"),
+                "healthy": sum(1 for item in skills if item.get("urgency") == "ok"),
+                "regen_queued": sum(1 for item in skills if item.get("regen_queued")),
+            },
+            "skills": skills,
+        }
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not load half-life predictions") from exc
+
+
+@router.post("/{org_id}/half-life/refresh")
+async def refresh_org_half_life(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        skills = await compute_skill_decay_timeline(org_id, None, db)
+        return {"refreshed": True, "skill_count": len(skills), "computed_at": datetime.utcnow().isoformat()}
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not refresh half-life predictions") from exc
+
+
+@router.post("/{org_id}/half-life/buffer")
+async def update_half_life_buffer(
+    org_id: str,
+    payload: HalfLifeBufferRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        org = await db.get(Org, org_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Org not found")
+        settings = _org_settings_dict(org)
+        settings["half_life_buffer_hours"] = payload.hours_before_decay
+        org.settings = settings
+        await db.commit()
+        return {"saved": True, "hours_before_decay": payload.hours_before_decay}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not save half-life buffer") from exc
+
+
+def _team_name_for_repo(repo: Repo) -> str:
+    if repo.full_name and "/" in repo.full_name:
+        return repo.full_name.split("/", 1)[0]
+    return (repo.name or "Unassigned").split("-", 1)[0]
+
+
+def _score_band(score: int) -> str:
+    if score <= 20:
+        return "0-20"
+    if score <= 40:
+        return "21-40"
+    if score <= 60:
+        return "41-60"
+    if score <= 80:
+        return "61-80"
+    return "81-100"
+
+
+def _half_life_response(rows: list[tuple[SkillHalfLife, Skill, Repo]]) -> OrgHalfLifeResponse:
+    now = datetime.utcnow()
+    items: list[OrgHalfLifeSkillResponse] = []
+    for half_life, skill, repo in rows:
+        days_remaining = 90.0
+        if half_life.predicted_decay_date:
+            days_remaining = (half_life.predicted_decay_date - now).total_seconds() / 86400
+        urgency: Literal["now", "soon", "ok"] = "now" if days_remaining < 3 else "soon" if days_remaining < 14 else "ok"
+        items.append(
+            OrgHalfLifeSkillResponse(
+                skill_id=skill.id,
+                repo_id=repo.id,
+                repo_name=repo.name,
+                domain=skill.domain,
+                skill_path=skill.skill_path,
+                predicted_decay_days=float(half_life.predicted_decay_days or days_remaining),
+                predicted_decay_date=half_life.predicted_decay_date,
+                decay_confidence=float(half_life.decay_confidence or 0),
+                regeneration_buffer_hours=int(half_life.regeneration_buffer_hours or 24),
+                regen_queued=bool(half_life.regen_queued),
+                urgency=urgency,
+            )
+        )
+    return OrgHalfLifeResponse(
+        summary={
+            "critical": sum(1 for item in items if item.urgency == "now"),
+            "warning": sum(1 for item in items if item.urgency == "soon"),
+            "healthy": sum(1 for item in items if item.urgency == "ok"),
+            "regen_queued": sum(1 for item in items if item.regen_queued),
+        },
+        skills=items,
+    )
+
+
+async def _team_rows(org_id: str, db: AsyncSession) -> list[dict[str, object]]:
+    repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Repo.full_name))).scalars().all()
+    repo_ids = [repo.id for repo in repos]
+    skills = (await db.execute(select(Skill).where(Skill.repo_id.in_(repo_ids)))).scalars().all() if repo_ids else []
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    load_rows = (
+        await db.execute(
+            select(SkillUsageEvent.repo_id, SkillUsageEvent.agent_runtime, func.count(SkillUsageEvent.id))
+            .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff)
+            .group_by(SkillUsageEvent.repo_id, SkillUsageEvent.agent_runtime)
+        )
+    ).all()
+    load_counts: dict[str, int] = defaultdict(int)
+    runtimes_by_repo: dict[str, set[str]] = defaultdict(set)
+    for repo_id, runtime, count in load_rows:
+        load_counts[str(repo_id)] += int(count or 0)
+        if runtime:
+            runtimes_by_repo[str(repo_id)].add(str(runtime))
+    skills_by_repo: dict[str, list[Skill]] = defaultdict(list)
+    for skill in skills:
+        skills_by_repo[skill.repo_id].append(skill)
+    teams: dict[str, list[Repo]] = defaultdict(list)
+    for repo in repos:
+        teams[_team_name_for_repo(repo)].append(repo)
+    rows: list[dict[str, object]] = []
+    for team_name, team_repos in teams.items():
+        team_repo_ids = [repo.id for repo in team_repos]
+        repo_scores = []
+        skill_count = 0
+        stale_skill_count = 0
+        has_security_skill = False
+        for repo in team_repos:
+            repo_skills = skills_by_repo.get(repo.id, [])
+            skill_count += len(repo_skills)
+            stale_skill_count += sum(1 for skill in repo_skills if bool(skill.is_stale) or int(skill.score_freshness or 0) < 15)
+            has_security_skill = has_security_skill or any("security" in str(skill.domain or "").lower() or str(skill.skill_category or "") == "security_compliance" for skill in repo_skills)
+            score = int(sum(int(skill.score_total or 0) for skill in repo_skills) / len(repo_skills)) if repo_skills else 0
+            repo_scores.append({"name": repo.name, "score": score})
+        score_now = int(sum(int(item["score"]) for item in repo_scores) / len(repo_scores)) if repo_scores else 0
+        loads_30d = sum(load_counts.get(repo_id, 0) for repo_id in team_repo_ids)
+        score_14d_ago = max(0, min(100, score_now - (8 if loads_30d > 0 else 0)))
+        score_delta = score_now - score_14d_ago
+        red_flag_count = stale_skill_count + sum(1 for item in repo_scores if int(item["score"]) < 50)
+        rows.append(
+            {
+                "id": hashlib.sha1(team_name.encode("utf-8")).hexdigest()[:12],
+                "team_id": hashlib.sha1(team_name.encode("utf-8")).hexdigest()[:12],
+                "team_name": team_name,
+                "name": team_name,
+                "repo_count": len(team_repos),
+                "score_now": score_now,
+                "avg_score": score_now,
+                "score_14d_ago": score_14d_ago,
+                "score_delta": score_delta,
+                "score_delta_7d": score_delta,
+                "trend": "up" if score_delta > 2 else "down" if score_delta < -2 else "flat",
+                "worst_repo": min(repo_scores, key=lambda item: int(item["score"]), default=None),
+                "best_repo": max(repo_scores, key=lambda item: int(item["score"]), default=None),
+                "red_flag_count": red_flag_count,
+                "urgent_count": red_flag_count,
+                "agent_load_count_30d": loads_30d,
+                "active_agent_runtimes": sorted({runtime for repo_id in team_repo_ids for runtime in runtimes_by_repo.get(repo_id, set())}),
+                "skill_count": skill_count,
+                "stale_skill_count": stale_skill_count,
+                "coverage_score": max(0, min(100, score_now)),
+                "has_security_skill": has_security_skill,
+                "knowledge_concentration_risk": skill_count > 8 and len(team_repos) == 1,
+            }
+        )
+    return rows
+
+
+@router.get("/{org_id}/teams/summary")
+async def get_teams_summary(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        rows = await _team_rows(org_id, db)
+        distribution = {"0-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
+        for row in rows:
+            distribution[_score_band(int(row["score_now"]))] += 1
+        alerts = []
+        for row in rows:
+            if int(row["agent_load_count_30d"]) == 0:
+                alerts.append({"type": "zero_adoption", "team_name": row["team_name"], "message": f"{row['team_name']} has no agent loads in 30 days.", "severity": "medium"})
+            if int(row["red_flag_count"]) > 0:
+                alerts.append({"type": "red_flag", "team_name": row["team_name"], "message": f"{row['team_name']} has {row['red_flag_count']} skill risks needing review.", "severity": "high"})
+        org_avg_score = int(sum(int(row["score_now"]) for row in rows) / len(rows)) if rows else 0
+        sorted_by_score = sorted(rows, key=lambda row: int(row["score_now"]))
+        return {
+            "total_teams": len(rows),
+            "total_repos": sum(int(row["repo_count"]) for row in rows),
+            "total_skills": sum(int(row["skill_count"]) for row in rows),
+            "org_avg_score": org_avg_score,
+            "top_team": str(sorted_by_score[-1]["team_name"]) if sorted_by_score else None,
+            "needs_attention": str(sorted_by_score[0]["team_name"]) if sorted_by_score else None,
+            "urgent_count": sum(1 for row in rows if int(row["red_flag_count"]) > 0 or int(row["score_now"]) < 50),
+            "stale_skill_count": sum(int(row["stale_skill_count"]) for row in rows),
+            "teams_needing_attention": sum(1 for row in rows if int(row["score_delta"]) < -10 or int(row["red_flag_count"]) > 0),
+            "teams_winning": sum(1 for row in rows if int(row["score_delta"]) > 10),
+            "teams_inactive": sum(1 for row in rows if int(row["agent_load_count_30d"]) == 0),
+            "score_distribution": distribution,
+            "alerts": alerts[:5],
+        }
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("Teams summary endpoint error for org %s", org_id)
+        return {
+            "total_teams": 0,
+            "total_repos": 0,
+            "total_skills": 0,
+            "org_avg_score": 0,
+            "top_team": None,
+            "needs_attention": None,
+            "urgent_count": 0,
+            "stale_skill_count": 0,
+            "teams_needing_attention": 0,
+            "teams_winning": 0,
+            "teams_inactive": 0,
+            "score_distribution": {"0-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0},
+            "alerts": [],
+            "error": f"Analysis failed - check server logs: {exc}",
+        }
+
+
+@router.get("/{org_id}/teams")
+async def list_teams(
+    org_id: str,
+    view: Literal["needs_attention", "winning", "inactive", "all"] = Query(default="all"),
+    sort: Literal["score_delta", "score", "name"] = Query(default="score"),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    distribution = {"0-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
+    try:
+        rows = await _team_rows(org_id, db)
+        for row in rows:
+            distribution[_score_band(int(row["score_now"]))] += 1
+        if view == "needs_attention":
+            rows = [row for row in rows if int(row["score_delta"]) < -10 or int(row["red_flag_count"]) > 0]
+        elif view == "winning":
+            rows = [row for row in rows if int(row["score_delta"]) > 10]
+        elif view == "inactive":
+            rows = [row for row in rows if int(row["agent_load_count_30d"]) == 0]
+        if sort == "score_delta":
+            rows.sort(key=lambda row: int(row["score_delta"]))
+        elif sort == "name":
+            rows.sort(key=lambda row: str(row["team_name"]))
+        else:
+            rows.sort(key=lambda row: (-int(row["score_now"]), str(row["team_name"])))
+        total = len(rows)
+        return {"teams": rows[offset : offset + limit], "total": total, "limit": limit, "offset": offset, "score_distribution": distribution, "error": False}
+    except Exception as exc:
+        await _rollback(db, "teams lookup")
+        logger.exception("Teams endpoint error for org %s", org_id)
+        return {
+            "teams": [],
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "score_distribution": distribution,
+            "error": True,
+            "message": "Could not load teams",
+        }
 
 
 @router.get("/{org_id}/available-repos")
@@ -3015,6 +5987,477 @@ async def get_org_coverage_summary(
     )
 
 
+@router.get("/{org_id}/agent-scorecard")
+async def get_agent_scorecard(
+    org_id: str,
+    days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    generated_at = _utc_now_naive()
+    cutoff = generated_at - timedelta(days=days)
+    repo_rows = list((await db.execute(select(Repo).where(Repo.org_id == org_id))).scalars().all())
+    repos_by_id = {item.id: item for item in repo_rows}
+    if not repos_by_id:
+        return {
+            "window_days": days,
+            "days": days,
+            "generated_at": generated_at.isoformat(),
+            "summary": {"total_prs": 0, "total_merged": 0, "total_violations": 0, "avg_compliance_percent": 0.0, "avg_risk": 0.0},
+            "agents": [],
+        }
+
+    pr_rows = list(
+        (
+            await db.execute(
+                select(PullRequest).where(
+                    PullRequest.repo_id.in_(repos_by_id.keys()),
+                    PullRequest.opened_at >= cutoff,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    pr_rows = [
+        item
+        for item in pr_rows
+        if item.opened_at is not None
+        and (item.opened_at.replace(tzinfo=None) if item.opened_at.tzinfo else item.opened_at) >= cutoff
+    ]
+    pr_ids = [item.id for item in pr_rows]
+    attributions = (
+        list((await db.execute(select(PRAttribution).where(PRAttribution.pr_id.in_(pr_ids)))).scalars().all())
+        if pr_ids
+        else []
+    )
+    attr_by_pr = {item.pr_id: item for item in attributions}
+
+    agents: dict[str, dict[str, object]] = {}
+    risk_sums: dict[str, int] = defaultdict(int)
+    confidence_sums: dict[str, float] = defaultdict(float)
+    violation_prs: dict[str, int] = defaultdict(int)
+    skill_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    violation_skill_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+    for pr_item in pr_rows:
+        attribution = attr_by_pr.get(pr_item.id)
+        agent = attribution.primary_agent if attribution else "human"
+        row = agents.setdefault(
+            agent,
+            {
+                "agent_runtime": agent,
+                "agent": agent,
+                "display_name": _runtime_display_name(agent),
+                "agent_label": _runtime_display_name(agent),
+                "prs_total": 0,
+                "prs": 0,
+                "prs_merged": 0,
+                "merged": 0,
+                "prs_reverted": 0,
+                "violations_total": 0,
+                "violations": 0,
+                "warnings_total": 0,
+                "risk_distribution": {"green": 0, "yellow": 0, "red": 0},
+            },
+        )
+        row["prs_total"] = int(row["prs_total"]) + 1
+        row["prs"] = row["prs_total"]
+        if pr_item.merged_at is not None or pr_item.state == "merged":
+            row["prs_merged"] = int(row["prs_merged"]) + 1
+            row["merged"] = row["prs_merged"]
+        elif pr_item.closed_at is not None or pr_item.state == "closed":
+            row["prs_reverted"] = int(row["prs_reverted"]) + 1
+
+        violations, warnings = _finding_counts(attribution)
+        row["violations_total"] = int(row["violations_total"]) + violations
+        row["violations"] = row["violations_total"]
+        row["warnings_total"] = int(row["warnings_total"]) + warnings
+        if violations > 0:
+            violation_prs[agent] += 1
+
+        tier = _scorecard_risk_tier(attribution)
+        risk_distribution = row["risk_distribution"]
+        if isinstance(risk_distribution, dict):
+            risk_distribution[tier] = int(risk_distribution.get(tier, 0)) + 1
+
+        risk_sums[agent] += int(attribution.risk_score or 0) if attribution else 0
+        confidence_sums[agent] += float(attribution.confidence) if attribution else 1.0
+        if attribution and isinstance(attribution.skills_loaded, list):
+            for skill in attribution.skills_loaded:
+                name = _scorecard_skill_name(skill)
+                if name:
+                    skill_counts[agent][name] += 1
+        if attribution and isinstance(attribution.skills_violated, list):
+            for finding in attribution.skills_violated:
+                if not isinstance(finding, dict):
+                    continue
+                if _severity_bucket(finding) != "violation":
+                    continue
+                name = _scorecard_skill_name(finding)
+                if name:
+                    violation_skill_counts[agent][name] += 1
+
+    agent_rows: list[dict[str, object]] = []
+    for agent, row in agents.items():
+        prs_total = int(row["prs_total"])
+        violation_rate = (violation_prs[agent] / prs_total) if prs_total else 0.0
+        row["violation_rate"] = round(violation_rate, 4)
+        row["compliance_pct"] = round((1 - violation_rate) * 100, 1) if prs_total else 100.0
+        row["compliance_percent"] = row["compliance_pct"]
+        row["avg_risk_score"] = round(risk_sums[agent] / prs_total, 1) if prs_total else 0.0
+        row["avg_risk"] = row["avg_risk_score"]
+        row["confidence_avg"] = round(confidence_sums[agent] / prs_total, 4) if prs_total else 0.0
+        row["skills_loaded"] = _scorecard_top_counts(skill_counts[agent], 5)
+        row["top_skills"] = row["skills_loaded"]
+        row["violation_skill_names"] = _scorecard_top_counts(violation_skill_counts[agent], 3)
+        row["top_violations"] = row["violation_skill_names"]
+        agent_rows.append(row)
+
+    agent_rows.sort(key=lambda item: (-int(item["prs_total"]), str(item["agent"])))
+    total_prs = sum(int(row["prs_total"]) for row in agent_rows)
+    summary = {
+        "total_prs": total_prs,
+        "total_merged": sum(int(row["prs_merged"]) for row in agent_rows),
+        "total_violations": sum(int(row["violations_total"]) for row in agent_rows),
+        "avg_compliance_percent": round(sum(float(row["compliance_pct"]) for row in agent_rows) / len(agent_rows), 1) if agent_rows else 0.0,
+        "avg_risk": round(sum(float(row["avg_risk_score"]) for row in agent_rows) / len(agent_rows), 1) if agent_rows else 0.0,
+    }
+    return {"window_days": days, "days": days, "generated_at": generated_at.isoformat(), "summary": summary, "agents": agent_rows}
+
+
+@router.get("/{org_id}/agent-prs")
+async def list_agent_prs(
+    org_id: str,
+    agent: str | None = Query(default=None),
+    repo: str | None = Query(default=None),
+    state: Literal["open", "closed", "merged", "all"] = Query(default="open"),
+    risk_tier: Literal["green", "yellow", "red"] | None = Query(default=None),
+    search: str | None = Query(default=None),
+    sort: Literal["opened_at", "risk_score", "violations"] = Query(default="opened_at"),
+    order: Literal["desc", "asc"] = Query(default="desc"),
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    repo_rows = list((await db.execute(select(Repo).where(Repo.org_id == org_id))).scalars().all())
+    repos_by_id = {item.id: item for item in repo_rows}
+    if not repo_rows:
+        return {"items": [], "next_cursor": None, "total_count": 0}
+
+    pr_rows = list(
+        (
+            await db.execute(select(PullRequest).where(PullRequest.repo_id.in_(repos_by_id.keys())))
+        )
+        .scalars()
+        .all()
+    )
+    pr_ids = [item.id for item in pr_rows]
+    attributions = (
+        list((await db.execute(select(PRAttribution).where(PRAttribution.pr_id.in_(pr_ids)))).scalars().all())
+        if pr_ids
+        else []
+    )
+    attr_by_pr = {item.pr_id: item for item in attributions}
+    agents = _normalise_agent_filter(agent)
+    search_term = (search or "").strip().lower()
+
+    cards: list[dict[str, object]] = []
+    for pr_item in pr_rows:
+        repo_item = repos_by_id.get(pr_item.repo_id)
+        if repo_item is None:
+            continue
+        attr = attr_by_pr.get(pr_item.id)
+        primary_agent = attr.primary_agent if attr else "human"
+        if repo and pr_item.repo_id != repo:
+            continue
+        if state != "all" and pr_item.state != state:
+            continue
+        if agents and primary_agent not in agents:
+            continue
+        if risk_tier and (attr.risk_tier if attr else "green") != risk_tier:
+            continue
+        if search_term and search_term not in f"{pr_item.title or ''} {pr_item.body or ''}".lower():
+            continue
+        cards.append(_pr_card(pr_item, repo_item, attr))
+
+    def sort_key(card: dict[str, object]) -> object:
+        if sort == "risk_score":
+            return int(card.get("risk_score") or 0)
+        if sort == "violations":
+            return int(card.get("violation_count") or 0) + int(card.get("warning_count") or 0)
+        return str(card.get("opened_at") or "")
+
+    cards.sort(key=sort_key, reverse=(order == "desc"))
+    total_count = len(cards)
+    offset = _decode_cursor(cursor)
+    page = cards[offset : offset + limit]
+    next_offset = offset + len(page)
+    next_cursor = _encode_cursor(next_offset) if next_offset < total_count else None
+    return {"items": page, "next_cursor": next_cursor, "total_count": total_count}
+
+
+@router.get("/{org_id}/agent-prs/{pr_id}")
+async def get_agent_pr_detail(
+    org_id: str,
+    pr_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    pr_item = await db.get(PullRequest, pr_id)
+    if pr_item is None:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+    repo_item = await db.get(Repo, pr_item.repo_id)
+    if repo_item is None or repo_item.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+    attr = (await db.execute(select(PRAttribution).where(PRAttribution.pr_id == pr_id))).scalar_one_or_none()
+    card = _pr_card(pr_item, repo_item, attr)
+    session_ids = attr.sessions if attr and isinstance(attr.sessions, list) else []
+    sessions = []
+    if session_ids:
+        session_rows = list(
+            (await db.execute(select(AgentSession).where(AgentSession.id.in_(session_ids)))).scalars().all()
+        )
+        for session in session_rows:
+            sessions.append(
+                {
+                    "id": session.id,
+                    "agent_runtime": session.agent_runtime,
+                    "started_at": session.session_start.isoformat() if session.session_start else None,
+                    "skills_loaded": session.skills_loaded or [],
+                    "replay_url": f"/dashboard/repos/{session.repo_id}/sessions/{session.id}",
+                }
+            )
+    violations = []
+    for item in attr.skills_violated if attr and isinstance(attr.skills_violated, list) else []:
+        if not isinstance(item, dict):
+            continue
+        skill_id = item.get("skill_id")
+        violations.append(
+            {
+                "file": item.get("file_path") or item.get("file") or "unknown",
+                "line": item.get("line_number") or item.get("line_start"),
+                "skill_name": item.get("skill_name") or item.get("title") or "Skill",
+                "severity": item.get("severity") or "warning",
+                "explanation": item.get("message") or item.get("finding") or "",
+                "fix_suggestion": item.get("suggestion") or item.get("fix_suggestion"),
+                "skill_url": f"/dashboard/repos/{repo_item.id}/skills/{skill_id}" if skill_id else f"/dashboard/repos/{repo_item.id}/skills",
+            }
+        )
+    return {
+        **card,
+        "attribution": {
+            "id": attr.id,
+            "primary_agent": attr.primary_agent,
+            "confidence": attr.confidence,
+            "lines_by_agent": attr.lines_by_agent or {},
+            "lines_by_human": attr.lines_by_human,
+            "sessions": attr.sessions or [],
+            "skills_loaded": attr.skills_loaded or [],
+            "skills_violated": attr.skills_violated or [],
+            "computed_at": attr.computed_at.isoformat() if attr.computed_at else None,
+        }
+        if attr
+        else None,
+        "risk_breakdown": attr.risk_breakdown if attr else {},
+        "violations": violations,
+        "sessions": sessions,
+        "checks": _check_runs(pr_item),
+    }
+
+
+@router.get("/{org_id}/my-code-today", response_model=MyCodeTodayResponse)
+async def get_my_code_today(
+    org_id: str,
+    login: str = Query(min_length=1, max_length=128),
+    date: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> MyCodeTodayResponse:
+    _assert_org_scope(org_id, current_org_id)
+    target_date = parse_standup_date(date)
+    start = datetime.combine(target_date, datetime.min.time())
+    end = start + timedelta(days=1)
+
+    sessions = list(
+        (
+            await db.execute(
+                select(AgentSession)
+                .where(
+                    AgentSession.org_id == org_id,
+                    AgentSession.engineer_login == login,
+                    AgentSession.session_start >= start,
+                    AgentSession.session_start < end,
+                )
+                .order_by(desc(AgentSession.session_start))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not sessions:
+        return MyCodeTodayResponse(
+            date=target_date.isoformat(),
+            login=login,
+            sessions=[],
+            summary=MyCodeTodaySummary(
+                total_sessions=0,
+                total_files=0,
+                skills_used=[],
+                prs_opened=0,
+                prs_merged=0,
+                violations=0,
+                warnings=0,
+            ),
+        )
+
+    repo_ids = {session.repo_id for session in sessions}
+    prs = list(
+        (
+            await db.execute(select(PullRequest).where(PullRequest.repo_id.in_(repo_ids)))
+        )
+        .scalars()
+        .all()
+    )
+    pr_by_id = {pr.id: pr for pr in prs}
+    attributions = (
+        list(
+            (
+                await db.execute(select(PRAttribution).where(PRAttribution.pr_id.in_(pr_by_id.keys())))
+            )
+            .scalars()
+            .all()
+        )
+        if pr_by_id
+        else []
+    )
+    session_to_attr: dict[str, PRAttribution] = {}
+    for attribution in attributions:
+        for session_id in _list_or_empty(attribution.sessions):
+            session_to_attr.setdefault(str(session_id), attribution)
+
+    files_touched: set[str] = set()
+    skills_used: set[str] = set()
+    prs_opened: set[str] = set()
+    prs_merged: set[str] = set()
+    violations = 0
+    warnings = 0
+    items: list[MyCodeTodaySession] = []
+    counted_prs: set[str] = set()
+    for session in sessions:
+        files = [str(path) for path in _list_or_empty(session.files_touched) if path]
+        skills = [str(skill) for skill in _list_or_empty(session.skills_loaded) if skill]
+        files_touched.update(files)
+        skills_used.update(skills)
+        attribution = session_to_attr.get(session.id)
+        pr_payload = None
+        if attribution:
+            pr = pr_by_id.get(attribution.pr_id)
+            if pr:
+                if pr.opened_at and start <= pr.opened_at < end:
+                    prs_opened.add(pr.id)
+                if pr.merged_at and start <= pr.merged_at < end:
+                    prs_merged.add(pr.id)
+                if pr.id not in counted_prs:
+                    found_violations, found_warnings = _finding_counts_from_items(attribution.skills_violated)
+                    violations += found_violations
+                    warnings += found_warnings
+                    counted_prs.add(pr.id)
+                pr_payload = MyCodeTodayPR(
+                    id=pr.id,
+                    github_pr_number=pr.github_pr_number,
+                    title=pr.title or f"PR #{pr.github_pr_number}",
+                    state=pr.state,
+                    risk_tier=attribution.risk_tier or "green",
+                )
+        items.append(
+            MyCodeTodaySession(
+                session_id=session.id,
+                agent_runtime=session.agent_runtime,
+                started_at=session.session_start.isoformat(),
+                ended_at=(session.session_end or session.closed_at).isoformat() if (session.session_end or session.closed_at) else None,
+                files_touched=files,
+                skills_loaded=skills,
+                outcome=session.outcome,
+                pr=pr_payload,
+            )
+        )
+
+    return MyCodeTodayResponse(
+        date=target_date.isoformat(),
+        login=login,
+        sessions=items,
+        summary=MyCodeTodaySummary(
+            total_sessions=len(items),
+            total_files=len(files_touched),
+            skills_used=sorted(skills_used),
+            prs_opened=len(prs_opened),
+            prs_merged=len(prs_merged),
+            violations=violations,
+            warnings=warnings,
+        ),
+    )
+
+
+@router.get("/{org_id}/standup")
+async def get_org_standup(
+    org_id: str,
+    date: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    return await collect_standup_summary(org_id, date, db)
+
+
+@router.patch("/{org_id}/settings/slack", response_model=None)
+async def update_org_slack_settings(
+    org_id: str,
+    payload: SlackSettingsPayload,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object] | JSONResponse:
+    _assert_org_scope(org_id, current_org_id)
+    org = await db.get(Org, org_id)
+    if org is None:
+        return _error(404, "Org not found", "ORG_NOT_FOUND")
+    org.slack_webhook_url = payload.webhook_url.strip() if payload.webhook_url else None
+    org.slack_standup_enabled = bool(payload.standup_enabled)
+    org.slack_standup_hour = int(payload.standup_hour)
+    try:
+        await db.commit()
+    except SQLAlchemyError:
+        await _rollback(db, "org slack settings update")
+        return _error(400, "Could not update Slack settings", "SLACK_SETTINGS_UPDATE_FAILED")
+    return {
+        "ok": True,
+        "slack_webhook_url": org.slack_webhook_url,
+        "slack_standup_enabled": bool(org.slack_standup_enabled),
+        "slack_standup_hour": int(org.slack_standup_hour or 9),
+    }
+
+
+@router.post("/{org_id}/standup/send", response_model=None)
+async def send_org_standup(
+    org_id: str,
+    date: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object] | JSONResponse:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        await send_standup(org_id, date, db)
+    except HTTPException as exc:
+        return _error(exc.status_code, str(exc.detail), "STANDUP_SEND_FAILED")
+    except Exception:
+        return _error(502, "Could not send Slack standup", "STANDUP_SEND_FAILED")
+    return {"ok": True, "message": "Standup sent"}
+
+
 @router.get("/{org_id}/memory-score", response_model=MemoryScoreResponse)
 async def get_org_memory_score(
     org_id: str,
@@ -3101,6 +6544,10 @@ async def update_org_settings(
             org.score_threshold = payload.score_threshold
         if "slack_webhook_url" in fields:
             org.slack_webhook_url = str(payload.slack_webhook_url) if payload.slack_webhook_url else None
+        if "slack_standup_enabled" in fields and payload.slack_standup_enabled is not None:
+            org.slack_standup_enabled = payload.slack_standup_enabled
+        if "slack_standup_hour" in fields and payload.slack_standup_hour is not None:
+            org.slack_standup_hour = payload.slack_standup_hour
         if "notify_on_pr" in fields and payload.notify_on_pr is not None:
             org.notify_on_pr = payload.notify_on_pr
         if "notify_on_stale" in fields and payload.notify_on_stale is not None:

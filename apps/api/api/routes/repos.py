@@ -27,10 +27,14 @@ from apps.api.api.analysis import _skill_category_for_domain
 from apps.api.api.routes.webhook import _queue_analysis
 from apps.api.api.services import audit
 from apps.api.api.services.audit import get_actor_login
+from apps.api.api.services.agent_connection import detect_runtime_from_headers, normalize_runtime
+from apps.api.api.services.commit_check import run_commit_check
 from apps.api.api.services.llm import LLMCallError, LLMNotConfiguredError, call_llm
 from apps.api.api.services.memory import run_session_knowledge_extraction
+from apps.api.api.services.pr_attribution import attribute_pr
+from apps.api.api.services.pr_risk import compute_risk_score
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AnalysisRun, Dependency, Org, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillUsageEvent, SkillVersion
+from packages.db.models import AgentSession, AnalysisRun, Dependency, Org, PRAttribution, PullRequest, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillUsageEvent, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
     AnalysisRunResponse,
@@ -117,10 +121,41 @@ class SkillContentUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=200_000)
 
 
+class CommitCheckRequest(BaseModel):
+    base_sha: str | None = Field(default=None, max_length=255)
+    branch: str | None = Field(default=None, max_length=255)
+    diff: str | None = Field(default=None, max_length=500_000)
+
+
+class RepoDiffCheckRequest(BaseModel):
+    diff: str = Field(min_length=1, max_length=500_000)
+
+
+def _serialize_pr_attribution(attribution: PRAttribution) -> dict[str, object]:
+    return {
+        "id": attribution.id,
+        "pr_id": attribution.pr_id,
+        "primary_agent": attribution.primary_agent,
+        "confidence": attribution.confidence,
+        "lines_by_agent": attribution.lines_by_agent or {},
+        "lines_by_human": attribution.lines_by_human,
+        "sessions": attribution.sessions or [],
+        "skills_loaded": attribution.skills_loaded or [],
+        "skills_violated": attribution.skills_violated or [],
+        "risk_score": attribution.risk_score,
+        "risk_tier": attribution.risk_tier,
+        "risk_breakdown": attribution.risk_breakdown or {},
+        "computed_at": attribution.computed_at.isoformat() if attribution.computed_at else None,
+    }
+
+
 class SkillImproveRequest(BaseModel):
     """Request body for the skill improvement loop."""
 
-    mode: Literal["regenerate", "enhance"]
+    mode: Literal["regenerate", "enhance"] = "enhance"
+    section: Literal["anti_patterns"] | None = None
+    content_to_append: str | None = None
+    review_comment: str | None = None
 
 
 class SkillImprovementIssue(BaseModel):
@@ -415,6 +450,22 @@ def _skill_improvement_plan(skill: Skill, version: SkillVersion | None = None) -
     )
 
 
+def _append_to_anti_patterns(content: str, addition: str) -> str:
+    heading = re.search(r"(^##\s+Anti[- ]patterns.*$)", content, flags=re.IGNORECASE | re.MULTILINE)
+    addition = addition.strip()
+    if not addition:
+        return content
+    if not heading:
+        suffix = "\n\n" if content.strip() else ""
+        return f"{content.rstrip()}{suffix}## Anti-patterns\n\n{addition}\n"
+    insert_at = heading.end()
+    next_heading = re.search(r"^##\s+", content[insert_at:], flags=re.MULTILINE)
+    if next_heading:
+        position = insert_at + next_heading.start()
+        return f"{content[:position].rstrip()}\n\n{addition}\n\n{content[position:].lstrip()}"
+    return f"{content.rstrip()}\n\n{addition}\n"
+
+
 async def _llm_skill_improvement(
     *,
     settings: dict[str, object],
@@ -681,6 +732,7 @@ async def get_repo_skills(
             "content_hash": skill.content_hash,
             "source_type": _normalized_source_type(skill),
             "skill_category": _normalized_skill_category(skill),
+            "is_enterprise": bool(getattr(skill, "is_enterprise", False)),
             "is_stale": skill.is_stale,
             "load_count_30d": skill.load_count_30d,
             "last_loaded_at": skill.last_loaded_at,
@@ -894,6 +946,50 @@ async def improve_skill(
         )
     ).scalar_one_or_none()
     plan = _skill_improvement_plan(skill, latest_version)
+    if body.section == "anti_patterns":
+        addition = (body.content_to_append or "").strip()
+        if not addition:
+            raise HTTPException(status_code=400, detail="content_to_append is required")
+        current_content = skill.content or ""
+        new_content = _append_to_anti_patterns(current_content, addition)
+        content_hash = hashlib.sha256(new_content.encode()).hexdigest()
+        try:
+            await db.execute(
+                update(SkillVersion)
+                .where(SkillVersion.skill_id == skill.id, SkillVersion.is_latest.is_(True))
+                .values(is_latest=False)
+            )
+            count_result = await db.execute(select(func.count(SkillVersion.id)).where(SkillVersion.skill_id == skill.id))
+            version_number = int(count_result.scalar() or 0) + 1
+            skill.content = new_content
+            skill.content_hash = content_hash
+            skill.score_freshness = min(25, int(skill.score_freshness or 0) + 5)
+            if hasattr(skill, "updated_at"):
+                setattr(skill, "updated_at", datetime.utcnow())
+            db.add(
+                SkillVersion(
+                    skill_id=skill.id,
+                    run_id=skill.run_id or str(uuid4()),
+                    repo_id=repo_id,
+                    domain=skill.domain,
+                    content=new_content,
+                    content_hash=content_hash,
+                    version_number=version_number,
+                    is_latest=True,
+                )
+            )
+            await db.commit()
+        except SQLAlchemyError as exc:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail="Unable to update skill anti-patterns") from exc
+        return SkillImproveResponse(
+            improved=True,
+            reason="Anti-pattern appended from code review",
+            new_version=version_number,
+            new_score=float(skill.score_total or 0),
+            score_delta=0,
+            content=new_content[:1000],
+        )
     if body.mode == "regenerate":
         installation_id = repo.github_installation_id
         if not installation_id:
@@ -1525,6 +1621,114 @@ async def get_runs(
     ]
 
 
+@router.get("/{repo_id}/prs/{pr_number}/attribution")
+async def get_pr_attribution(
+    repo_id: str,
+    pr_number: int,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    repo = (await db.execute(select(Repo).where(Repo.id == repo_id))).scalar_one_or_none()
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
+    if repo.org_id != current_org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    pr = (
+        await db.execute(
+            select(PullRequest).where(PullRequest.repo_id == repo_id, PullRequest.github_pr_number == pr_number)
+        )
+    ).scalar_one_or_none()
+    if pr is None:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+
+    attribution = (await db.execute(select(PRAttribution).where(PRAttribution.pr_id == pr.id))).scalar_one_or_none()
+    if attribution is None:
+        attribution = await attribute_pr(pr.id, db)
+    return _serialize_pr_attribution(attribution)
+
+
+@router.get("/{repo_id}/prs/{pr_number}/risk")
+async def get_pr_risk(
+    repo_id: str,
+    pr_number: int,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    repo = (await db.execute(select(Repo).where(Repo.id == repo_id))).scalar_one_or_none()
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
+    if repo.org_id != current_org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    pr = (
+        await db.execute(
+            select(PullRequest).where(PullRequest.repo_id == repo_id, PullRequest.github_pr_number == pr_number)
+        )
+    ).scalar_one_or_none()
+    if pr is None:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+
+    try:
+        return await compute_risk_score(pr.id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{repo_id}/commits/{sha}/check")
+async def check_commit(
+    repo_id: str,
+    sha: str,
+    body: CommitCheckRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    repo = (await db.execute(select(Repo).where(Repo.id == repo_id))).scalar_one_or_none()
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
+    if repo.org_id != current_org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    payload = body or CommitCheckRequest()
+    try:
+        result = await run_commit_check(
+            repo,
+            sha,
+            db,
+            base_sha=payload.base_sha,
+            branch=payload.branch,
+            diff=payload.diff,
+        )
+        return result.as_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{repo_id}/check")
+async def check_repo_diff(
+    repo_id: str,
+    body: RepoDiffCheckRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    api_key = (
+        request.headers.get("x-api-key")
+        or request.headers.get("X-API-Key")
+        or request.headers.get("api-key")
+        or request.headers.get("API-Key")
+    )
+    if not api_key:
+        raise HTTPException(status_code=401, detail="API key required")
+    org = (await db.execute(select(Org).where(Org.api_key == api_key))).scalar_one_or_none()
+    if org is None:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    repo = await _repo_in_scope(db, repo_id, org.id)
+    try:
+        result = await run_commit_check(repo, "working-tree", db, diff=body.diff)
+        return result.as_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/{repo_id}/analyse")
 async def trigger_analysis(
     repo_id: str,
@@ -1714,7 +1918,7 @@ async def sync_repo_analytics(
                 org_id=current_org_id,
                 repo_id=repo_id,
                 skill_id=skill.id,
-                agent_runtime=event.agent_runtime[:100] or "unknown",
+                agent_runtime=normalize_runtime(event.agent_runtime)[:100],
                 session_id=event.session_id[:255] or str(uuid4()),
                 loaded_at=loaded_at,
             )
@@ -1811,6 +2015,7 @@ async def load_skills_for_agent(
             "domain": skill.domain,
             "score": skill.score_total,
             "version": version.version_number,
+            "is_enterprise": bool(getattr(skill, "is_enterprise", False)),
         })
 
     # Record load events — completely non-fatal, never affects the response
@@ -1849,17 +2054,4 @@ async def load_skills_for_agent(
 
 def _detect_agent_runtime(request: Request) -> str:
     """Infer which agent is calling based on headers / user-agent."""
-    ua = (request.headers.get("user-agent") or "").lower()
-    if "claude" in ua or "anthropic" in ua:
-        return "claude_code"
-    if "codex" in ua or "openai" in ua:
-        return "codex"
-    if "cursor" in ua:
-        return "cursor"
-    if "copilot" in ua or "github" in ua:
-        return "copilot"
-    # Check x-agent header (set by skilgen hooks)
-    agent_header = (request.headers.get("x-agent") or "").lower()
-    if agent_header:
-        return agent_header
-    return "unknown"
+    return detect_runtime_from_headers(request.headers)

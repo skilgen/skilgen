@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { cn } from "@skillayer/ui";
 
@@ -11,12 +12,34 @@ type DashboardNavLinkProps = {
   label: string;
   badge?: string;
   badgeVariant?: "label" | "dot";
+  unreadStorageKey?: string;
 };
 
-export function DashboardNavLink({ href, icon, label, badge, badgeVariant = "label" }: DashboardNavLinkProps) {
+export function DashboardNavLink({ href, icon, label, badge, badgeVariant = "label", unreadStorageKey }: DashboardNavLinkProps) {
   const pathname = usePathname();
+  const [unreadCount, setUnreadCount] = useState(0);
   const hrefPath = href.split("?")[0] ?? href;
-  const isActive = hrefPath === "/dashboard" ? pathname === hrefPath : pathname === hrefPath || pathname.startsWith(`${hrefPath}/`);
+  const exactMatchHrefs = new Set(["/dashboard/eval", "/dashboard/eval/ab-tests"]);
+  const isActive = hrefPath === "/dashboard"
+    ? pathname === hrefPath
+    : exactMatchHrefs.has(hrefPath)
+      ? pathname === hrefPath
+      : pathname === hrefPath || pathname.startsWith(`${hrefPath}/`);
+  useEffect(() => {
+    if (!unreadStorageKey) return;
+    const readCount = () => {
+      const raw = window.localStorage.getItem(unreadStorageKey);
+      const parsed = raw ? Number.parseInt(raw, 10) : 0;
+      setUnreadCount(Number.isFinite(parsed) ? parsed : 0);
+    };
+    readCount();
+    window.addEventListener("storage", readCount);
+    const interval = window.setInterval(readCount, 5000);
+    return () => {
+      window.removeEventListener("storage", readCount);
+      window.clearInterval(interval);
+    };
+  }, [unreadStorageKey]);
 
   return (
     <Link
@@ -29,7 +52,9 @@ export function DashboardNavLink({ href, icon, label, badge, badgeVariant = "lab
     >
       {icon}
       <span className="min-w-0 flex-1">{label}</span>
-      {badge && badgeVariant === "dot" ? (
+      {unreadStorageKey && unreadCount > 0 ? (
+        <span className="min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[10px] font-bold text-white">{Math.min(99, unreadCount)}</span>
+      ) : badge && badgeVariant === "dot" ? (
         <span aria-label={badge} className="h-2 w-2 animate-pulse rounded-full bg-[#f59e0b]" />
       ) : badge ? (
         <span className="rounded-full bg-[#C9973A]/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#e8b84b]">

@@ -60,28 +60,43 @@ def _write_claude_code_hook(project_root: str | Path) -> Path | None:
     hooks = existing.get("hooks")
     if not isinstance(hooks, dict):
         hooks = {}
+    pre_tool_use = hooks.get("PreToolUse")
+    if not isinstance(pre_tool_use, list):
+        pre_tool_use = []
     post_tool_use = hooks.get("PostToolUse")
     if not isinstance(post_tool_use, list):
         post_tool_use = []
 
-    skilgen_hook_exists = any(
-        isinstance(entry, dict)
-        and entry.get("matcher") == "Read"
-        and any(
-            isinstance(hook, dict) and "skilgen.hooks.claude_code_hook" in str(hook.get("command", ""))
-            for hook in entry.get("hooks", [])
+    def _has_skilgen_hook(entries: list[object], matcher: str) -> bool:
+        return any(
+            isinstance(entry, dict)
+            and entry.get("matcher") == matcher
+            and any(
+                isinstance(hook, dict) and "skilgen.hooks.claude_code_hook" in str(hook.get("command", ""))
+                for hook in entry.get("hooks", [])
+            )
+            for entry in entries
         )
-        for entry in post_tool_use
-    )
+
+    skilgen_hook_exists = _has_skilgen_hook(pre_tool_use, "Edit|Write|NotebookEdit") and _has_skilgen_hook(post_tool_use, "Read|Edit|Write|NotebookEdit")
     if skilgen_hook_exists:
         return None
 
-    post_tool_use.append(
-        {
-            "matcher": "Read",
-            "hooks": [{"type": "command", "command": hook_command}],
-        }
-    )
+    if not _has_skilgen_hook(pre_tool_use, "Edit|Write|NotebookEdit"):
+        pre_tool_use.append(
+            {
+                "matcher": "Edit|Write|NotebookEdit",
+                "hooks": [{"type": "command", "command": hook_command}],
+            }
+        )
+    if not _has_skilgen_hook(post_tool_use, "Read|Edit|Write|NotebookEdit"):
+        post_tool_use.append(
+            {
+                "matcher": "Read|Edit|Write|NotebookEdit",
+                "hooks": [{"type": "command", "command": hook_command}],
+            }
+        )
+    hooks["PreToolUse"] = pre_tool_use
     hooks["PostToolUse"] = post_tool_use
     existing["hooks"] = hooks
     settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")

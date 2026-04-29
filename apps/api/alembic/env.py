@@ -19,13 +19,14 @@ if "postgresql+asyncpg://" in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
 if DATABASE_URL:
     parsed = urlsplit(DATABASE_URL)
-    query = [
-        (key, value)
-        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
-        if key not in {"ssl", "sslmode"}
-    ]
-    query.append(("sslmode", "require"))
-    DATABASE_URL = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+    if parsed.scheme.startswith("postgresql"):
+        query = [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key not in {"ssl", "sslmode"}
+        ]
+        query.append(("sslmode", "require"))
+        DATABASE_URL = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
 
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
@@ -44,10 +45,14 @@ from packages.db.models.audit_event import AuditEvent
 from packages.db.models.half_life import SkillHalfLife
 from packages.db.models.org_llm_config import OrgLLMConfig
 from packages.db.models.org_policy import OrgPolicy
+from packages.db.models.pr_attribution import PRAttribution
+from packages.db.models.pr_comment import PRComment
+from packages.db.models.pull_request import Commit, PullRequest
 from packages.db.models.skill_memory_stub import SkillMemoryStub
 from packages.db.models.skill_version import SkillVersion
 from packages.db.models.registry import MarketplaceInstall, SkillDependency, SkillRegistryEntry
 from packages.db.models.score_history import ScoreHistory
+from packages.db.models.source_connection import SourceConnection
 from packages.db.models.skill_usage_event import SkillUsageEvent
 from packages.db.models.review_run import ReviewRun
 

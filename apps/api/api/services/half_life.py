@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +9,45 @@ from packages.db.models import Repo, Skill, SkillHalfLife, SkillVersion
 
 
 def _now() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
+    return datetime.utcnow()
+
+
+def predict_half_life_days(commit_velocity_per_day: float) -> float:
+    baseline_days = 90
+    decay_factor = 1 + (commit_velocity_per_day * 2)
+    return baseline_days / decay_factor
+
+
+async def compute_skill_decay_timeline(org_id: str, repo_id: str | None, db: AsyncSession) -> list[dict]:
+    filters = [Repo.org_id == org_id]
+    if repo_id:
+        filters.append(Repo.id == repo_id)
+    skills = (
+        await db.execute(select(Skill, Repo).join(Repo, Repo.id == Skill.repo_id).where(*filters).order_by(Skill.domain))
+    ).all()
+    now = _now()
+    timeline: list[dict] = []
+    for skill, repo in skills:
+        velocity = await get_commit_velocity(skill.id, db)
+        commit_velocity = velocity["commits_30d"] / 30
+        days = predict_half_life_days(commit_velocity)
+        generated_at = skill.created_at
+        predicted = generated_at + timedelta(days=days)
+        remaining = (predicted - now).days
+        timeline.append({
+            "skill_id": skill.id,
+            "repo_id": repo.id,
+            "repo_name": repo.name,
+            "domain": skill.domain,
+            "skill_path": skill.skill_path,
+            "last_generated_at": generated_at,
+            "predicted_stale_at": predicted,
+            "days_remaining": remaining,
+            "commit_velocity": round(commit_velocity, 2),
+            "urgency": "now" if remaining < 3 else "soon" if remaining < 14 else "ok",
+            "regen_queued": False,
+        })
+    return sorted(timeline, key=lambda item: item["days_remaining"])
 
 
 async def get_commit_velocity(skill_id: str, db: AsyncSession) -> dict[str, int]:

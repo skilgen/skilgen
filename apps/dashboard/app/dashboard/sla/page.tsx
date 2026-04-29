@@ -3,8 +3,6 @@ import { ClipboardList } from "lucide-react";
 
 import { getBootstrapOrg, getMyOrg, getOrgRepos, getSLAPolicies } from "../../../lib/data";
 
-export const dynamic = "force-dynamic";
-
 export default async function SLAPage() {
   let accessToken = "";
   try {

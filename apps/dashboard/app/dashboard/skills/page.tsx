@@ -5,8 +5,6 @@ import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
 import { API_URL, type Org, type Repo, type Skill, type SkillCategory } from "../../../lib/data";
 
-export const dynamic = "force-dynamic";
-
 type SearchParams = Record<string, string | string[] | undefined>;
 
 type SkillsPageProps = {

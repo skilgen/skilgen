@@ -32,6 +32,8 @@ class OrgSettingsResponse(BaseModel):
     plan: str
     score_threshold: int
     slack_webhook_url: str | None
+    slack_standup_enabled: bool = False
+    slack_standup_hour: int = 9
     notify_on_pr: bool
     notify_on_stale: bool
     anthropic_api_key_set: bool = False
@@ -49,6 +51,8 @@ class OrgSettingsUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     score_threshold: int | None = Field(default=None, ge=0, le=100)
     slack_webhook_url: AnyHttpUrl | None = None
+    slack_standup_enabled: bool | None = None
+    slack_standup_hour: int | None = Field(default=None, ge=0, le=23)
     notify_on_pr: bool | None = None
     notify_on_stale: bool | None = None
 
@@ -79,6 +83,7 @@ class SkillResponse(BaseModel):
     content_hash: str | None = None
     source_type: str | None = "code"
     skill_category: str | None = "codebase_architecture"
+    is_enterprise: bool = False
     is_stale: bool
     load_count_30d: int
     last_loaded_at: datetime | None
@@ -205,6 +210,12 @@ class RuntimeBreakdownEntryResponse(BaseModel):
     loads_30d: int
     unique_skills: int
     top_skill_domain: str | None
+    unique_domains: int = 0
+    avg_skill_score: float = 0
+    top_domains: list[str] = []
+    knowledge_breadth_score: int = 0
+    most_recent_load: datetime | None = None
+    pattern: str = "Active agent"
 
 
 class RuntimeBreakdownResponse(BaseModel):
