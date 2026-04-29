@@ -4530,6 +4530,27 @@
         ]
       },
       {
+        "path": "packages/db/models/repo.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "from typing import TYPE_CHECKING",
+          "from sqlalchemy import BigInteger, ForeignKey, String",
+          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
+          "from packages.db.models.base import Base, new_uuid, utcnow",
+          "if TYPE_CHECKING:",
+          "from packages.db.models.analysis_run import AnalysisRun",
+          "from packages.db.models.pull_request import Commit, PullRequest",
+          "from packages.db.models.dependency import Dependency",
+          "from packages.db.models.org import Org",
+          "from packages.db.models.skill import Skill"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/core/config.py",
         "kind": "source",
         "language": "python",
@@ -4553,6 +4574,27 @@
           "pathlib",
           "skilgen/core/models.py"
         ]
+      },
+      {
+        "path": "packages/db/models/skill.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "from typing import TYPE_CHECKING",
+          "from sqlalchemy import Boolean, ForeignKey, JSON, String, Text",
+          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
+          "from packages.db.models.base import Base, new_uuid, utcnow",
+          "if TYPE_CHECKING:",
+          "from packages.db.models.repo import Repo",
+          "from packages.db.models.skill_version import SkillVersion",
+          "SOURCE_TYPE_TO_CATEGORY: dict[str, str] = {",
+          "\"code\": \"codebase_architecture\",",
+          "\"openapi\": \"internal_tools\","
+        ],
+        "related_imports": []
       },
       {
         "path": "skilgen/core/requirements.py",
@@ -4584,27 +4626,6 @@
         ]
       },
       {
-        "path": "packages/db/models/repo.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from datetime import datetime",
-          "from typing import TYPE_CHECKING",
-          "from sqlalchemy import BigInteger, ForeignKey, String",
-          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
-          "from packages.db.models.base import Base, new_uuid, utcnow",
-          "if TYPE_CHECKING:",
-          "from packages.db.models.analysis_run import AnalysisRun",
-          "from packages.db.models.pull_request import Commit, PullRequest",
-          "from packages.db.models.dependency import Dependency",
-          "from packages.db.models.org import Org",
-          "from packages.db.models.skill import Skill"
-        ],
-        "related_imports": []
-      },
-      {
         "path": "apps/api/api/routes/orgs.py",
         "kind": "source",
         "language": "python",
@@ -4622,27 +4643,6 @@
           "from dataclasses import asdict",
           "from datetime import UTC, datetime, timedelta",
           "import hashlib"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": "packages/db/models/skill.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from datetime import datetime",
-          "from typing import TYPE_CHECKING",
-          "from sqlalchemy import Boolean, ForeignKey, JSON, String, Text",
-          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
-          "from packages.db.models.base import Base, new_uuid, utcnow",
-          "if TYPE_CHECKING:",
-          "from packages.db.models.repo import Repo",
-          "from packages.db.models.skill_version import SkillVersion",
-          "SOURCE_TYPE_TO_CATEGORY: dict[str, str] = {",
-          "\"code\": \"codebase_architecture\",",
-          "\"openapi\": \"internal_tools\","
         ],
         "related_imports": []
       },
@@ -4754,14 +4754,14 @@
           "import hashlib",
           "import re",
           "from datetime import UTC, datetime, timedelta",
+          "from difflib import unified_diff",
           "from typing import Any, Literal",
           "from uuid import uuid4",
           "from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response",
           "from fastapi.responses import JSONResponse",
           "from pydantic import BaseModel, Field",
           "from sqlalchemy import desc, func, select, update",
-          "from sqlalchemy.ext.asyncio import AsyncSession",
-          "from sqlalchemy.exc import SQLAlchemyError"
+          "from sqlalchemy.ext.asyncio import AsyncSession"
         ],
         "related_imports": []
       },
@@ -4901,7 +4901,7 @@
           "from __future__ import annotations",
           "from datetime import datetime",
           "from typing import TYPE_CHECKING",
-          "from sqlalchemy import JSON, BigInteger, String",
+          "from sqlalchemy import JSON, BigInteger, String, Text",
           "from sqlalchemy.orm import Mapped, mapped_column, relationship",
           "from packages.db.models.base import Base, new_uuid, utcnow",
           "if TYPE_CHECKING:",
@@ -4910,6 +4910,27 @@
           "from packages.db.models.source_connection import SourceConnection",
           "class Org(Base):",
           "__tablename__ = \"orgs\""
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "apps/api/api/services/llm.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import re",
+          "from typing import Any",
+          "import httpx",
+          "from packages.db.llm_key import decrypt_key",
+          "class LLMNotConfiguredError(Exception):",
+          "pass",
+          "class LLMCallError(Exception):",
+          "pass",
+          "def _provider_settings(org_settings: dict[str, Any] | None) -> tuple[str, str, str, str | None]:",
+          "settings = org_settings or {}",
+          "provider = str(settings.get(\"llm_provider\") or \"\").lower()"
         ],
         "related_imports": []
       },
@@ -4975,42 +4996,6 @@
           "subprocess",
           "sys",
           "time"
-        ]
-      },
-      {
-        "path": "skilgen/core/score.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import json",
-          "import re",
-          "import subprocess",
-          "from datetime import UTC, datetime",
-          "from html import escape",
-          "from pathlib import Path",
-          "from threading import Lock",
-          "from urllib.parse import quote",
-          "from skilgen.agents.codebase_signals import CODE_EXTENSIONS, is_ignored_path_parts, is_internal_skillayer_monorepo",
-          "from skilgen.core.context import build_codebase_context",
-          "from skilgen.core.freshness import compute_freshness_report, load_freshness_state"
-        ],
-        "related_imports": [
-          "__future__",
-          "datetime",
-          "html",
-          "json",
-          "pathlib",
-          "re",
-          "skilgen/agents/codebase_signals.py",
-          "skilgen/core/context.py",
-          "skilgen/core/freshness.py",
-          "skilgen/core/requirements.py",
-          "skilgen/core/validation.py",
-          "subprocess",
-          "threading",
-          "urllib.parse"
         ]
       },
       {
@@ -5197,25 +5182,40 @@
         ]
       },
       {
-        "path": "apps/api/api/services/llm.py",
+        "path": "skilgen/core/score.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
           "from __future__ import annotations",
+          "import json",
           "import re",
-          "from typing import Any",
-          "import httpx",
-          "from packages.db.llm_key import decrypt_key",
-          "class LLMNotConfiguredError(Exception):",
-          "pass",
-          "class LLMCallError(Exception):",
-          "pass",
-          "def _provider_settings(org_settings: dict[str, Any] | None) -> tuple[str, str, str, str | None]:",
-          "settings = org_settings or {}",
-          "provider = str(settings.get(\"llm_provider\") or \"\").lower()"
+          "import subprocess",
+          "from datetime import UTC, datetime",
+          "from html import escape",
+          "from pathlib import Path",
+          "from threading import Lock",
+          "from urllib.parse import quote",
+          "from skilgen.agents.codebase_signals import CODE_EXTENSIONS, is_ignored_path_parts, is_internal_skillayer_monorepo",
+          "from skilgen.core.context import build_codebase_context",
+          "from skilgen.core.freshness import compute_freshness_report, load_freshness_state"
         ],
-        "related_imports": []
+        "related_imports": [
+          "__future__",
+          "datetime",
+          "html",
+          "json",
+          "pathlib",
+          "re",
+          "skilgen/agents/codebase_signals.py",
+          "skilgen/core/context.py",
+          "skilgen/core/freshness.py",
+          "skilgen/core/requirements.py",
+          "skilgen/core/validation.py",
+          "subprocess",
+          "threading",
+          "urllib.parse"
+        ]
       },
       {
         "path": "skilgen/cli/main.py",
@@ -5414,6 +5414,27 @@
         ]
       },
       {
+        "path": "apps/api/api/services/commit_check.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import time",
+          "from dataclasses import dataclass",
+          "from datetime import datetime",
+          "from typing import Any",
+          "import httpx",
+          "from sqlalchemy import select",
+          "from sqlalchemy.ext.asyncio import AsyncSession",
+          "from apps.api.api.github import get_installation_token",
+          "from apps.api.api.pr_comment import (",
+          "build_violation_comment,",
+          "create_skill_review_check_run,"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/agents/decision_planner.py",
         "kind": "source",
         "language": "python",
@@ -5604,41 +5625,6 @@
           "subprocess",
           "urllib.parse",
           "urllib.request"
-        ]
-      },
-      {
-        "path": "skilgen/core/corpus_index.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import fnmatch",
-          "import hashlib",
-          "import json",
-          "import re",
-          "from collections import defaultdict",
-          "from pathlib import Path, PurePosixPath",
-          "from typing import Any",
-          "from skilgen.agents.language_parsers import ParsedLanguageEvidence, parse_language_evidence",
-          "from skilgen.core.config import load_config",
-          "from skilgen.core.document_ingestion import extract_document_text",
-          "from skilgen.core.models import CorpusSettings, SkilgenConfig"
-        ],
-        "related_imports": [
-          "__future__",
-          "collections",
-          "fnmatch",
-          "hashlib",
-          "json",
-          "pathlib",
-          "re",
-          "skilgen/agents/codebase_signals.py",
-          "skilgen/agents/language_parsers.py",
-          "skilgen/core/config.py",
-          "skilgen/core/document_ingestion.py",
-          "skilgen/core/models.py",
-          "typing"
         ]
       },
       {
@@ -13574,6 +13560,12 @@
         "env:QSTASH_NEXT_SIGNING_KEY",
         "env:QSTASH_TOKEN",
         "env:REDIS_URL",
+        "env:SMTP",
+        "env:SMTP_FROM",
+        "env:SMTP_HOST",
+        "env:SMTP_PASSWORD",
+        "env:SMTP_PORT",
+        "env:SMTP_USER",
         "env:WORKOS_API_KEY",
         "env:WORKOS_CLIENT_ID",
         "env:WORKOS_COOKIE_PASSWORD",
@@ -13621,6 +13613,11 @@
         "env:QSTASH_NEXT_SIGNING_KEY",
         "env:QSTASH_TOKEN",
         "env:REDIS_URL",
+        "env:SMTP_FROM",
+        "env:SMTP_HOST",
+        "env:SMTP_PASSWORD",
+        "env:SMTP_PORT",
+        "env:SMTP_USER",
         "env:STRIPE_PRICE_BUSINESS",
         "env:STRIPE_PRICE_TEAM",
         "env:STRIPE_SECRET_KEY",
