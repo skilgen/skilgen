@@ -4,9 +4,9 @@ This file summarizes the generated skill tree and cross references.
 
 ## Architecture Blueprint
 - Headline: Evidence-backed architecture blueprint for the codebase
-- Summary: Skilgen identified 3 top-level architecture domains from 90 evidence items and 13 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 173 symbol-bearing files, 170 call-bearing files, 72 mapped tests, and 6 workspace packages.
+- Summary: Skilgen identified 3 top-level architecture domains from 90 evidence items and 13 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 177 symbol-bearing files, 174 call-bearing files, 72 mapped tests, and 6 workspace packages.
 - Hotspots:
-  - Dominant languages: python.
+  - Dominant languages: python, typescript.
 
 ## Materialization Decisions
 ### requirements

@@ -2,7 +2,7 @@
 
 ## Evidence-backed architecture blueprint for the codebase
 
-Skilgen identified 3 top-level architecture domains from 90 evidence items and 13 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 173 symbol-bearing files, 170 call-bearing files, 72 mapped tests, and 6 workspace packages.
+Skilgen identified 3 top-level architecture domains from 90 evidence items and 13 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 177 symbol-bearing files, 174 call-bearing files, 72 mapped tests, and 6 workspace packages.
 
 ## Visual Overview
 ```mermaid
@@ -36,23 +36,24 @@ graph TD
   skills_roadmap_skill_md --> skills_roadmap_phase_2_skill_md["skills/roadmap/phase-2/SKILL.md"]
   skills_roadmap_skill_md --> skills_roadmap_phase_3_skill_md["skills/roadmap/phase-3/SKILL.md"]
   skills_roadmap_skill_md -. cross-link .-> skills_requirements_skill_md["skills/requirements/SKILL.md"]
+  extensions_vscode_skillayer_src_check_ts["extensions/vscode-skillayer/src/check.ts"]
+  extensions_vscode_skillayer_src_check_ts --> extensions_vscode_skillayer_src_check_ts_function_checkdiff["function checkDiff"]
+  extensions_vscode_skillayer_src_check_ts --> extensions_vscode_skillayer_src_check_ts_function_diffcurrentfile["function diffCurrentFile"]
+  extensions_vscode_skillayer_src_config_ts["extensions/vscode-skillayer/src/config.ts"]
+  extensions_vscode_skillayer_src_config_ts --> extensions_vscode_skillayer_src_config_ts_function_getconfig["function getConfig"]
+  extensions_vscode_skillayer_src_config_ts --> extensions_vscode_skillayer_src_config_ts_function_isconfigured["function isConfigured"]
+  extensions_vscode_skillayer_src_diagnostics_ts["extensions/vscode-skillayer/src/diagnostics.ts"]
+  extensions_vscode_skillayer_src_diagnostics_ts --> extensions_vscode_skillayer_src_diagnostics_ts_function_findingstodiagnostics["function findingsToDiagnostics"]
+  extensions_vscode_skillayer_src_diagnostics_ts --> extensions_vscode_skillayer_src_diagnostics_ts_findingstodiagnostics["findingsToDiagnostics"]
+  extensions_vscode_skillayer_src_extension_ts["extensions/vscode-skillayer/src/extension.ts"]
+  extensions_vscode_skillayer_src_extension_ts --> extensions_vscode_skillayer_src_extension_ts_function_toseverity["function toSeverity"]
+  extensions_vscode_skillayer_src_extension_ts --> extensions_vscode_skillayer_src_extension_ts_function_activate["function activate"]
   scripts_bump_version_py["scripts/bump_version.py"]
   scripts_bump_version_py --> scripts_bump_version_py_from_future_import_annotations["from __future__ import annotations"]
   scripts_bump_version_py --> scripts_bump_version_py_imports_argparse["imports argparse"]
   scripts_deploy_api_py["scripts/deploy_api.py"]
   scripts_deploy_api_py --> scripts_deploy_api_py_from_future_import_annotations["from __future__ import annotations"]
   scripts_deploy_api_py --> scripts_deploy_api_py_imports_argparse["imports argparse"]
-  scripts_deploy_dashboard_py["scripts/deploy_dashboard.py"]
-  scripts_deploy_dashboard_py --> scripts_deploy_dashboard_py_from_future_import_annotations["from __future__ import annotations"]
-  scripts_deploy_dashboard_py --> scripts_deploy_dashboard_py_imports_argparse["imports argparse"]
-  scripts_deploy_web_py["scripts/deploy_web.py"]
-  scripts_deploy_web_py --> scripts_deploy_web_py_from_future_import_annotations["from __future__ import annotations"]
-  scripts_deploy_web_py --> scripts_deploy_web_py_imports_argparse["imports argparse"]
-  scripts_run_requirements_pipeline_py["scripts/run_requirements_pipeline.py"]
-  scripts_run_requirements_pipeline_py --> scripts_run_requirements_pipeline_py_from_future_import_annotations["from __future__ import annotations"]
-  scripts_run_requirements_pipeline_py --> scripts_run_requirements_pipeline_py_imports_argparse["imports argparse"]
-  setup_py["setup.py"]
-  setup_py --> setup_py_from_setuptools_import_setup["from setuptools import setup"]
   workspace_apps_dashboard["apps/dashboard"]
   workspace_apps_web["apps/web"]
   workspace_packages_config["packages/config"]
@@ -71,20 +72,21 @@ graph TD
 
 ## Dominant Languages
 - `python`
+- `typescript`
 
 ## Source Comprehension
-- Symbol graph files: `173`
-- Cross-file symbol relationships: `84`
-- Call graph files: `170`
-- Config/runtime files: `41`
+- Symbol graph files: `177`
+- Cross-file symbol relationships: `91`
+- Call graph files: `174`
+- Config/runtime files: `44`
 - Tests mapped to code: `72`
 - Runtime artifacts ingested: `1`
-- Dependency risk nodes: `264`
+- Dependency risk nodes: `270`
 
 ## Parser Backends
 - `empty`: `3` files
 - `python-ast`: `173` files
-- `regex`: `3` files
+- `regex`: `7` files
 
 ## Workspace Topology
 - Repo archetype: `skilgen-platform`
@@ -111,26 +113,26 @@ graph TD
 - `packages/ui` -> `packages/config`
 
 ### Example Symbol Surfaces
+- `extensions/vscode-skillayer/src/check.ts`: `function checkDiff`, `function diffCurrentFile`, `function getStagedDiff`, `CheckResult`
+- `extensions/vscode-skillayer/src/config.ts`: `function getConfig`, `function isConfigured`, `getConfig`, `isConfigured`
+- `extensions/vscode-skillayer/src/diagnostics.ts`: `function findingsToDiagnostics`, `findingsToDiagnostics`
+- `extensions/vscode-skillayer/src/extension.ts`: `function toSeverity`, `function activate`, `function checkDocument`, `function checkCurrentFile`
 - `scripts/bump_version.py`: `from __future__ import annotations`, `imports argparse`, `imports re`, `from pathlib import Path`
 - `scripts/deploy_api.py`: `from __future__ import annotations`, `imports argparse`, `imports json`, `imports shutil`
 - `scripts/deploy_dashboard.py`: `from __future__ import annotations`, `imports argparse`, `imports json`, `imports subprocess`
 - `scripts/deploy_web.py`: `from __future__ import annotations`, `imports argparse`, `imports json`, `imports subprocess`
-- `scripts/run_requirements_pipeline.py`: `from __future__ import annotations`, `imports argparse`, `imports json`, `from pathlib import Path`
-- `setup.py`: `from setuptools import setup`
-- `skilgen/__init__.py`: `from skilgen.agents import fingerprint_project`, `from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, stop_auto_update_worker`, `from skilgen.delivery import run_delivery`, `from skilgen.sdk import activate_project_mcp_connector, activate_skill_source, analyze_project, architecture_project`
-- `skilgen/agents/__init__.py`: `from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence`, `from skilgen.agents.architecture_planner import build_architecture_blueprint`, `from skilgen.agents.evidence_graph import build_evidence_graph`, `from skilgen.agents.language_parsers import parse_language_evidence`
 
 ### Cross-File Symbol Relationships
+- `extensions/vscode-skillayer/src/diagnostics.ts`: `Finding` `imports` `./check` (confidence 0.35)
+- `extensions/vscode-skillayer/src/extension.ts`: `getConfig` `imports` `./config` (confidence 0.35)
+- `extensions/vscode-skillayer/src/extension.ts`: `isConfigured` `imports` `./config` (confidence 0.35)
+- `extensions/vscode-skillayer/src/extension.ts`: `checkDiff` `imports` `./check` (confidence 0.35)
+- `extensions/vscode-skillayer/src/extension.ts`: `diffCurrentFile` `imports` `./check` (confidence 0.35)
+- `extensions/vscode-skillayer/src/extension.ts`: `getStagedDiff` `imports` `./check` (confidence 0.35)
+- `extensions/vscode-skillayer/src/extension.ts`: `findingsToDiagnostics` `imports` `./diagnostics` (confidence 0.35)
 - `skilgen/api/jobs.py`: `JobCancelledError` `extends` `RuntimeError` (confidence 0.35)
 - `skilgen/api/server.py`: `BoundedThreadPoolHTTPServer` `extends` `HTTPServer` (confidence 0.35)
 - `skilgen/api/server.py`: `JsonFormatter` `extends` `logging.Formatter` (confidence 0.35)
-- `skilgen/api/server.py`: `SkilgenHandler` `extends` `BaseHTTPRequestHandler` (confidence 0.35)
-- `skilgen/commands/check.py`: `CheckConfigError` `extends` `ValueError` (confidence 0.35)
-- `skilgen/core/auth_tokens.py`: `SignedTokenError` `extends` `ValueError` (confidence 0.35)
-- `skilgen/parsers/__init__.py`: `ApiSpecParserError` `extends` `ValueError` (confidence 0.35)
-- `skilgen/parsers/confluence.py`: `_ConfluenceHTMLExtractor` `extends` `HTMLParser` (confidence 0.35)
-- `skilgen/parsers/dbt.py`: `DbtProjectParseError` `extends` `ValueError` (confidence 0.35)
-- `skilgen/parsers/helm.py`: `HelmParserError` `extends` `ValueError` (confidence 0.35)
 
 ### Example Config And Runtime Signals
 - `.claude/settings.json`: `env:CLAUDE_TOOL_INPUT_FILE_PATH`, `env:SKILLAYER_API_KEY`, `env:SKILLAYER_REPO_ID`
@@ -248,7 +250,7 @@ graph TD
 ## Evidence Graph Recommendations
 - Use high-signal source evidence to define domain boundaries before generating skills.
 - Prefer domains that are supported by both code evidence and requirements intent.
-- Optimize skill synthesis around the dominant languages: python.
+- Optimize skill synthesis around the dominant languages: python, typescript.
 - Use structural evidence such as functions, classes, divisions, and sections to refine skill boundaries.
 - Use the symbol graph to align skill boundaries with real modules, classes, and callable surfaces.
 - Parser backends in use: empty, python-ast, regex.
@@ -256,4 +258,4 @@ graph TD
 - Model package boundaries from the `turbo` workspace graph separately from file-level import edges.
 
 ## Hotspots
-- Dominant languages: python.
+- Dominant languages: python, typescript.

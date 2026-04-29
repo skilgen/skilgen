@@ -37,16 +37,14 @@
 - `roadmap`: Delivery sequencing domain that keeps phases, next steps, and implementation order explicit for agents.
 
 ## External Skill Packs
-- Installed packs: 4
-- Active packs: 4
+- Installed packs: 3
+- Active packs: 3
 - Preferred packs to load first:
   - `anthropic-skills` (score 87, trust `official`, license `unknown`)
-  - `awesome-copilot` (score 87, trust `official`, license `MIT License`)
   - `langchain-skills` (score 80, trust `official`, license `unknown`)
   - `agentskills-spec` (score 58, trust `spec`, license `Apache License`)
 
 ## External Skill Provenance
 - `agentskills-spec` from `https://github.com/agentskills/agentskills.git` at `2d3e01f590f68bee2cb76a3200823e93b2cc9eaa`
 - `anthropic-skills` from `https://github.com/anthropics/skills.git` at `5128e1865d670f5d6c9cef000e6dfc4e951fb5b9`
-- `awesome-copilot` from `https://github.com/github/awesome-copilot.git` at `867d5d25f990e8fb171a56a0382d5208a70ac6f5`
 - `langchain-skills` from `https://github.com/langchain-ai/langchain-skills.git` at `f8115670953680937e66fd50923dff54d748c7f3`

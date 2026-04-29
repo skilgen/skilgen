@@ -159,7 +159,8 @@
     "legacy_programs": [],
     "copybooks": [],
     "language_inventory": {
-      "python": 179
+      "python": 179,
+      "typescript": 4
     }
   },
   "repo_archetype": "skilgen-platform",
@@ -976,6 +977,22 @@
     }
   ],
   "import_graph": {
+    "extensions/vscode-skillayer/src/check.ts": [
+      "vscode"
+    ],
+    "extensions/vscode-skillayer/src/config.ts": [
+      "vscode"
+    ],
+    "extensions/vscode-skillayer/src/diagnostics.ts": [
+      "extensions/vscode-skillayer/src/check.ts",
+      "vscode"
+    ],
+    "extensions/vscode-skillayer/src/extension.ts": [
+      "extensions/vscode-skillayer/src/check.ts",
+      "extensions/vscode-skillayer/src/config.ts",
+      "extensions/vscode-skillayer/src/diagnostics.ts",
+      "vscode"
+    ],
     "scripts/bump_version.py": [
       "__future__",
       "argparse",
@@ -2664,12 +2681,30 @@
   },
   "evidence_graph": {
     "language_inventory": {
-      "python": 179
+      "python": 179,
+      "typescript": 4
     },
     "dominant_languages": [
-      "python"
+      "python",
+      "typescript"
     ],
     "import_graph": {
+      "extensions/vscode-skillayer/src/check.ts": [
+        "vscode"
+      ],
+      "extensions/vscode-skillayer/src/config.ts": [
+        "vscode"
+      ],
+      "extensions/vscode-skillayer/src/diagnostics.ts": [
+        "extensions/vscode-skillayer/src/check.ts",
+        "vscode"
+      ],
+      "extensions/vscode-skillayer/src/extension.ts": [
+        "extensions/vscode-skillayer/src/check.ts",
+        "extensions/vscode-skillayer/src/config.ts",
+        "extensions/vscode-skillayer/src/diagnostics.ts",
+        "vscode"
+      ],
       "scripts/bump_version.py": [
         "__future__",
         "argparse",
@@ -4570,6 +4605,27 @@
         "related_imports": []
       },
       {
+        "path": "apps/api/api/routes/orgs.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import asyncio",
+          "import base64",
+          "from collections import defaultdict",
+          "from itertools import combinations",
+          "import json",
+          "import socket",
+          "import urllib.error",
+          "import urllib.request",
+          "from dataclasses import asdict",
+          "from datetime import UTC, datetime, timedelta",
+          "import hashlib"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "packages/db/models/skill.py",
         "kind": "source",
         "language": "python",
@@ -4643,27 +4699,6 @@
           "urllib.request",
           "uuid"
         ]
-      },
-      {
-        "path": "apps/api/api/routes/orgs.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import asyncio",
-          "import base64",
-          "from collections import defaultdict",
-          "from itertools import combinations",
-          "import json",
-          "import socket",
-          "import urllib.error",
-          "import urllib.request",
-          "from dataclasses import asdict",
-          "from datetime import UTC, datetime, timedelta",
-          "import hashlib"
-        ],
-        "related_imports": []
       },
       {
         "path": "skilgen/api/service.py",
@@ -6114,6 +6149,74 @@
         "related_imports": []
       },
       {
+        "path": "extensions/vscode-skillayer/src/check.ts",
+        "kind": "structure",
+        "language": "typescript",
+        "tags": [
+          "structural-evidence"
+        ],
+        "snippet": [
+          "function checkDiff",
+          "function diffCurrentFile",
+          "function getStagedDiff"
+        ],
+        "related_imports": [
+          "vscode"
+        ]
+      },
+      {
+        "path": "extensions/vscode-skillayer/src/config.ts",
+        "kind": "structure",
+        "language": "typescript",
+        "tags": [
+          "structural-evidence"
+        ],
+        "snippet": [
+          "function getConfig",
+          "function isConfigured"
+        ],
+        "related_imports": [
+          "vscode"
+        ]
+      },
+      {
+        "path": "extensions/vscode-skillayer/src/diagnostics.ts",
+        "kind": "structure",
+        "language": "typescript",
+        "tags": [
+          "structural-evidence"
+        ],
+        "snippet": [
+          "function findingsToDiagnostics"
+        ],
+        "related_imports": [
+          "extensions/vscode-skillayer/src/check.ts",
+          "vscode"
+        ]
+      },
+      {
+        "path": "extensions/vscode-skillayer/src/extension.ts",
+        "kind": "structure",
+        "language": "typescript",
+        "tags": [
+          "structural-evidence"
+        ],
+        "snippet": [
+          "function toSeverity",
+          "function activate",
+          "function checkDocument",
+          "function checkCurrentFile",
+          "function checkStaged",
+          "function deactivate"
+        ],
+        "related_imports": [
+          "extensions/vscode-skillayer/src/check.ts",
+          "extensions/vscode-skillayer/src/config.ts",
+          "extensions/vscode-skillayer/src/diagnostics.ts",
+          "vscode"
+        ]
+      },
+      {
         "path": "scripts/bump_version.py",
         "kind": "structure",
         "language": "python",
@@ -6440,112 +6543,6 @@
         ]
       },
       {
-        "path": "skilgen/agents/evidence_graph.py",
-        "kind": "structure",
-        "language": "python",
-        "tags": [
-          "structural-evidence"
-        ],
-        "snippet": [
-          "from __future__ import annotations",
-          "from pathlib import Path",
-          "from skilgen.agents.codebase_signals import analyze_codebase, collect_code_evidence, collect_structural_evidence",
-          "from skilgen.agents.relationship_mapper import build_import_graph",
-          "from skilgen.agents.source_graphs import build_call_graph, build_config_runtime_graph, build_parser_summary, build_symbol_graph",
-          "from skilgen.agents.workspace_graph import build_workspace_graph",
-          "from skilgen.core.dependency_risk import build_dependency_risk_graph",
-          "from skilgen.core.models import EvidenceGraph, EvidenceItem, RequirementsContext, RuntimeSignals",
-          "from skilgen.core.runtime_signals import collect_runtime_signals",
-          "function _text_preview"
-        ],
-        "related_imports": [
-          "__future__",
-          "pathlib",
-          "skilgen/agents/codebase_signals.py",
-          "skilgen/agents/relationship_mapper.py",
-          "skilgen/agents/source_graphs.py",
-          "skilgen/agents/workspace_graph.py",
-          "skilgen/core/dependency_risk.py",
-          "skilgen/core/models.py",
-          "skilgen/core/runtime_signals.py"
-        ]
-      },
-      {
-        "path": "skilgen/agents/feature_extractor.py",
-        "kind": "structure",
-        "language": "python",
-        "tags": [
-          "structural-evidence"
-        ],
-        "snippet": [
-          "from __future__ import annotations",
-          "from pathlib import Path",
-          "from skilgen.agents.codebase_signals import analyze_codebase",
-          "from skilgen.agents.requirements_parser import parse_project_intent, parse_project_intent_native",
-          "from skilgen.deep_agents_core import run_deep_json",
-          "from skilgen.core.models import FeatureRecord",
-          "function extract_features_native",
-          "function extract_features"
-        ],
-        "related_imports": [
-          "__future__",
-          "pathlib",
-          "skilgen/agents/codebase_signals.py",
-          "skilgen/agents/requirements_parser.py",
-          "skilgen/core/models.py",
-          "skilgen/deep_agents_core.py"
-        ]
-      },
-      {
-        "path": "skilgen/agents/framework_fingerprint.py",
-        "kind": "structure",
-        "language": "python",
-        "tags": [
-          "structural-evidence"
-        ],
-        "snippet": [
-          "from __future__ import annotations",
-          "from pathlib import Path",
-          "from skilgen.core.models import FrameworkFingerprint, FrameworkMatch",
-          "function _gather_files",
-          "function _match",
-          "function fingerprint_project"
-        ],
-        "related_imports": [
-          "__future__",
-          "pathlib",
-          "skilgen/core/models.py"
-        ]
-      },
-      {
-        "path": "skilgen/agents/language_parsers.py",
-        "kind": "structure",
-        "language": "python",
-        "tags": [
-          "structural-evidence"
-        ],
-        "snippet": [
-          "from __future__ import annotations",
-          "imports ast",
-          "imports re",
-          "from dataclasses import dataclass, field",
-          "from pathlib import Path",
-          "class ParsedSymbolRelationship",
-          "class ParsedLanguageEvidence",
-          "function _safe_text",
-          "function _tree_sitter_parse",
-          "function _node_name"
-        ],
-        "related_imports": [
-          "__future__",
-          "ast",
-          "dataclasses",
-          "pathlib",
-          "re",
-          "tree_sitter_language_pack"
-        ]
-      },
-      {
         "path": "AGENTS.md",
         "kind": "documentation",
         "language": null,
@@ -6795,7 +6792,7 @@
     "recommendations": [
       "Use high-signal source evidence to define domain boundaries before generating skills.",
       "Prefer domains that are supported by both code evidence and requirements intent.",
-      "Optimize skill synthesis around the dominant languages: python.",
+      "Optimize skill synthesis around the dominant languages: python, typescript.",
       "Use structural evidence such as functions, classes, divisions, and sections to refine skill boundaries.",
       "Use the symbol graph to align skill boundaries with real modules, classes, and callable surfaces.",
       "Parser backends in use: empty, python-ast, regex.",
@@ -6807,6 +6804,38 @@
       "High fan-out dependency hotspots surfaced in: scripts/deploy_api.py, skilgen/agents/__init__.py, skilgen/agents/architecture_planner.py, skilgen/agents/codebase_signals.py, skilgen/agents/decision_planner.py."
     ],
     "parser_summary": {
+      "extensions/vscode-skillayer/src/check.ts": {
+        "language": "typescript",
+        "backend": "regex",
+        "symbol_count": 5,
+        "call_count": 16,
+        "import_count": 0,
+        "relationship_count": 0
+      },
+      "extensions/vscode-skillayer/src/config.ts": {
+        "language": "typescript",
+        "backend": "regex",
+        "symbol_count": 2,
+        "call_count": 3,
+        "import_count": 0,
+        "relationship_count": 0
+      },
+      "extensions/vscode-skillayer/src/diagnostics.ts": {
+        "language": "typescript",
+        "backend": "regex",
+        "symbol_count": 1,
+        "call_count": 8,
+        "import_count": 1,
+        "relationship_count": 1
+      },
+      "extensions/vscode-skillayer/src/extension.ts": {
+        "language": "typescript",
+        "backend": "regex",
+        "symbol_count": 6,
+        "call_count": 27,
+        "import_count": 0,
+        "relationship_count": 6
+      },
       "scripts/bump_version.py": {
         "language": "python",
         "backend": "python-ast",
@@ -8241,6 +8270,40 @@
       }
     },
     "symbol_graph": {
+      "extensions/vscode-skillayer/src/check.ts": [
+        "function checkDiff",
+        "function diffCurrentFile",
+        "function getStagedDiff",
+        "CheckResult",
+        "Finding",
+        "checkDiff",
+        "diffCurrentFile",
+        "getStagedDiff"
+      ],
+      "extensions/vscode-skillayer/src/config.ts": [
+        "function getConfig",
+        "function isConfigured",
+        "getConfig",
+        "isConfigured"
+      ],
+      "extensions/vscode-skillayer/src/diagnostics.ts": [
+        "function findingsToDiagnostics",
+        "findingsToDiagnostics"
+      ],
+      "extensions/vscode-skillayer/src/extension.ts": [
+        "function toSeverity",
+        "function activate",
+        "function checkDocument",
+        "function checkCurrentFile",
+        "function checkStaged",
+        "function deactivate",
+        "activate",
+        "checkCurrentFile",
+        "checkDocument",
+        "checkStaged",
+        "deactivate",
+        "toSeverity"
+      ],
       "scripts/bump_version.py": [
         "from __future__ import annotations",
         "imports argparse",
@@ -10069,6 +10132,65 @@
       ]
     },
     "call_graph": {
+      "extensions/vscode-skillayer/src/check.ts": [
+        "Error",
+        "checkDiff",
+        "cwd",
+        "diffCurrentFile",
+        "execAsync",
+        "fetch",
+        "getStagedDiff",
+        "import",
+        "join",
+        "json",
+        "map",
+        "promisify",
+        "slice",
+        "split",
+        "startsWith",
+        "stringify"
+      ],
+      "extensions/vscode-skillayer/src/config.ts": [
+        "getConfig",
+        "getConfiguration",
+        "isConfigured"
+      ],
+      "extensions/vscode-skillayer/src/diagnostics.ts": [
+        "Diagnostic",
+        "endsWith",
+        "filter",
+        "findingsToDiagnostics",
+        "lineAt",
+        "map",
+        "max",
+        "min"
+      ],
+      "extensions/vscode-skillayer/src/extension.ts": [
+        "activate",
+        "async",
+        "checkCurrentFile",
+        "checkDiff",
+        "checkDocument",
+        "checkStaged",
+        "clear",
+        "createDiagnosticCollection",
+        "createStatusBarItem",
+        "deactivate",
+        "diffCurrentFile",
+        "dispose",
+        "findingsToDiagnostics",
+        "getConfig",
+        "getStagedDiff",
+        "getText",
+        "isConfigured",
+        "onDidSaveTextDocument",
+        "push",
+        "registerCommand",
+        "set",
+        "show",
+        "showErrorMessage",
+        "showInformationMessage"
+      ],
       "scripts/bump_version.py": [
         "ArgumentParser",
         "Path",
@@ -13592,6 +13714,18 @@
         "env:SKILGEN_SCORE_THRESHOLD",
         "env:TRACEABILITY"
       ],
+      "extensions/vscode-skillayer/package-lock.json": [
+        "env:MIT",
+        "runtime:s3"
+      ],
+      "extensions/vscode-skillayer/package.json": [
+        "env:API",
+        "env:URL"
+      ],
+      "extensions/vscode-skillayer/tsconfig.json": [
+        "env:DOM",
+        "env:ES2022"
+      ],
       "infra/docker/docker-compose.prod.yml": [
         "env:CMD",
         "env:DEPLOYMENT_MODE",
@@ -13842,6 +13976,7 @@
         "skilgen/core/runtime_signals.py"
       ],
       "tests/test_config.py": [
+        "extensions/vscode-skillayer/src/config.ts",
         "skilgen/core/config.py"
       ],
       "tests/test_context.py": [
@@ -13952,6 +14087,7 @@
         "skilgen/api/jobs.py"
       ],
       "tests/test_llm_config.py": [
+        "extensions/vscode-skillayer/src/config.ts",
         "skilgen/core/config.py"
       ],
       "tests/test_memory_capture.py": [
@@ -14274,6 +14410,62 @@
       ]
     },
     "symbol_relationships": [
+      {
+        "source_path": "extensions/vscode-skillayer/src/diagnostics.ts",
+        "source_symbol": "Finding",
+        "relationship": "imports",
+        "target_symbol": "./check",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "extensions/vscode-skillayer/src/extension.ts",
+        "source_symbol": "getConfig",
+        "relationship": "imports",
+        "target_symbol": "./config",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "extensions/vscode-skillayer/src/extension.ts",
+        "source_symbol": "isConfigured",
+        "relationship": "imports",
+        "target_symbol": "./config",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "extensions/vscode-skillayer/src/extension.ts",
+        "source_symbol": "checkDiff",
+        "relationship": "imports",
+        "target_symbol": "./check",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "extensions/vscode-skillayer/src/extension.ts",
+        "source_symbol": "diffCurrentFile",
+        "relationship": "imports",
+        "target_symbol": "./check",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "extensions/vscode-skillayer/src/extension.ts",
+        "source_symbol": "getStagedDiff",
+        "relationship": "imports",
+        "target_symbol": "./check",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "extensions/vscode-skillayer/src/extension.ts",
+        "source_symbol": "findingsToDiagnostics",
+        "relationship": "imports",
+        "target_symbol": "./diagnostics",
+        "target_path": null,
+        "confidence": 0.35
+      },
       {
         "source_path": "skilgen/api/jobs.py",
         "source_symbol": "JobCancelledError",
@@ -15394,6 +15586,15 @@
         },
         {
           "id": "package:@types/react-dom",
+          "kind": "external-package",
+          "risk_score": 0.2,
+          "signals": [
+            "version:loosely-pinned"
+          ],
+          "dependencies": []
+        },
+        {
+          "id": "package:@types/vscode",
           "kind": "external-package",
           "risk_score": 0.2,
           "signals": [
@@ -17098,6 +17299,46 @@
           ]
         },
         {
+          "id": "extensions/vscode-skillayer/src/check.ts",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "vscode"
+          ]
+        },
+        {
+          "id": "extensions/vscode-skillayer/src/config.ts",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "vscode"
+          ]
+        },
+        {
+          "id": "extensions/vscode-skillayer/src/diagnostics.ts",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "extensions/vscode-skillayer/src/check.ts",
+            "vscode"
+          ]
+        },
+        {
+          "id": "extensions/vscode-skillayer/src/extension.ts",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "extensions/vscode-skillayer/src/check.ts",
+            "extensions/vscode-skillayer/src/config.ts",
+            "extensions/vscode-skillayer/src/diagnostics.ts",
+            "vscode"
+          ]
+        },
+        {
           "id": "manifest:apps/api/requirements.txt",
           "kind": "manifest",
           "risk_score": 0.0,
@@ -17153,6 +17394,17 @@
             "httpx",
             "redis",
             "celery"
+          ]
+        },
+        {
+          "id": "manifest:extensions/vscode-skillayer/package.json",
+          "kind": "manifest",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": [
+            "@types/node",
+            "@types/vscode",
+            "typescript"
           ]
         },
         {
@@ -18688,6 +18940,30 @@
       ],
       "edges": [
         {
+          "source": "extensions/vscode-skillayer/src/diagnostics.ts",
+          "target": "extensions/vscode-skillayer/src/check.ts",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "extensions/vscode-skillayer/src/extension.ts",
+          "target": "extensions/vscode-skillayer/src/check.ts",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "extensions/vscode-skillayer/src/extension.ts",
+          "target": "extensions/vscode-skillayer/src/config.ts",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "extensions/vscode-skillayer/src/extension.ts",
+          "target": "extensions/vscode-skillayer/src/diagnostics.ts",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
           "source": "manifest:apps/api/requirements.txt",
           "target": "package:alembic",
           "kind": "external-package",
@@ -19110,6 +19386,30 @@
         {
           "source": "manifest:apps/worker/requirements.txt",
           "target": "package:sqlalchemy",
+          "kind": "external-package",
+          "risk_signals": [
+            "version:loosely-pinned"
+          ]
+        },
+        {
+          "source": "manifest:extensions/vscode-skillayer/package.json",
+          "target": "package:@types/node",
+          "kind": "external-package",
+          "risk_signals": [
+            "version:loosely-pinned"
+          ]
+        },
+        {
+          "source": "manifest:extensions/vscode-skillayer/package.json",
+          "target": "package:@types/vscode",
+          "kind": "external-package",
+          "risk_signals": [
+            "version:loosely-pinned"
+          ]
+        },
+        {
+          "source": "manifest:extensions/vscode-skillayer/package.json",
+          "target": "package:typescript",
           "kind": "external-package",
           "risk_signals": [
             "version:loosely-pinned"
@@ -22130,7 +22430,7 @@
   },
   "architecture": {
     "headline": "Evidence-backed architecture blueprint for the codebase",
-    "system_summary": "Skilgen identified 3 top-level architecture domains from 90 evidence items and 13 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 173 symbol-bearing files, 170 call-bearing files, 72 mapped tests, and 6 workspace packages.",
+    "system_summary": "Skilgen identified 3 top-level architecture domains from 90 evidence items and 13 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 177 symbol-bearing files, 174 call-bearing files, 72 mapped tests, and 6 workspace packages.",
     "domains": [
       {
         "name": "requirements",
@@ -22194,7 +22494,7 @@
       }
     ],
     "hotspots": [
-      "Dominant languages: python."
+      "Dominant languages: python, typescript."
     ],
     "recommendations": [
       "Use architecture domains as the parents for the skill tree, and keep sub-skills close to strong evidence files.",
