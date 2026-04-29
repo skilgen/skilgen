@@ -14,6 +14,7 @@ from packages.db.models.flag_dismissal import FlagDismissal
 from packages.db.models.half_life import SkillHalfLife
 from packages.db.models.half_life_cache import HalfLifeCache
 from packages.db.models.job import Job
+from packages.db.models.login_event import LoginEvent
 from packages.db.models.org import Org
 from packages.db.models.org_llm_config import OrgLLMConfig
 from packages.db.models.org_policy import OrgPolicy
@@ -71,6 +72,7 @@ __all__ = [
     "SkillHalfLife",
     "HalfLifeCache",
     "Job",
+    "LoginEvent",
     "SkillMemoryStub",
     "SkillSnapshot",
     "SkillRegistryEntry",

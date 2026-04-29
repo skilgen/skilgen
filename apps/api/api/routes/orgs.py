@@ -51,7 +51,7 @@ from apps.api.api.services.redflags import compute_repo_red_flags
 from apps.api.api.services.skillql import SkillQLParseError, execute_skillql
 from apps.api.api.services.standup import collect_standup_summary, parse_standup_date, send_standup
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AnalysisRun, AuditEvent, CoverageGap, DependencyGraphCache, FlagDismissal, Org, OrgLLMConfig, OrgPolicy, PRAttribution, PullRequest, Repo, ScoreHistory, Skill, SkillHalfLife, SkillMemoryStub, SkillUsageEvent, SkillVersion
+from packages.db.models import AgentSession, AnalysisRun, AuditEvent, CoverageGap, DependencyGraphCache, FlagDismissal, LoginEvent, Org, OrgLLMConfig, OrgPolicy, PRAttribution, PullRequest, Repo, ScoreHistory, Skill, SkillHalfLife, SkillMemoryStub, SkillUsageEvent, SkillVersion
 from packages.db.models import SourceConnection as SourceConnectionModel
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
@@ -115,6 +115,11 @@ class DebtGenerateAllRequest(BaseModel):
 
 class ManifestVerifyRequest(BaseModel):
     manifest: dict[str, Any]
+
+
+class LoginEventRequest(BaseModel):
+    user_login: str
+    user_email: str
 
 SOURCE_TYPE_DISPLAY_NAMES = {
     "code": "Codebase",
@@ -1236,10 +1241,11 @@ async def _repo_response(db: AsyncSession, repo: Repo) -> RepoResponse:
     skill_count = (
         await db.execute(select(func.count(Skill.id)).where(Skill.repo_id == repo.id))
     ).scalar_one()
-    repo_skills = (
-        await db.execute(select(Skill).where(Skill.repo_id == repo.id).order_by(desc(Skill.created_at)))
-    ).scalars().all()
-    languages, display_language = _repo_language_metadata(list(repo_skills), repo.language)
+    # Keep the repo list resilient across partially migrated production DBs by
+    # avoiding a full Skill row load here. Newer skill taxonomy columns are not
+    # needed for the list card and have caused stale deployments to 500.
+    languages: list[str] = []
+    display_language = repo.language or "Unknown"
     delta = None
     if len(latest_history) >= 2:
         delta = int(latest_history[0].score_total - latest_history[1].score_total)
@@ -2043,6 +2049,34 @@ async def get_org_api_key(
         return _error(400, "Could not load org API key", "ORG_API_KEY_LOOKUP_FAILED")
 
 
+@router.post("/{org_id}/auth/login-event", response_model=None)
+async def create_login_event(
+    org_id: str,
+    payload: LoginEventRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, bool] | JSONResponse:
+    _assert_org_scope(org_id, current_org_id)
+    forwarded = request.headers.get("x-forwarded-for", "")
+    ip_address = forwarded.split(",", 1)[0].strip() if forwarded else (request.client.host if request.client else None)
+    db.add(
+        LoginEvent(
+            org_id=org_id,
+            user_login=payload.user_login,
+            user_email=payload.user_email,
+            ip_address=ip_address,
+            user_agent=request.headers.get("user-agent"),
+        )
+    )
+    try:
+        await db.commit()
+    except SQLAlchemyError:
+        await _rollback(db, "login event insert")
+        return _error(400, "Could not record login event", "LOGIN_EVENT_FAILED")
+    return {"ok": True}
+
+
 @router.post("/{org_id}/api-key/rotate", response_model=OrgApiKeyResponse)
 async def rotate_org_api_key(
     org_id: str,
@@ -2810,7 +2844,9 @@ async def list_org_repos(
     offset: int = Query(default=0, ge=0),
     search: str = "",
     db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
 ) -> list[RepoResponse]:
+    _assert_org_scope(org_id, current_org_id)
     query = select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True))
     if search:
         query = query.where(Repo.full_name.ilike(f"%{search}%"))

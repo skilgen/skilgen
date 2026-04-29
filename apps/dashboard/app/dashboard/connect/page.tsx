@@ -19,11 +19,13 @@ type ConnectStatusItem = {
 
 type ConnectStatus = {
   github_connected?: boolean;
+  github_app_installed?: boolean;
   api_key_configured?: boolean;
   agent_connected?: boolean;
   repos_connected?: number;
   skills_generated?: number;
   connections?: ConnectStatusItem[];
+  agent_runtimes?: Record<string, { connected?: boolean; load_count_30d?: number }>;
 };
 
 async function resolveConnectData(): Promise<{
@@ -83,12 +85,16 @@ function isConnected(item: ConnectStatusItem): boolean {
 
 function statusCards(status: ConnectStatus | null, repos: Repo[], setupStatus: SetupStatus | null, apiKey: string): ConnectStatusItem[] {
   if (status?.connections?.length) return status.connections;
+  const repoCount = status?.repos_connected ?? repos.length;
+  const githubConnected = status?.github_app_installed ?? status?.github_connected ?? setupStatus?.has_repos ?? repoCount > 0;
+  const runtimeConnected = Object.values(status?.agent_runtimes ?? {}).some((runtime) => Boolean(runtime.connected) || Number(runtime.load_count_30d ?? 0) > 0);
+  const agentConnected = status?.agent_connected ?? (Boolean(setupStatus?.has_agent_loads) || runtimeConnected);
   return [
     {
       id: "github",
       label: "GitHub repositories",
-      connected: status?.github_connected ?? setupStatus?.has_repos ?? repos.length > 0,
-      detail: repos.length ? `${repos.length} repos connected` : "No repositories connected yet",
+      connected: githubConnected,
+      detail: repoCount ? `${repoCount} repo${repoCount === 1 ? "" : "s"} connected` : "No repositories connected yet",
     },
     {
       id: "api-key",
@@ -105,8 +111,8 @@ function statusCards(status: ConnectStatus | null, repos: Repo[], setupStatus: S
     {
       id: "agent",
       label: "Agent loads",
-      connected: status?.agent_connected ?? Boolean(setupStatus?.has_agent_loads),
-      detail: setupStatus?.has_agent_loads ? "Agents have loaded Skillayer context" : "Connect Claude, Codex, Cursor, or CI",
+      connected: agentConnected,
+      detail: agentConnected ? "Agents have loaded Skillayer context" : "Connect Claude, Codex, Cursor, or CI",
     },
   ];
 }

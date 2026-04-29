@@ -101,6 +101,71 @@ export type MemoryScore = {
 
 export type AgentName = "claude_code" | "codex" | "cursor" | "copilot" | "devin" | "human" | "mixed" | string;
 
+export type AdminOverview = {
+  orgs: { total: number; active_30d: number; suspended: number; by_plan: Record<string, number> };
+  users: { total_unique: number; logins_7d: number; logins_30d: number; most_active: Array<{ login: string; count: number }> };
+  data: Record<string, number>;
+  generated_at: string;
+};
+
+export type AdminOrg = {
+  id: string;
+  name: string;
+  login?: string;
+  plan: string;
+  is_suspended: boolean;
+  suspended_at?: string | null;
+  suspended_reason?: string | null;
+  created_at: string | null;
+  last_active_at: string | null;
+  user_count: number;
+  login_count: number;
+  last_login_at: string | null;
+  skill_count: number;
+  session_count: number;
+  pr_count: number;
+  analysis_run_count: number;
+  repo_count: number;
+  api_key_hint?: string | null;
+};
+
+export type AdminOrgDetail = AdminOrg & {
+  repos: Array<{ id: string; full_name: string; skill_count: number; last_analysed_at: string | null; is_active?: boolean }>;
+  recent_sessions: Array<{ id: string; engineer_login: string | null; agent_runtime: string; session_start: string | null; files_touched_count: number; outcome?: string | null }>;
+  sessions?: Array<{ id: string; engineer_login: string | null; agent_runtime: string; session_start: string | null; files_touched_count: number; outcome?: string | null }>;
+  recent_logins: Array<{ user_login: string | null; user_email: string | null; ip_address: string | null; user_agent?: string | null; created_at: string | null }>;
+  skills_by_category: Record<string, number>;
+  violations_30d: number;
+  risk_distribution: { red: number; yellow: number; green: number };
+};
+
+export type AdminUser = {
+  user_login: string;
+  user_email: string | null;
+  orgs: Array<{ org_id: string; org_name: string }>;
+  login_count: number;
+  last_login_at: string | null;
+  first_login_at: string | null;
+  sessions_count: number;
+  prs_count: number;
+};
+
+export type AdminLoginEvent = {
+  id: string;
+  org_id: string | null;
+  org_name: string | null;
+  user_login: string | null;
+  user_email: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string | null;
+};
+
+export type UsageSeries = {
+  days: number;
+  series: Array<{ date: string; agent_sessions: number; prs_opened: number; logins: number; analysis_runs: number; violations: number }>;
+};
+
 export type AgentPrCard = {
   pr_id: string;
   repo_id: string;
@@ -1400,6 +1465,49 @@ export async function getDeveloperLeaderboard(accessToken: string | null, orgId:
   const params = new URLSearchParams({ days: String(days), sort_by: sortBy });
   if (includeTrend) params.set("include_trend", "true");
   return apiFetch<DeveloperLeaderboardResponse>(`/orgs/${orgId}/developer-leaderboard?${params.toString()}`, { accessToken, cache: "no-store" });
+}
+
+function adminHeaders(adminSecret: string): HeadersInit {
+  return { "X-Admin-Secret": adminSecret };
+}
+
+export async function getAdminOverview(adminSecret: string): Promise<AdminOverview | null> {
+  return apiFetch<AdminOverview>("/admin/overview", { headers: adminHeaders(adminSecret), cache: "no-store" });
+}
+
+export async function getAdminOrgs(adminSecret: string, params?: URLSearchParams): Promise<{ orgs: AdminOrg[]; next_cursor: string | null; total: number } | null> {
+  const query = params?.toString();
+  return apiFetch<{ orgs: AdminOrg[]; next_cursor: string | null; total: number }>(`/admin/orgs${query ? `?${query}` : ""}`, { headers: adminHeaders(adminSecret), cache: "no-store" });
+}
+
+export async function getAdminOrg(orgId: string, adminSecret: string): Promise<AdminOrgDetail | null> {
+  return apiFetch<AdminOrgDetail>(`/admin/orgs/${orgId}`, { headers: adminHeaders(adminSecret), cache: "no-store" });
+}
+
+export async function getAdminOrgUsage(orgId: string, adminSecret: string, days = 30): Promise<UsageSeries | null> {
+  return apiFetch<UsageSeries>(`/admin/orgs/${orgId}/usage?days=${days}`, { headers: adminHeaders(adminSecret), cache: "no-store" });
+}
+
+export async function getAdminUsers(adminSecret: string, params?: URLSearchParams): Promise<{ users: AdminUser[]; next_cursor: string | null; total: number } | null> {
+  const query = params?.toString();
+  return apiFetch<{ users: AdminUser[]; next_cursor: string | null; total: number }>(`/admin/users${query ? `?${query}` : ""}`, { headers: adminHeaders(adminSecret), cache: "no-store" });
+}
+
+export async function getAdminLogins(adminSecret: string, params?: URLSearchParams): Promise<{ logins: AdminLoginEvent[]; next_cursor: string | null; total: number } | null> {
+  const query = params?.toString();
+  return apiFetch<{ logins: AdminLoginEvent[]; next_cursor: string | null; total: number }>(`/admin/logins${query ? `?${query}` : ""}`, { headers: adminHeaders(adminSecret), cache: "no-store" });
+}
+
+export async function suspendOrg(orgId: string, adminSecret: string, reason: string): Promise<AdminOrg | null> {
+  return apiFetch<AdminOrg>(`/admin/orgs/${orgId}/suspend`, { headers: adminHeaders(adminSecret), method: "POST", body: JSON.stringify({ reason }), cache: "no-store" });
+}
+
+export async function unsuspendOrg(orgId: string, adminSecret: string): Promise<AdminOrg | null> {
+  return apiFetch<AdminOrg>(`/admin/orgs/${orgId}/unsuspend`, { headers: adminHeaders(adminSecret), method: "POST", cache: "no-store" });
+}
+
+export async function deleteOrg(orgId: string, adminSecret: string): Promise<{ ok: boolean; deleted_org_id: string } | null> {
+  return apiFetch<{ ok: boolean; deleted_org_id: string }>(`/admin/orgs/${orgId}`, { headers: adminHeaders(adminSecret), method: "DELETE", cache: "no-store" });
 }
 
 export async function executeSkillQL(accessToken: string | null, orgId: string, query: string): Promise<SkillQLResult | null> {
