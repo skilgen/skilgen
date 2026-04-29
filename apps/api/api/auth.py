@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hmac
+import os
 import time
 from typing import Any
 
 import httpx
-from fastapi import Depends, HTTPException
+from fastapi import Depends, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwk, jwt
 from jose.utils import base64url_decode
@@ -19,6 +21,13 @@ from packages.db.models import Org
 bearer_scheme = HTTPBearer(auto_error=True)
 _JWKS_CACHE: dict[str, dict[str, Any]] = {}
 _JWKS_TTL_SECONDS = 3600
+
+
+def get_admin_secret(x_admin_secret: str = Header(default="")) -> str:
+    secret = os.getenv("ADMIN_SECRET", "") or settings.ADMIN_SECRET
+    if not secret or not hmac.compare_digest(x_admin_secret, secret):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return x_admin_secret
 
 
 def _deployment_mode() -> str:

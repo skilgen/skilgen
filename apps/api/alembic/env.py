@@ -51,6 +51,7 @@ from packages.db.models.pull_request import Commit, PullRequest
 from packages.db.models.skill_memory_stub import SkillMemoryStub
 from packages.db.models.skill_snapshot import SkillSnapshot
 from packages.db.models.skill_version import SkillVersion
+from packages.db.models.login_event import LoginEvent
 from packages.db.models.registry import MarketplaceInstall, SkillDependency, SkillRegistryEntry
 from packages.db.models.score_history import ScoreHistory
 from packages.db.models.source_connection import SourceConnection

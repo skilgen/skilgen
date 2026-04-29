@@ -39,7 +39,7 @@ import { cache } from "react";
 
 import { mockOrg, mockUser } from "@/lib/mock-data";
 import { DashboardNavLink } from "@/components/dashboard-nav-link";
-import { getAuditLogStats, getAutopilotQueue, getBootstrapOrg, getEvalSkillGaps, getMemoryQueue, getMyOrg, getOrgRedFlags, getOrgSetupStatus, type Org } from "../../lib/data";
+import { API_URL, getAuditLogStats, getAutopilotQueue, getBootstrapOrg, getEvalSkillGaps, getMemoryQueue, getMyOrg, getOrgRedFlags, getOrgSetupStatus, type Org } from "../../lib/data";
 
 type ShellUser = Pick<typeof mockUser, "email" | "firstName" | "lastName">;
 
@@ -191,6 +191,29 @@ export default async function DashboardLayout({
   };
   const shellOrg = await loadShellOrg();
   const shellUser = await loadShellUser();
+  try {
+    const session = await withAuth({ ensureSignedIn: false });
+    const token = session?.accessToken || "";
+    if (token && shellOrg.id && shellUser.email) {
+      const login = shellUser.email.split("@")[0] || shellUser.email;
+      void fetch(`${API_URL}/orgs/${shellOrg.id}/auth/login-event`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ user_login: login, user_email: shellUser.email }),
+        cache: "no-store",
+      }).catch(() => undefined);
+    }
+  } catch {
+    // Login telemetry must never block dashboard rendering.
+  }
+  const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
+    .split(",")
+    .map((email) => email.trim())
+    .filter(Boolean);
+  const isAdmin = adminEmails.includes(shellUser.email || "");
   const navBadges = await loadNavBadges();
   const navGroups: Array<{ label: string; items: NavItem[] }> = [
     {
@@ -262,6 +285,7 @@ export default async function DashboardLayout({
       items: [
         { href: "/dashboard/audit", label: "Audit", icon: "ScrollText", badge: navBadges.audit ? "Critical audit events" : undefined, badgeVariant: "dot" },
         { href: "/dashboard/settings", label: "Settings", icon: "Settings" },
+        ...(isAdmin ? [{ href: "/dashboard/admin", label: "Admin", icon: "ShieldCheck" as const }] : []),
       ],
     },
   ];
