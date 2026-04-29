@@ -26,8 +26,15 @@ export type OrgSettings = {
   plan: string;
   score_threshold: number;
   slack_webhook_url: string | null;
+  slack_signing_secret_set?: boolean;
+  slack_team_id?: string | null;
   slack_standup_enabled?: boolean;
   slack_standup_hour?: number;
+  digest_email?: string | null;
+  digest_enabled?: boolean;
+  digest_day?: number;
+  digest_hour?: number;
+  digest_last_sent_at?: string | null;
   notify_on_pr: boolean;
   notify_on_stale: boolean;
   github_app_installed: boolean;
@@ -40,6 +47,14 @@ export type OrgSettings = {
     trigger: string;
     created_at: string | null;
   }[];
+};
+
+export type EmailDigestSettings = {
+  digest_email: string | null;
+  digest_enabled: boolean;
+  digest_day: number;
+  digest_hour: number;
+  digest_last_sent_at?: string | null;
 };
 
 export type OrgAISettings = {
@@ -249,6 +264,21 @@ export type DeveloperLeaderboardResponse = {
   generated_at: string;
   developers: DeveloperLeaderboardEntry[];
 };
+
+export type SkillQLResultFormat = "table" | "number" | "list" | "timeline";
+
+export type SkillQLResult = {
+  query: string;
+  intent: string;
+  result_format: SkillQLResultFormat;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  row_count: number;
+  data_sources: string[];
+  suggested_followups: string[];
+};
+
+export type SkillQLSuggestions = Record<string, string[]>;
 
 export type SetupStep = {
   id: "connect_repo" | "generate_skills" | "connect_agent" | "improve_skills" | string;
@@ -610,6 +640,7 @@ export type AuditLogResponse = {
   total: number;
   events: AuditLogEvent[];
   has_more: boolean;
+  next_cursor: string | null;
 };
 
 export type AuditLogStats = {
@@ -805,6 +836,28 @@ export type SkillVersionDiff = {
   }>;
   added_count: number;
   removed_count: number;
+};
+
+export type SkillSnapshot = {
+  id: string;
+  skill_id: string;
+  repo_id: string;
+  snapshot_type: "auto" | "manual" | "pre_edit" | string;
+  label: string | null;
+  content?: string;
+  score_total: number | null;
+  score_groundedness: number | null;
+  score_coverage: number | null;
+  score_freshness: number | null;
+  score_structure: number | null;
+  created_by: string | null;
+  created_at: string | null;
+};
+
+export type SkillRollbackResult = {
+  ok: boolean;
+  snapshot_id: string;
+  pre_edit_snapshot_id: string;
 };
 
 export type SkillContentUpdateResult = {
@@ -1294,6 +1347,27 @@ export async function getOrgSettings(accessToken: string | null, orgId: string):
   return apiFetch<OrgSettings>(`/orgs/${orgId}/settings`, { accessToken, cache: "no-store" });
 }
 
+export async function getEmailDigestSettings(accessToken: string | null, orgId: string): Promise<EmailDigestSettings | null> {
+  const settings = await getOrgSettings(accessToken, orgId);
+  if (!settings) return null;
+  return {
+    digest_email: settings.digest_email ?? null,
+    digest_enabled: Boolean(settings.digest_enabled),
+    digest_day: Number.isFinite(settings.digest_day) ? Number(settings.digest_day) : 1,
+    digest_hour: Number.isFinite(settings.digest_hour) ? Number(settings.digest_hour) : 8,
+    digest_last_sent_at: settings.digest_last_sent_at ?? null,
+  };
+}
+
+export async function updateEmailDigestSettings(accessToken: string | null, orgId: string, payload: EmailDigestSettings): Promise<EmailDigestSettings | null> {
+  return apiFetch<EmailDigestSettings>(`/orgs/${orgId}/settings/email-digest`, {
+    accessToken,
+    body: JSON.stringify(payload),
+    cache: "no-store",
+    method: "PATCH",
+  });
+}
+
 export async function getOrgAISettings(accessToken: string | null, orgId: string): Promise<OrgAISettings | null> {
   return apiFetch<OrgAISettings>(`/orgs/${orgId}/settings`, { accessToken, cache: "no-store" });
 }
@@ -1326,6 +1400,14 @@ export async function getDeveloperLeaderboard(accessToken: string | null, orgId:
   const params = new URLSearchParams({ days: String(days), sort_by: sortBy });
   if (includeTrend) params.set("include_trend", "true");
   return apiFetch<DeveloperLeaderboardResponse>(`/orgs/${orgId}/developer-leaderboard?${params.toString()}`, { accessToken, cache: "no-store" });
+}
+
+export async function executeSkillQL(accessToken: string | null, orgId: string, query: string): Promise<SkillQLResult | null> {
+  return apiFetch<SkillQLResult>(`/orgs/${orgId}/skillql`, { accessToken, method: "POST", body: JSON.stringify({ query }), cache: "no-store" });
+}
+
+export async function getSkillQLSuggestions(accessToken: string | null, orgId: string): Promise<SkillQLSuggestions | null> {
+  return apiFetch<SkillQLSuggestions>(`/orgs/${orgId}/skillql/suggestions`, { accessToken, cache: "no-store" });
 }
 
 export async function getAutopilotQueue(accessToken: string | null, orgId: string): Promise<AutopilotTask[] | null> {
@@ -1394,17 +1476,26 @@ export async function getOrgRedFlags(accessToken: string | null, orgId: string, 
   return apiFetch<OrgRedFlags>(`/orgs/${orgId}/red-flags${suffix}`, { accessToken, cache: "no-store" });
 }
 
-export async function getOrgAuditLog(accessToken: string | null, orgId: string, params?: URLSearchParams): Promise<AuditLogResponse | null> {
+export async function getAuditLog(accessToken: string | null, orgId: string, params?: URLSearchParams): Promise<AuditLogResponse | null> {
   const query = params?.toString();
   return apiFetch<AuditLogResponse>(`/orgs/${orgId}/audit-log${query ? `?${query}` : ""}`, { accessToken, cache: "no-store" });
+}
+
+export async function getOrgAuditLog(accessToken: string | null, orgId: string, params?: URLSearchParams): Promise<AuditLogResponse | null> {
+  return getAuditLog(accessToken, orgId, params);
+}
+
+export async function getAuditLogEventTypes(accessToken: string | null, orgId: string): Promise<string[] | null> {
+  return apiFetch<string[]>(`/orgs/${orgId}/audit-log/event-types`, { accessToken, cache: "no-store" });
 }
 
 export async function getAuditLogStats(accessToken: string | null, orgId: string): Promise<AuditLogStats | null> {
   return apiFetch<AuditLogStats>(`/orgs/${orgId}/audit-log/stats`, { accessToken, cache: "no-store" });
 }
 
-export function exportAuditLogCsvUrl(orgId: string): string {
-  return `${API_URL}/orgs/${orgId}/audit-log?format=csv`;
+export function exportAuditLogCsvUrl(orgId: string, params?: URLSearchParams): string {
+  const query = params?.toString();
+  return `${API_URL}/orgs/${orgId}/audit-log/export${query ? `?${query}` : ""}`;
 }
 
 export async function configureAuditWebhook(
@@ -1521,6 +1612,73 @@ export async function getSkillVersionDiff(
   versionId: string,
 ): Promise<SkillVersionDiff | null> {
   return apiFetch<SkillVersionDiff>(`/repos/${repoId}/skills/${skillId}/versions/${versionId}/diff`, { accessToken, cache: "no-store" });
+}
+
+export async function getSkillSnapshots(
+  accessToken: string | null,
+  repoId: string,
+  skillId: string,
+  params?: URLSearchParams,
+): Promise<SkillSnapshot[] | null> {
+  const query = params?.toString();
+  return apiFetch<SkillSnapshot[]>(`/repos/${repoId}/skills/${skillId}/snapshots${query ? `?${query}` : ""}`, { accessToken, cache: "no-store" });
+}
+
+export async function getSkillSnapshot(
+  accessToken: string | null,
+  repoId: string,
+  skillId: string,
+  snapshotId: string,
+): Promise<SkillSnapshot | null> {
+  return apiFetch<SkillSnapshot>(`/repos/${repoId}/skills/${skillId}/snapshots/${snapshotId}`, { accessToken, cache: "no-store" });
+}
+
+export async function getSkillSnapshotDiff(
+  accessToken: string | null,
+  repoId: string,
+  skillId: string,
+  snapshotId: string,
+): Promise<string | null> {
+  const headers: Record<string, string> = {};
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  try {
+    const response = await fetch(`${API_URL}/repos/${repoId}/skills/${skillId}/snapshots/${snapshotId}/diff`, {
+      headers,
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return response.text();
+  } catch (error) {
+    console.error(`Failed to fetch snapshot diff ${snapshotId}:`, error);
+    return null;
+  }
+}
+
+export async function createSkillSnapshot(
+  accessToken: string,
+  repoId: string,
+  skillId: string,
+  label?: string,
+): Promise<SkillSnapshot | null> {
+  return apiFetch<SkillSnapshot>(`/repos/${repoId}/skills/${skillId}/snapshots`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify({ label }),
+    cache: "no-store",
+  });
+}
+
+export async function rollbackSkill(
+  accessToken: string,
+  repoId: string,
+  skillId: string,
+  snapshotId: string,
+): Promise<SkillRollbackResult | null> {
+  return apiFetch<SkillRollbackResult>(`/repos/${repoId}/skills/${skillId}/rollback/${snapshotId}`, {
+    accessToken,
+    method: "POST",
+    cache: "no-store",
+  });
 }
 
 export async function updateSkillContent(

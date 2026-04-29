@@ -29,6 +29,7 @@ from packages.db.models.score_history import ScoreHistory
 from packages.db.models.source_connection import SourceConnection
 from packages.db.models.skill import Skill
 from packages.db.models.skill_memory_stub import SkillMemoryStub
+from packages.db.models.skill_snapshot import SkillSnapshot
 from packages.db.models.skill_usage_event import SkillUsageEvent
 from packages.db.models.skill_version import SkillVersion
 from packages.db.models.sla_policy import SLAPolicy
@@ -71,6 +72,7 @@ __all__ = [
     "HalfLifeCache",
     "Job",
     "SkillMemoryStub",
+    "SkillSnapshot",
     "SkillRegistryEntry",
     "SkillUsageEvent",
     "SkillVersion",

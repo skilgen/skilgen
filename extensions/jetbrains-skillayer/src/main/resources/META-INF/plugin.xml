@@ -1,0 +1,41 @@
+<idea-plugin>
+    <id>com.skillayer.intellij</id>
+    <name>Skillayer — Skill Review</name>
+    <version>0.1.0</version>
+    <vendor email="support@skillayer.com" url="https://skillayer.com">Skillayer</vendor>
+
+    <description><![CDATA[
+        Skillayer skill review for IntelliJ Platform IDEs. Check current files or staged changes against repository skills and surface violations inline.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>Git4Idea</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.skillayer.intellij.SkillayerConfigurable"
+            id="com.skillayer.intellij.settings"
+            displayName="Skillayer" />
+        <applicationService serviceImplementation="com.skillayer.intellij.SkillayerSettings" />
+        <externalAnnotator language="ANY" implementationClass="com.skillayer.intellij.FindingAnnotator" />
+        <postStartupActivity implementation="com.skillayer.intellij.SkillayerPlugin" />
+        <notificationGroup id="Skillayer" displayType="BALLOON" />
+    </extensions>
+
+    <actions>
+        <group id="com.skillayer.intellij.toolsGroup" text="Skillayer" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last" />
+            <action
+                id="com.skillayer.intellij.checkCurrentFile"
+                class="com.skillayer.intellij.CheckAction"
+                text="Check Current File"
+                description="Check the active editor content with Skillayer" />
+            <action
+                id="com.skillayer.intellij.checkStagedChanges"
+                class="com.skillayer.intellij.CheckStagedAction"
+                text="Check Staged Changes"
+                description="Check staged Git changes with Skillayer" />
+        </group>
+    </actions>
+</idea-plugin>

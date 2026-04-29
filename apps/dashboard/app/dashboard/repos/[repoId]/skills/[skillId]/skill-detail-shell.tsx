@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, FileText, Lightbulb, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, FileText, History, Lightbulb, Loader2, Sparkles } from "lucide-react";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SkillDetailViewer } from "@/components/skill-detail-viewer";
@@ -706,6 +706,10 @@ export function SkillDetailShell({ accessToken, repo, repoId, skill, usageStats,
 
           <div className="flex flex-wrap items-center gap-2">
             <ScoreBadge score={score} />
+            <Link className="inline-flex h-10 items-center gap-2 rounded-full border border-[color:var(--bg-border)] px-3 text-[12px] font-semibold text-[color:var(--text-secondary)] hover:border-[color:var(--accent-primary)] hover:text-[color:var(--accent-primary)]" href={`/dashboard/repos/${repoId}/skills/${skill.id}/time-machine`}>
+              <History className="h-4 w-4" />
+              Time Machine
+            </Link>
             <PublishSkillButton accessToken={accessToken} domain={skill.domain} skillId={skill.id} />
             <StaleBadge isStale={skill.is_stale} />
             <VersionBadge versionNumber={versionNumber} />

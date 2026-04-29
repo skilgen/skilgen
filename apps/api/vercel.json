@@ -19,6 +19,7 @@
     { "src": "/(.*)", "dest": "apps/api/api/index.py" }
   ],
   "crons": [
-    { "path": "/cron/standup", "schedule": "0 9 * * *" }
+    { "path": "/cron/standup", "schedule": "0 9 * * *" },
+    { "path": "/cron/digest", "schedule": "0 9 * * *" }
   ]
 }

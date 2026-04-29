@@ -37,15 +37,18 @@ from apps.api.api.services.agent_connection import get_agent_connection_status, 
 from apps.api.api.services.commit_check import _severity_bucket
 from apps.api.api.services.github_pr import create_skill_pr
 from apps.api.api.services.dependency_analyzer import compute_cross_repo_dependencies, compute_repo_dependencies
+from apps.api.api.services.email_digest import build_and_send_org_digest
 from apps.api.api.services.half_life import compute_skill_decay_timeline, predict_half_life_days
 from apps.api.api.services.knowledge_concentration import concentration_response
 from apps.api.api.services.llm import LLMCallError, LLMNotConfiguredError, call_llm
 from apps.api.api.services.manifest import verify_manifest
 from apps.api.api.services.skill_generator import generate_skill_with_ai
+from apps.api.api.services.snapshot import auto_snapshot_skill
 from packages.db.llm_key import decrypt_key, encrypt_key, key_hint
 from apps.api.api.services.policy import POLICY_RULE_TYPES, PolicyViolation, evaluate_policies
 from apps.api.api.services.policy_engine import PR_POLICY_RULE_TYPES, validate_pr_policy_config
 from apps.api.api.services.redflags import compute_repo_red_flags
+from apps.api.api.services.skillql import SkillQLParseError, execute_skillql
 from apps.api.api.services.standup import collect_standup_summary, parse_standup_date, send_standup
 from packages.db.database import get_db
 from packages.db.models import AgentSession, AnalysisRun, AuditEvent, CoverageGap, DependencyGraphCache, FlagDismissal, Org, OrgLLMConfig, OrgPolicy, PRAttribution, PullRequest, Repo, ScoreHistory, Skill, SkillHalfLife, SkillMemoryStub, SkillUsageEvent, SkillVersion
@@ -349,6 +352,15 @@ class SlackSettingsPayload(BaseModel):
     webhook_url: str | None = Field(default=None, max_length=4096)
     standup_enabled: bool = False
     standup_hour: int = Field(default=9, ge=0, le=23)
+    signing_secret: str | None = Field(default=None, max_length=4096)
+    team_id: str | None = Field(default=None, max_length=255)
+
+
+class EmailDigestSettingsPayload(BaseModel):
+    digest_email: str | None = Field(default=None, max_length=320)
+    digest_enabled: bool = False
+    digest_day: int = Field(default=1, ge=0, le=6)
+    digest_hour: int = Field(default=8, ge=0, le=23)
 
 
 class MyCodeTodayPR(BaseModel):
@@ -450,6 +462,7 @@ class AuditEventsResponse(BaseModel):
     total: int
     events: list[AuditEventResponse]
     has_more: bool
+    next_cursor: str | None = None
 
 
 class AuditStatsResponse(BaseModel):
@@ -531,6 +544,10 @@ class LLMConfigTestResponse(BaseModel):
     success: bool
     response: str | None = None
     error: str | None = None
+
+
+class SkillQLRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
 
 
 class SkillSearchRequest(BaseModel):
@@ -1066,6 +1083,39 @@ def _audit_event_response(event: AuditEvent) -> AuditEventResponse:
         metadata=event.metadata_json or {},
         created_at=event.created_at,
     )
+
+
+def _audit_log_filters(
+    org_id: str,
+    *,
+    actor: str | None = None,
+    search: str | None = None,
+    event_type: str | None = None,
+    repo_id: str | None = None,
+    severity: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    resource_type: str | None = None,
+) -> list:
+    filters = [AuditEvent.org_id == org_id]
+    if date_from is not None:
+        filters.append(AuditEvent.created_at >= date_from.replace(tzinfo=None))
+    if date_to is not None:
+        filters.append(AuditEvent.created_at <= date_to.replace(tzinfo=None))
+    if event_type:
+        filters.append(AuditEvent.event_type.startswith(event_type) if event_type.endswith(".") else AuditEvent.event_type == event_type)
+    if resource_type:
+        filters.append(AuditEvent.resource_type == resource_type)
+    if repo_id:
+        filters.append(AuditEvent.repo_id == repo_id)
+    if actor:
+        filters.append(AuditEvent.actor_login.ilike(f"%{actor}%"))
+    if search:
+        pattern = f"%{search}%"
+        filters.append(AuditEvent.actor_login.ilike(pattern) | AuditEvent.summary.ilike(pattern))
+    if severity:
+        filters.append(AuditEvent.severity == severity)
+    return filters
 
 
 def _policy_response(policy: OrgPolicy, violation_count: int = 0) -> PolicyResponse:
@@ -1759,6 +1809,10 @@ def _generate_org_api_key() -> str:
     return f"sk-{secrets.token_urlsafe(32)}"
 
 
+def _valid_email(value: str) -> bool:
+    return "@" in value and "." in value.rsplit("@", 1)[-1] and not any(char.isspace() for char in value)
+
+
 def _org_settings_response(org: Org, installation_id: int | None, recent_runs: list[AnalysisRun]) -> OrgSettingsResponse:
     """Convert an org and its GitHub state into a settings response."""
     settings_payload = org.settings if isinstance(org.settings, dict) else {}
@@ -1769,8 +1823,15 @@ def _org_settings_response(org: Org, installation_id: int | None, recent_runs: l
         plan=org.plan,
         score_threshold=int(org.score_threshold or 60),
         slack_webhook_url=org.slack_webhook_url,
+        slack_signing_secret_set=bool(getattr(org, "slack_signing_secret", None)),
+        slack_team_id=getattr(org, "slack_team_id", None),
         slack_standup_enabled=bool(org.slack_standup_enabled),
         slack_standup_hour=int(org.slack_standup_hour or 9),
+        digest_email=getattr(org, "digest_email", None),
+        digest_enabled=bool(getattr(org, "digest_enabled", False)),
+        digest_day=int(getattr(org, "digest_day", 1) if getattr(org, "digest_day", None) is not None else 1),
+        digest_hour=int(getattr(org, "digest_hour", 8) if getattr(org, "digest_hour", None) is not None else 8),
+        digest_last_sent_at=str(settings_payload.get("digest_last_sent_at")) if settings_payload.get("digest_last_sent_at") else None,
         notify_on_pr=bool(org.notify_on_pr),
         notify_on_stale=bool(org.notify_on_stale),
         anthropic_api_key_set=bool(settings_payload.get("anthropic_api_key_encrypted")),
@@ -2415,6 +2476,7 @@ async def save_enterprise_skills(
                 )
                 db.add(skill)
                 await db.flush()
+                await auto_snapshot_skill(skill, db, snapshot_type="auto")
                 responses.append(_enterprise_skill_response(skill, repo))
             await db.commit()
             return responses
@@ -4543,6 +4605,7 @@ async def generate_debt_gap(
         )
         db.add(skill)
         await db.flush()
+        await auto_snapshot_skill(skill, db, snapshot_type="auto")
         pr = await create_skill_pr(repo, suggested_path, content, f"skillayer/add-{gap.domain}-{gap.id[:8]}", f"Add {gap.domain} Skillayer skill", f"Skillayer generated a missing `{gap.domain}` skill from the dashboard.")
         gap.skill_id = skill.id
         gap.status = "pr_opened"
@@ -4796,28 +4859,32 @@ async def get_audit_log(
     resource_type: str | None = None,
     repo_id: str | None = None,
     actor: str | None = None,
+    search: str | None = None,
     severity: Literal["info", "warning", "critical"] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
+    cursor: datetime | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    format: Literal["json", "csv"] = "json",
     db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
 ):
-    now = _utc_now_naive()
-    since = since or (now - timedelta(days=30))
-    until = until or now
-    filters = [AuditEvent.org_id == org_id, AuditEvent.created_at >= since, AuditEvent.created_at <= until]
-    if event_type:
-        filters.append(AuditEvent.event_type.startswith(event_type) if event_type.endswith(".") else AuditEvent.event_type == event_type)
-    if resource_type:
-        filters.append(AuditEvent.resource_type == resource_type)
-    if repo_id:
-        filters.append(AuditEvent.repo_id == repo_id)
-    if actor:
-        filters.append(AuditEvent.actor_login.ilike(f"%{actor}%"))
-    if severity:
-        filters.append(AuditEvent.severity == severity)
+    _assert_org_scope(org_id, current_org_id)
+    filters = _audit_log_filters(
+        org_id,
+        actor=actor,
+        search=search,
+        event_type=event_type,
+        repo_id=repo_id,
+        severity=severity,
+        date_from=date_from or since,
+        date_to=date_to or until,
+        resource_type=resource_type,
+    )
+    if cursor is not None:
+        filters.append(AuditEvent.created_at < cursor.replace(tzinfo=None))
     try:
         total = int((await db.execute(select(func.count(AuditEvent.id)).where(*filters))).scalar() or 0)
         rows = (
@@ -4825,33 +4892,102 @@ async def get_audit_log(
                 select(AuditEvent)
                 .where(*filters)
                 .order_by(desc(AuditEvent.created_at))
-                .limit(limit)
+                .limit(limit + 1)
                 .offset(offset)
             )
         ).scalars().all()
     except SQLAlchemyError as exc:
         await _rollback(db, "audit log lookup")
         raise HTTPException(status_code=400, detail="Unable to load audit log") from exc
-    if format == "csv":
-        def stream_rows():
-            buffer = StringIO()
-            writer = csv.writer(buffer)
-            writer.writerow(["timestamp", "event_type", "action", "actor", "summary", "repo", "severity"])
+    has_more = len(rows) > limit
+    page_rows = list(rows[:limit])
+    next_cursor = page_rows[-1].created_at.isoformat() if has_more and page_rows else None
+    return AuditEventsResponse(total=total, events=[_audit_event_response(event) for event in page_rows], has_more=has_more, next_cursor=next_cursor)
+
+
+@router.get("/{org_id}/audit-log/export")
+async def export_audit_log(
+    org_id: str,
+    event_type: str | None = None,
+    resource_type: str | None = None,
+    repo_id: str | None = None,
+    actor: str | None = None,
+    search: str | None = None,
+    severity: Literal["info", "warning", "critical"] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> StreamingResponse:
+    _assert_org_scope(org_id, current_org_id)
+    filters = _audit_log_filters(
+        org_id,
+        actor=actor,
+        search=search,
+        event_type=event_type,
+        repo_id=repo_id,
+        severity=severity,
+        date_from=date_from,
+        date_to=date_to,
+        resource_type=resource_type,
+    )
+    try:
+        rows = (
+            await db.execute(
+                select(AuditEvent)
+                .where(*filters)
+                .order_by(desc(AuditEvent.created_at))
+                .limit(10000)
+            )
+        ).scalars().all()
+    except SQLAlchemyError as exc:
+        await _rollback(db, "audit log export")
+        raise HTTPException(status_code=400, detail="Unable to export audit log") from exc
+
+    def stream_rows():
+        buffer = StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["timestamp", "actor", "event_type", "severity", "repo", "description", "metadata"])
+        yield buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
+        for event in rows:
+            writer.writerow([
+                event.created_at.isoformat(),
+                event.actor_login or "system",
+                event.event_type,
+                event.severity,
+                event.repo_name or "",
+                event.summary,
+                json.dumps(event.metadata_json or {}, sort_keys=True),
+            ])
             yield buffer.getvalue()
             buffer.seek(0)
             buffer.truncate(0)
-            for event in rows:
-                writer.writerow([event.created_at.isoformat(), event.event_type, event.action, event.actor_login or "system", event.summary, event.repo_name or "", event.severity])
-                yield buffer.getvalue()
-                buffer.seek(0)
-                buffer.truncate(0)
 
-        return StreamingResponse(
-            stream_rows(),
-            media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=audit-log.csv"},
+    return StreamingResponse(
+        stream_rows(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=audit-log.csv"},
+    )
+
+
+@router.get("/{org_id}/audit-log/event-types", response_model=list[str])
+async def get_audit_log_event_types(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[str]:
+    _assert_org_scope(org_id, current_org_id)
+    rows = (
+        await db.execute(
+            select(AuditEvent.event_type)
+            .where(AuditEvent.org_id == org_id)
+            .distinct()
+            .order_by(AuditEvent.event_type)
         )
-    return AuditEventsResponse(total=total, events=[_audit_event_response(event) for event in rows], has_more=offset + len(rows) < total)
+    ).scalars().all()
+    return sorted({str(row) for row in rows if row})
 
 
 @router.get("/{org_id}/audit-log/stats", response_model=AuditStatsResponse)
@@ -5164,6 +5300,49 @@ async def test_llm_config(org_id: str, payload: LLMConfigUpdate, db: AsyncSessio
     except Exception as exc:
         await db.rollback()
         return LLMConfigTestResponse(success=False, response=None, error=str(exc))
+
+
+SKILLQL_SUGGESTIONS = {
+    "Agent Activity": [
+        "Which agents opened the most pull requests in the last 30 days?",
+        "Show agent sessions with weak outcomes this week.",
+        "Which agents loaded the most skills recently?",
+    ],
+    "Developer Insights": [
+        "Which developers had the most agent sessions in the last 30 days?",
+        "Show my recent sessions by outcome.",
+        "Which developers merged the most agent-authored PRs?",
+    ],
+    "Skill Health": [
+        "Which skills have low scores and high load counts?",
+        "Show stale security skills loaded in the last 30 days.",
+        "List testing skills with no recent loads.",
+    ],
+    "Policy & Risk": [
+        "Which red-risk PRs happened in the last 30 days?",
+        "Show critical audit events from this week.",
+        "Which agents have the most skill violations?",
+    ],
+}
+
+
+@router.post("/{org_id}/skillql", response_model=None)
+async def run_skillql(org_id: str, payload: SkillQLRequest, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> dict[str, Any] | JSONResponse:
+    _assert_org_scope(org_id, current_org_id)
+    try:
+        return await execute_skillql(payload.query, org_id, db)
+    except LLMNotConfiguredError:
+        return JSONResponse(status_code=422, content={"error": "llm_not_configured", "message": "SkillQL requires an LLM configured. Go to Settings → LLM."})
+    except SkillQLParseError as exc:
+        return JSONResponse(status_code=422, content={"error": "query_parse_failed", "message": str(exc)})
+    except LLMCallError as exc:
+        return JSONResponse(status_code=502, content={"error": "llm_call_failed", "message": str(exc)})
+
+
+@router.get("/{org_id}/skillql/suggestions")
+async def get_skillql_suggestions(org_id: str, current_org_id: str = Depends(get_current_org_id)) -> dict[str, list[str]]:
+    _assert_org_scope(org_id, current_org_id)
+    return SKILLQL_SUGGESTIONS
 
 
 def _parse_skillql(query: str) -> list[tuple[str, str, str]]:
@@ -6775,6 +6954,10 @@ async def update_org_slack_settings(
     org.slack_webhook_url = payload.webhook_url.strip() if payload.webhook_url else None
     org.slack_standup_enabled = bool(payload.standup_enabled)
     org.slack_standup_hour = int(payload.standup_hour)
+    if "signing_secret" in payload.model_fields_set:
+        org.slack_signing_secret = payload.signing_secret.strip() if payload.signing_secret else None
+    if "team_id" in payload.model_fields_set:
+        org.slack_team_id = payload.team_id.strip() if payload.team_id else None
     try:
         await db.commit()
     except SQLAlchemyError:
@@ -6783,9 +6966,68 @@ async def update_org_slack_settings(
     return {
         "ok": True,
         "slack_webhook_url": org.slack_webhook_url,
+        "slack_signing_secret_set": bool(getattr(org, "slack_signing_secret", None)),
+        "slack_team_id": getattr(org, "slack_team_id", None),
         "slack_standup_enabled": bool(org.slack_standup_enabled),
         "slack_standup_hour": int(org.slack_standup_hour or 9),
     }
+
+
+@router.patch("/{org_id}/settings/email-digest", response_model=None)
+async def update_org_email_digest_settings(
+    org_id: str,
+    payload: EmailDigestSettingsPayload,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object] | JSONResponse:
+    _assert_org_scope(org_id, current_org_id)
+    org = await db.get(Org, org_id)
+    if org is None:
+        return _error(404, "Org not found", "ORG_NOT_FOUND")
+    email = payload.digest_email.strip().lower() if payload.digest_email else None
+    if email and not _valid_email(email):
+        return _error(422, "Enter a valid digest email", "INVALID_DIGEST_EMAIL")
+    org.digest_email = email
+    org.digest_enabled = bool(payload.digest_enabled)
+    org.digest_day = int(payload.digest_day)
+    org.digest_hour = int(payload.digest_hour)
+    try:
+        await db.commit()
+    except SQLAlchemyError:
+        await _rollback(db, "org email digest settings update")
+        return _error(400, "Could not update email digest settings", "EMAIL_DIGEST_SETTINGS_UPDATE_FAILED")
+    settings_payload = org.settings if isinstance(org.settings, dict) else {}
+    return {
+        "ok": True,
+        "digest_email": org.digest_email,
+        "digest_enabled": bool(org.digest_enabled),
+        "digest_day": int(org.digest_day if org.digest_day is not None else 1),
+        "digest_hour": int(org.digest_hour if org.digest_hour is not None else 8),
+        "digest_last_sent_at": settings_payload.get("digest_last_sent_at"),
+    }
+
+
+@router.post("/{org_id}/digest/send", response_model=None)
+async def send_org_email_digest(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object] | JSONResponse:
+    _assert_org_scope(org_id, current_org_id)
+    org = await db.get(Org, org_id)
+    if org is None:
+        return _error(404, "Org not found", "ORG_NOT_FOUND")
+    if not org.digest_email:
+        return _error(400, "Digest email is not configured", "DIGEST_EMAIL_NOT_CONFIGURED")
+    try:
+        sent = await build_and_send_org_digest(org_id, db)
+    except HTTPException as exc:
+        return _error(exc.status_code, str(exc.detail), "EMAIL_DIGEST_SEND_FAILED")
+    except Exception:
+        return _error(502, "Could not send email digest", "EMAIL_DIGEST_SEND_FAILED")
+    if not sent:
+        return _error(502, "Could not send email digest", "EMAIL_DIGEST_SEND_FAILED")
+    return {"ok": True, "message": "Digest sent"}
 
 
 @router.post("/{org_id}/standup/send", response_model=None)

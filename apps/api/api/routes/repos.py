@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import UTC, datetime, timedelta
+from difflib import unified_diff
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -33,8 +34,9 @@ from apps.api.api.services.llm import LLMCallError, LLMNotConfiguredError, call_
 from apps.api.api.services.memory import run_session_knowledge_extraction
 from apps.api.api.services.pr_attribution import attribute_pr
 from apps.api.api.services.pr_risk import compute_risk_score
+from apps.api.api.services.snapshot import auto_snapshot_skill, rollback_skill
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AnalysisRun, Dependency, Org, PRAttribution, PullRequest, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillUsageEvent, SkillVersion
+from packages.db.models import AgentSession, AnalysisRun, Dependency, Org, PRAttribution, PullRequest, Repo, ScoreHistory, Skill, SkillMemoryStub, SkillSnapshot, SkillUsageEvent, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
     AnalysisRunResponse,
@@ -129,6 +131,10 @@ class CommitCheckRequest(BaseModel):
 
 class RepoDiffCheckRequest(BaseModel):
     diff: str = Field(min_length=1, max_length=500_000)
+
+
+class SkillSnapshotCreateRequest(BaseModel):
+    label: str | None = Field(default=None, max_length=255)
 
 
 def _serialize_pr_attribution(attribution: PRAttribution) -> dict[str, object]:
@@ -262,6 +268,47 @@ async def _repo_in_scope(db: AsyncSession, repo_id: str, org_id: str) -> Repo:
     if repo.org_id != org_id:
         raise HTTPException(status_code=403, detail="Forbidden")
     return repo
+
+
+async def _snapshot_actor(request: Request, db: AsyncSession, current_org_id: str | None) -> tuple[str, str]:
+    api_key = (
+        request.headers.get("x-api-key")
+        or request.headers.get("X-API-Key")
+        or request.headers.get("api-key")
+        or request.headers.get("API-Key")
+    )
+    if api_key:
+        org = (await db.execute(select(Org).where(Org.api_key == api_key))).scalar_one_or_none()
+        if org is None:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        return str(org.id), f"api_key:{getattr(org, 'login', None) or org.id}"
+    if current_org_id:
+        return current_org_id, get_actor_login(request)
+    raise HTTPException(status_code=401, detail="API key required")
+
+
+def _snapshot_metadata(snapshot: SkillSnapshot) -> dict[str, object]:
+    return {
+        "id": snapshot.id,
+        "skill_id": snapshot.skill_id,
+        "repo_id": snapshot.repo_id,
+        "snapshot_type": snapshot.snapshot_type,
+        "label": snapshot.label,
+        "score_total": snapshot.score_total,
+        "score_groundedness": snapshot.score_groundedness,
+        "score_coverage": snapshot.score_coverage,
+        "score_freshness": snapshot.score_freshness,
+        "score_structure": snapshot.score_structure,
+        "created_by": snapshot.created_by,
+        "created_at": snapshot.created_at.isoformat() if snapshot.created_at else None,
+    }
+
+
+async def _skill_in_repo(db: AsyncSession, repo_id: str, skill_id: str) -> Skill:
+    skill = await db.get(Skill, skill_id)
+    if skill is None or skill.repo_id != repo_id:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return skill
 
 
 def _normalized_source_type(skill: Skill) -> str:
@@ -741,6 +788,128 @@ async def get_repo_skills(
             "last_updated_at": latest_version.created_at if latest_version else skill.created_at,
         })
     return responses
+
+
+@router.get("/{repo_id}/skills/{skill_id}/snapshots")
+async def list_skill_snapshots(
+    repo_id: str,
+    skill_id: str,
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> list[dict[str, object]]:
+    org_id, _actor = await _snapshot_actor(request, db, current_org_id)
+    await _repo_in_scope(db, repo_id, org_id)
+    await _skill_in_repo(db, repo_id, skill_id)
+    statement = select(SkillSnapshot).where(SkillSnapshot.repo_id == repo_id, SkillSnapshot.skill_id == skill_id)
+    if cursor:
+        try:
+            cursor_at = datetime.fromisoformat(cursor.replace("Z", "+00:00")).replace(tzinfo=None)
+            statement = statement.where(SkillSnapshot.created_at < cursor_at)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor") from None
+    snapshots = (
+        await db.execute(statement.order_by(desc(SkillSnapshot.created_at)).limit(limit))
+    ).scalars().all()
+    return [_snapshot_metadata(snapshot) for snapshot in snapshots]
+
+
+@router.get("/{repo_id}/skills/{skill_id}/snapshots/{snapshot_id}")
+async def get_skill_snapshot(
+    repo_id: str,
+    skill_id: str,
+    snapshot_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> dict[str, object]:
+    org_id, _actor = await _snapshot_actor(request, db, current_org_id)
+    await _repo_in_scope(db, repo_id, org_id)
+    await _skill_in_repo(db, repo_id, skill_id)
+    snapshot = await db.get(SkillSnapshot, snapshot_id)
+    if snapshot is None or snapshot.skill_id != skill_id or snapshot.repo_id != repo_id:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    return {**_snapshot_metadata(snapshot), "content": snapshot.content}
+
+
+@router.get("/{repo_id}/skills/{skill_id}/snapshots/{snapshot_id}/diff")
+async def get_skill_snapshot_diff(
+    repo_id: str,
+    skill_id: str,
+    snapshot_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> Response:
+    org_id, _actor = await _snapshot_actor(request, db, current_org_id)
+    await _repo_in_scope(db, repo_id, org_id)
+    skill = await _skill_in_repo(db, repo_id, skill_id)
+    snapshot = await db.get(SkillSnapshot, snapshot_id)
+    if snapshot is None or snapshot.skill_id != skill_id or snapshot.repo_id != repo_id:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    diff = "".join(
+        unified_diff(
+            (snapshot.content or "").splitlines(keepends=True),
+            (skill.content or "").splitlines(keepends=True),
+            fromfile=f"snapshot/{snapshot.id}",
+            tofile="current",
+        )
+    )
+    return Response(content=diff, media_type="text/plain")
+
+
+@router.post("/{repo_id}/skills/{skill_id}/snapshots")
+async def create_skill_snapshot(
+    repo_id: str,
+    skill_id: str,
+    payload: SkillSnapshotCreateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> dict[str, object]:
+    org_id, actor = await _snapshot_actor(request, db, current_org_id)
+    await _repo_in_scope(db, repo_id, org_id)
+    skill = await _skill_in_repo(db, repo_id, skill_id)
+    try:
+        snapshot = await auto_snapshot_skill(
+            skill,
+            db,
+            snapshot_type="manual",
+            label=(payload.label or "").strip() or None,
+            created_by=actor,
+            idempotent=False,
+        )
+        await db.commit()
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to create snapshot") from exc
+    return _snapshot_metadata(snapshot)
+
+
+@router.post("/{repo_id}/skills/{skill_id}/rollback/{snapshot_id}")
+async def rollback_repo_skill(
+    repo_id: str,
+    skill_id: str,
+    snapshot_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> dict[str, object]:
+    org_id, actor = await _snapshot_actor(request, db, current_org_id)
+    await _repo_in_scope(db, repo_id, org_id)
+    await _skill_in_repo(db, repo_id, skill_id)
+    try:
+        _skill, pre_edit = await rollback_skill(skill_id, snapshot_id, db, actor)
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Unable to rollback skill") from exc
+    return {"ok": True, "snapshot_id": snapshot_id, "pre_edit_snapshot_id": pre_edit.id}
 
 
 @router.get("/{repo_id}/skills/{skill_id}/usage-stats", response_model=RepoSkillUsageStatsResponse)

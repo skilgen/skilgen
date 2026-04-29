@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, BigInteger, String
+from sqlalchemy import JSON, BigInteger, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from packages.db.models.base import Base, new_uuid, utcnow
@@ -29,8 +29,14 @@ class Org(Base):
     plan_seat_limit: Mapped[int] = mapped_column(default=3)
     score_threshold: Mapped[int] = mapped_column(default=60)
     slack_webhook_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    slack_signing_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slack_team_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_standup_enabled: Mapped[bool] = mapped_column(default=False)
     slack_standup_hour: Mapped[int] = mapped_column(default=9)
+    digest_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    digest_enabled: Mapped[bool] = mapped_column(default=False)
+    digest_day: Mapped[int] = mapped_column(default=1)
+    digest_hour: Mapped[int] = mapped_column(default=8)
     notify_on_pr: Mapped[bool] = mapped_column(default=True)
     notify_on_stale: Mapped[bool] = mapped_column(default=True)
     notification_settings: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True, default=dict)

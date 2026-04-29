@@ -65,6 +65,7 @@ class Skill(Base):
     load_count_30d: Mapped[int] = mapped_column(default=0)
     last_loaded_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
     repo: Mapped["Repo"] = relationship(back_populates="skills")
     versions: Mapped[list["SkillVersion"]] = relationship(

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.api.github import clone_repo
 from apps.api.api.notifications import build_stale_skill_message, post_slack_message
 from apps.api.api.services.llm_config import configured_llm_environment, get_repo_llm_config
+from apps.api.api.services.snapshot import snapshot_repo_skills
 from packages.db.models import AnalysisRun, Dependency, Org, Repo, ScoreHistory, Skill, SkillVersion
 from packages.db.models.skill import skill_category_for_source_type
 from skilgen.core.dependency_risk import analyze_dependency_risks
@@ -597,6 +598,7 @@ async def run_analysis(
             domain_count=int(analysis_result.get("domain_count") or len({entry["domain"] for entry in skill_files})),
             skill_count=int(analysis_result.get("skill_count") or len(saved_skills)),
         )
+        await snapshot_repo_skills(repo_id, db, snapshot_type="auto")
         await update_repo_analysed(db, repo_id)
         await db.commit()
         await _notify_stale_skills(db, repo_id, full_name, saved_skills)
