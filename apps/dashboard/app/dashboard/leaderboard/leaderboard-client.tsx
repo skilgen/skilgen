@@ -45,7 +45,7 @@ type Props = {
 };
 
 async function fetchLeaderboard(accessToken: string, orgId: string, days: number, sortBy: string): Promise<DeveloperLeaderboardResponse> {
-  const params = new URLSearchParams({ days: String(days), sort_by: sortBy });
+  const params = new URLSearchParams({ days: String(days), sort_by: sortBy, include_trend: "true" });
   const response = await fetch(`${API_URL}/orgs/${orgId}/developer-leaderboard?${params.toString()}`, {
     headers: { "Content-Type": "application/json", ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
     cache: "no-store",
@@ -86,6 +86,40 @@ function riskTone(value: number): string {
   if (value >= 70) return "bg-red-400 text-red-200";
   if (value >= 30) return "bg-amber-400 text-amber-200";
   return "bg-[color:var(--accent-green)] text-[color:var(--accent-green)]";
+}
+
+function trendMeta(row: DeveloperLeaderboardEntry): { label: string; className: string } {
+  if (!row.trend) return { label: "→", className: "bg-white/5 text-[color:var(--text-tertiary)]" };
+  const value = `${row.trend.compliance_delta > 0 ? "+" : ""}${Math.round(row.trend.compliance_delta)}%`;
+  if (row.trend.direction === "up") return { label: `▲ ${value}`, className: "bg-[color:var(--accent-green)]/15 text-[color:var(--accent-green)]" };
+  if (row.trend.direction === "down") return { label: `▼ ${value}`, className: "bg-red-500/15 text-red-200" };
+  return { label: `→ ${value}`, className: "bg-white/5 text-[color:var(--text-tertiary)]" };
+}
+
+function TrendBadge({ row }: { row: DeveloperLeaderboardEntry }) {
+  const meta = trendMeta(row);
+  return <span className={cn("whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-semibold", meta.className)}>{meta.label}</span>;
+}
+
+function Sparkline({ values, direction }: { values?: Array<number | null>; direction?: "up" | "down" | "flat" }) {
+  const points = values ?? [];
+  const plotted = points.map((value, index) => ({ value, index })).filter((point): point is { value: number; index: number } => typeof point.value === "number");
+  const stroke = direction === "up" ? "var(--accent-green)" : direction === "down" ? "#f87171" : "var(--text-tertiary)";
+  if (plotted.length < 2) {
+    return <div className="h-5 w-[60px] rounded bg-white/5" aria-label="Not enough trend data" />;
+  }
+  const polyline = plotted
+    .map(({ value, index }) => {
+      const x = (index / Math.max(1, points.length - 1)) * 60;
+      const y = 20 - (Math.max(0, Math.min(100, value)) / 100) * 18 - 1;
+      return `${x},${y}`;
+    })
+    .join(" ");
+  return (
+    <svg className="h-5 w-[60px]" role="img" aria-label="7 day compliance trend" viewBox="0 0 60 20">
+      <polyline fill="none" points={polyline} stroke={stroke} strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+    </svg>
+  );
 }
 
 function mergedTone(row: DeveloperLeaderboardEntry): string {
@@ -153,6 +187,7 @@ function PodiumCard({ row, index }: { row: DeveloperLeaderboardEntry; index: num
       </div>
       <div className="mt-4 text-lg font-semibold text-[color:var(--text-primary)]">@{row.login}</div>
       <div className="mt-2 text-3xl font-semibold text-[color:var(--text-primary)]">{Math.round(row.compliance_pct)}%</div>
+      <div className="mt-2"><TrendBadge row={row} /></div>
       <div className="mt-3 flex flex-wrap gap-2 text-xs text-[color:var(--text-secondary)]">
         <span>{formatNumber(row.sessions_count)} sessions</span>
         <span>{formatNumber(row.prs_merged)} merged</span>
@@ -292,10 +327,10 @@ export function LeaderboardClient({ accessToken, orgId, initialDays, initialSort
           </div>
 
           <div className={cn("overflow-x-auto rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]", loading && "opacity-70")}>
-            <table className="min-w-[1680px] w-full border-collapse text-left">
+            <table className="min-w-[1760px] w-full border-collapse text-left">
               <thead className="border-b border-[color:var(--bg-border)] bg-black/15 text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">
                 <tr>
-                  {["#", "Developer", "Sessions", "Files", "Lines", "PRs", "Merged", "Violations", "Warnings", "Compliance", "Avg Risk", "Agents", "Top Skills", "Top Violations", "Last Active"].map((heading) => (
+                  {["#", "Developer", "Sessions", "Files", "Lines", "PRs", "Merged", "Violations", "Warnings", "Compliance", "Trend", "Avg Risk", "Agents", "Top Skills", "Top Violations", "Last Active"].map((heading) => (
                     <th className="px-4 py-3" key={heading}>{heading}</th>
                   ))}
                 </tr>
@@ -324,13 +359,15 @@ export function LeaderboardClient({ accessToken, orgId, initialDays, initialSort
                         <span className={cn("rounded-full px-2 py-1 text-xs font-semibold", row.warnings_total > 0 ? "bg-amber-500/15 text-amber-200" : "bg-white/5 text-[color:var(--text-secondary)]")}>{formatNumber(row.warnings_total)}</span>
                       </td>
                       <td className="px-4 py-4">
-                        <div className="flex min-w-[130px] items-center gap-2">
+                        <div className="flex min-w-[170px] items-center gap-2">
                           <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/5">
                             <div className={cn("h-full rounded-full", complianceClass.split(" ")[0])} style={{ width: `${Math.max(0, Math.min(100, row.compliance_pct))}%` }} />
                           </div>
                           <span className={cn("w-10 text-right text-xs font-semibold", complianceClass.split(" ")[1])}>{Math.round(row.compliance_pct)}%</span>
+                          <TrendBadge row={row} />
                         </div>
                       </td>
+                      <td className="px-4 py-4"><Sparkline direction={row.trend?.direction} values={row.sparkline} /></td>
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-2">
                           <span className={cn("h-2.5 w-2.5 rounded-full", riskClass.split(" ")[0])} />
@@ -390,8 +427,8 @@ function LeaderboardSkeletonInline() {
       </div>
       <div className="overflow-hidden rounded-[24px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
         {[...Array(8)].map((_, row) => (
-          <div className="grid min-w-[1680px] grid-cols-[60px_160px_repeat(13,100px)] gap-4 border-b border-[color:var(--bg-border)] p-4" key={row}>
-            {[...Array(15)].map((__, cell) => <div className="h-5 animate-pulse rounded bg-white/5" key={cell} />)}
+          <div className="grid min-w-[1760px] grid-cols-[60px_160px_repeat(14,100px)] gap-4 border-b border-[color:var(--bg-border)] p-4" key={row}>
+            {[...Array(16)].map((__, cell) => <div className="h-5 animate-pulse rounded bg-white/5" key={cell} />)}
           </div>
         ))}
       </div>

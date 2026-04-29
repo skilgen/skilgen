@@ -40,6 +40,7 @@ from apps.api.api.services.dependency_analyzer import compute_cross_repo_depende
 from apps.api.api.services.half_life import compute_skill_decay_timeline, predict_half_life_days
 from apps.api.api.services.knowledge_concentration import concentration_response
 from apps.api.api.services.llm import LLMCallError, LLMNotConfiguredError, call_llm
+from apps.api.api.services.manifest import verify_manifest
 from apps.api.api.services.skill_generator import generate_skill_with_ai
 from packages.db.llm_key import decrypt_key, encrypt_key, key_hint
 from apps.api.api.services.policy import POLICY_RULE_TYPES, PolicyViolation, evaluate_policies
@@ -107,6 +108,10 @@ class DebtGapGenerateRequest(BaseModel):
 class DebtGenerateAllRequest(BaseModel):
     domains: list[str] | None = None
     repo_ids: list[str] | None = None
+
+
+class ManifestVerifyRequest(BaseModel):
+    manifest: dict[str, Any]
 
 SOURCE_TYPE_DISPLAY_NAMES = {
     "code": "Codebase",
@@ -6144,6 +6149,7 @@ async def get_developer_leaderboard(
     org_id: str,
     days: int = Query(default=30, ge=1, le=180),
     sort_by: Literal["compliance", "prs", "sessions", "violations", "lines"] = Query(default="compliance"),
+    include_trend: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id),
 ) -> dict[str, object]:
@@ -6224,6 +6230,7 @@ async def get_developer_leaderboard(
     risk_sums: dict[str, int] = defaultdict(int)
     risk_counts: dict[str, int] = defaultdict(int)
     clean_prs: dict[str, int] = defaultdict(int)
+    prs_by_login: dict[str, list[PullRequest]] = defaultdict(list)
 
     def row_for(login: str) -> dict[str, object]:
         return developers.setdefault(
@@ -6281,6 +6288,7 @@ async def get_developer_leaderboard(
             row["prs_merged"] = int(row["prs_merged"]) + 1
         elif pr.closed_at is not None or pr.state == "closed":
             row["prs_reverted"] = int(row["prs_reverted"]) + 1
+        prs_by_login[login].append(pr)
 
         attribution = attr_by_pr.get(pr.id)
         violations, warnings = _finding_counts(attribution)
@@ -6333,6 +6341,85 @@ async def get_developer_leaderboard(
         return (-float(row["compliance_pct"]), -int(row["prs_merged"]), -int(row["sessions_count"]), str(row["login"]))
 
     developer_rows.sort(key=sort_key)
+
+    if include_trend:
+        previous_cutoff = cutoff - timedelta(days=days)
+        previous_pr_rows = list(
+            (
+                await db.execute(
+                    select(PullRequest).where(
+                        PullRequest.repo_id.in_(repo_ids),
+                        PullRequest.opened_at >= previous_cutoff,
+                        PullRequest.opened_at < cutoff,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        previous_pr_rows = [
+            pr
+            for pr in previous_pr_rows
+            if str(pr.author_login or "").strip()
+            and _dt_naive(pr.opened_at) is not None
+            and previous_cutoff <= _dt_naive(pr.opened_at) < cutoff
+        ]
+        previous_pr_ids = [pr.id for pr in previous_pr_rows]
+        previous_attributions = (
+            list((await db.execute(select(PRAttribution).where(PRAttribution.pr_id.in_(previous_pr_ids)))).scalars().all())
+            if previous_pr_ids
+            else []
+        )
+        previous_attr_by_pr = {attr.pr_id: attr for attr in previous_attributions}
+        previous_stats: dict[str, dict[str, float | int]] = defaultdict(lambda: {"prs": 0, "clean": 0, "violations": 0})
+        for pr in previous_pr_rows:
+            login = str(pr.author_login or "").strip()
+            attr = previous_attr_by_pr.get(pr.id)
+            violations, _warnings = _finding_counts(attr)
+            previous_stats[login]["prs"] = int(previous_stats[login]["prs"]) + 1
+            previous_stats[login]["violations"] = int(previous_stats[login]["violations"]) + violations
+            if violations == 0:
+                previous_stats[login]["clean"] = int(previous_stats[login]["clean"]) + 1
+
+        spark_dates = [(generated_at.date() - timedelta(days=6 - index)) for index in range(7)]
+        for row in developer_rows:
+            login = str(row["login"])
+            previous = previous_stats.get(login)
+            if previous and int(previous["prs"]) > 0:
+                previous_compliance = (int(previous["clean"]) / int(previous["prs"])) * 100
+                compliance_delta = round(float(row["compliance_pct"]) - previous_compliance, 1)
+                if compliance_delta > 2:
+                    direction = "up"
+                elif compliance_delta < -2:
+                    direction = "down"
+                else:
+                    direction = "flat"
+                row["trend"] = {
+                    "compliance_delta": compliance_delta,
+                    "violations_delta": int(row["violations_total"]) - int(previous["violations"]),
+                    "direction": direction,
+                }
+            else:
+                row["trend"] = None
+
+            sparkline: list[float | None] = []
+            for day in spark_dates:
+                day_prs = [
+                    pr
+                    for pr in prs_by_login.get(login, [])
+                    if _dt_naive(pr.opened_at) is not None and _dt_naive(pr.opened_at).date() == day
+                ]
+                if not day_prs:
+                    sparkline.append(None)
+                    continue
+                clean_count = 0
+                for pr in day_prs:
+                    violations, _warnings = _finding_counts(attr_by_pr.get(pr.id))
+                    if violations == 0:
+                        clean_count += 1
+                sparkline.append(round((clean_count / len(day_prs)) * 100, 1))
+            row["sparkline"] = sparkline
+
     for index, row in enumerate(developer_rows, start=1):
         row["rank"] = index
 
@@ -6479,6 +6566,54 @@ async def get_agent_pr_detail(
         "violations": violations,
         "sessions": sessions,
         "checks": _check_runs(pr_item),
+    }
+
+
+@router.get("/{org_id}/agent-prs/{pr_id}/manifest")
+async def get_agent_pr_manifest(
+    org_id: str,
+    pr_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    pr_item = await db.get(PullRequest, pr_id)
+    if pr_item is None:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+    repo_item = await db.get(Repo, pr_item.repo_id)
+    if repo_item is None or repo_item.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+    attr = (await db.execute(select(PRAttribution).where(PRAttribution.pr_id == pr_id))).scalar_one_or_none()
+    if attr is None or not attr.signed_manifest:
+        raise HTTPException(status_code=404, detail="Manifest not yet generated")
+    return {
+        "manifest": attr.signed_manifest,
+        "signed_at": attr.manifest_signed_at.isoformat() if attr.manifest_signed_at else None,
+    }
+
+
+@router.post("/{org_id}/agent-prs/{pr_id}/manifest/verify")
+async def verify_agent_pr_manifest(
+    org_id: str,
+    pr_id: str,
+    payload: ManifestVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    _assert_org_scope(org_id, current_org_id)
+    pr_item = await db.get(PullRequest, pr_id)
+    if pr_item is None:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+    repo_item = await db.get(Repo, pr_item.repo_id)
+    if repo_item is None or repo_item.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+    org = await db.get(Org, org_id)
+    if org is None or not org.api_key:
+        raise HTTPException(status_code=404, detail="Organization API key not configured")
+    valid = verify_manifest(payload.manifest, org.api_key)
+    return {
+        "valid": valid,
+        "message": "Manifest signature is valid." if valid else "Manifest signature is invalid or missing.",
     }
 
 

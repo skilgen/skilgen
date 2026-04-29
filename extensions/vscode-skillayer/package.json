@@ -1,0 +1,38 @@
+{
+  "name": "skillayer",
+  "displayName": "Skillayer - Skill Review",
+  "description": "Inline skill violation checking powered by Skillayer",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Linters"],
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      { "command": "skillayer.checkFile", "title": "Skillayer: Check Current File" },
+      { "command": "skillayer.checkStaged", "title": "Skillayer: Check Staged Changes" },
+      { "command": "skillayer.clearDiagnostics", "title": "Skillayer: Clear Diagnostics" }
+    ],
+    "configuration": {
+      "title": "Skillayer",
+      "properties": {
+        "skillayer.apiKey": { "type": "string", "description": "Your Skillayer API key" },
+        "skillayer.repoId": { "type": "string", "description": "Skillayer repo ID to check against" },
+        "skillayer.apiUrl": { "type": "string", "default": "https://api.skillayer.com", "description": "Skillayer API base URL" },
+        "skillayer.checkOnSave": { "type": "boolean", "default": false, "description": "Run skill check on every file save" },
+        "skillayer.severity.violations": { "type": "string", "enum": ["Error", "Warning", "Information"], "default": "Error" },
+        "skillayer.severity.warnings": { "type": "string", "enum": ["Error", "Warning", "Information"], "default": "Warning" }
+      }
+    }
+  },
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.0.0"
+  }
+}

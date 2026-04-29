@@ -34,6 +34,8 @@ class PRAttribution(Base):
     risk_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     risk_tier: Mapped[str] = mapped_column(String(16), default="green", nullable=False)
     risk_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    signed_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    manifest_signed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     computed_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
