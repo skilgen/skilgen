@@ -14,9 +14,10 @@
     },
     "backend": {
       "name": "fastapi",
-      "confidence": 0.8500000000000001,
+      "confidence": 0.99,
       "evidence": [
         "main.py",
+        "app/api",
         "pyproject.toml"
       ]
     },
@@ -4452,6 +4453,27 @@
         "related_imports": []
       },
       {
+        "path": "apps/api/api/auth.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import hmac",
+          "import os",
+          "import time",
+          "from typing import Any",
+          "import httpx",
+          "from fastapi import Depends, Header, HTTPException",
+          "from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer",
+          "from jose import JWTError, jwk, jwt",
+          "from jose.utils import base64url_decode",
+          "from sqlalchemy import select",
+          "from sqlalchemy.ext.asyncio import AsyncSession"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/core/models.py",
         "kind": "source",
         "language": "python",
@@ -4475,27 +4497,6 @@
           "dataclasses",
           "pathlib"
         ]
-      },
-      {
-        "path": "apps/api/api/auth.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import time",
-          "from typing import Any",
-          "import httpx",
-          "from fastapi import Depends, HTTPException",
-          "from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer",
-          "from jose import JWTError, jwk, jwt",
-          "from jose.utils import base64url_decode",
-          "from sqlalchemy import select",
-          "from sqlalchemy.ext.asyncio import AsyncSession",
-          "from packages.db.database import get_db",
-          "from packages.db.config import settings"
-        ],
-        "related_imports": []
       },
       {
         "path": "skilgen/agents/codebase_signals.py",
@@ -4576,27 +4577,6 @@
         ]
       },
       {
-        "path": "packages/db/models/skill.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from datetime import datetime",
-          "from typing import TYPE_CHECKING",
-          "from sqlalchemy import Boolean, ForeignKey, JSON, String, Text",
-          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
-          "from packages.db.models.base import Base, new_uuid, utcnow",
-          "if TYPE_CHECKING:",
-          "from packages.db.models.repo import Repo",
-          "from packages.db.models.skill_version import SkillVersion",
-          "SOURCE_TYPE_TO_CATEGORY: dict[str, str] = {",
-          "\"code\": \"codebase_architecture\",",
-          "\"openapi\": \"internal_tools\","
-        ],
-        "related_imports": []
-      },
-      {
         "path": "skilgen/core/requirements.py",
         "kind": "source",
         "language": "python",
@@ -4643,6 +4623,27 @@
           "from dataclasses import asdict",
           "from datetime import UTC, datetime, timedelta",
           "import hashlib"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "packages/db/models/skill.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "from typing import TYPE_CHECKING",
+          "from sqlalchemy import Boolean, ForeignKey, JSON, String, Text",
+          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
+          "from packages.db.models.base import Base, new_uuid, utcnow",
+          "if TYPE_CHECKING:",
+          "from packages.db.models.repo import Repo",
+          "from packages.db.models.skill_version import SkillVersion",
+          "SOURCE_TYPE_TO_CATEGORY: dict[str, str] = {",
+          "\"code\": \"codebase_architecture\",",
+          "\"openapi\": \"internal_tools\","
         ],
         "related_imports": []
       },
@@ -4766,27 +4767,6 @@
         "related_imports": []
       },
       {
-        "path": "packages/db/config.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from pydantic_settings import BaseSettings, SettingsConfigDict",
-          "class Settings(BaseSettings):",
-          "DATABASE_URL: str = \"\"",
-          "DATABASE_URL_UNPOOLED: str = \"\"",
-          "DEBUG: bool = False",
-          "GITHUB_APP_ID: str = \"\"",
-          "GITHUB_APP_PRIVATE_KEY: str = \"\"",
-          "GITHUB_WEBHOOK_SECRET: str = \"\"",
-          "WORKOS_API_KEY: str = \"\"",
-          "WORKOS_CLIENT_ID: str = \"\"",
-          "OIDC_ISSUER_URL: str = \"\""
-        ],
-        "related_imports": []
-      },
-      {
         "path": "apps/api/api/analysis.py",
         "kind": "source",
         "language": "python",
@@ -4841,6 +4821,27 @@
           "time",
           "typing"
         ]
+      },
+      {
+        "path": "packages/db/config.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from pydantic_settings import BaseSettings, SettingsConfigDict",
+          "class Settings(BaseSettings):",
+          "DATABASE_URL: str = \"\"",
+          "DATABASE_URL_UNPOOLED: str = \"\"",
+          "DEBUG: bool = False",
+          "GITHUB_APP_ID: str = \"\"",
+          "GITHUB_APP_PRIVATE_KEY: str = \"\"",
+          "GITHUB_WEBHOOK_SECRET: str = \"\"",
+          "WORKOS_API_KEY: str = \"\"",
+          "WORKOS_CLIENT_ID: str = \"\"",
+          "OIDC_ISSUER_URL: str = \"\""
+        ],
+        "related_imports": []
       },
       {
         "path": "packages/db/models/__init__.py",
@@ -5218,6 +5219,27 @@
         ]
       },
       {
+        "path": "apps/api/api/services/commit_check.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import time",
+          "from dataclasses import dataclass",
+          "from datetime import datetime",
+          "from typing import Any",
+          "import httpx",
+          "from sqlalchemy import select",
+          "from sqlalchemy.ext.asyncio import AsyncSession",
+          "from apps.api.api.github import get_installation_token",
+          "from apps.api.api.pr_comment import (",
+          "build_violation_comment,",
+          "create_skill_review_check_run,"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/cli/main.py",
         "kind": "source",
         "language": "python",
@@ -5412,27 +5434,6 @@
           "skilgen/deep_agents_core.py",
           "typing"
         ]
-      },
-      {
-        "path": "apps/api/api/services/commit_check.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import time",
-          "from dataclasses import dataclass",
-          "from datetime import datetime",
-          "from typing import Any",
-          "import httpx",
-          "from sqlalchemy import select",
-          "from sqlalchemy.ext.asyncio import AsyncSession",
-          "from apps.api.api.github import get_installation_token",
-          "from apps.api.api.pr_comment import (",
-          "build_violation_comment,",
-          "create_skill_review_check_run,"
-        ],
-        "related_imports": []
       },
       {
         "path": "skilgen/agents/decision_planner.py",
@@ -13545,6 +13546,7 @@
         "env:GITHUB_APP_ID",
         "env:GITHUB_APP_PRIVATE_KEY",
         "env:GITHUB_WEBHOOK_SECRET",
+        "env:NEXT_PUBLIC_ADMIN_EMAILS",
         "env:NEXT_PUBLIC_API_URL",
         "env:NEXT_PUBLIC_APP_URL",
         "env:NEXT_PUBLIC_DASHBOARD_URL",
@@ -13613,6 +13615,8 @@
         "env:QSTASH_NEXT_SIGNING_KEY",
         "env:QSTASH_TOKEN",
         "env:REDIS_URL",
+        "env:SKILLAYER_INSTANCE",
+        "env:SKILLAYER_VERSION",
         "env:SMTP_FROM",
         "env:SMTP_HOST",
         "env:SMTP_PASSWORD",
