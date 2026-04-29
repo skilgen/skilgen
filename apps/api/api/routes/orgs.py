@@ -5,7 +5,6 @@ import base64
 from collections import defaultdict
 from itertools import combinations
 import json
-import os
 import socket
 import urllib.error
 import urllib.request
@@ -7029,21 +7028,6 @@ async def send_org_email_digest(
     if not sent:
         return _error(502, "Could not send email digest", "EMAIL_DIGEST_SEND_FAILED")
     return {"ok": True, "message": "Digest sent"}
-
-
-@router.get("/{org_id}/digest/debug", response_model=None)
-async def get_org_digest_debug(
-    org_id: str,
-    current_org_id: str = Depends(get_current_org_id),
-) -> dict[str, str]:
-    _assert_org_scope(org_id, current_org_id)
-    return {
-        "SMTP_HOST": os.getenv("SMTP_HOST", "NOT SET"),
-        "SMTP_PORT": os.getenv("SMTP_PORT", "NOT SET"),
-        "SMTP_USER": os.getenv("SMTP_USER", "NOT SET"),
-        "SMTP_PASSWORD": "SET" if os.getenv("SMTP_PASSWORD") else "NOT SET",
-        "SMTP_FROM": os.getenv("SMTP_FROM", "NOT SET"),
-    }
 
 
 @router.post("/{org_id}/standup/send", response_model=None)
