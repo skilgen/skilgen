@@ -29,6 +29,7 @@ import { ApiAccessPanel } from "./api-access-panel";
 import { ManageBillingButton } from "./billing/manage-billing-button";
 import { LLMConfigPanel } from "./llm-config-panel";
 import { AgentIntegrationPanel } from "./agent-integration-panel";
+import { EmailDigestCard } from "./email-digest-card";
 import { PolicySettingsPanel, SiemSettingsPanel } from "./enterprise-settings";
 import { SlackStandupCard } from "./slack-standup-card";
 import { SettingsControls } from "./settings-controls";
@@ -100,8 +101,15 @@ function fallbackSettings(): OrgSettings {
     plan: "business",
     score_threshold: 60,
     slack_webhook_url: null,
+    slack_signing_secret_set: false,
+    slack_team_id: null,
     slack_standup_enabled: false,
     slack_standup_hour: 9,
+    digest_email: null,
+    digest_enabled: false,
+    digest_day: 1,
+    digest_hour: 8,
+    digest_last_sent_at: null,
     notify_on_pr: true,
     notify_on_stale: true,
     github_app_installed: false,
@@ -197,13 +205,26 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps):
           <div className="space-y-8">
             <SettingsControls accessToken={accessToken} initialPolicies={policies.policies} initialSettings={settings} orgId={settings.id} tab={tab} />
             {tab === "notifications" ? (
-              <SlackStandupCard
-                accessToken={accessToken}
-                initialEnabled={settings.slack_standup_enabled}
-                initialHour={settings.slack_standup_hour}
-                initialWebhookUrl={settings.slack_webhook_url}
-                orgId={settings.id}
-              />
+              <>
+                <SlackStandupCard
+                  accessToken={accessToken}
+                  initialEnabled={settings.slack_standup_enabled}
+                  initialHour={settings.slack_standup_hour}
+                  initialSigningSecretSet={settings.slack_signing_secret_set}
+                  initialTeamId={settings.slack_team_id}
+                  initialWebhookUrl={settings.slack_webhook_url}
+                  orgId={settings.id}
+                />
+                <EmailDigestCard
+                  accessToken={accessToken}
+                  initialDay={settings.digest_day}
+                  initialEmail={settings.digest_email}
+                  initialEnabled={settings.digest_enabled}
+                  initialHour={settings.digest_hour}
+                  initialLastSentAt={settings.digest_last_sent_at}
+                  orgId={settings.id}
+                />
+              </>
             ) : null}
           </div>
         ) : null}

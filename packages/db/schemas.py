@@ -32,8 +32,15 @@ class OrgSettingsResponse(BaseModel):
     plan: str
     score_threshold: int
     slack_webhook_url: str | None
+    slack_signing_secret_set: bool = False
+    slack_team_id: str | None = None
     slack_standup_enabled: bool = False
     slack_standup_hour: int = 9
+    digest_email: str | None = None
+    digest_enabled: bool = False
+    digest_day: int = 1
+    digest_hour: int = 8
+    digest_last_sent_at: str | None = None
     notify_on_pr: bool
     notify_on_stale: bool
     anthropic_api_key_set: bool = False
@@ -53,6 +60,10 @@ class OrgSettingsUpdate(BaseModel):
     slack_webhook_url: AnyHttpUrl | None = None
     slack_standup_enabled: bool | None = None
     slack_standup_hour: int | None = Field(default=None, ge=0, le=23)
+    digest_email: str | None = Field(default=None, max_length=320)
+    digest_enabled: bool | None = None
+    digest_day: int | None = Field(default=None, ge=0, le=6)
+    digest_hour: int | None = Field(default=None, ge=0, le=23)
     notify_on_pr: bool | None = None
     notify_on_stale: bool | None = None
 

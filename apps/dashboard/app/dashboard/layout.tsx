@@ -23,6 +23,7 @@ import {
   Mail,
   Settings,
   ShieldCheck,
+  Sparkles,
   ScrollText,
   AlertTriangle,
   ShieldAlert,
@@ -176,6 +177,7 @@ export default async function DashboardLayout({
     History,
     Inbox,
     ShieldCheck,
+    Sparkles,
     FlaskConical,
     Zap,
   };
@@ -212,6 +214,7 @@ export default async function DashboardLayout({
         { href: "/dashboard/ai-readiness", label: "AI Readiness", icon: "Brain" },
         { href: "/dashboard/analytics", label: "Analytics", icon: "ClipboardList" },
         { href: "/dashboard/eval", label: "Agent Performance", icon: "BarChart2" },
+        { href: "/dashboard/skillql", label: "SkillQL", icon: "Sparkles" },
         { href: "/dashboard/eval/gaps", label: "Skill Gaps", icon: "AlertTriangle", badge: navBadges.skillGapCount ? `${navBadges.skillGapCount} open gaps` : undefined, badgeVariant: "dot" },
         { href: "/dashboard/eval/ab-tests", label: "A/B Tests", icon: "FlaskConical" },
       ],

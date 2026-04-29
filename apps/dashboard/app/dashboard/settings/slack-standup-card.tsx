@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Loader2, Send, Slack, Save } from "lucide-react";
+import { CheckCircle2, Copy, Loader2, Send, Slack, Save } from "lucide-react";
 import { useMemo, useState } from "react";
 
 const CLIENT_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -11,6 +11,8 @@ type Props = {
   initialWebhookUrl: string | null;
   initialEnabled?: boolean;
   initialHour?: number;
+  initialSigningSecretSet?: boolean;
+  initialTeamId?: string | null;
 };
 
 type Status = {
@@ -25,21 +27,26 @@ function headers(accessToken: string): HeadersInit {
   };
 }
 
-export function SlackStandupCard({ accessToken, orgId, initialWebhookUrl, initialEnabled = false, initialHour = 9 }: Props) {
+export function SlackStandupCard({ accessToken, orgId, initialWebhookUrl, initialEnabled = false, initialHour = 9, initialSigningSecretSet = false, initialTeamId = null }: Props) {
   const [webhookUrl, setWebhookUrl] = useState(initialWebhookUrl ?? "");
   const [enabled, setEnabled] = useState(Boolean(initialEnabled));
   const [hour, setHour] = useState(Number.isFinite(initialHour) ? initialHour : 9);
+  const [signingSecret, setSigningSecret] = useState("");
+  const [teamId, setTeamId] = useState(initialTeamId ?? "");
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<Status>(null);
+  const commandEndpoint = `${CLIENT_API_URL}/webhooks/slack/command`;
 
   const body = useMemo(
     () => ({
       webhook_url: webhookUrl.trim() || null,
       standup_enabled: enabled,
       standup_hour: hour,
+      ...(signingSecret.trim() ? { signing_secret: signingSecret.trim() } : {}),
+      team_id: teamId.trim() || null,
     }),
-    [enabled, hour, webhookUrl],
+    [enabled, hour, signingSecret, teamId, webhookUrl],
   );
 
   async function save(): Promise<void> {
@@ -54,11 +61,17 @@ export function SlackStandupCard({ accessToken, orgId, initialWebhookUrl, initia
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || "Could not save Slack standup settings");
       setStatus({ tone: "success", message: "Slack standup settings saved" });
+      setSigningSecret("");
     } catch (error) {
       setStatus({ tone: "error", message: error instanceof Error ? error.message : "Could not save Slack standup settings" });
     } finally {
       setSaving(false);
     }
+  }
+
+  async function copyEndpoint(): Promise<void> {
+    await navigator.clipboard.writeText(commandEndpoint);
+    setStatus({ tone: "success", message: "Slash command endpoint copied" });
   }
 
   async function sendTest(): Promise<void> {
@@ -120,6 +133,33 @@ export function SlackStandupCard({ accessToken, orgId, initialWebhookUrl, initia
             <span className={enabled ? "absolute right-1 top-1 h-4 w-4 rounded-full bg-black" : "absolute left-1 top-1 h-4 w-4 rounded-full bg-[color:var(--text-tertiary)]"} />
           </span>
         </button>
+      </div>
+
+      <div className="mt-6 border-t border-[color:var(--bg-border)] pt-5">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-[15px] font-semibold text-[color:var(--text-primary)]">Slash Command</h3>
+            <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Use this request URL for Slack command `/skillayer`.</p>
+          </div>
+          <button className="inline-flex h-9 items-center rounded-md border border-[color:var(--bg-border)] px-3 text-[13px] font-semibold text-[color:var(--text-primary)] transition-colors hover:border-[#C9973A]/50" onClick={copyEndpoint} type="button">
+            <Copy className="mr-2 h-4 w-4" />
+            Copy endpoint
+          </button>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+          <label className="block">
+            <span className="text-[12px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Request URL</span>
+            <input className="mt-2 h-11 w-full rounded-xl border border-[color:var(--bg-border)] bg-[#08080d] px-3 font-mono text-[13px] text-white outline-none" readOnly value={commandEndpoint} />
+          </label>
+          <label className="block">
+            <span className="text-[12px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Slack Team ID</span>
+            <input className="mt-2 h-11 w-full rounded-xl border border-[color:var(--bg-border)] bg-[#08080d] px-3 font-mono text-[13px] text-white outline-none transition-colors focus:border-[#C9973A]" onChange={(event) => setTeamId(event.target.value)} placeholder="T0123456789" value={teamId} />
+          </label>
+          <label className="block lg:col-span-2">
+            <span className="text-[12px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Slack Signing Secret</span>
+            <input className="mt-2 h-11 w-full rounded-xl border border-[color:var(--bg-border)] bg-[#08080d] px-3 font-mono text-[13px] text-white outline-none transition-colors focus:border-[#C9973A]" onChange={(event) => setSigningSecret(event.target.value)} placeholder={initialSigningSecretSet ? "Secret saved. Enter a new value to rotate." : "Slack app signing secret"} type="password" value={signingSecret} />
+          </label>
+        </div>
       </div>
 
       {status ? (
