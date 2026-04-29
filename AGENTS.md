@@ -25,11 +25,13 @@ The current input mode was: `requirements + codebase`.
 ## External Skill Packs
 - `agentskills-spec` (spec, trust `spec`): installed at `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/agentskills-spec`
 - `anthropic-skills` (anthropic, trust `official`): installed at `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/anthropic-skills`
+- `awesome-copilot` (github, trust `official`): installed at `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/awesome-copilot`
 - `langchain-skills` (langchain, trust `official`): installed at `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/langchain-skills`
 
 ## Active External Skill Packs
 - `agentskills-spec` (skill-spec, trust score 7): load from `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/agentskills-spec`
 - `anthropic-skills` (anthropic-skills, trust score 7): load from `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/anthropic-skills`
+- `awesome-copilot` (generic-repo, trust score 8): load from `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/awesome-copilot`
 - `langchain-skills` (langchain-skills, trust score 7): load from `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/langchain-skills`
 
 ## External Skill Policy
@@ -39,6 +41,7 @@ The current input mode was: `requirements + codebase`.
 
 ## Preferred External Skill Packs
 - `anthropic-skills` (score 87): Detected Claude/Anthropic repo hints.
+- `awesome-copilot` (score 87): Detected GitHub Copilot instructions or workspace setup.
 - `langchain-skills` (score 80): Detected LangChain/LangGraph/Deep Agents dependencies.
 - `agentskills-spec` (score 58): Detected SKILL.md-style files or an existing skills tree.
 
@@ -92,19 +95,19 @@ The current input mode was: `requirements + codebase`.
 - `skills/platform/SKILL.md`
 - `skills/roadmap/SKILL.md`
 - `.skilgen/external-skills/normalized/anthropic-skills/SUMMARY.md`
+- `.skilgen/external-skills/normalized/awesome-copilot/SUMMARY.md`
 - `.skilgen/external-skills/normalized/langchain-skills/SUMMARY.md`
-- `.skilgen/external-skills/normalized/agentskills-spec/SUMMARY.md`
 - Load decision memory in this order:
   - `.skilgen/memory/current_run.json`
   - `.skilgen/state/freshness.json`
   - `.skilgen/external-skills/lock.json`
-  - `.skilgen/memory/runs/run-2ae8391f6cdb.json`
+  - `.skilgen/memory/runs/run-49398a54f6cb.json`
   - `.skilgen/external-skills/normalized/anthropic-skills/SUMMARY.md`
   - `.skilgen/external-skills/normalized/anthropic-skills/index.json`
+  - `.skilgen/external-skills/normalized/awesome-copilot/SUMMARY.md`
+  - `.skilgen/external-skills/normalized/awesome-copilot/index.json`
   - `.skilgen/external-skills/normalized/langchain-skills/SUMMARY.md`
   - `.skilgen/external-skills/normalized/langchain-skills/index.json`
-  - `.skilgen/external-skills/normalized/agentskills-spec/SUMMARY.md`
-  - `.skilgen/external-skills/normalized/agentskills-spec/index.json`
 
 ## Skill Telemetry Hook
 - When you actually open a repo skill file to use it during implementation, record that load with Skilgen analytics.

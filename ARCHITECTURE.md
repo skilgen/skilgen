@@ -2,7 +2,7 @@
 
 ## Evidence-backed architecture blueprint for the codebase
 
-Skilgen identified 3 top-level architecture domains from 90 evidence items and 13 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 172 symbol-bearing files, 169 call-bearing files, 72 mapped tests, and 6 workspace packages.
+Skilgen identified 3 top-level architecture domains from 90 evidence items and 13 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 173 symbol-bearing files, 170 call-bearing files, 72 mapped tests, and 6 workspace packages.
 
 ## Visual Overview
 ```mermaid
@@ -73,18 +73,18 @@ graph TD
 - `python`
 
 ## Source Comprehension
-- Symbol graph files: `172`
-- Cross-file symbol relationships: `83`
-- Call graph files: `169`
+- Symbol graph files: `173`
+- Cross-file symbol relationships: `84`
+- Call graph files: `170`
 - Config/runtime files: `41`
 - Tests mapped to code: `72`
 - Runtime artifacts ingested: `1`
-- Dependency risk nodes: `258`
+- Dependency risk nodes: `264`
 
 ## Parser Backends
 - `empty`: `3` files
-- `python-ast`: `172` files
-- `regex`: `2` files
+- `python-ast`: `173` files
+- `regex`: `3` files
 
 ## Workspace Topology
 - Repo archetype: `skilgen-platform`
@@ -125,19 +125,19 @@ graph TD
 - `skilgen/api/server.py`: `BoundedThreadPoolHTTPServer` `extends` `HTTPServer` (confidence 0.35)
 - `skilgen/api/server.py`: `JsonFormatter` `extends` `logging.Formatter` (confidence 0.35)
 - `skilgen/api/server.py`: `SkilgenHandler` `extends` `BaseHTTPRequestHandler` (confidence 0.35)
+- `skilgen/commands/check.py`: `CheckConfigError` `extends` `ValueError` (confidence 0.35)
 - `skilgen/core/auth_tokens.py`: `SignedTokenError` `extends` `ValueError` (confidence 0.35)
 - `skilgen/parsers/__init__.py`: `ApiSpecParserError` `extends` `ValueError` (confidence 0.35)
 - `skilgen/parsers/confluence.py`: `_ConfluenceHTMLExtractor` `extends` `HTMLParser` (confidence 0.35)
 - `skilgen/parsers/dbt.py`: `DbtProjectParseError` `extends` `ValueError` (confidence 0.35)
 - `skilgen/parsers/helm.py`: `HelmParserError` `extends` `ValueError` (confidence 0.35)
-- `skilgen/parsers/incident.py`: `IncidentParseError` `extends` `ValueError` (confidence 0.35)
 
 ### Example Config And Runtime Signals
 - `.claude/settings.json`: `env:CLAUDE_TOOL_INPUT_FILE_PATH`, `env:SKILLAYER_API_KEY`, `env:SKILLAYER_REPO_ID`
-- `.env.example`: `env:ADMIN_SECRET`, `env:API_URL`, `env:DATABASE_URL`, `env:DEPLOYMENT_MODE`, `env:GITHUB_APP_ID`
+- `.env.example`: `env:ADMIN_SECRET`, `env:API_URL`, `env:CRON_SECRET`, `env:DATABASE_URL`, `env:DEPLOYMENT_MODE`
 - `.github/ISSUE_TEMPLATE/bug_report.yml`: `env:API`, `env:CLI`, `env:SDK`
 - `.github/workflows/skilgen-sync.yml`: `env:AGENTS`, `env:ANALYSIS`, `env:ANTHROPIC_API_KEY`, `env:ARCHITECTURE`, `env:BASE_REQUIREMENTS`
-- `apps/api/.env.example`: `env:ADMIN_SECRET`, `env:DATABASE_URL`, `env:DEPLOYMENT_MODE`, `env:GITHUB_APP_ID`, `env:GITHUB_APP_PRIVATE_KEY`
+- `apps/api/.env.example`: `env:ADMIN_SECRET`, `env:CRON_SECRET`, `env:DATABASE_URL`, `env:DEPLOYMENT_MODE`, `env:GITHUB_APP_ID`
 - `apps/api/Dockerfile`: `env:CMD`, `env:COPY`, `env:ENTRYPOINT`, `env:EXPOSE`, `env:FROM`
 - `apps/api/alembic.ini`: `env:INFO`, `env:NOT`, `env:NOTSET`, `env:PATH`, `env:POSIX`
 - `apps/api/requirements.txt`: `runtime:postgres`, `runtime:redis`
@@ -162,8 +162,8 @@ graph TD
 - `skilgen/deep_agents_runtime.py`: `fanout:high`, `cycle:internal`
 - `skilgen/delivery.py`: `fanout:high`, `cycle:internal`
 - `skilgen/generators/package.py`: `fanout:high`, `cycle:internal`
+- `manifest:apps/dashboard/package.json`: `fanout:large-manifest`
 - `manifest:packages/ui/package.json`: `fanout:large-manifest`
-- `manifest:pyproject.toml`: `fanout:large-manifest`
 
 ## Skill Materialization Plan
 ### requirements

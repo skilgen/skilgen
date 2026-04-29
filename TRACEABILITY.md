@@ -185,12 +185,16 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 - Installed `anthropic-skills` from `https://github.com/anthropics/skills.git`
   Trust: `official` score `7`
   License: `unknown`
+- Installed `awesome-copilot` from `https://github.com/github/awesome-copilot.git`
+  Trust: `official` score `8`
+  License: `MIT License`
 - Installed `langchain-skills` from `https://github.com/langchain-ai/langchain-skills.git`
   Trust: `official` score `7`
   License: `unknown`
 
 ### Preferred External Packs
 - `anthropic-skills`: Detected Claude/Anthropic repo hints.
+- `awesome-copilot`: Detected GitHub Copilot instructions or workspace setup.
 - `langchain-skills`: Detected LangChain/LangGraph/Deep Agents dependencies.
 - `agentskills-spec`: Detected SKILL.md-style files or an existing skills tree.
 

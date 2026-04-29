@@ -159,7 +159,7 @@
     "legacy_programs": [],
     "copybooks": [],
     "language_inventory": {
-      "python": 177
+      "python": 179
     }
   },
   "repo_archetype": "skilgen-platform",
@@ -1256,6 +1256,7 @@
       "skilgen/api/server.py",
       "skilgen/api/service.py",
       "skilgen/autoupdate.py",
+      "skilgen/commands/check.py",
       "skilgen/core/analytics.py",
       "skilgen/core/config.py",
       "skilgen/core/corpus_index.py",
@@ -1279,6 +1280,19 @@
       "urllib.parse",
       "urllib.request",
       "uuid"
+    ],
+    "skilgen/commands/__init__.py": [],
+    "skilgen/commands/check.py": [
+      "__future__",
+      "dataclasses",
+      "json",
+      "os",
+      "pathlib",
+      "subprocess",
+      "sys",
+      "typing",
+      "urllib.error",
+      "urllib.request"
     ],
     "skilgen/core/__init__.py": [],
     "skilgen/core/analytics.py": [
@@ -1672,9 +1686,12 @@
     ],
     "skilgen/hooks/claude_code_hook.py": [
       "__future__",
+      "json",
       "os",
+      "pathlib",
       "sys",
       "time",
+      "typing",
       "urllib.request"
     ],
     "skilgen/hooks/cursor.py": [
@@ -2647,7 +2664,7 @@
   },
   "evidence_graph": {
     "language_inventory": {
-      "python": 177
+      "python": 179
     },
     "dominant_languages": [
       "python"
@@ -2933,6 +2950,7 @@
         "skilgen/api/server.py",
         "skilgen/api/service.py",
         "skilgen/autoupdate.py",
+        "skilgen/commands/check.py",
         "skilgen/core/analytics.py",
         "skilgen/core/config.py",
         "skilgen/core/corpus_index.py",
@@ -2956,6 +2974,19 @@
         "urllib.parse",
         "urllib.request",
         "uuid"
+      ],
+      "skilgen/commands/__init__.py": [],
+      "skilgen/commands/check.py": [
+        "__future__",
+        "dataclasses",
+        "json",
+        "os",
+        "pathlib",
+        "subprocess",
+        "sys",
+        "typing",
+        "urllib.error",
+        "urllib.request"
       ],
       "skilgen/core/__init__.py": [],
       "skilgen/core/analytics.py": [
@@ -3349,9 +3380,12 @@
       ],
       "skilgen/hooks/claude_code_hook.py": [
         "__future__",
+        "json",
         "os",
+        "pathlib",
         "sys",
         "time",
+        "typing",
         "urllib.request"
       ],
       "skilgen/hooks/cursor.py": [
@@ -4364,6 +4398,25 @@
         "related_imports": []
       },
       {
+        "path": "packages/db/models/base.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "import uuid",
+          "from sqlalchemy.orm import DeclarativeBase",
+          "def utcnow() -> datetime:",
+          "return datetime.utcnow()",
+          "def new_uuid() -> str:",
+          "return str(uuid.uuid4())",
+          "class Base(DeclarativeBase):",
+          "pass"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/core/models.py",
         "kind": "source",
         "language": "python",
@@ -4387,25 +4440,6 @@
           "dataclasses",
           "pathlib"
         ]
-      },
-      {
-        "path": "packages/db/models/base.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from datetime import datetime",
-          "import uuid",
-          "from sqlalchemy.orm import DeclarativeBase",
-          "def utcnow() -> datetime:",
-          "return datetime.utcnow()",
-          "def new_uuid() -> str:",
-          "return str(uuid.uuid4())",
-          "class Base(DeclarativeBase):",
-          "pass"
-        ],
-        "related_imports": []
       },
       {
         "path": "apps/api/api/auth.py",
@@ -4459,27 +4493,6 @@
           "skilgen/core/document_ingestion.py",
           "skilgen/core/models.py"
         ]
-      },
-      {
-        "path": "packages/db/models/skill.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from datetime import datetime",
-          "from typing import TYPE_CHECKING",
-          "from sqlalchemy import ForeignKey, JSON, String, Text",
-          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
-          "from packages.db.models.base import Base, new_uuid, utcnow",
-          "if TYPE_CHECKING:",
-          "from packages.db.models.repo import Repo",
-          "from packages.db.models.skill_version import SkillVersion",
-          "SOURCE_TYPE_TO_CATEGORY: dict[str, str] = {",
-          "\"code\": \"codebase_architecture\",",
-          "\"openapi\": \"internal_tools\","
-        ],
-        "related_imports": []
       },
       {
         "path": "skilgen/core/config.py",
@@ -4549,10 +4562,31 @@
           "from packages.db.models.base import Base, new_uuid, utcnow",
           "if TYPE_CHECKING:",
           "from packages.db.models.analysis_run import AnalysisRun",
+          "from packages.db.models.pull_request import Commit, PullRequest",
           "from packages.db.models.dependency import Dependency",
           "from packages.db.models.org import Org",
-          "from packages.db.models.skill import Skill",
-          "class Repo(Base):"
+          "from packages.db.models.skill import Skill"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "packages/db/models/skill.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "from typing import TYPE_CHECKING",
+          "from sqlalchemy import Boolean, ForeignKey, JSON, String, Text",
+          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
+          "from packages.db.models.base import Base, new_uuid, utcnow",
+          "if TYPE_CHECKING:",
+          "from packages.db.models.repo import Repo",
+          "from packages.db.models.skill_version import SkillVersion",
+          "SOURCE_TYPE_TO_CATEGORY: dict[str, str] = {",
+          "\"code\": \"codebase_architecture\",",
+          "\"openapi\": \"internal_tools\","
         ],
         "related_imports": []
       },
@@ -4611,6 +4645,27 @@
         ]
       },
       {
+        "path": "apps/api/api/routes/orgs.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import asyncio",
+          "import base64",
+          "from collections import defaultdict",
+          "from itertools import combinations",
+          "import json",
+          "import socket",
+          "import urllib.error",
+          "import urllib.request",
+          "from dataclasses import asdict",
+          "from datetime import UTC, datetime, timedelta",
+          "import hashlib"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/api/service.py",
         "kind": "source",
         "language": "python",
@@ -4653,6 +4708,48 @@
           "skilgen/external_skills.py",
           "typing"
         ]
+      },
+      {
+        "path": "apps/api/api/routes/repos.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import hashlib",
+          "import re",
+          "from datetime import UTC, datetime, timedelta",
+          "from typing import Any, Literal",
+          "from uuid import uuid4",
+          "from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response",
+          "from fastapi.responses import JSONResponse",
+          "from pydantic import BaseModel, Field",
+          "from sqlalchemy import desc, func, select, update",
+          "from sqlalchemy.ext.asyncio import AsyncSession",
+          "from sqlalchemy.exc import SQLAlchemyError"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "packages/db/config.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from pydantic_settings import BaseSettings, SettingsConfigDict",
+          "class Settings(BaseSettings):",
+          "DATABASE_URL: str = \"\"",
+          "DATABASE_URL_UNPOOLED: str = \"\"",
+          "DEBUG: bool = False",
+          "GITHUB_APP_ID: str = \"\"",
+          "GITHUB_APP_PRIVATE_KEY: str = \"\"",
+          "GITHUB_WEBHOOK_SECRET: str = \"\"",
+          "WORKOS_API_KEY: str = \"\"",
+          "WORKOS_CLIENT_ID: str = \"\"",
+          "OIDC_ISSUER_URL: str = \"\""
+        ],
+        "related_imports": []
       },
       {
         "path": "apps/api/api/analysis.py",
@@ -4711,65 +4808,23 @@
         ]
       },
       {
-        "path": "apps/api/api/routes/repos.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import hashlib",
-          "import re",
-          "from datetime import UTC, datetime, timedelta",
-          "from typing import Any, Literal",
-          "from uuid import uuid4",
-          "from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response",
-          "from fastapi.responses import JSONResponse",
-          "from pydantic import BaseModel, Field",
-          "from sqlalchemy import desc, func, select, update",
-          "from sqlalchemy.ext.asyncio import AsyncSession",
-          "from sqlalchemy.exc import SQLAlchemyError"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": "packages/db/config.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from pydantic_settings import BaseSettings, SettingsConfigDict",
-          "class Settings(BaseSettings):",
-          "DATABASE_URL: str = \"\"",
-          "DATABASE_URL_UNPOOLED: str = \"\"",
-          "DEBUG: bool = False",
-          "GITHUB_APP_ID: str = \"\"",
-          "GITHUB_APP_PRIVATE_KEY: str = \"\"",
-          "GITHUB_WEBHOOK_SECRET: str = \"\"",
-          "WORKOS_API_KEY: str = \"\"",
-          "WORKOS_CLIENT_ID: str = \"\"",
-          "OIDC_ISSUER_URL: str = \"\""
-        ],
-        "related_imports": []
-      },
-      {
         "path": "packages/db/models/__init__.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
           "from packages.db.models.agent_session import AgentSession",
+          "from packages.db.models.agent_load_event import AgentLoadEvent",
           "from packages.db.models.analysis_run import AnalysisRun",
           "from packages.db.models.audit_event import AuditEvent",
           "from packages.db.models.autopilot_task import AutopilotTask",
           "from packages.db.models.base import Base",
           "from packages.db.models.dependency import Dependency",
-          "from packages.db.models.eval import ABTest, AgentTask, EvalSession, SkillGap",
-          "from packages.db.models.flag_dismissal import FlagDismissal",
-          "from packages.db.models.half_life import SkillHalfLife",
-          "from packages.db.models.org import Org",
-          "from packages.db.models.org_llm_config import OrgLLMConfig",
-          "from packages.db.models.org_policy import OrgPolicy"
+          "from packages.db.models.cross_repo_opportunity import CrossRepoOpportunity",
+          "from packages.db.models.coverage_gap import CoverageGap",
+          "from packages.db.models.dependency_graph_cache import DependencyGraphCache",
+          "from packages.db.models.digest_config import DigestConfig",
+          "from packages.db.models.eval import ABTest, AgentTask, EvalSession, SkillGap"
         ],
         "related_imports": []
       },
@@ -4801,6 +4856,27 @@
           "skilgen/agents/workspace_graph.py",
           "skilgen/core/models.py"
         ]
+      },
+      {
+        "path": "packages/db/models/org.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "from typing import TYPE_CHECKING",
+          "from sqlalchemy import JSON, BigInteger, String",
+          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
+          "from packages.db.models.base import Base, new_uuid, utcnow",
+          "if TYPE_CHECKING:",
+          "from packages.db.models.digest_config import DigestConfig",
+          "from packages.db.models.repo import Repo",
+          "from packages.db.models.source_connection import SourceConnection",
+          "class Org(Base):",
+          "__tablename__ = \"orgs\""
+        ],
+        "related_imports": []
       },
       {
         "path": "skilgen/agents/requirements_parser.py",
@@ -5011,27 +5087,6 @@
         ]
       },
       {
-        "path": "apps/api/api/routes/orgs.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from dataclasses import asdict",
-          "from datetime import UTC, datetime, timedelta",
-          "import hashlib",
-          "import logging",
-          "import secrets",
-          "from typing import Any, Literal",
-          "from uuid import uuid4",
-          "import csv",
-          "from io import StringIO",
-          "import time",
-          "from fastapi import APIRouter, Depends, HTTPException, Query, Request"
-        ],
-        "related_imports": []
-      },
-      {
         "path": "skilgen/agents/domain_graph_planner.py",
         "kind": "source",
         "language": "python",
@@ -5107,6 +5162,27 @@
         ]
       },
       {
+        "path": "apps/api/api/services/llm.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import re",
+          "from typing import Any",
+          "import httpx",
+          "from packages.db.llm_key import decrypt_key",
+          "class LLMNotConfiguredError(Exception):",
+          "pass",
+          "class LLMCallError(Exception):",
+          "pass",
+          "def _provider_settings(org_settings: dict[str, Any] | None) -> tuple[str, str, str, str | None]:",
+          "settings = org_settings or {}",
+          "provider = str(settings.get(\"llm_provider\") or \"\").lower()"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/cli/main.py",
         "kind": "source",
         "language": "python",
@@ -5139,6 +5215,7 @@
           "skilgen/api/server.py",
           "skilgen/api/service.py",
           "skilgen/autoupdate.py",
+          "skilgen/commands/check.py",
           "skilgen/core/analytics.py",
           "skilgen/core/config.py",
           "skilgen/core/corpus_index.py",
@@ -5231,27 +5308,6 @@
           "skilgen/agents/source_graphs.py",
           "skilgen/agents/workspace_graph.py"
         ]
-      },
-      {
-        "path": "packages/db/models/org.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from datetime import datetime",
-          "from typing import TYPE_CHECKING",
-          "from sqlalchemy import JSON, BigInteger, String",
-          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
-          "from packages.db.models.base import Base, new_uuid, utcnow",
-          "if TYPE_CHECKING:",
-          "from packages.db.models.repo import Repo",
-          "class Org(Base):",
-          "__tablename__ = \"orgs\"",
-          "id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)",
-          "github_org_id: Mapped[int] = mapped_column(BigInteger, unique=True)"
-        ],
-        "related_imports": []
       },
       {
         "path": "skilgen/agents/evidence_graph.py",
@@ -5548,34 +5604,6 @@
           "skilgen/core/document_ingestion.py",
           "skilgen/core/models.py",
           "typing"
-        ]
-      },
-      {
-        "path": "skilgen/agents/relationship_mapper.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import ast",
-          "import re",
-          "import warnings",
-          "from pathlib import Path",
-          "from skilgen.agents.codebase_signals import _iter_code_files",
-          "IGNORED_PARTS = {\".git\", \".skilgen\", \"external-skills\", \"__pycache__\", \".venv\", \"venv\", \"node_modules\"}",
-          "_JS_IMPORT_RE = re.compile(r\"\"\"(?:import|export)\\s+(?:[^;]*?\\s+from\\s+)?[\"']([^\"']+)[\"']\"\"\")",
-          "_JS_REQUIRE_RE = re.compile(r\"\"\"require\\(\\s*[\"']([^\"']+)[\"']\\s*\\)\"\"\")",
-          "_JAVA_IMPORT_RE = re.compile(r\"\"\"^\\s*import\\s+([a-zA-Z0-9_.*]+)\\s*;\"\"\", re.MULTILINE)",
-          "_GO_IMPORT_BLOCK_RE = re.compile(r'import\\s*\\((.*?)\\)', re.DOTALL)",
-          "_GO_IMPORT_LINE_RE = re.compile(r'\"([^\"]+)\"')"
-        ],
-        "related_imports": [
-          "__future__",
-          "ast",
-          "pathlib",
-          "re",
-          "skilgen/agents/codebase_signals.py",
-          "warnings"
         ]
       },
       {
@@ -6017,6 +6045,29 @@
         "related_imports": []
       },
       {
+        "path": "docs/specs/AgentRun_v0.md",
+        "kind": "source",
+        "language": "documentation",
+        "tags": [
+          "documentation"
+        ],
+        "snippet": [
+          "# AgentRun Webhook Spec v0",
+          "AgentRun is Skillayer's vendor-neutral event format for AI coding agent sessions. Any agent vendor can POST one event when a session starts, updates, or completes so Skillayer can ",
+          "## Endpoint",
+          "```http",
+          "POST https://api.skillayer.com/orgs/{org_id}/agent-runs",
+          "Authorization: Bearer sk-...",
+          "Content-Type: application/json",
+          "```",
+          "The API key is the same org API key used by `/repos/{repo_id}/skills/load`.",
+          "```json",
+          "{",
+          "\"$schema\": \"https://json-schema.org/draft/2020-12/schema\","
+        ],
+        "related_imports": []
+      },
+      {
         "path": "docs/examples/claude-agent-sdk-python-dashboard.html",
         "kind": "source",
         "language": "enterprise_document",
@@ -6059,29 +6110,6 @@
           "\u00a9 Skilgen",
           "Skilgen OS",
           "Repository \u00b7 claude-code"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": "docs/examples/langchain-dashboard.html",
-        "kind": "source",
-        "language": "enterprise_document",
-        "tags": [
-          "enterprise_document"
-        ],
-        "snippet": [
-          "Skilgen Dashboard \u00b7 langchain",
-          "\u00a9 Skilgen",
-          "Agent Intelligence Surface",
-          "Repository \u00b7 langchain",
-          "Skilgen Operating System",
-          "All your skill intelligence \u2014 alive, connected, and visible on a single surface. Not a dashboard. A living map.",
-          "langchain",
-          "is translated into one operating surface for coding agents: architecture, evidence, dependencies, skill flows, score, freshness, analytics, auto-update, and capability context toge",
-          "15 stale skills",
-          "Auto-update on",
-          "Git-aware new untracked files",
-          "Evidence"
         ],
         "related_imports": []
       },
@@ -7011,6 +7039,22 @@
         "import_count": 20,
         "relationship_count": 0
       },
+      "skilgen/commands/__init__.py": {
+        "language": "python",
+        "backend": "regex",
+        "symbol_count": 0,
+        "call_count": 0,
+        "import_count": 0,
+        "relationship_count": 0
+      },
+      "skilgen/commands/check.py": {
+        "language": "python",
+        "backend": "python-ast",
+        "symbol_count": 13,
+        "call_count": 30,
+        "import_count": 10,
+        "relationship_count": 1
+      },
       "skilgen/core/__init__.py": {
         "language": "python",
         "backend": "empty",
@@ -7238,7 +7282,7 @@
       "skilgen/delivery.py": {
         "language": "python",
         "backend": "python-ast",
-        "symbol_count": 10,
+        "symbol_count": 11,
         "call_count": 30,
         "import_count": 20,
         "relationship_count": 0
@@ -7302,9 +7346,9 @@
       "skilgen/hooks/claude_code_hook.py": {
         "language": "python",
         "backend": "python-ast",
-        "symbol_count": 4,
-        "call_count": 14,
-        "import_count": 5,
+        "symbol_count": 23,
+        "call_count": 30,
+        "import_count": 8,
         "relationship_count": 0
       },
       "skilgen/hooks/cursor.py": {
@@ -8489,6 +8533,18 @@
         "imports threading",
         "imports time"
       ],
+      "skilgen/commands/check.py": [
+        "from __future__ import annotations",
+        "imports json",
+        "imports os",
+        "imports subprocess",
+        "imports sys",
+        "from dataclasses import dataclass",
+        "from pathlib import Path",
+        "from typing import Any",
+        "from urllib.error import HTTPError, URLError",
+        "from urllib.request import Request, urlopen"
+      ],
       "skilgen/core/analytics.py": [
         "from __future__ import annotations",
         "imports json",
@@ -8865,14 +8921,15 @@
       ],
       "skilgen/hooks/claude_code_hook.py": [
         "from __future__ import annotations",
+        "imports json",
         "imports os",
+        "from pathlib import Path",
         "imports sys",
         "imports time",
+        "from typing import Any",
         "imports urllib.request",
-        "function _session_lock_path",
-        "function _already_fired",
-        "function _mark_fired",
-        "function main"
+        "function _session_id",
+        "function _session_lock_path"
       ],
       "skilgen/hooks/cursor.py": [
         "from __future__ import annotations",
@@ -10549,6 +10606,32 @@
         "activate_external_skill",
         "activate_mcp_connector"
       ],
+      "skilgen/commands/check.py": [
+        "CheckConfig",
+        "CheckConfigError",
+        "Path",
+        "Request",
+        "_first_nonempty",
+        "_format_item",
+        "_hook_template",
+        "_items",
+        "append",
+        "bool",
+        "chmod",
+        "cwd",
+        "dataclass",
+        "decode",
+        "dumps",
+        "encode",
+        "exists",
+        "get",
+        "getattr",
+        "getenv",
+        "install_hook",
+        "isinstance",
+        "join",
+        "len"
+      ],
       "skilgen/core/analytics.py": [
         "Counter",
         "Path",
@@ -11169,6 +11252,7 @@
         "Request",
         "_auto_sync_to_skillayer",
         "_emit",
+        "_has_skilgen_hook",
         "_local_analytics_events",
         "_upload_analytics",
         "_write_claude_code_hook",
@@ -11187,8 +11271,7 @@
         "create_run_memory",
         "current_runtime_mode",
         "decode",
-        "dumps",
-        "encode"
+        "dumps"
       ],
       "skilgen/enterprise_skills.py": [
         "MCPConnector",
@@ -11302,20 +11385,30 @@
         "write_text"
       ],
       "skilgen/hooks/claude_code_hook.py": [
+        "Path",
         "Request",
+        "_absolute_path",
+        "_after_content_for_tool",
         "_already_fired",
+        "_api_base",
+        "_artifact_cache_path",
+        "_capture_before",
+        "_file_path_for_tool",
+        "_fire_skill_load",
+        "_handle_post_tool",
+        "_handle_pre_tool",
+        "_hook_event_name",
+        "_load_event",
         "_mark_fired",
+        "_pop_before",
+        "_post_json",
+        "_read_content",
+        "_repo_root",
+        "_session_id",
         "_session_lock_path",
-        "close",
-        "get",
-        "getmtime",
-        "join",
-        "main",
-        "open",
-        "str",
-        "time",
-        "urlopen",
-        "write"
+        "_tool_input",
+        "_tool_name",
+        "_tool_response"
       ],
       "skilgen/hooks/cursor.py": [
         "Path",
@@ -13338,6 +13431,7 @@
       ".env.example": [
         "env:ADMIN_SECRET",
         "env:API_URL",
+        "env:CRON_SECRET",
         "env:DATABASE_URL",
         "env:DEPLOYMENT_MODE",
         "env:GITHUB_APP_ID",
@@ -13391,6 +13485,7 @@
       ],
       "apps/api/.env.example": [
         "env:ADMIN_SECRET",
+        "env:CRON_SECRET",
         "env:DATABASE_URL",
         "env:DEPLOYMENT_MODE",
         "env:GITHUB_APP_ID",
@@ -13565,11 +13660,13 @@
         "env:B4RT",
         "env:BSD",
         "env:CC0",
+        "env:DJ8BJS4E",
         "env:G3ZA",
         "env:G5KYP6",
         "env:IICI",
         "env:ISC",
         "env:JTF99U",
+        "env:K9ZGHG",
         "env:KIN",
         "env:L7G8",
         "env:LGPL",
@@ -13583,6 +13680,7 @@
         "env:PAJLD1I",
         "env:PB7X",
         "env:PKQ",
+        "env:RB0",
         "env:SEE",
         "env:SU5",
         "env:T4IS",
@@ -13676,8 +13774,8 @@
         "skilgen/agents/__init__.py",
         "skilgen/api/__init__.py",
         "skilgen/cli/__init__.py",
-        "skilgen/core/__init__.py",
-        "skilgen/generators/__init__.py"
+        "skilgen/commands/__init__.py",
+        "skilgen/core/__init__.py"
       ],
       "tests/test_analytics.py": [
         "skilgen/core/analytics.py"
@@ -14205,6 +14303,14 @@
         "source_symbol": "SkilgenHandler",
         "relationship": "extends",
         "target_symbol": "BaseHTTPRequestHandler",
+        "target_path": null,
+        "confidence": 0.35
+      },
+      {
+        "source_path": "skilgen/commands/check.py",
+        "source_symbol": "CheckConfigError",
+        "relationship": "extends",
+        "target_symbol": "ValueError",
         "target_path": null,
         "confidence": 0.35
       },
@@ -15024,6 +15130,37 @@
           ]
         },
         {
+          "id": "manifest:apps/dashboard/package.json",
+          "kind": "manifest",
+          "risk_score": 0.25,
+          "signals": [
+            "fanout:large-manifest"
+          ],
+          "dependencies": [
+            "@skillayer/config",
+            "@skillayer/types",
+            "@skillayer/ui",
+            "@types/d3",
+            "@workos-inc/authkit-nextjs",
+            "autoprefixer",
+            "d3",
+            "lucide-react",
+            "next",
+            "postcss",
+            "posthog-js",
+            "react",
+            "react-dom",
+            "recharts",
+            "swr",
+            "tailwindcss",
+            "@types/node",
+            "@types/react",
+            "@types/react-dom",
+            "eslint",
+            "typescript"
+          ]
+        },
+        {
           "id": "manifest:packages/ui/package.json",
           "kind": "manifest",
           "risk_score": 0.25,
@@ -15229,6 +15366,15 @@
           "dependencies": []
         },
         {
+          "id": "package:@types/d3",
+          "kind": "external-package",
+          "risk_score": 0.2,
+          "signals": [
+            "version:loosely-pinned"
+          ],
+          "dependencies": []
+        },
+        {
           "id": "package:@types/node",
           "kind": "external-package",
           "risk_score": 0.2,
@@ -15347,6 +15493,15 @@
         },
         {
           "id": "package:cryptography",
+          "kind": "external-package",
+          "risk_score": 0.2,
+          "signals": [
+            "version:loosely-pinned"
+          ],
+          "dependencies": []
+        },
+        {
+          "id": "package:d3",
           "kind": "external-package",
           "risk_score": 0.2,
           "signals": [
@@ -15571,6 +15726,15 @@
           "dependencies": []
         },
         {
+          "id": "package:recharts",
+          "kind": "external-package",
+          "risk_score": 0.2,
+          "signals": [
+            "version:loosely-pinned"
+          ],
+          "dependencies": []
+        },
+        {
           "id": "package:redis",
           "kind": "external-package",
           "risk_score": 0.2,
@@ -15590,6 +15754,15 @@
         },
         {
           "id": "package:stripe",
+          "kind": "external-package",
+          "risk_score": 0.2,
+          "signals": [
+            "version:loosely-pinned"
+          ],
+          "dependencies": []
+        },
+        {
+          "id": "package:swr",
           "kind": "external-package",
           "risk_score": 0.2,
           "signals": [
@@ -15862,9 +16035,29 @@
             "skilgen/api/server.py",
             "skilgen/api/service.py",
             "skilgen/autoupdate.py",
+            "skilgen/commands/check.py",
             "skilgen/core/analytics.py",
-            "skilgen/core/config.py",
-            "skilgen/core/corpus_index.py"
+            "skilgen/core/config.py"
+          ]
+        },
+        {
+          "id": "skilgen/commands/check.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "dataclasses",
+            "json",
+            "os",
+            "pathlib",
+            "subprocess",
+            "sys",
+            "typing",
+            "urllib.error",
+            "urllib.request"
           ]
         },
         {
@@ -16124,6 +16317,24 @@
             "skilgen/core/models.py",
             "skilgen/deep_agents_core.py",
             "typing"
+          ]
+        },
+        {
+          "id": "skilgen/hooks/claude_code_hook.py",
+          "kind": "source-file",
+          "risk_score": 0.15,
+          "signals": [
+            "fanout:high"
+          ],
+          "dependencies": [
+            "__future__",
+            "json",
+            "os",
+            "pathlib",
+            "sys",
+            "time",
+            "typing",
+            "urllib.request"
           ]
         },
         {
@@ -16907,31 +17118,6 @@
           ]
         },
         {
-          "id": "manifest:apps/dashboard/package.json",
-          "kind": "manifest",
-          "risk_score": 0.0,
-          "signals": [],
-          "dependencies": [
-            "@skillayer/config",
-            "@skillayer/types",
-            "@skillayer/ui",
-            "@workos-inc/authkit-nextjs",
-            "autoprefixer",
-            "lucide-react",
-            "next",
-            "postcss",
-            "posthog-js",
-            "react",
-            "react-dom",
-            "tailwindcss",
-            "@types/node",
-            "@types/react",
-            "@types/react-dom",
-            "eslint",
-            "typescript"
-          ]
-        },
-        {
           "id": "manifest:apps/web/package.json",
           "kind": "manifest",
           "risk_score": 0.0,
@@ -17251,6 +17437,13 @@
           "dependencies": []
         },
         {
+          "id": "skilgen/commands/__init__.py",
+          "kind": "source-file",
+          "risk_score": 0.0,
+          "signals": [],
+          "dependencies": []
+        },
+        {
           "id": "skilgen/core/__init__.py",
           "kind": "source-file",
           "risk_score": 0.0,
@@ -17488,19 +17681,6 @@
           "dependencies": [
             "__future__",
             "pathlib"
-          ]
-        },
-        {
-          "id": "skilgen/hooks/claude_code_hook.py",
-          "kind": "source-file",
-          "risk_score": 0.0,
-          "signals": [],
-          "dependencies": [
-            "__future__",
-            "os",
-            "sys",
-            "time",
-            "urllib.request"
           ]
         },
         {
@@ -18629,6 +18809,14 @@
         },
         {
           "source": "manifest:apps/dashboard/package.json",
+          "target": "package:@types/d3",
+          "kind": "external-package",
+          "risk_signals": [
+            "version:loosely-pinned"
+          ]
+        },
+        {
+          "source": "manifest:apps/dashboard/package.json",
           "target": "package:@types/node",
           "kind": "external-package",
           "risk_signals": [
@@ -18662,6 +18850,14 @@
         {
           "source": "manifest:apps/dashboard/package.json",
           "target": "package:autoprefixer",
+          "kind": "external-package",
+          "risk_signals": [
+            "version:loosely-pinned"
+          ]
+        },
+        {
+          "source": "manifest:apps/dashboard/package.json",
+          "target": "package:d3",
           "kind": "external-package",
           "risk_signals": [
             "version:loosely-pinned"
@@ -18716,6 +18912,22 @@
           "target": "package:react-dom",
           "kind": "external-package",
           "risk_signals": []
+        },
+        {
+          "source": "manifest:apps/dashboard/package.json",
+          "target": "package:recharts",
+          "kind": "external-package",
+          "risk_signals": [
+            "version:loosely-pinned"
+          ]
+        },
+        {
+          "source": "manifest:apps/dashboard/package.json",
+          "target": "package:swr",
+          "kind": "external-package",
+          "risk_signals": [
+            "version:loosely-pinned"
+          ]
         },
         {
           "source": "manifest:apps/dashboard/package.json",
@@ -20037,6 +20249,12 @@
         },
         {
           "source": "skilgen/cli/main.py",
+          "target": "skilgen/commands/check.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/cli/main.py",
           "target": "skilgen/core/analytics.py",
           "kind": "repo-import",
           "risk_signals": []
@@ -20092,12 +20310,6 @@
         {
           "source": "skilgen/cli/main.py",
           "target": "skilgen/delivery.py",
-          "kind": "repo-import",
-          "risk_signals": []
-        },
-        {
-          "source": "skilgen/cli/main.py",
-          "target": "skilgen/enterprise_skills.py",
           "kind": "repo-import",
           "risk_signals": []
         },
@@ -21918,7 +22130,7 @@
   },
   "architecture": {
     "headline": "Evidence-backed architecture blueprint for the codebase",
-    "system_summary": "Skilgen identified 3 top-level architecture domains from 90 evidence items and 13 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 172 symbol-bearing files, 169 call-bearing files, 72 mapped tests, and 6 workspace packages.",
+    "system_summary": "Skilgen identified 3 top-level architecture domains from 90 evidence items and 13 domain graph nodes. Parser backends in use: empty, python-ast, regex. Source comprehension currently tracks 173 symbol-bearing files, 170 call-bearing files, 72 mapped tests, and 6 workspace packages.",
     "domains": [
       {
         "name": "requirements",
