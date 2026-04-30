@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from apps.api.api.index import app
 from apps.api.api.routes import orgs
+from apps.api.api.services.agent_connection import get_agent_connection_status
 from packages.db.llm_key import decrypt_key
 from packages.db.models import AnalysisRun
 from packages.db.models import SourceConnection as SourceConnectionModel
@@ -383,6 +384,28 @@ def test_runtime_breakdown_merges_runtime_aliases_before_rendering() -> None:
     assert response.runtimes[0].loads_30d == 2
     assert response.runtimes[0].unique_skills == 1
     assert response.total_loads_30d == 3
+
+
+def test_connect_status_merges_runtime_alias_load_counts() -> None:
+    now = datetime.utcnow()
+    db = Db(
+        org=_org(),
+        results=[
+            Result(rows=[
+                SimpleNamespace(agent_runtime="codex", last_seen_at=now - timedelta(days=1), load_count_30d=24),
+                SimpleNamespace(agent_runtime="codex_cli", last_seen_at=now, load_count_30d=12),
+                SimpleNamespace(agent_runtime="unknown", last_seen_at=now, load_count_30d=5),
+                SimpleNamespace(agent_runtime="other", last_seen_at=now - timedelta(days=20), load_count_30d=7),
+            ]),
+        ],
+    )
+
+    response = asyncio.run(get_agent_connection_status("org_1", db))
+
+    assert response["codex_cli"]["connected"] is True
+    assert response["codex_cli"]["load_count_30d"] == 36
+    assert response["unidentified_agent"]["connected"] is True
+    assert response["unidentified_agent"]["load_count_30d"] == 12
 
 
 def test_org_session_tag_updates_existing_session() -> None:

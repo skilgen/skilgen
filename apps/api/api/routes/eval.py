@@ -956,9 +956,13 @@ async def _compute_skill_gaps(db: AsyncSession, org_id: str, status: str = "all"
         skills_by_repo[skill.repo_id].append(skill)
 
     computed: list[GapItem] = []
+    emitted_gap_ids: set[str] = set()
 
     def add_gap(repo: Repo, gap_type: str, severity: str, domain: str, current_score: int | None, evidence: str, recommendation: str, fix_command: str | None, impact: str, failure_count: int = 1, skill: Skill | None = None) -> None:
         gap_id = _stable_gap_id(org_id, repo.id, gap_type, domain)
+        if gap_id in emitted_gap_ids:
+            return
+        emitted_gap_ids.add(gap_id)
         existing = existing_gaps.get(gap_id)
         gap_status = existing.status if existing else "open"
         if existing is None:

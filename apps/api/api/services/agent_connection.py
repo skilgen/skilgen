@@ -94,9 +94,12 @@ async def get_agent_connection_status(org_id: str, db: AsyncSession) -> dict:
         if runtime not in status:
             continue
         last_seen = row.last_seen_at
+        existing_seen_raw = status[runtime]["last_seen_at"]
+        existing_seen = datetime.fromisoformat(existing_seen_raw) if existing_seen_raw else None
+        latest_seen = max((seen for seen in (existing_seen, last_seen) if seen is not None), default=None)
         status[runtime] = {
-            "connected": bool(last_seen and last_seen >= cutoff_14),
-            "last_seen_at": last_seen.isoformat() if last_seen else None,
-            "load_count_30d": int(row.load_count_30d or 0),
+            "connected": bool(latest_seen and latest_seen >= cutoff_14),
+            "last_seen_at": latest_seen.isoformat() if latest_seen else None,
+            "load_count_30d": int(status[runtime]["load_count_30d"] or 0) + int(row.load_count_30d or 0),
         }
     return status

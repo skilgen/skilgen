@@ -133,3 +133,24 @@ def test_skill_gaps_detects_missing_low_quality_stale_and_never_loaded() -> None
     assert {"missing_skill", "low_quality", "stale", "never_loaded"} <= gap_types
     assert any(isinstance(item, SkillGap) for item in db.added)
     assert db.committed is True
+
+
+def test_skill_gaps_deduplicates_same_repo_domain_gap_type() -> None:
+    weak_a = _skill("skill_security_a", "security_compliance", score=35, loads=1)
+    weak_b = _skill("skill_security_b", "security_compliance", score=40, loads=1)
+    db = Db(
+        results=[
+            Result(rows=[_repo()]),
+            Result(rows=[weak_a, weak_b]),
+            Result(rows=[]),
+            Result(rows=[]),
+        ]
+    )
+
+    response = asyncio.run(eval_routes.list_skill_gaps("org_1", "all", db, "org_1"))
+    low_quality_security = [
+        gap for gap in response.gaps if gap.gap_type == "low_quality" and gap.domain == "security_compliance"
+    ]
+
+    assert len(low_quality_security) == 1
+    assert db.committed is True
