@@ -31,7 +31,7 @@ export default async function SLAPage() {
           </select>
           <input className="h-10 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 text-sm" defaultValue={80} max={100} min={60} name="coverage_target_pct" type="number" />
           <input className="h-10 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 text-sm" name="alert_email" placeholder="alerts@example.com" />
-          <button className="h-10 rounded-md bg-[color:var(--accent-primary)] px-4 text-sm font-semibold text-[color:var(--bg-base)]" formAction={`/api/not-wired`} type="button">Add</button>
+          <button className="h-10 rounded-md bg-[color:var(--accent-primary)] px-4 text-sm font-semibold text-[color:var(--bg-base)]" formAction="/api/sla" type="submit">Add</button>
         </form>
       </section>
 

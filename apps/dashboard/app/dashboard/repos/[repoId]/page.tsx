@@ -7,6 +7,7 @@ import { SectionFallback } from "@/components/section-fallback";
 import {
   API_URL,
   getBootstrapOrg,
+  getMyOrg,
   getOrgRedFlags,
   getRepoDependencies,
   getRepo,
@@ -611,7 +612,7 @@ export default async function RepoDetailPage({ params }: PageProps) {
     scoreForecast = forecastPayload;
     dependencies = dependencyPayload;
     skillSources = sourcePayload;
-    const org = await getBootstrapOrg();
+    const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
     if (org?.id) {
       repoRedFlags = (await getOrgRedFlags(accessToken, org.id, "critical", repoId))?.flags ?? [];
     }

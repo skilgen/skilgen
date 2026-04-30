@@ -32,11 +32,17 @@ const AGENTS = [
 const AGENT_LABELS: Record<string, string> = {
   claude_code: "Claude",
   codex: "Codex",
+  codex_cli: "Codex CLI",
   cursor: "Cursor",
   copilot: "Copilot",
+  github_copilot: "Copilot",
+  gemini_cli: "Gemini CLI",
+  gemini: "Gemini CLI",
   devin: "Devin",
   human: "Human",
   mixed: "Mixed",
+  unidentified_agent: "Unidentified",
+  unknown: "Unknown",
 };
 
 const AGENT_COLORS: Record<string, string> = {
