@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { ArrowRight, BookOpen, ChevronRight, HelpCircle, LibraryBig, Search, Sparkles } from "lucide-react";
+import { withAuth } from "@workos-inc/authkit-nextjs";
 
 import { SectionErrorBoundary } from "@/components/section-error-boundary";
 import { SectionFallback } from "@/components/section-fallback";
-import { API_URL, type Org, type Repo, type Skill, type SkillCategory } from "../../../lib/data";
+import { API_URL, getMyOrg, type Org, type Repo, type Skill, type SkillCategory } from "../../../lib/data";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -124,9 +125,12 @@ function formatRelativeTime(value: string | null): string {
   }).format(new Date(timestamp));
 }
 
-async function fetchNoStore<T>(path: string): Promise<T | null> {
+async function fetchNoStore<T>(path: string, accessToken?: string): Promise<T | null> {
   try {
-    const response = await fetch(`${API_URL}${path}`, { cache: "no-store" });
+    const response = await fetch(`${API_URL}${path}`, {
+      cache: "no-store",
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    });
     if (!response.ok) return null;
     return (await response.json()) as T;
   } catch (error) {
@@ -142,7 +146,14 @@ async function loadSkillsLibrary(): Promise<{
   repoSkillFailures: number;
   failedBootstrap: boolean;
 }> {
-  const org = await fetchNoStore<Org>("/orgs/bootstrap");
+  let accessToken = "";
+  try {
+    const session = await withAuth({ ensureSignedIn: false });
+    accessToken = session?.accessToken || "";
+  } catch {
+    accessToken = "";
+  }
+  const org = accessToken ? await getMyOrg(accessToken) : await fetchNoStore<Org>("/orgs/bootstrap");
   if (!org) {
     return {
       org: null,
@@ -153,7 +164,7 @@ async function loadSkillsLibrary(): Promise<{
     };
   }
 
-  const repos = (await fetchNoStore<Repo[]>(`/orgs/${org.id}/repos`)) ?? [];
+  const repos = (await fetchNoStore<Repo[]>(`/orgs/${org.id}/repos`, accessToken)) ?? [];
   const skillPayloads = await Promise.all(
     repos.map(async (repo) => {
       const repoSkills = await fetchNoStore<Skill[]>(`/repos/${repo.id}/skills`);
