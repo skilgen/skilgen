@@ -6879,6 +6879,10 @@ async def get_my_code_today(
     start = datetime.combine(target_date, datetime.min.time())
     end = start + timedelta(days=1)
 
+    def in_target_day(value: datetime | None) -> bool:
+        candidate = _dt_naive(value)
+        return candidate is not None and start <= candidate < end
+
     sessions = list(
         (
             await db.execute(
@@ -6956,9 +6960,9 @@ async def get_my_code_today(
     pr_items: list[MyCodeTodayPR] = []
     for pr in daily_prs:
         attribution = attr_by_pr.get(pr.id)
-        if pr.opened_at and start <= pr.opened_at < end:
+        if in_target_day(pr.opened_at):
             prs_opened.add(pr.id)
-        if pr.merged_at and start <= pr.merged_at < end:
+        if in_target_day(pr.merged_at):
             prs_merged.add(pr.id)
         if pr.id not in counted_prs:
             found_violations, found_warnings = _finding_counts_from_items(attribution.skills_violated if attribution else [])
@@ -6985,9 +6989,9 @@ async def get_my_code_today(
         if attribution:
             pr = pr_by_id.get(attribution.pr_id)
             if pr:
-                if pr.opened_at and start <= pr.opened_at < end:
+                if in_target_day(pr.opened_at):
                     prs_opened.add(pr.id)
-                if pr.merged_at and start <= pr.merged_at < end:
+                if in_target_day(pr.merged_at):
                     prs_merged.add(pr.id)
                 if pr.id not in counted_prs:
                     found_violations, found_warnings = _finding_counts_from_items(attribution.skills_violated)

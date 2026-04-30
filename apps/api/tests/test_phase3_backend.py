@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from apps.api.api.routes import orgs
@@ -122,6 +122,19 @@ def test_my_code_today_includes_pr_activity_without_sessions() -> None:
     assert response.summary.prs_opened == 1
     assert response.summary.violations == 1
     assert response.summary.warnings == 1
+
+
+def test_my_code_today_handles_timezone_aware_pr_timestamps() -> None:
+    pr = _pr()
+    pr.opened_at = datetime(2026, 4, 28, 10, 20, 0, tzinfo=timezone.utc)
+    pr.merged_at = datetime(2026, 4, 28, 11, 20, 0, tzinfo=timezone.utc)
+    db = Db(results=[Result(rows=[]), Result(rows=[pr]), Result(rows=[_attr()])])
+
+    response = asyncio.run(orgs.get_my_code_today("org_1", login="ravi", date="2026-04-28", db=db, current_org_id="org_1"))
+
+    assert response.summary.prs_opened == 1
+    assert response.summary.prs_merged == 1
+    assert response.prs[0].github_pr_number == 42
 
 
 def test_standup_summary_aggregates_daily_activity() -> None:
