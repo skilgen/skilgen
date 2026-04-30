@@ -1707,6 +1707,7 @@
       "json",
       "os",
       "pathlib",
+      "skilgen/core/analytics.py",
       "sys",
       "time",
       "typing",
@@ -3419,6 +3420,7 @@
         "json",
         "os",
         "pathlib",
+        "skilgen/core/analytics.py",
         "sys",
         "time",
         "typing",
@@ -5299,6 +5301,36 @@
         ]
       },
       {
+        "path": "skilgen/core/analytics.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import json",
+          "import os",
+          "from collections import Counter, defaultdict",
+          "from datetime import UTC, datetime",
+          "from pathlib import Path",
+          "import re",
+          "from skilgen.external_skills import active_external_skills",
+          "def _compute_richness_score(content: str, spec: object) -> dict[str, int]:",
+          "lines = content.splitlines()",
+          "words = len(content.split())",
+          "code_blocks = content.count(\"```\") // 2"
+        ],
+        "related_imports": [
+          "__future__",
+          "collections",
+          "datetime",
+          "json",
+          "os",
+          "pathlib",
+          "re",
+          "skilgen/external_skills.py"
+        ]
+      },
+      {
         "path": "skilgen/external_skills.py",
         "kind": "source",
         "language": "python",
@@ -5491,36 +5523,6 @@
           "re",
           "skilgen/core/models.py",
           "yaml"
-        ]
-      },
-      {
-        "path": "skilgen/core/analytics.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import json",
-          "import os",
-          "from collections import Counter, defaultdict",
-          "from datetime import UTC, datetime",
-          "from pathlib import Path",
-          "import re",
-          "from skilgen.external_skills import active_external_skills",
-          "def _compute_richness_score(content: str, spec: object) -> dict[str, int]:",
-          "lines = content.splitlines()",
-          "words = len(content.split())",
-          "code_blocks = content.count(\"```\") // 2"
-        ],
-        "related_imports": [
-          "__future__",
-          "collections",
-          "datetime",
-          "json",
-          "os",
-          "pathlib",
-          "re",
-          "skilgen/external_skills.py"
         ]
       },
       {
@@ -7362,9 +7364,9 @@
       "skilgen/hooks/claude_code_hook.py": {
         "language": "python",
         "backend": "python-ast",
-        "symbol_count": 23,
+        "symbol_count": 24,
         "call_count": 30,
-        "import_count": 8,
+        "import_count": 9,
         "relationship_count": 0
       },
       "skilgen/hooks/cursor.py": {
@@ -8978,8 +8980,8 @@
         "imports time",
         "from typing import Any",
         "imports urllib.request",
-        "function _session_id",
-        "function _session_lock_path"
+        "from skilgen.core.analytics import log_skill_usage",
+        "function _session_id"
       ],
       "skilgen/hooks/cursor.py": [
         "from __future__ import annotations",
@@ -16552,6 +16554,7 @@
             "json",
             "os",
             "pathlib",
+            "skilgen/core/analytics.py",
             "sys",
             "time",
             "typing",
@@ -21257,6 +21260,12 @@
         {
           "source": "skilgen/generators/skills.py",
           "target": "skilgen/deep_agents_core.py",
+          "kind": "repo-import",
+          "risk_signals": []
+        },
+        {
+          "source": "skilgen/hooks/claude_code_hook.py",
+          "target": "skilgen/core/analytics.py",
           "kind": "repo-import",
           "risk_signals": []
         },
