@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "@skillayer/ui";
-import type { MyCodeTodayResponse, MyCodeTodaySession } from "../../../lib/data";
+import type { MyCodeTodayPR, MyCodeTodayResponse, MyCodeTodaySession } from "../../../lib/data";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
 
@@ -156,6 +156,22 @@ function SessionCard({ session }: { session: MyCodeTodaySession }) {
   );
 }
 
+function PrCard({ pr }: { pr: MyCodeTodayPR }) {
+  return (
+    <Link className="block rounded-2xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4 transition-colors hover:border-[color:var(--accent-primary)]/70" href={`/dashboard/agent-prs?pr=${pr.id}`}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="inline-flex items-center text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]"><GitPullRequest className="mr-1.5 h-3.5 w-3.5" />PR #{pr.github_pr_number}</span>
+        <span className={cn("rounded-full border px-2 py-1 text-[11px] font-semibold capitalize", riskClass(pr.risk_tier))}>{pr.risk_tier}</span>
+      </div>
+      <div className="mt-3 line-clamp-2 text-sm font-semibold text-[color:var(--text-primary)]">{pr.title}</div>
+      <div className="mt-3 flex items-center justify-between gap-3 text-xs">
+        <span className="capitalize text-[color:var(--text-secondary)]">{pr.state ?? "open"}</span>
+        <span className="inline-flex items-center font-semibold text-[color:var(--accent-primary)]">Open PR context <ExternalLink className="ml-1 h-3.5 w-3.5" /></span>
+      </div>
+    </Link>
+  );
+}
+
 export function MyCodeTodayClient({ accessToken, orgId, initialData, initialDate, initialLogin }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -169,6 +185,7 @@ export function MyCodeTodayClient({ accessToken, orgId, initialData, initialDate
 
   const summary = data?.summary ?? { total_sessions: 0, total_files: 0, skills_used: [], prs_opened: 0, prs_merged: 0, violations: 0, warnings: 0 };
   const sessions = useMemo(() => data?.sessions ?? [], [data?.sessions]);
+  const prs = useMemo(() => data?.prs ?? [], [data?.prs]);
 
   const refresh = useCallback(async (nextLogin = login, nextDate = date) => {
     if (!orgId || !nextLogin) return;
@@ -226,9 +243,11 @@ export function MyCodeTodayClient({ accessToken, orgId, initialData, initialDate
         </button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         <SummaryCard icon={<Code2 className="h-4 w-4" />} label="Sessions" value={summary.total_sessions} />
         <SummaryCard icon={<FileText className="h-4 w-4" />} label="Files" value={summary.total_files} />
+        <SummaryCard icon={<GitPullRequest className="h-4 w-4" />} label="PRs Opened" value={summary.prs_opened} />
+        <SummaryCard icon={<GitPullRequest className="h-4 w-4" />} label="PRs Merged" tone={summary.prs_merged > 0 ? "green" : undefined} value={summary.prs_merged} />
         <SummaryCard icon={<ShieldAlert className="h-4 w-4" />} label="Violations" tone={summary.violations > 0 ? "red" : "green"} value={summary.violations} />
         <SummaryCard icon={<AlertTriangle className="h-4 w-4" />} label="Warnings" tone={summary.warnings > 0 ? "amber" : "green"} value={summary.warnings} />
       </div>
@@ -259,9 +278,28 @@ export function MyCodeTodayClient({ accessToken, orgId, initialData, initialDate
         </div>
       ) : null}
 
-      {error ? <ErrorState error={error} onRetry={() => void refresh()} /> : sessions.length ? (
-        <div className="space-y-3">
-          {sessions.map((session) => <SessionCard key={session.session_id} session={session} />)}
+      {error ? <ErrorState error={error} onRetry={() => void refresh()} /> : sessions.length || prs.length ? (
+        <div className="space-y-5">
+          {prs.length ? (
+            <section className="space-y-3">
+              <div>
+                <h2 className="text-lg font-semibold text-[color:var(--text-primary)]">PR activity</h2>
+                <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Pull requests authored by this developer on the selected date.</p>
+              </div>
+              <div className="grid gap-3 lg:grid-cols-2">
+                {prs.map((pr) => <PrCard key={pr.id} pr={pr} />)}
+              </div>
+            </section>
+          ) : null}
+          {sessions.length ? (
+            <section className="space-y-3">
+              <div>
+                <h2 className="text-lg font-semibold text-[color:var(--text-primary)]">Agent sessions</h2>
+                <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Sessions with loaded skills and file touch data.</p>
+              </div>
+              {sessions.map((session) => <SessionCard key={session.session_id} session={session} />)}
+            </section>
+          ) : null}
         </div>
       ) : <EmptyState date={date} />}
     </div>

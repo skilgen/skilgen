@@ -1,7 +1,7 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { UserRound } from "lucide-react";
 
-import { getBootstrapOrg, getMyCodeToday, getMyOrg } from "../../../lib/data";
+import { getBootstrapOrg, getDeveloperLeaderboard, getMyCodeToday, getMyOrg } from "../../../lib/data";
 import { MyCodeTodayClient } from "./my-code-today-client";
 
 type PageProps = {
@@ -23,18 +23,28 @@ function loginFromEmail(email: string | null | undefined): string {
 export default async function MyCodeTodayPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const selectedDate = first(params.date) || todayUtc();
+  const requestedLogin = first(params.login) || "";
   let accessToken = "";
-  let currentLogin = first(params.login) || "";
+  let currentLogin = requestedLogin;
+  let emailFallbackLogin = "developer";
   let org = null;
 
   try {
     const session = await withAuth({ ensureSignedIn: false });
     accessToken = session?.accessToken || "";
-    currentLogin ||= loginFromEmail(session?.user?.email);
+    emailFallbackLogin = loginFromEmail(session?.user?.email);
     org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   } catch {
-    currentLogin ||= "developer";
     org = await getBootstrapOrg();
+  }
+
+  if (!currentLogin && org?.id) {
+    const leaderboard = await getDeveloperLeaderboard(accessToken, org.id, 30, "prs");
+    const developers = leaderboard?.developers ?? [];
+    currentLogin =
+      developers.find((developer) => developer.login.toLowerCase() === emailFallbackLogin.toLowerCase())?.login ||
+      developers[0]?.login ||
+      emailFallbackLogin;
   }
 
   if (!org?.id) {

@@ -234,6 +234,14 @@ export type AgentPrManifestResponse = {
   signed_at: string | null;
 };
 
+export type MyCodeTodayPR = {
+  id: string;
+  github_pr_number: number;
+  title: string;
+  state: string | null;
+  risk_tier: "green" | "yellow" | "red" | string;
+};
+
 export type MyCodeTodaySession = {
   session_id: string;
   agent_runtime: string;
@@ -242,19 +250,14 @@ export type MyCodeTodaySession = {
   files_touched: string[];
   skills_loaded: string[];
   outcome: string | null;
-  pr: {
-    id: string;
-    github_pr_number: number;
-    title: string;
-    state: string;
-    risk_tier: "green" | "yellow" | "red" | string;
-  } | null;
+  pr: MyCodeTodayPR | null;
 };
 
 export type MyCodeTodayResponse = {
   date: string;
   login: string;
   sessions: MyCodeTodaySession[];
+  prs?: MyCodeTodayPR[];
   summary: {
     total_sessions: number;
     total_files: number;

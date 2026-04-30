@@ -85,7 +85,7 @@ def _attr() -> PRAttribution:
 
 
 def test_my_code_today_links_sessions_to_pr_attribution() -> None:
-    db = Db(results=[Result(rows=[_session()]), Result(rows=[_pr()]), Result(rows=[_attr()])])
+    db = Db(results=[Result(rows=[_session()]), Result(rows=[_pr()]), Result(rows=[_pr()]), Result(rows=[_attr()])])
 
     response = asyncio.run(orgs.get_my_code_today("org_1", login="ravi", date="2026-04-28", db=db, current_org_id="org_1"))
 
@@ -95,18 +95,33 @@ def test_my_code_today_links_sessions_to_pr_attribution() -> None:
     assert response.summary.prs_opened == 1
     assert response.summary.violations == 1
     assert response.summary.warnings == 1
+    assert response.prs[0].github_pr_number == 42
     assert response.sessions[0].pr is not None
     assert response.sessions[0].pr.risk_tier == "red"
 
 
 def test_my_code_today_empty_date_returns_empty_summary() -> None:
-    db = Db(results=[Result(rows=[])])
+    db = Db(results=[Result(rows=[]), Result(rows=[])])
 
     response = asyncio.run(orgs.get_my_code_today("org_1", login="ravi", date="2026-04-28", db=db, current_org_id="org_1"))
 
     assert response.sessions == []
     assert response.summary.total_sessions == 0
     assert response.summary.skills_used == []
+    assert response.prs == []
+
+
+def test_my_code_today_includes_pr_activity_without_sessions() -> None:
+    db = Db(results=[Result(rows=[]), Result(rows=[_pr()]), Result(rows=[_attr()])])
+
+    response = asyncio.run(orgs.get_my_code_today("org_1", login="ravi", date="2026-04-28", db=db, current_org_id="org_1"))
+
+    assert response.sessions == []
+    assert response.prs[0].title == "Fix auth refresh"
+    assert response.prs[0].risk_tier == "red"
+    assert response.summary.prs_opened == 1
+    assert response.summary.violations == 1
+    assert response.summary.warnings == 1
 
 
 def test_standup_summary_aggregates_daily_activity() -> None:

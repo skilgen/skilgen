@@ -24,7 +24,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select, update
+from sqlalchemy import and_, desc, func, or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -401,6 +401,7 @@ class MyCodeTodayResponse(BaseModel):
     date: str
     login: str
     sessions: list[MyCodeTodaySession]
+    prs: list[MyCodeTodayPR] = Field(default_factory=list)
     summary: MyCodeTodaySummary
 
 
@@ -1993,17 +1994,25 @@ async def get_org_connect_status(
                 select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Repo.name)
             )
         ).scalars().all()
-        repo_ids = [repo.id for repo in repos]
-        skill_count = int(
-            (
+        skill_count = 0
+        for repo in repos:
+            latest_run = (
                 await db.execute(
-                    select(func.count(Skill.id)).where(Skill.repo_id.in_(repo_ids))
-                    if repo_ids
-                    else select(func.count(Skill.id)).where(False)
+                    select(AnalysisRun)
+                    .where(AnalysisRun.repo_id == repo.id, AnalysisRun.status == "complete")
+                    .order_by(desc(AnalysisRun.created_at))
+                    .limit(1)
                 )
-            ).scalar()
-            or 0
-        )
+            ).scalar_one_or_none()
+            if latest_run is not None:
+                skill_count += int(latest_run.skill_count or 0)
+            else:
+                skill_count += int(
+                    (
+                        await db.execute(select(func.count(Skill.id)).where(Skill.repo_id == repo.id))
+                    ).scalar()
+                    or 0
+                )
         runtime_status = await get_agent_connection_status(org_id, db)
     except Exception as exc:
         await _rollback(db, "connect status lookup")
@@ -6886,30 +6895,38 @@ async def get_my_code_today(
         .scalars()
         .all()
     )
-    if not sessions:
-        return MyCodeTodayResponse(
-            date=target_date.isoformat(),
-            login=login,
-            sessions=[],
-            summary=MyCodeTodaySummary(
-                total_sessions=0,
-                total_files=0,
-                skills_used=[],
-                prs_opened=0,
-                prs_merged=0,
-                violations=0,
-                warnings=0,
-            ),
-        )
-
-    repo_ids = {session.repo_id for session in sessions}
-    prs = list(
+    daily_prs = list(
         (
-            await db.execute(select(PullRequest).where(PullRequest.repo_id.in_(repo_ids)))
+            await db.execute(
+                select(PullRequest)
+                .join(Repo, Repo.id == PullRequest.repo_id)
+                .where(
+                    Repo.org_id == org_id,
+                    PullRequest.author_login == login,
+                    or_(
+                        and_(PullRequest.opened_at.is_not(None), PullRequest.opened_at >= start, PullRequest.opened_at < end),
+                        and_(PullRequest.merged_at.is_not(None), PullRequest.merged_at >= start, PullRequest.merged_at < end),
+                    ),
+                )
+                .order_by(desc(PullRequest.opened_at))
+            )
         )
         .scalars()
         .all()
     )
+    repo_ids = {session.repo_id for session in sessions}
+    session_prs = (
+        list(
+            (
+                await db.execute(select(PullRequest).where(PullRequest.repo_id.in_(repo_ids)))
+            )
+            .scalars()
+            .all()
+        )
+        if repo_ids
+        else []
+    )
+    prs = list({pr.id: pr for pr in [*daily_prs, *session_prs]}.values())
     pr_by_id = {pr.id: pr for pr in prs}
     attributions = (
         list(
@@ -6926,6 +6943,7 @@ async def get_my_code_today(
     for attribution in attributions:
         for session_id in _list_or_empty(attribution.sessions):
             session_to_attr.setdefault(str(session_id), attribution)
+    attr_by_pr = {attribution.pr_id: attribution for attribution in attributions}
 
     files_touched: set[str] = set()
     skills_used: set[str] = set()
@@ -6935,6 +6953,28 @@ async def get_my_code_today(
     warnings = 0
     items: list[MyCodeTodaySession] = []
     counted_prs: set[str] = set()
+    pr_items: list[MyCodeTodayPR] = []
+    for pr in daily_prs:
+        attribution = attr_by_pr.get(pr.id)
+        if pr.opened_at and start <= pr.opened_at < end:
+            prs_opened.add(pr.id)
+        if pr.merged_at and start <= pr.merged_at < end:
+            prs_merged.add(pr.id)
+        if pr.id not in counted_prs:
+            found_violations, found_warnings = _finding_counts_from_items(attribution.skills_violated if attribution else [])
+            violations += found_violations
+            warnings += found_warnings
+            counted_prs.add(pr.id)
+        pr_items.append(
+            MyCodeTodayPR(
+                id=pr.id,
+                github_pr_number=pr.github_pr_number,
+                title=pr.title or f"PR #{pr.github_pr_number}",
+                state=pr.state,
+                risk_tier=(attribution.risk_tier if attribution else None) or "green",
+            )
+        )
+
     for session in sessions:
         files = [str(path) for path in _list_or_empty(session.files_touched) if path]
         skills = [str(skill) for skill in _list_or_empty(session.skills_loaded) if skill]
@@ -6978,6 +7018,7 @@ async def get_my_code_today(
         date=target_date.isoformat(),
         login=login,
         sessions=items,
+        prs=pr_items,
         summary=MyCodeTodaySummary(
             total_sessions=len(items),
             total_files=len(files_touched),
