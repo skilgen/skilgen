@@ -7012,7 +7012,7 @@
       "skilgen/api/jobs.py": {
         "language": "python",
         "backend": "python-ast",
-        "symbol_count": 19,
+        "symbol_count": 20,
         "call_count": 30,
         "import_count": 12,
         "relationship_count": 1
@@ -8530,7 +8530,7 @@
         "imports json",
         "imports sqlite3",
         "imports uuid",
-        "from concurrent.futures import ThreadPoolExecutor",
+        "from concurrent.futures import Future, ThreadPoolExecutor",
         "from contextlib import closing",
         "from dataclasses import dataclass, field",
         "from datetime import datetime, timezone",
@@ -10602,6 +10602,7 @@
         "_recover_persisted_jobs",
         "_row_to_job",
         "add",
+        "add_done_callback",
         "append",
         "append_audit_event",
         "append_job_event",
@@ -10610,8 +10611,7 @@
         "connect",
         "dumps",
         "execute",
-        "fetchall",
-        "fetchone"
+        "fetchall"
       ],
       "skilgen/api/server.py": [
         "ApiPrincipal",
