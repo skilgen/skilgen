@@ -4616,7 +4616,7 @@
           "from __future__ import annotations",
           "import asyncio",
           "import base64",
-          "from collections import defaultdict",
+          "from collections import Counter, defaultdict",
           "from itertools import combinations",
           "import json",
           "import socket",
