@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, ClipboardList, GitBranch, History, Loader2, Settings, ShieldCheck } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
@@ -64,7 +64,17 @@ export default function ReviewPage() {
   const [scanAllLoading, setScanAllLoading] = useState(false);
   const [scanAllStatus, setScanAllStatus] = useState("");
 
-  async function bootstrap() {
+  const loadHistory = useCallback(async (nextOrgId = orgId, nextApiKey = apiKey) => {
+    if (!nextOrgId || !nextApiKey) return;
+    const response = await fetch(`${API_URL}/orgs/${nextOrgId}/review/history`, { headers: { Authorization: `Bearer ${nextApiKey}` } });
+    if (response.ok) {
+      const body = (await response.json()) as { reviews: PRReview[] };
+      setHistory(body.reviews);
+      setSelected((current) => (body.reviews.some((review) => review.id === current?.id) ? current : body.reviews[0] ?? null));
+    }
+  }, [apiKey, orgId]);
+
+  const bootstrap = useCallback(async () => {
     const ctx = await fetch("/api/org-context").then((response) => response.json()) as { orgId: string; apiKey: string };
     if (!ctx.orgId || !ctx.apiKey) return;
     const auth = { Authorization: `Bearer ${ctx.apiKey}` };
@@ -74,21 +84,11 @@ export default function ReviewPage() {
     setRepos(repoRows);
     setRepoId(repoRows[0]?.id ?? "");
     await loadHistory(ctx.orgId, ctx.apiKey);
-  }
-
-  async function loadHistory(nextOrgId = orgId, nextApiKey = apiKey) {
-    if (!nextOrgId || !nextApiKey) return;
-    const response = await fetch(`${API_URL}/orgs/${nextOrgId}/review/history`, { headers: { Authorization: `Bearer ${nextApiKey}` } });
-    if (response.ok) {
-      const body = (await response.json()) as { reviews: PRReview[] };
-      setHistory(body.reviews);
-      setSelected((current) => (body.reviews.some((review) => review.id === current?.id) ? current : body.reviews[0] ?? null));
-    }
-  }
+  }, [loadHistory]);
 
   useEffect(() => {
     void bootstrap();
-  }, []);
+  }, [bootstrap]);
 
   async function scan() {
     if (!orgId || !apiKey || !repoId || !diff.trim()) return;

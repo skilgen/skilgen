@@ -2143,7 +2143,9 @@ async def load_skills_for_agent(
     if repo is None:
         raise HTTPException(status_code=404, detail="Repo not found")
 
-    # Load latest skill versions
+    # Load latest skill versions. If version rows are temporarily unavailable,
+    # fall back to the current Skill content so connected agents still receive
+    # useful guidance instead of an empty "no skills" response.
     try:
         skills_result = await db.execute(
             select(Skill, SkillVersion)
@@ -2151,9 +2153,14 @@ async def load_skills_for_agent(
             .where(Skill.repo_id == repo_id, SkillVersion.is_latest.is_(True))
             .order_by(Skill.domain)
         )
-        rows = skills_result.all()
+        rows: list[tuple[Skill, SkillVersion | None]] = list(skills_result.all())
     except Exception:
-        rows = []
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        fallback_skills = sorted(await _latest_repo_skills(db, repo_id), key=lambda item: item.domain)
+        rows = [(skill, None) for skill in fallback_skills]
 
     if not rows:
         return {
@@ -2172,7 +2179,7 @@ async def load_skills_for_agent(
     skill_summaries: list[dict] = []
 
     for skill, version in rows:
-        content = version.content or ""
+        content = (version.content if version is not None else skill.content) or ""
         skill_blocks.append(
             f"## {skill.domain}\n"
             f"Score: {skill.score_total or 0:.0f}/100 | "
@@ -2183,7 +2190,7 @@ async def load_skills_for_agent(
             "id": str(skill.id),
             "domain": skill.domain,
             "score": skill.score_total,
-            "version": version.version_number,
+            "version": version.version_number if version is not None else None,
             "is_enterprise": bool(getattr(skill, "is_enterprise", False)),
         })
 

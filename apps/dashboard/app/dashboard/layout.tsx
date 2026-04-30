@@ -128,7 +128,7 @@ const loadNavBadges = cache(async (): Promise<{ memory: boolean; redFlags: boole
   } catch {
     // Auth can be unavailable in local preview; badges fall back below.
   }
-  const org = await getBootstrapOrg();
+  const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   if (!org?.id) return { memory: false, redFlags: false, audit: false, agentLoads: true, skillGapCount: 0, pendingAutopilotCount: 0 };
   const [memory, redFlags, auditStats, setupStatus, skillGaps, autopilotQueue] = await Promise.all([
     getMemoryQueue(accessToken, org.id, { status: "pending", limit: 1 }),

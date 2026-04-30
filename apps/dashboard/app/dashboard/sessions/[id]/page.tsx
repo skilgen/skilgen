@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
@@ -19,14 +19,13 @@ export default function SessionDetailPage({ params, searchParams }: { params: Pr
   const [selected, setSelected] = useState(0);
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
-  useEffect(() => { void bootstrap(); }, []);
-  async function bootstrap() {
+  const bootstrap = useCallback(async () => {
     const ctx = await fetch("/api/org-context").then((r) => r.json()) as { orgId: string; apiKey: string };
     if (!ctx.orgId || !ctx.apiKey) return;
     const org = { id: ctx.orgId };
     const key = { api_key: ctx.apiKey };
     setApiKey(key.api_key);
-    let rid = resolvedSearchParams.repo || repoId;
+    let rid = resolvedSearchParams.repo || "";
     if (!rid) {
       const rows = await fetch(`${API_URL}/orgs/${org.id}/sessions`, { headers: { Authorization: `Bearer ${key.api_key}` } }).then((r) => r.json());
       const found = rows.sessions?.find((item: Session) => item.id === resolvedParams.id);
@@ -37,7 +36,8 @@ export default function SessionDetailPage({ params, searchParams }: { params: Pr
       const detail = await fetch(`${API_URL}/repos/${rid}/agent-sessions/${resolvedParams.id}`, { headers: { Authorization: `Bearer ${key.api_key}` } }).then((r) => r.json());
       setSession(detail); setCode(detail.code_produced || "");
     }
-  }
+  }, [resolvedParams.id, resolvedSearchParams.repo]);
+  useEffect(() => { void bootstrap(); }, [bootstrap]);
   async function patch(outcome: string) {
     if (!repoId) return;
     const detail = await fetch(`${API_URL}/repos/${repoId}/sessions/${resolvedParams.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ outcome, code_produced: code }) }).then((r) => r.json());
