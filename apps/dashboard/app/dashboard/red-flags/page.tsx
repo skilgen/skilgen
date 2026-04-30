@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
-import { getBootstrapOrg, getOrgRedFlags, type OrgRedFlags } from "../../../lib/data";
+import { getBootstrapOrg, getMyOrg, getOrgRedFlags, type OrgRedFlags } from "../../../lib/data";
 import { RedFlagsShell } from "./red-flags-shell";
 
 export default async function RedFlagsPage() {
@@ -12,7 +12,7 @@ export default async function RedFlagsPage() {
   } catch (error) {
     console.error("Red flags auth unavailable:", error);
   }
-  const org = await getBootstrapOrg();
+  const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   const response = org?.id ? await getOrgRedFlags(accessToken, org.id) : null;
   const redFlags: OrgRedFlags = response ?? {
     critical_count: 0,

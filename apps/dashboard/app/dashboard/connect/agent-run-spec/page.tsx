@@ -16,7 +16,7 @@ async function loadSpecContext() {
     // Auth can be unavailable in local preview; continue with bootstrap data.
   }
   const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
-  const apiKey = org ? (await getOrgApiKey(accessToken || "bootstrap", org.id))?.api_key ?? "" : "";
+  const apiKey = org ? (await getOrgApiKey(accessToken, org.id))?.api_key ?? "" : "";
   return { orgId: org?.id ?? "", apiKey };
 }
 

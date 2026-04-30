@@ -21,8 +21,10 @@ export default function SessionDetailPage({ params, searchParams }: { params: Pr
   const [loading, setLoading] = useState(false);
   useEffect(() => { void bootstrap(); }, []);
   async function bootstrap() {
-    const org = await fetch(`${API_URL}/orgs/bootstrap`).then((r) => r.json());
-    const key = await fetch(`${API_URL}/orgs/${org.id}/api-key`, { headers: { Authorization: "Bearer bootstrap" } }).then((r) => r.json());
+    const ctx = await fetch("/api/org-context").then((r) => r.json()) as { orgId: string; apiKey: string };
+    if (!ctx.orgId || !ctx.apiKey) return;
+    const org = { id: ctx.orgId };
+    const key = { api_key: ctx.apiKey };
     setApiKey(key.api_key);
     let rid = resolvedSearchParams.repo || repoId;
     if (!rid) {

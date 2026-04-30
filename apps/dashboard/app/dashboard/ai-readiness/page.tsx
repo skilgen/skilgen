@@ -2,7 +2,7 @@ import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { ArrowUpRight, Brain } from "lucide-react";
 
-import { getBootstrapOrg, getKnowledgeVelocity, getMemoryQueue, getOrgMemoryScore, getOrgRepos } from "../../../lib/data";
+import { getBootstrapOrg, getKnowledgeVelocity, getMemoryQueue, getMyOrg, getOrgMemoryScore, getOrgRepos } from "../../../lib/data";
 
 function gradeCopy(score: number): string {
   if (score >= 80) return "AI-Native — agents write code like your best engineers";
@@ -35,7 +35,7 @@ export default async function AIReadinessPage() {
   } catch {
     accessToken = "";
   }
-  const org = await getBootstrapOrg();
+  const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   const [score, velocity, queue, repos] = org?.id ? await Promise.all([getOrgMemoryScore(accessToken, org.id), getKnowledgeVelocity(accessToken, org.id), getMemoryQueue(accessToken, org.id, { status: "pending" }), getOrgRepos(accessToken, org.id)]) : [null, null, null, []];
   const safe = score ?? { score: 0, grade: "F" as const, trend: "Stable", trend_7d: 0, trend_30d: 0, computed_at: "", breakdown: { coverage: 0, load_frequency: 0, compliance: 0, quality: 0, freshness: 0 } };
   const totalSkills = (repos ?? []).reduce((sum, repo) => sum + (repo.skill_count ?? 0), 0);

@@ -7,6 +7,15 @@ import { ChevronDown, History, Plus, SlidersHorizontal } from "lucide-react";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
 export const dynamic = "force-dynamic";
 
+const AGENT_LABELS: Record<string, string> = {
+  claude_code: "Claude Code", codex: "Codex", codex_cli: "Codex CLI",
+  cursor: "Cursor", copilot: "GitHub Copilot", gemini_cli: "Gemini CLI",
+  devin: "Devin", unidentified_agent: "Unidentified Agent", unknown: "Unknown",
+};
+function agentLabel(runtime: string) {
+  return AGENT_LABELS[runtime] ?? runtime.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 type SessionSkill = { domain: string; score: number; loaded_at: string };
 type Session = {
   session_id: string;
@@ -66,13 +75,14 @@ export default function SessionsPage() {
   useEffect(() => { void bootstrap(); }, []);
 
   async function bootstrap() {
-    const org = await fetch(`${API_URL}/orgs/bootstrap`).then((r) => r.json());
-    const key = await fetch(`${API_URL}/orgs/${org.id}/api-key`, { headers: { Authorization: "Bearer bootstrap" } }).then((r) => r.json());
+    const ctx = await fetch("/api/org-context").then((r) => r.json()) as { orgId: string; apiKey: string };
+    if (!ctx.orgId || !ctx.apiKey) return;
+    const auth = { Authorization: `Bearer ${ctx.apiKey}` };
     const [repoRows, sessionRows] = await Promise.all([
-      fetch(`${API_URL}/orgs/${org.id}/repos`, { headers: { Authorization: `Bearer ${key.api_key}` } }).then((r) => r.json()),
-      fetch(`${API_URL}/orgs/${org.id}/sessions`, { headers: { Authorization: `Bearer ${key.api_key}` } }).then((r) => r.json()),
+      fetch(`${API_URL}/orgs/${ctx.orgId}/repos`, { headers: auth }).then((r) => r.json()),
+      fetch(`${API_URL}/orgs/${ctx.orgId}/sessions`, { headers: auth }).then((r) => r.json()),
     ]);
-    setApiKey(key.api_key);
+    setApiKey(ctx.apiKey);
     setRepos(repoRows);
     setRepoId(repoRows[0]?.id ?? "");
     setSessions(sessionRows.sessions ?? []);
@@ -120,7 +130,7 @@ export default function SessionsPage() {
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="text-xs text-[color:var(--text-tertiary)]">{shortTime(session.started_at)}</div>
-                        <h3 className="mt-1 text-lg font-semibold">{session.agent_runtime} · {session.repo_name}</h3>
+                        <h3 className="mt-1 text-lg font-semibold">{agentLabel(session.agent_runtime)} · {session.repo_name}</h3>
                       </div>
                       <div className="text-right text-sm text-[color:var(--text-secondary)]">{session.session_context} · {session.duration_minutes || 1} min</div>
                     </div>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
-import { getBootstrapOrg, getOrgSkillDebt } from "../../../lib/data";
+import { getBootstrapOrg, getMyOrg, getOrgSkillDebt } from "../../../lib/data";
 import { DebtClient } from "./debt-client";
 
 type PageProps = {
@@ -39,7 +39,7 @@ export default async function SkillDebtPage({ searchParams }: PageProps) {
     console.error("Skill debt auth unavailable:", error);
   }
 
-  const org = await getBootstrapOrg();
+  const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   const orgId = org?.id ?? "";
   const debt = orgId ? await getOrgSkillDebt(accessToken, orgId) : null;
   const safeDebt = debt ?? {

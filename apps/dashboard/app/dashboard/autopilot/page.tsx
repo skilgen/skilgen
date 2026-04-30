@@ -2,7 +2,7 @@ import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { Activity, CheckCircle2, Clock3, GitPullRequest, Sparkles, XCircle } from "lucide-react";
 
-import { getAutopilotQueue, getBootstrapOrg, type AutopilotTask } from "../../../lib/data";
+import { getAutopilotQueue, getBootstrapOrg, getMyOrg, type AutopilotTask } from "../../../lib/data";
 import { GenerateImprovementButton, ReviewActions, TriggerAutopilotButton } from "./autopilot-actions";
 
 export const dynamic = "force-dynamic";
@@ -70,7 +70,7 @@ export default async function AutopilotPage({ searchParams }: { searchParams?: P
     // Local preview may not have auth.
   }
 
-  const org = await getBootstrapOrg();
+  const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   const params = searchParams ? await searchParams : {};
   const queue = org?.id ? await getAutopilotQueue(accessToken, org.id) : null;
   const tasks = queue ?? [];

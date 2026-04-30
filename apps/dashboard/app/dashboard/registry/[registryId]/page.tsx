@@ -2,7 +2,7 @@ import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { ArrowLeft, BookOpen, GitBranch } from "lucide-react";
 
-import { getBootstrapOrg, getRegistrySkillDetail } from "../../../../lib/data";
+import { getBootstrapOrg, getMyOrg, getRegistrySkillDetail } from "../../../../lib/data";
 import { CopyValueButton, SkillActions } from "./skill-actions";
 import { ImportOwnButton } from "./import-own-button";
 
@@ -26,7 +26,7 @@ export default async function RegistryDetailPage({ params }: PageProps) {
     console.error("Registry detail auth unavailable:", error);
   }
 
-  const bootstrapOrg = await getBootstrapOrg();
+  const bootstrapOrg = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
   const orgId = bootstrapOrg?.id ?? "";
   const detail = await getRegistrySkillDetail(registryId);
 

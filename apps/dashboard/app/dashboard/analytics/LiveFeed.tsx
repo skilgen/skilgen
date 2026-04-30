@@ -22,8 +22,22 @@ type FeedEvent = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
 
+const AGENT_LABELS: Record<string, string> = {
+  claude_code: "Claude Code",
+  codex: "Codex",
+  codex_cli: "Codex CLI",
+  cursor: "Cursor",
+  copilot: "GitHub Copilot",
+  github_copilot: "GitHub Copilot",
+  gemini_cli: "Gemini CLI",
+  gemini: "Gemini CLI",
+  devin: "Devin",
+  unknown: "Unknown",
+  unidentified_agent: "Unidentified Agent",
+};
+
 function label(agent: string): string {
-  return ({ claude_code: "Claude Code", codex: "Codex", cursor: "Cursor", unknown: "Unknown" } as Record<string, string>)[agent] || agent;
+  return AGENT_LABELS[agent] ?? AGENT_LABELS[agent?.replace(/-/g, "_")] ?? (agent ? agent.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "Unknown");
 }
 
 function relative(ts: string, now: number): string {

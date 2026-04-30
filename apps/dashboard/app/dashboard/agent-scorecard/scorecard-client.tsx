@@ -21,11 +21,15 @@ type Props = {
 const AGENT_LABELS: Record<string, string> = {
   claude_code: "Claude Code",
   codex: "Codex",
+  codex_cli: "Codex CLI",
   cursor: "Cursor",
-  copilot: "Copilot",
+  copilot: "GitHub Copilot",
+  github_copilot: "GitHub Copilot",
+  gemini_cli: "Gemini CLI",
   devin: "Devin",
   human: "Human",
   mixed: "Mixed",
+  unidentified_agent: "Unidentified Agent",
 };
 
 const AGENT_COLORS: Record<string, string> = {

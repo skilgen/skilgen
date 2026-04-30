@@ -65,14 +65,15 @@ export default function ReviewPage() {
   const [scanAllStatus, setScanAllStatus] = useState("");
 
   async function bootstrap() {
-    const org = await fetch(`${API_URL}/orgs/bootstrap`).then((response) => response.json());
-    const key = await fetch(`${API_URL}/orgs/${org.id}/api-key`, { headers: { Authorization: "Bearer bootstrap" } }).then((response) => response.json());
-    const repoRows = await fetch(`${API_URL}/orgs/${org.id}/repos`, { headers: { Authorization: `Bearer ${key.api_key}` } }).then((response) => response.json());
-    setOrgId(org.id);
-    setApiKey(key.api_key);
+    const ctx = await fetch("/api/org-context").then((response) => response.json()) as { orgId: string; apiKey: string };
+    if (!ctx.orgId || !ctx.apiKey) return;
+    const auth = { Authorization: `Bearer ${ctx.apiKey}` };
+    const repoRows = await fetch(`${API_URL}/orgs/${ctx.orgId}/repos`, { headers: auth }).then((response) => response.json());
+    setOrgId(ctx.orgId);
+    setApiKey(ctx.apiKey);
     setRepos(repoRows);
     setRepoId(repoRows[0]?.id ?? "");
-    await loadHistory(org.id, key.api_key);
+    await loadHistory(ctx.orgId, ctx.apiKey);
   }
 
   async function loadHistory(nextOrgId = orgId, nextApiKey = apiKey) {
