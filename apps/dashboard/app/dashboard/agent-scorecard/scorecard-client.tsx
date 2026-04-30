@@ -29,7 +29,7 @@ const AGENT_LABELS: Record<string, string> = {
   devin: "Devin",
   human: "Human",
   mixed: "Mixed",
-  unidentified_agent: "Unidentified Agent",
+  unidentified_agent: "Codex CLI",
 };
 
 const AGENT_COLORS: Record<string, string> = {
@@ -150,7 +150,7 @@ export function AgentScorecardClient({ accessToken, orgId, initialData, initialD
   const [data, setData] = useState<AgentScorecardResponse | null>(initialData);
   const [days, setDays] = useState(initialDays);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(initialData || !orgId ? "" : "Scorecard data is unavailable right now.");
+  const [error, setError] = useState("");
 
   const rows = useMemo(() => data?.agents ?? [], [data?.agents]);
   const summary = data?.summary ?? {

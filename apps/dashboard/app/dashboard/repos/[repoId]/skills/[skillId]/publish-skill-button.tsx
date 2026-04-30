@@ -16,11 +16,11 @@ export function PublishSkillButton({ skillId, domain, accessToken }: PublishSkil
   return (
     <>
       <button
-        className="rounded-md border border-[rgb(var(--accent-primary-rgb)/0.4)] px-3 py-1.5 text-[13px] font-semibold text-[color:var(--accent-primary)] transition-colors hover:bg-[rgb(var(--accent-primary-rgb)/0.08)]"
+        className="rounded-full bg-[color:var(--accent-primary)] px-4 py-2 text-[13px] font-semibold text-black shadow-sm transition-colors hover:bg-[color:var(--accent-bright)]"
         onClick={() => setOpen(true)}
         type="button"
       >
-        Publish
+        Publish to Registry
       </button>
       {open ? <PublishSkillModal accessToken={accessToken} domain={domain} onClose={() => setOpen(false)} skillId={skillId} /> : null}
     </>

@@ -62,7 +62,7 @@ export function ABShell({ accessToken, orgId, skills, tests }: { accessToken: st
       <div className="grid gap-4 lg:grid-cols-2">
         {liveTests.map((test) => (
           <article className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5" key={test.id}>
-            <div className="flex items-center justify-between"><h2 className="font-semibold">{test.skill_name ?? test.name}</h2><span className="rounded-full border border-[color:var(--bg-border)] px-2 py-1 text-xs capitalize">{test.status}</span></div>
+            <div className="flex items-center justify-between"><h2 className="font-semibold">{test.skill_name ?? test.name}</h2><span className="rounded-full border border-[color:var(--bg-border)] px-2 py-1 text-xs capitalize">{String(test.status).replace("_", " ")}</span></div>
             {test.status === "completed" ? (
               <div className="mt-5 rounded-lg border border-[color:var(--accent-green)]/30 bg-[color:var(--accent-green)]/10 p-4 text-sm text-[color:var(--accent-green)]">Treatment wins? {test.winner === "treatment" ? `Yes (+${test.improvement_pct ?? 0}% success rate)` : test.winner}</div>
             ) : (
@@ -74,6 +74,7 @@ export function ABShell({ accessToken, orgId, skills, tests }: { accessToken: st
             )}
             <p className="mt-4 text-sm text-[color:var(--text-secondary)]">{test.recommendation ?? `Confidence: ${test.confidence ?? "Collecting data"}`}</p>
             {test.status === "running" ? <button className="mt-4 rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-xs" onClick={() => conclude(test.id)} type="button">Conclude test</button> : null}
+            {test.status === "needs_data" ? <button className="mt-4 rounded-md bg-[color:var(--accent-primary)] px-3 py-2 text-xs font-semibold text-black" onClick={() => setOpen(true)} type="button">Start a fresh test</button> : null}
           </article>
         ))}
       </div>

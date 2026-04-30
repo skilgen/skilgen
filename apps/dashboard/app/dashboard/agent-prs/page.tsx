@@ -21,7 +21,7 @@ export default async function AgentPrInboxPage({ searchParams }: { searchParams?
       params.set(key, value);
     }
   }
-  if (!params.has("state")) params.set("state", "open");
+  if (!params.has("state")) params.set("state", "all");
   const [initial, repos, apiKey] = org
     ? await Promise.all([
         getAgentPrs(accessToken, org.id, params),

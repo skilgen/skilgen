@@ -1385,7 +1385,12 @@ def _decode_cursor(cursor: str | None) -> int:
 def _normalise_agent_filter(agent: str | None) -> set[str]:
     if not agent:
         return set()
-    return {part.strip() for part in agent.split(",") if part.strip()}
+    agents = {part.strip() for part in agent.split(",") if part.strip()}
+    if "codex" in agents:
+        agents.add("codex_cli")
+    if "codex_cli" in agents:
+        agents.add("codex")
+    return agents
 
 
 def _pr_html_url(pr: PullRequest, repo: Repo) -> str | None:
@@ -6702,7 +6707,7 @@ async def list_agent_prs(
     org_id: str,
     agent: str | None = Query(default=None),
     repo: str | None = Query(default=None),
-    state: Literal["open", "closed", "merged", "all"] = Query(default="open"),
+    state: Literal["open", "closed", "merged", "all"] = Query(default="all"),
     risk_tier: Literal["green", "yellow", "red"] | None = Query(default=None),
     search: str | None = Query(default=None),
     sort: Literal["opened_at", "risk_score", "violations"] = Query(default="opened_at"),

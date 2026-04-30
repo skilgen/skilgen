@@ -102,7 +102,37 @@ def test_skillql_valid_plan_executes_rows(monkeypatch) -> None:
     assert payload["rows"][0]["domain"] == "testing"
     assert payload["rows"][0]["score_total"] == 42
     assert payload["row_count"] == 1
+    assert payload["answer"]
     assert len(payload["suggested_followups"]) == 3
+
+
+def test_skillql_normalises_question_dict_string(monkeypatch) -> None:
+    prompts: list[str] = []
+
+    async def fake_call_llm(settings, system_prompt, user_prompt, max_tokens=1024):
+        prompts.append(user_prompt)
+        if len(prompts) == 1:
+            return _plan()
+        if len(prompts) == 2:
+            return "Testing skills are weak: testing is 42/100."
+        return json.dumps(["Which testing skills are stale?", "Which agents load these skills?", "Show low score skills by category."])
+
+    monkeypatch.setattr(skillql, "call_llm", fake_call_llm)
+    skill = SimpleNamespace(
+        domain="testing",
+        skill_category="testing_conventions",
+        score_total=42,
+        load_count_30d=8,
+        last_loaded_at=datetime(2026, 4, 27, 12, 0, 0),
+        created_at=datetime(2026, 4, 20, 12, 0, 0),
+    )
+    client = _client(Db([Result([skill])]))
+
+    response = client.post("/orgs/org_1/skillql", json={"query": "{'question': 'Which testing skills are weak?'}"})
+
+    assert response.status_code == 200
+    assert response.json()["query"] == "Which testing skills are weak?"
+    assert prompts[0] == "Which testing skills are weak?"
 
 
 def test_skillql_llm_not_configured_shape(monkeypatch) -> None:

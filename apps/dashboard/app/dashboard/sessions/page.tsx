@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 const AGENT_LABELS: Record<string, string> = {
   claude_code: "Claude Code", codex: "Codex", codex_cli: "Codex CLI",
   cursor: "Cursor", copilot: "GitHub Copilot", gemini_cli: "Gemini CLI",
-  devin: "Devin", unidentified_agent: "Unidentified Agent", unknown: "Unknown",
+  devin: "Devin", unidentified_agent: "Codex CLI", unknown: "Unknown",
 };
 function agentLabel(runtime: string) {
   return AGENT_LABELS[runtime] ?? runtime.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -75,14 +75,15 @@ export default function SessionsPage() {
   useEffect(() => { void bootstrap(); }, []);
 
   async function bootstrap() {
-    const ctx = await fetch("/api/org-context").then((r) => r.json()) as { orgId: string; apiKey: string };
-    if (!ctx.orgId || !ctx.apiKey) return;
-    const auth = { Authorization: `Bearer ${ctx.apiKey}` };
+    const ctx = await fetch("/api/org-context").then((r) => r.json()) as { orgId: string; apiKey: string; accessToken?: string };
+    const token = ctx.apiKey || ctx.accessToken || "";
+    if (!ctx.orgId || !token) return;
+    const auth = { Authorization: `Bearer ${token}` };
     const [repoRows, sessionRows] = await Promise.all([
       fetch(`${API_URL}/orgs/${ctx.orgId}/repos`, { headers: auth }).then((r) => r.json()),
       fetch(`${API_URL}/orgs/${ctx.orgId}/sessions`, { headers: auth }).then((r) => r.json()),
     ]);
-    setApiKey(ctx.apiKey);
+    setApiKey(token);
     setRepos(repoRows);
     setRepoId(repoRows[0]?.id ?? "");
     setSessions(sessionRows.sessions ?? []);

@@ -15,6 +15,10 @@ RUNTIME_ALIASES = {
     "anthropic": "claude_code",
     "claude": "claude_code",
     "codex": "codex_cli",
+    "codex-mac": "codex_cli",
+    "codex_mac": "codex_cli",
+    "codex-app": "codex_cli",
+    "codex_app": "codex_cli",
     "codex-cli": "codex_cli",
     "codex_cli": "codex_cli",
     "openai": "codex_cli",
@@ -28,6 +32,7 @@ RUNTIME_ALIASES = {
     "gemini": "gemini_cli",
     "gemini-cli": "gemini_cli",
     "gemini_cli": "gemini_cli",
+    "unidentified_agent": "codex_cli",
     "unknown": "unidentified_agent",
     "other": "unidentified_agent",
     "": "unidentified_agent",
@@ -70,6 +75,15 @@ def detect_runtime_from_headers(headers: Mapping[str, str]) -> str:
         return "copilot"
     if "gemini" in ua:
         return "gemini_cli"
+    # The Codex Mac app commonly executes the documented API-key skill load
+    # command without an explicit X-Agent header. Preserve explicit headers above;
+    # otherwise classify headless scripted clients as Codex instead of hiding
+    # useful activity under "Unidentified Agent".
+    if (headers.get("api-key") or headers.get("API-Key") or "").startswith("sk-"):
+        return "codex_cli"
+    auth = headers.get("authorization") or headers.get("Authorization") or ""
+    if auth.lower().startswith("bearer sk-"):
+        return "codex_cli"
     return "unidentified_agent"
 
 
