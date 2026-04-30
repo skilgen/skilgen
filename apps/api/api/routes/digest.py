@@ -125,7 +125,11 @@ def _html_digest(payload: dict, recipient: str) -> str:
     if "memory_score" in widgets:
         metric_cards.append(f"<div style=\"background:#111827;border-radius:14px;padding:16px\"><b>Memory Score</b><div style=\"font-size:32px\">{payload['memory_score']}/100</div></div>")
     top_skill = f"<h2 style=\"color:#C8922A\">Top Skill</h2><p>{payload['top_skill']['name']} · {payload['top_skill']['loads']} loads</p>" if "top_skill" in widgets else ""
-    top_gaps = f"<h2 style=\"color:#C8922A\">Top Gaps</h2><ul>{''.join(f'<li>{gap['pattern']} · {gap['frequency']}</li>' for gap in payload['top_gaps']) or '<li>No gaps detected</li>'}</ul>" if "skill_gaps" in widgets else ""
+    gap_items = "".join(
+        f"<li>{gap['pattern']} · {gap['frequency']}</li>"
+        for gap in payload["top_gaps"]
+    ) or "<li>No gaps detected</li>"
+    top_gaps = f"<h2 style=\"color:#C8922A\">Top Gaps</h2><ul>{gap_items}</ul>" if "skill_gaps" in widgets else ""
     return f"""<!doctype html>
 <html><body style="margin:0;background:#101018;color:#f8fafc;font-family:Inter,Arial,sans-serif">
   <div style="max-width:680px;margin:0 auto;padding:24px">

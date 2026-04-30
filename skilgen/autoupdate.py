@@ -172,6 +172,19 @@ def stop_auto_update_worker(project_root: str | Path) -> dict[str, object]:
             os.kill(pid, signal.SIGTERM)
         except OSError:
             pass
+        else:
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    break
+                time.sleep(0.05)
+            else:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
     payload = {
         **status,
         "running": False,
@@ -199,6 +212,8 @@ def run_auto_update_worker(project_root: str | Path, *, interval_seconds: float 
     previous = _snapshot(root)
     while True:
         time.sleep(interval_seconds)
+        if not root.exists() or not (root / "skilgen.yml").exists():
+            return
         current = _snapshot(root)
         if current == previous:
             continue

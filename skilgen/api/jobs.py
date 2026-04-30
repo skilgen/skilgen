@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -38,6 +38,7 @@ class JobCancelledError(RuntimeError):
 _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="skilgen-job")
 _job_lock = Lock()
 _runtime_jobs: dict[str, JobRecord] = {}
+_runtime_futures: dict[str, Future[dict[str, object]]] = {}
 _recovered_roots: set[Path] = set()
 
 
@@ -282,31 +283,48 @@ def submit_job(
 
             result = fn(report)
             job.result = result
-            update_job(job, status="completed", progress=100, message="completed")
             append_job_event(job, "Finished delivery.", 100)
             root = _job_root(job.payload)
             if root is not None:
                 append_audit_event(root, action="job_complete", outcome="success", source="jobs", job_id=job.job_id)
+            update_job(job, status="completed", progress=100, message="completed")
             return result
         except JobCancelledError:
             job.error = "job cancelled"
-            update_job(job, status="cancelled", progress=100, message="cancelled")
             append_job_event(job, "Job cancelled.", 100)
+            update_job(job, status="cancelled", progress=100, message="cancelled")
             raise
         except Exception as exc:  # noqa: BLE001
             job.error = str(exc)
-            update_job(job, status="failed", progress=100, message="failed")
             append_job_event(job, f"Job failed: {exc}", 100)
             root = _job_root(job.payload)
             if root is not None:
                 append_audit_event(root, action="job_complete", outcome="failed", source="jobs", job_id=job.job_id)
+            update_job(job, status="failed", progress=100, message="failed")
             raise
 
-    _executor.submit(runner)
+    future = _executor.submit(runner)
+    with _job_lock:
+        _runtime_futures[job.job_id] = future
+
+    def _forget_future(_future: Future[dict[str, object]]) -> None:
+        with _job_lock:
+            _runtime_futures.pop(job.job_id, None)
+
+    future.add_done_callback(_forget_future)
     return job
 
 
 def get_job(job_id: str, project_root: str | Path | None = None) -> JobRecord | None:
+    with _job_lock:
+        future = _runtime_futures.get(job_id)
+    if future is not None:
+        try:
+            future.result(timeout=0.05)
+        except TimeoutError:
+            pass
+        except Exception:
+            pass
     with _job_lock:
         job = _runtime_jobs.get(job_id)
     if job is not None:
