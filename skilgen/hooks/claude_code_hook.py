@@ -8,6 +8,8 @@ import time
 from typing import Any
 import urllib.request
 
+from skilgen.core.analytics import log_skill_usage
+
 # Fire /skills/load once per Claude Code session (not on every file read).
 _COOLDOWN_SECONDS = 300
 _EDIT_TOOLS = {"Edit", "Write", "NotebookEdit"}
@@ -133,6 +135,23 @@ def _read_content(file_path: str) -> str | None:
         return _absolute_path(file_path).read_text(encoding="utf-8")
     except Exception:
         return None
+
+
+def record_read(skill_path: str) -> bool:
+    """Record a skill read for compatibility with older Claude hook tests."""
+    try:
+        path = Path(skill_path).resolve()
+        if not path.exists() or path.name != "SKILL.md":
+            return False
+        skills_root = next((parent for parent in path.parents if parent.name == "skills"), None)
+        if skills_root is None:
+            return False
+        project_root = skills_root.parent
+        relative = path.relative_to(project_root).as_posix()
+        log_skill_usage(project_root, [relative], agent="claude_code", context="claude_code_hook")
+        return True
+    except Exception:
+        return False
 
 
 def _capture_before(session_id: str, file_path: str) -> None:

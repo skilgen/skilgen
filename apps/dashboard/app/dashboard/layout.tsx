@@ -41,6 +41,8 @@ import { mockOrg, mockUser } from "@/lib/mock-data";
 import { DashboardNavLink } from "@/components/dashboard-nav-link";
 import { API_URL, getAuditLogStats, getAutopilotQueue, getBootstrapOrg, getEvalSkillGaps, getMemoryQueue, getMyOrg, getOrgRedFlags, getOrgSetupStatus, type Org } from "../../lib/data";
 
+export const dynamic = "force-dynamic";
+
 type ShellUser = Pick<typeof mockUser, "email" | "firstName" | "lastName">;
 
 async function handleSignOut() {

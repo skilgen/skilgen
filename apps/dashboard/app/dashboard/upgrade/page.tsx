@@ -6,7 +6,7 @@ import { UpgradeButton } from "@/components/upgrade-button";
 import { UpgradePageTracker } from "@/components/upgrade-page-tracker";
 
 type Plan = {
-  name: "Free" | "Team" | "Enterprise";
+  name: "Free" | "Team" | "Business" | "Enterprise";
   price: string;
   caption: string;
   features: string[];
@@ -29,6 +29,13 @@ const plans: Plan[] = [
     badge: "Most Popular",
     features: ["Unlimited repos", "Team rollup", "Slack alerts", "Policy gates", "Audit log", "Priority support"],
     cta: "Upgrade to Team",
+  },
+  {
+    name: "Business",
+    price: "$199/mo",
+    caption: "For organizations standardizing AI coding governance across critical repositories.",
+    features: ["Everything in Team", "PR comment engine", "Advanced policy gates", "Agent scorecards", "Weekly email digest", "Priority support"],
+    cta: "Upgrade to Business",
   },
   {
     name: "Enterprise",
@@ -85,7 +92,7 @@ export default async function UpgradePage() {
       </section>
 
       <SectionErrorBoundary section="pricing plans">
-        <section className="grid gap-5 xl:grid-cols-3">
+        <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
           {plans.map((plan) => (
             <article
               className={
@@ -118,6 +125,7 @@ export default async function UpgradePage() {
                 </button>
               ) : null}
               {plan.name === "Team" ? <UpgradeButton accessToken={accessToken} label={plan.cta} plan="team" /> : null}
+              {plan.name === "Business" ? <UpgradeButton accessToken={accessToken} label={plan.cta} plan="business" /> : null}
               {plan.name === "Enterprise" ? (
                 <a className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border border-[#C9973A]/60 text-[14px] font-semibold text-[#C9973A] hover:bg-[#C9973A]/10" href="mailto:sales@skillayer.com?subject=Skillayer%20Enterprise%20Inquiry">
                   <Mail className="h-4 w-4" />

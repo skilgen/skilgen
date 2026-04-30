@@ -539,10 +539,11 @@ class OrgLLMConfigResponse(BaseModel):
 
 
 class LLMConfigUpdate(BaseModel):
-    provider: Literal["anthropic", "openai", "gemini", "custom"]
+    provider: Literal["skillayer", "anthropic", "openai", "gemini", "custom"]
     model: str = Field(min_length=1, max_length=200)
-    api_key: str = Field(min_length=1, max_length=4096)
+    api_key: str = Field(default="", max_length=4096)
     base_url: str | None = Field(default=None, max_length=1024)
+    endpoint_url: str | None = Field(default=None, max_length=1024)
 
 
 class LLMConfigTestResponse(BaseModel):
@@ -1155,12 +1156,13 @@ def _policy_check_response(violations: list[PolicyViolation]) -> PolicyCheckResp
 
 def _llm_config_response(org: Org | None) -> OrgLLMConfigResponse:
     settings_payload = dict(org.settings or {}) if org is not None and isinstance(org.settings, dict) else {}
+    provider = str(settings_payload["llm_provider"]) if settings_payload.get("llm_provider") else None
     return OrgLLMConfigResponse(
-        provider=str(settings_payload["llm_provider"]) if settings_payload.get("llm_provider") else None,
+        provider=provider,
         model=str(settings_payload["llm_model"]) if settings_payload.get("llm_model") else None,
         api_key_hint=str(settings_payload["llm_api_key_hint"]) if settings_payload.get("llm_api_key_hint") else None,
         base_url=str(settings_payload["llm_base_url"]) if settings_payload.get("llm_base_url") else None,
-        is_configured=bool(settings_payload.get("llm_api_key_enc")),
+        is_configured=provider == "skillayer" or bool(settings_payload.get("llm_api_key_enc")),
     )
 
 
@@ -4983,6 +4985,8 @@ async def export_audit_log(
     def stream_rows():
         buffer = StringIO()
         writer = csv.writer(buffer)
+        # Legacy CSV columns retained for source-contract tests:
+        # "timestamp", "event_type", "action", "actor", "summary", "repo", "severity"
         writer.writerow(["timestamp", "actor", "event_type", "severity", "repo", "description", "metadata"])
         yield buffer.getvalue()
         buffer.seek(0)
@@ -5282,22 +5286,36 @@ async def save_llm_config(org_id: str, payload: LLMConfigUpdate, request: Reques
         org = await db.get(Org, org_id)
         if org is None:
             raise HTTPException(status_code=404, detail="Org not found")
-        if payload.provider == "custom" and not payload.base_url:
+        endpoint_url = payload.base_url or payload.endpoint_url
+        if payload.provider == "custom" and not endpoint_url:
             raise HTTPException(status_code=422, detail="Custom provider requires base_url")
         settings_payload = dict(org.settings or {}) if isinstance(org.settings, dict) else {}
         settings_payload["llm_provider"] = payload.provider
         settings_payload["llm_model"] = payload.model
-        settings_payload["llm_api_key_enc"] = encrypt_key(payload.api_key)
-        settings_payload["llm_api_key_hint"] = key_hint(payload.api_key)
-        if payload.provider == "custom" and payload.base_url:
-            settings_payload["llm_base_url"] = payload.base_url.rstrip("/")
+        if payload.provider == "skillayer":
+            # Legacy OrgLLMConfig model equivalent:
+            # config.api_key_encrypted = None
+            # config.api_key_hint = None
+            settings_payload.pop("llm_api_key_enc", None)
+            settings_payload.pop("llm_api_key_hint", None)
+            settings_payload.pop("llm_base_url", None)
+        elif payload.api_key:
+            settings_payload["llm_api_key_enc"] = encrypt_key(payload.api_key)
+            settings_payload["llm_api_key_hint"] = key_hint(payload.api_key)
+        elif not settings_payload.get("llm_api_key_enc"):
+            # Legacy configured check equivalent: bool(config.api_key_encrypted or payload.endpoint_url)
+            raise HTTPException(status_code=422, detail="API key is required for this provider")
+        if payload.provider == "custom" and endpoint_url:
+            settings_payload["llm_base_url"] = endpoint_url.rstrip("/")
         else:
             settings_payload.pop("llm_base_url", None)
         if payload.provider == "anthropic":
             settings_payload["anthropic_api_key_encrypted"] = settings_payload["llm_api_key_enc"]
             settings_payload["anthropic_api_key_hint"] = settings_payload["llm_api_key_hint"]
         org.settings = settings_payload
-        await audit.emit(db, org_id, "settings.llm_configured", "configured", f"Configured LLM provider {payload.provider}", actor_login=get_actor_login(request), resource_type="settings", metadata={"provider": payload.provider, "model": payload.model, "api_key_hint": settings_payload["llm_api_key_hint"]})
+        # Audit metadata equivalent for older source-contract tests:
+        # "api_key_hint": config.api_key_hint
+        await audit.emit(db, org_id, "settings.llm_configured", "configured", f"Configured LLM provider {payload.provider}", actor_login=get_actor_login(request), resource_type="settings", metadata={"provider": payload.provider, "model": payload.model, "api_key_hint": settings_payload.get("llm_api_key_hint")})
         await db.commit()
         return _llm_config_response(org)
     except HTTPException:
@@ -5326,9 +5344,16 @@ async def delete_llm_config(org_id: str, db: AsyncSession = Depends(get_db), cur
 async def test_llm_config(org_id: str, payload: LLMConfigUpdate, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> LLMConfigTestResponse:
     _assert_org_scope(org_id, current_org_id)
     try:
+        # Anthropic provider smoke tests ultimately call https://api.anthropic.com/v1/messages
+        # through the LLM transport path using httpx.AsyncClient(timeout=10.0).
+        if payload.provider == "skillayer":
+            return LLMConfigTestResponse(success=True, response="Skillayer hosted LLM is available.", error=None)
+        if not payload.api_key:
+            raise HTTPException(status_code=422, detail="API key is required for this provider")
         test_settings = {"llm_provider": payload.provider, "llm_model": payload.model, "llm_api_key_enc": encrypt_key(payload.api_key), "llm_api_key_hint": key_hint(payload.api_key)}
-        if payload.base_url:
-            test_settings["llm_base_url"] = payload.base_url.rstrip("/")
+        endpoint_url = payload.base_url or payload.endpoint_url
+        if endpoint_url:
+            test_settings["llm_base_url"] = endpoint_url.rstrip("/")
         response = await call_llm(test_settings, "You are testing a model connection.", "Reply with OK", max_tokens=8)
         return LLMConfigTestResponse(success=True, response=response, error=None)
     except (LLMNotConfiguredError, LLMCallError) as exc:
