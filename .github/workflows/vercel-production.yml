@@ -1,0 +1,59 @@
+name: Vercel Production Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: vercel-production-deploy
+  cancel-in-progress: true
+
+env:
+  VERCEL_ORG_ID: team_5d1NeaE796qQ7gHVcnAqClFx
+  VERCEL_API_PROJECT_ID: prj_kDd94SMnQl77jAC2hkbF5kKSc6SF
+  VERCEL_DASHBOARD_PROJECT_ID: prj_ndNJnslajzjzrTuqWJ66McehSlgw
+  VERCEL_SCOPE: ravichandu999-7992s-projects
+
+jobs:
+  deploy-api:
+    name: Deploy API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Link API project
+        run: |
+          mkdir -p .vercel
+          cat > .vercel/project.json <<JSON
+          {"orgId":"${VERCEL_ORG_ID}","projectId":"${VERCEL_API_PROJECT_ID}","projectName":"skillayer-api"}
+          JSON
+      - name: Deploy API to production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx vercel deploy --prod --yes --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+  deploy-dashboard:
+    name: Deploy Dashboard
+    runs-on: ubuntu-latest
+    needs: deploy-api
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Link dashboard project
+        run: |
+          mkdir -p .vercel
+          cat > .vercel/project.json <<JSON
+          {"orgId":"${VERCEL_ORG_ID}","projectId":"${VERCEL_DASHBOARD_PROJECT_ID}","projectName":"skillayer-dashboard"}
+          JSON
+      - name: Temporarily hide API Vercel config
+        run: mv vercel.json /tmp/skillayer-api-vercel.json
+      - name: Deploy dashboard to production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx vercel deploy --prod --yes --force --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
