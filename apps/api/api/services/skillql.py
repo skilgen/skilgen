@@ -43,6 +43,14 @@ Use only these data sources and filters. Prefer the smallest set of data_sources
 
 FOLLOWUP_SYSTEM_PROMPT = """Return ONLY a JSON array of exactly 3 short follow-up questions. No markdown, no prose."""
 
+ANSWER_SYSTEM_PROMPT = """You are SkillQL, a concise engineering intelligence analyst inside Skillayer.
+Answer the user's question using only the supplied rows. Write like a helpful senior teammate:
+- lead with the answer, not the query mechanics
+- name specific PRs, skills, agents, developers, or risks when present
+- if the data is empty, say what is missing and where to look next
+- keep the answer under 180 words
+Do not mention SQL, JSON, rows, or internal table names unless the user asks."""
+
 VALID_DATA_SOURCES = {"skills", "agent_sessions", "pull_requests", "pr_attributions", "audit_events"}
 VALID_RESULT_FORMATS = {"table", "number", "list", "timeline"}
 FILTER_KEYS = {"time_window_days", "agent_runtime", "risk_tier", "engineer_login", "skill_category", "event_type"}
@@ -61,6 +69,20 @@ def _extract_json(text: str) -> Any:
         return json.loads(cleaned)
     except json.JSONDecodeError as exc:
         raise SkillQLParseError("SkillQL could not parse the query plan. Try a more specific question.") from exc
+
+
+def _normalise_query(query: str) -> str:
+    text = str(query or "").strip()
+    if not text:
+        return text
+    try:
+        parsed = json.loads(text.replace("'", '"'))
+        if isinstance(parsed, dict) and parsed.get("question"):
+            return str(parsed["question"]).strip()
+    except Exception:
+        pass
+    match = re.search(r"['\"]question['\"]\s*:\s*['\"](.+?)['\"]\s*}?\s*$", text)
+    return match.group(1).strip() if match else text
 
 
 def _parse_plan(text: str) -> dict[str, Any]:
@@ -229,23 +251,29 @@ async def _pr_rows(repo_ids: list[str], db: AsyncSession, filters: dict[str, Any
     if not repo_ids:
         return []
     result = await db.execute(
-        select(PullRequest, PRAttribution)
+        select(PullRequest, PRAttribution, Repo)
         .join(PRAttribution, PRAttribution.pr_id == PullRequest.id, isouter=True)
+        .join(Repo, Repo.id == PullRequest.repo_id)
         .where(PullRequest.repo_id.in_(repo_ids))
     )
     rows: list[dict[str, Any]] = []
     for item in result.all():
         pr = item[0] if isinstance(item, tuple) else getattr(item, "PullRequest", None)
         attr = item[1] if isinstance(item, tuple) and len(item) > 1 else getattr(item, "PRAttribution", None)
+        repo = item[2] if isinstance(item, tuple) and len(item) > 2 else getattr(item, "Repo", None)
         if pr is None:
             continue
         row = {
+            "pr_number": pr.github_pr_number,
+            "title": pr.title or f"PR #{pr.github_pr_number}",
+            "repo": getattr(repo, "full_name", None) or getattr(repo, "name", None) or pr.repo_id,
             "author_login": pr.author_login,
             "state": pr.state,
             "opened_at": _jsonable(pr.opened_at),
             "merged_at": _jsonable(pr.merged_at),
             "additions": pr.additions,
             "deletions": pr.deletions,
+            "changed_files": pr.changed_files,
             "primary_agent": attr.primary_agent if attr else None,
             "agent_runtime": attr.primary_agent if attr else None,
             "confidence": attr.confidence if attr else None,
@@ -302,7 +330,11 @@ async def _suggest_followups(org_settings: dict[str, Any], query: str, rows: lis
         )
         parsed = _extract_json(response)
         if isinstance(parsed, list):
-            followups = [str(item).strip() for item in parsed if str(item).strip()]
+            followups = [
+                str(item.get("question") if isinstance(item, dict) else item).strip()
+                for item in parsed
+                if str(item.get("question") if isinstance(item, dict) else item).strip()
+            ]
             if followups:
                 return followups[:3]
     except (LLMCallError, LLMNotConfiguredError, SkillQLParseError):
@@ -314,7 +346,43 @@ async def _suggest_followups(org_settings: dict[str, Any], query: str, rows: lis
     ]
 
 
+async def _synthesise_answer(org_settings: dict[str, Any], query: str, intent: str, rows: list[dict[str, Any]], sources: list[str]) -> str:
+    public_rows = _public_rows(rows[:25])
+    if not public_rows:
+        return "I could not find matching Skillayer data for that question. Try widening the date range, switching to All PRs, or checking whether GitHub and agent skill-load events are connected."
+    try:
+        response = await call_llm(
+            org_settings,
+            ANSWER_SYSTEM_PROMPT,
+            json.dumps(
+                {
+                    "question": query,
+                    "intent": intent,
+                    "data_sources": sources,
+                    "rows": public_rows,
+                    "row_count": len(rows),
+                },
+                default=str,
+            ),
+            max_tokens=512,
+        )
+        answer = response.strip()
+        if answer:
+            return answer
+    except (LLMCallError, LLMNotConfiguredError):
+        pass
+
+    if sources and "pull_requests" in sources:
+        titles = [f"#{row.get('pr_number')} {row.get('title')}" for row in public_rows[:8] if row.get("title")]
+        return f"I found {len(rows)} matching pull request{'s' if len(rows) != 1 else ''}. " + ("The most relevant ones are: " + "; ".join(titles) + "." if titles else "")
+    if sources and "skills" in sources:
+        names = [str(row.get("domain")) for row in public_rows[:8] if row.get("domain")]
+        return f"I found {len(rows)} matching skill{'s' if len(rows) != 1 else ''}: {', '.join(names)}."
+    return f"I found {len(rows)} matching Skillayer record{'s' if len(rows) != 1 else ''} for this question."
+
+
 async def execute_skillql(query: str, org_id: str, db: AsyncSession) -> dict[str, Any]:
+    query = _normalise_query(query)
     org = await db.get(Org, org_id)
     org_settings = dict(org.settings or {}) if org is not None and isinstance(org.settings, dict) else {}
     plan_response = await call_llm(org_settings, SKILLQL_SYSTEM_PROMPT, query, max_tokens=768)
@@ -351,10 +419,12 @@ async def execute_skillql(query: str, org_id: str, db: AsyncSession) -> dict[str
         columns = ["count"]
         final_rows = [{"count": len(rows)}]
 
+    answer = await _synthesise_answer(org_settings, query, plan["intent"], final_rows, sources)
     followups = await _suggest_followups(org_settings, query, final_rows)
     return {
         "query": query,
         "intent": plan["intent"],
+        "answer": answer,
         "result_format": plan["result_format"],
         "columns": columns,
         "rows": final_rows,

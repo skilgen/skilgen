@@ -139,7 +139,7 @@ function SessionCard({ session }: { session: MyCodeTodaySession }) {
         </div>
         <div className="w-full lg:w-[240px]">
           {session.pr ? (
-            <Link className="block rounded-2xl border border-[color:var(--bg-border)] bg-black/15 p-4 transition-colors hover:border-[color:var(--accent-primary)]/70" href={`/dashboard/agent-prs?pr=${session.pr.id}`}>
+            <Link className="block rounded-2xl border border-[color:var(--bg-border)] bg-black/15 p-4 transition-colors hover:border-[color:var(--accent-primary)]/70" href={`/dashboard/agent-prs?state=all&pr=${session.pr.id}`}>
               <div className="flex items-center justify-between gap-3">
                 <span className="inline-flex items-center text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]"><GitPullRequest className="mr-1.5 h-3.5 w-3.5" />PR #{session.pr.github_pr_number}</span>
                 <span className={cn("rounded-full border px-2 py-1 text-[11px] font-semibold capitalize", riskClass(session.pr.risk_tier))}>{session.pr.risk_tier}</span>
@@ -158,7 +158,7 @@ function SessionCard({ session }: { session: MyCodeTodaySession }) {
 
 function PrCard({ pr }: { pr: MyCodeTodayPR }) {
   return (
-    <Link className="block rounded-2xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4 transition-colors hover:border-[color:var(--accent-primary)]/70" href={`/dashboard/agent-prs?pr=${pr.id}`}>
+    <Link className="block rounded-2xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4 transition-colors hover:border-[color:var(--accent-primary)]/70" href={`/dashboard/agent-prs?state=all&pr=${pr.id}`}>
       <div className="flex items-center justify-between gap-3">
         <span className="inline-flex items-center text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]"><GitPullRequest className="mr-1.5 h-3.5 w-3.5" />PR #{pr.github_pr_number}</span>
         <span className={cn("rounded-full border px-2 py-1 text-[11px] font-semibold capitalize", riskClass(pr.risk_tier))}>{pr.risk_tier}</span>

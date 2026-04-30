@@ -38,6 +38,17 @@ def _iso(value: Any) -> str | None:
     return str(value)
 
 
+def _naive(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value.replace(tzinfo=None) if value.tzinfo else value
+
+
+def _gte(value: datetime | None, cutoff: datetime) -> bool:
+    candidate = _naive(value)
+    return candidate is not None and candidate >= cutoff
+
+
 def _cursor_offset(cursor: str | None) -> int:
     if not cursor:
         return 0
@@ -82,7 +93,7 @@ async def _org_summary(db: AsyncSession, org: Org) -> dict[str, Any]:
     last_login = (
         await db.execute(select(func.max(LoginEvent.created_at)).where(LoginEvent.org_id == org.id))
     ).scalar_one_or_none()
-    last_active = max([value for value in [last_session, last_run] if value is not None], default=None)
+    last_active = max([_naive(value) for value in [last_session, last_run] if value is not None], default=None)
     skill_count = 0
     session_count = 0
     pr_count = 0
@@ -150,9 +161,9 @@ async def admin_overview(
     logins = list((await db.execute(select(LoginEvent))).scalars().all())
     skills_total = int((await db.execute(select(func.count(Skill.id)))).scalar_one() or 0)
     repos_total = int((await db.execute(select(func.count(Repo.id)))).scalar_one() or 0)
-    active_orgs = {session.org_id for session in sessions if session.session_start and session.session_start >= cutoff_30d}
+    active_orgs = {session.org_id for session in sessions if _gte(session.session_start, cutoff_30d)}
     repo_org = dict((await db.execute(select(Repo.id, Repo.org_id))).all())
-    active_orgs.update(repo_org.get(run.repo_id) for run in runs if run.created_at and run.created_at >= cutoff_30d and repo_org.get(run.repo_id))
+    active_orgs.update(repo_org.get(run.repo_id) for run in runs if _gte(run.created_at, cutoff_30d) and repo_org.get(run.repo_id))
     by_plan = Counter((org.plan or "free") for org in orgs)
     most_active = Counter(login.user_login for login in logins if login.user_login).most_common(5)
     return {
@@ -164,8 +175,8 @@ async def admin_overview(
         },
         "users": {
             "total_unique": len({login.user_login for login in logins if login.user_login}),
-            "logins_7d": sum(1 for login in logins if login.created_at and login.created_at >= cutoff_7d),
-            "logins_30d": sum(1 for login in logins if login.created_at and login.created_at >= cutoff_30d),
+            "logins_7d": sum(1 for login in logins if _gte(login.created_at, cutoff_7d)),
+            "logins_30d": sum(1 for login in logins if _gte(login.created_at, cutoff_30d)),
             "most_active": [{"login": login, "count": count} for login, count in most_active],
         },
         "data": {
@@ -174,10 +185,10 @@ async def admin_overview(
             "total_prs": len(prs),
             "total_analysis_runs": len(runs),
             "total_repos": repos_total,
-            "sessions_7d": sum(1 for session in sessions if session.session_start and session.session_start >= cutoff_7d),
-            "sessions_30d": sum(1 for session in sessions if session.session_start and session.session_start >= cutoff_30d),
-            "prs_7d": sum(1 for pr in prs if pr.opened_at and pr.opened_at >= cutoff_7d),
-            "prs_30d": sum(1 for pr in prs if pr.opened_at and pr.opened_at >= cutoff_30d),
+            "sessions_7d": sum(1 for session in sessions if _gte(session.session_start, cutoff_7d)),
+            "sessions_30d": sum(1 for session in sessions if _gte(session.session_start, cutoff_30d)),
+            "prs_7d": sum(1 for pr in prs if _gte(pr.opened_at, cutoff_7d)),
+            "prs_30d": sum(1 for pr in prs if _gte(pr.opened_at, cutoff_30d)),
         },
         "generated_at": now.isoformat(),
     }

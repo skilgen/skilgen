@@ -18,5 +18,5 @@ export async function GET() {
   }
 
   const keyData = await getOrgApiKey(accessToken, org.id);
-  return NextResponse.json({ orgId: org.id, orgName: org.name, apiKey: keyData?.api_key ?? "" });
+  return NextResponse.json({ orgId: org.id, orgName: org.name, apiKey: keyData?.api_key ?? "", accessToken });
 }

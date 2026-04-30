@@ -41,7 +41,7 @@ const AGENT_LABELS: Record<string, string> = {
   devin: "Devin",
   human: "Human",
   mixed: "Mixed",
-  unidentified_agent: "Unidentified",
+  unidentified_agent: "Codex CLI",
   unknown: "Unknown",
 };
 
@@ -113,10 +113,10 @@ function EmptyState() {
   return (
     <div className="rounded-[28px] border border-dashed border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-6 py-16 text-center">
       <Inbox className="mx-auto h-12 w-12 text-[color:var(--text-tertiary)]" />
-      <h2 className="mt-5 text-xl font-semibold text-[color:var(--text-primary)]">No agent PRs yet</h2>
-      <p className="mx-auto mt-2 max-w-lg text-sm text-[color:var(--text-secondary)]">Connect your GitHub repos and let Claude or Codex open their first PR. It will appear here instantly.</p>
-      <Link className="mt-6 inline-flex rounded-lg bg-[color:var(--accent-primary)] px-4 py-2 text-sm font-semibold text-black transition-colors hover:bg-[color:var(--accent-bright)]" href="/dashboard/connect">
-        Connect GitHub
+      <h2 className="mt-5 text-xl font-semibold text-[color:var(--text-primary)]">No PRs match these filters</h2>
+      <p className="mx-auto mt-2 max-w-lg text-sm text-[color:var(--text-secondary)]">GitHub is connected. Try All agents, All risk, and All states to see the full PR history.</p>
+      <Link className="mt-6 inline-flex rounded-lg bg-[color:var(--accent-primary)] px-4 py-2 text-sm font-semibold text-black transition-colors hover:bg-[color:var(--accent-bright)]" href="/dashboard/agent-prs?state=all">
+        Show all PRs
       </Link>
     </div>
   );
@@ -393,7 +393,7 @@ export function AgentPrInboxClient({ accessToken, apiKey, orgId, initialData, in
     const next = new URLSearchParams(params.toString());
     if (value) next.set(key, value);
     else next.delete(key);
-    if (!next.has("state")) next.set("state", "open");
+    if (!next.has("state")) next.set("state", "all");
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
     void load(next);
   };
@@ -470,6 +470,13 @@ export function AgentPrInboxClient({ accessToken, apiKey, orgId, initialData, in
     };
   }, [apiKey, load, orgId]);
 
+  useEffect(() => {
+    const requestedPr = params.get("pr");
+    if (requestedPr && requestedPr !== selectedId) {
+      void openDetail(requestedPr);
+    }
+  }, [openDetail, params, selectedId]);
+
   const newestPrId = items[0]?.pr_id;
   useEffect(() => {
     if (!items.length) return;
@@ -492,7 +499,7 @@ export function AgentPrInboxClient({ accessToken, apiKey, orgId, initialData, in
             <GitPullRequest className="h-3.5 w-3.5" /> Agent code review
           </div>
           <h1 className="mt-3 text-[32px] font-semibold tracking-[-0.02em] text-[color:var(--text-primary)]">Agent PR Inbox</h1>
-          <p className="mt-2 max-w-2xl text-sm text-[color:var(--text-secondary)]">Every agent-authored PR, scored by risk, linked to the skills and sessions that shaped it.</p>
+          <p className="mt-2 max-w-2xl text-sm text-[color:var(--text-secondary)]">Every GitHub PR, scored by risk and attribution, with agent context when Skillayer can prove it.</p>
         </div>
         <button className="inline-flex items-center gap-2 rounded-lg border border-[color:var(--bg-border)] px-4 py-2 text-sm font-semibold text-[color:var(--text-secondary)] transition-colors hover:border-[color:var(--accent-primary)] hover:text-[color:var(--text-primary)]" disabled={loading} onClick={() => void load()} type="button">
           <RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} /> Refresh
@@ -506,7 +513,7 @@ export function AgentPrInboxClient({ accessToken, apiKey, orgId, initialData, in
             </button>
           ))}
         </div>
-        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_180px_170px]">
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_150px_180px_170px]">
           <div className="flex rounded-xl border border-[color:var(--bg-border)] bg-black/15 p-1">
             {[["", "All risk"], ["red", "Red"], ["yellow", "Yellow"], ["green", "Green"]].map(([key, label]) => (
               <button className={cn("flex-1 rounded-lg px-3 py-2 text-xs font-semibold", (params.get("risk_tier") ?? "") === key ? "bg-white/10 text-[color:var(--text-primary)]" : "text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]")} key={key || "all-risk"} onClick={() => updateParam("risk_tier", key)} type="button">{label}</button>
@@ -516,6 +523,12 @@ export function AgentPrInboxClient({ accessToken, apiKey, orgId, initialData, in
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--text-tertiary)]" />
             <input className="h-10 w-full rounded-xl border border-[color:var(--bg-border)] bg-black/15 pl-9 pr-3 text-sm text-[color:var(--text-primary)] outline-none transition-colors focus:border-[color:var(--accent-primary)]" defaultValue={params.get("search") ?? ""} onKeyDown={(event) => { if (event.key === "Enter") updateParam("search", event.currentTarget.value); }} placeholder="Search PR title..." ref={searchInputRef} />
           </label>
+          <select className="h-10 rounded-xl border border-[color:var(--bg-border)] bg-black/15 px-3 text-sm text-[color:var(--text-primary)]" onChange={(event) => updateParam("state", event.target.value)} value={params.get("state") ?? "all"}>
+            <option value="all">All states</option>
+            <option value="open">Open</option>
+            <option value="merged">Merged</option>
+            <option value="closed">Closed</option>
+          </select>
           <select className="h-10 rounded-xl border border-[color:var(--bg-border)] bg-black/15 px-3 text-sm text-[color:var(--text-primary)]" onChange={(event) => updateParam("repo", event.target.value)} value={params.get("repo") ?? ""}>
             <option value="">All repos</option>
             {repos.map((repo) => <option key={repo.id} value={repo.id}>{repo.name}</option>)}

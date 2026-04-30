@@ -338,6 +338,7 @@ export type SkillQLResultFormat = "table" | "number" | "list" | "timeline";
 export type SkillQLResult = {
   query: string;
   intent: string;
+  answer?: string;
   result_format: SkillQLResultFormat;
   columns: string[];
   rows: Array<Record<string, unknown>>;

@@ -207,6 +207,12 @@ function ResultPanel({ result, onAsk }: { result: SkillQLResult; onAsk: (query: 
         <span className="rounded-full bg-white/5 px-3 py-1 text-xs font-semibold text-[color:var(--text-tertiary)]">{result.row_count} rows</span>
       </div>
 
+      {result.answer ? (
+        <div className="rounded-2xl border border-[color:var(--accent-primary)]/25 bg-[color:var(--accent-primary)]/10 p-4 text-sm leading-6 text-[color:var(--text-primary)]">
+          {result.answer}
+        </div>
+      ) : null}
+
       {result.rows.length ? (
         result.result_format === "number" ? <NumberResult result={result} /> : result.result_format === "list" ? <ListResult result={result} /> : result.result_format === "timeline" ? <TimelineResult result={result} /> : <TableResult result={result} />
       ) : (

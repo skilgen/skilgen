@@ -15,6 +15,11 @@ function qualityClass(signal: string): string {
   return "bg-red-500/15 text-red-300";
 }
 
+function agentDisplayName(row: EvalSessionQuality): string {
+  if (row.agent_runtime === "unidentified_agent" || row.agent_display_name === "Unidentified Agent") return "Codex CLI";
+  return row.agent_display_name ?? row.agent_runtime;
+}
+
 function TrendChart({ points }: { points: EvalSummary["weekly_trend"] }): ReactElement {
   if (points.filter((point) => point.sessions > 0).length < 2) {
     return <div className="rounded-lg border border-dashed border-[color:var(--bg-border)] p-8 text-center text-sm text-[color:var(--text-secondary)]">📊 Trend appears after 2 weeks of sessions.</div>;
@@ -95,7 +100,7 @@ export function EvalShell({ accessToken, orgId, sessions, summary }: { accessTok
         <div className="mt-4 overflow-x-auto rounded-lg border border-[color:var(--bg-border)]">
           <table className="w-full min-w-[980px] text-left text-sm">
             <thead className="bg-black/20 text-xs uppercase tracking-wide text-[color:var(--text-tertiary)]"><tr><th className="p-3">Date/Time</th><th>Agent</th><th>Repo</th><th>Context</th><th>Skills loaded</th><th>Guidance quality</th><th>Outcome</th><th>Tag</th></tr></thead>
-            <tbody>{rows.map((row) => <tr className="border-t border-[color:var(--bg-border)]" key={row.session_id}><td className="p-3">{new Date(row.started_at).toLocaleString()}</td><td>{row.agent_display_name ?? row.agent_runtime}</td><td>{row.repo_name}</td><td>{row.session_context}</td><td>{row.skills_loaded.slice(0, 4).join(", ")}</td><td><span className={`rounded-full px-2 py-1 text-xs font-semibold capitalize ${qualityClass(row.quality_signal)}`}>{row.quality_signal}</span></td><td>{row.outcome}</td><td><select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-2 py-1 text-xs" onChange={(event) => { if (event.target.value) void tagOutcome(row.session_id, event.target.value as "success" | "needs_rework"); }} value={row.outcome === "unknown" ? "" : row.outcome}><option value="">Tag outcome</option><option value="success">Success</option><option value="needs_rework">Needs rework</option></select></td></tr>)}</tbody>
+            <tbody>{rows.map((row) => <tr className="border-t border-[color:var(--bg-border)]" key={row.session_id}><td className="p-3">{new Date(row.started_at).toLocaleString()}</td><td>{agentDisplayName(row)}</td><td>{row.repo_name}</td><td>{row.session_context}</td><td>{row.skills_loaded.slice(0, 4).join(", ")}</td><td><span className={`rounded-full px-2 py-1 text-xs font-semibold capitalize ${qualityClass(row.quality_signal)}`}>{row.quality_signal}</span></td><td>{row.outcome}</td><td><select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-2 py-1 text-xs" onChange={(event) => { if (event.target.value) void tagOutcome(row.session_id, event.target.value as "success" | "needs_rework"); }} value={row.outcome === "unknown" ? "" : row.outcome}><option value="">Tag outcome</option><option value="success">Success</option><option value="needs_rework">Needs rework</option></select></td></tr>)}</tbody>
           </table>
         </div>
       </section>

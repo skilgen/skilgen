@@ -33,7 +33,7 @@ const AGENT_LABELS: Record<string, string> = {
   gemini: "Gemini CLI",
   devin: "Devin",
   unknown: "Unknown",
-  unidentified_agent: "Unidentified Agent",
+  unidentified_agent: "Codex CLI",
 };
 
 function label(agent: string): string {

@@ -845,16 +845,36 @@ async def list_ab_tests(
     result = await db.execute(
         select(ABTest, Skill, Repo).join(Skill, Skill.id == ABTest.skill_id).join(Repo, Repo.id == ABTest.repo_id).where(ABTest.org_id == actual_org_id).order_by(desc(ABTest.created_at))
     )
-    return [
-        {
-            **_ab_response(test).model_dump(),
-            "skill_name": skill.domain,
-            "repo_name": repo.name,
-            "control_session_id": test.control_session_id,
-            "treatment_session_id": test.treatment_session_id,
-        }
-        for test, skill, repo in result.all()
-    ]
+    rows: list[dict[str, object]] = []
+    now = _now()
+    for test, skill, repo in result.all():
+        control_count, control_rate = await _session_rates(db, test.control_session_id)
+        treatment_count, treatment_rate = await _session_rates(db, test.treatment_session_id)
+        stale_without_data = (
+            test.status == "running"
+            and control_count == 0
+            and treatment_count == 0
+            and test.created_at is not None
+            and (now - (test.created_at.replace(tzinfo=None) if test.created_at.tzinfo else test.created_at)).days >= 2
+        )
+        payload = _ab_response(test).model_dump()
+        if stale_without_data:
+            payload["status"] = "needs_data"
+            payload["recommendation"] = "No agent tasks were collected for this test. Start a fresh test after the skill is loaded in real sessions."
+        rows.append(
+            {
+                **payload,
+                "skill_name": skill.domain,
+                "repo_name": repo.name,
+                "control_session_id": test.control_session_id,
+                "treatment_session_id": test.treatment_session_id,
+                "control_task_count": control_count,
+                "treatment_task_count": treatment_count,
+                "current_control_success_rate": control_rate,
+                "current_treatment_success_rate": treatment_rate,
+            }
+        )
+    return rows
 
 
 async def _session_rates(db: AsyncSession, session_id: str | None) -> tuple[int, float | None]:
