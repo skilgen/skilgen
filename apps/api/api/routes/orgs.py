@@ -2899,6 +2899,17 @@ async def get_org_stats(
         if latest_run is not None:
             skill_count += int(latest_run.skill_count or 0)
 
+    agent_cutoff = datetime.utcnow() - timedelta(days=30)
+    agent_runtime_rows = (
+        await db.execute(
+            select(SkillUsageEvent.agent_runtime).where(
+                SkillUsageEvent.org_id == org_id,
+                SkillUsageEvent.loaded_at >= agent_cutoff,
+            )
+        )
+    ).scalars().all()
+    active_agents = len({normalize_runtime(runtime) for runtime in agent_runtime_rows if runtime is not None})
+
     trend_date = func.date(ScoreHistory.recorded_at).label("date")
     start_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=29)
     trend_result = await db.execute(
@@ -2915,7 +2926,7 @@ async def get_org_stats(
         "repo_count": int(repo_count or 0),
         "avg_score": round(avg_score or 0),
         "skill_count": int(skill_count or 0),
-        "active_agents": 0,
+        "active_agents": active_agents,
         "score_trend": trend,
     }
 

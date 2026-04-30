@@ -17,7 +17,7 @@ from packages.db.models import SourceConnection as SourceConnectionModel
 class Result:
     def __init__(self, rows=None, scalar=None) -> None:
         self.rows = rows or []
-        self.scalar = scalar
+        self._scalar = scalar
 
     def scalars(self):
         return self
@@ -25,11 +25,17 @@ class Result:
     def all(self):
         return self.rows
 
+    def fetchall(self):
+        return self.rows
+
+    def scalar(self):
+        return self._scalar
+
     def scalar_one_or_none(self):
-        return self.scalar
+        return self._scalar
 
     def scalar_one(self):
-        return self.scalar
+        return self._scalar
 
 
 class Db:
@@ -103,6 +109,27 @@ def test_org_router_is_registered_on_existing_app() -> None:
     assert "/orgs/{org_id}/sources/connect" in paths
     assert "/orgs/{org_id}/enterprise-skills" in paths
     assert "/orgs/{org_id}/intelligence/insights" in paths
+
+
+def test_org_stats_counts_active_agent_runtimes_from_skill_usage() -> None:
+    db = Db(
+        results=[
+            Result(scalar=2),
+            Result(scalar=72),
+            Result(rows=["repo_1", "repo_2"]),
+            Result(scalar=SimpleNamespace(skill_count=12)),
+            Result(scalar=SimpleNamespace(skill_count=25)),
+            Result(rows=["codex", "codex_cli", "claude_code", None]),
+            Result(rows=[]),
+        ],
+    )
+
+    response = asyncio.run(orgs.get_org_stats("org_1", db))
+
+    assert response["repo_count"] == 2
+    assert response["skill_count"] == 37
+    assert response["avg_score"] == 72
+    assert response["active_agents"] == 2
 
 
 def test_org_sources_include_detected_and_common_unconnected_sources() -> None:
