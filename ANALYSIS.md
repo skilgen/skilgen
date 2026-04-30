@@ -13605,6 +13605,7 @@
         "env:VERCEL_API_PROJECT_ID",
         "env:VERCEL_DASHBOARD_PROJECT_ID",
         "env:VERCEL_ORG_ID",
+        "env:VERCEL_PROJECT_ID",
         "env:VERCEL_SCOPE",
         "env:VERCEL_TOKEN"
       ],
