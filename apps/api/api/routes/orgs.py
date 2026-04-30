@@ -5590,8 +5590,8 @@ def _knowledge_risk_id(risk: dict[str, object]) -> str:
     return hashlib.sha1(f"{risk.get('repo_id')}:{risk.get('domain')}:{risk.get('risk_type')}".encode("utf-8")).hexdigest()[:16]
 
 
-@router.get("/{org_id}/connect/status")
-async def get_connect_status(
+@router.get("/{org_id}/agent-connection/status")
+async def get_agent_connection_runtime_status(
     org_id: str,
     db: AsyncSession = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id),
