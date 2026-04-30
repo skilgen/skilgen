@@ -40,6 +40,7 @@ _job_lock = Lock()
 _runtime_jobs: dict[str, JobRecord] = {}
 _runtime_futures: dict[str, Future[dict[str, object]]] = {}
 _recovered_roots: set[Path] = set()
+_STATUS_POLL_FLUSH_SECONDS = 0.5
 
 
 def _job_root(payload: dict[str, object]) -> Path | None:
@@ -233,7 +234,7 @@ def append_job_event(job: JobRecord, message: str, progress: int | None = None) 
 
 
 def request_cancel(job_id: str, project_root: str | Path | None = None) -> JobRecord | None:
-    job = get_job(job_id, project_root)
+    job = get_job(job_id, project_root, flush_future=False)
     if job is None:
         return None
     with _job_lock:
@@ -315,7 +316,17 @@ def submit_job(
     return job
 
 
-def get_job(job_id: str, project_root: str | Path | None = None) -> JobRecord | None:
+def get_job(job_id: str, project_root: str | Path | None = None, *, flush_future: bool = True) -> JobRecord | None:
+    if flush_future:
+        with _job_lock:
+            future = _runtime_futures.get(job_id)
+        if future is not None:
+            try:
+                future.result(timeout=_STATUS_POLL_FLUSH_SECONDS)
+            except TimeoutError:
+                pass
+            except Exception:
+                pass
     with _job_lock:
         future = _runtime_futures.get(job_id)
     if future is not None:
