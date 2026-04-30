@@ -13599,6 +13599,15 @@
         "env:SKILGEN_SCORE_THRESHOLD",
         "env:TRACEABILITY"
       ],
+      ".github/workflows/vercel-production.yml": [
+        "env:API",
+        "env:JSON",
+        "env:VERCEL_API_PROJECT_ID",
+        "env:VERCEL_DASHBOARD_PROJECT_ID",
+        "env:VERCEL_ORG_ID",
+        "env:VERCEL_SCOPE",
+        "env:VERCEL_TOKEN"
+      ],
       "apps/api/.env.example": [
         "env:ADMIN_SECRET",
         "env:CRON_SECRET",

@@ -47,4 +47,4 @@
 ## External Skill Provenance
 - `agentskills-spec` from `https://github.com/agentskills/agentskills.git` at `2d3e01f590f68bee2cb76a3200823e93b2cc9eaa`
 - `anthropic-skills` from `https://github.com/anthropics/skills.git` at `5128e1865d670f5d6c9cef000e6dfc4e951fb5b9`
-- `langchain-skills` from `https://github.com/langchain-ai/langchain-skills.git` at `f8115670953680937e66fd50923dff54d748c7f3`
+- `langchain-skills` from `https://github.com/langchain-ai/langchain-skills.git` at `648df5daa32ef7a742a07740d9c5d13e3b8229c4`

@@ -78,7 +78,7 @@ graph TD
 - Symbol graph files: `177`
 - Cross-file symbol relationships: `91`
 - Call graph files: `174`
-- Config/runtime files: `44`
+- Config/runtime files: `45`
 - Tests mapped to code: `72`
 - Runtime artifacts ingested: `1`
 - Dependency risk nodes: `270`
@@ -139,10 +139,10 @@ graph TD
 - `.env.example`: `env:ADMIN_SECRET`, `env:API_URL`, `env:CRON_SECRET`, `env:DATABASE_URL`, `env:DEPLOYMENT_MODE`
 - `.github/ISSUE_TEMPLATE/bug_report.yml`: `env:API`, `env:CLI`, `env:SDK`
 - `.github/workflows/skilgen-sync.yml`: `env:AGENTS`, `env:ANALYSIS`, `env:ANTHROPIC_API_KEY`, `env:ARCHITECTURE`, `env:BASE_REQUIREMENTS`
+- `.github/workflows/vercel-production.yml`: `env:API`, `env:JSON`, `env:VERCEL_API_PROJECT_ID`, `env:VERCEL_DASHBOARD_PROJECT_ID`, `env:VERCEL_ORG_ID`
 - `apps/api/.env.example`: `env:ADMIN_SECRET`, `env:CRON_SECRET`, `env:DATABASE_URL`, `env:DEPLOYMENT_MODE`, `env:GITHUB_APP_ID`
 - `apps/api/Dockerfile`: `env:CMD`, `env:COPY`, `env:ENTRYPOINT`, `env:EXPOSE`, `env:FROM`
 - `apps/api/alembic.ini`: `env:INFO`, `env:NOT`, `env:NOTSET`, `env:PATH`, `env:POSIX`
-- `apps/api/requirements.txt`: `runtime:postgres`, `runtime:redis`
 
 ### Runtime Artifact Ingestion
 - `tests/fixtures/semgrep_results.sarif` (sast/sarif): SAST findings across 2 files

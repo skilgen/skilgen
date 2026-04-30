@@ -3,7 +3,7 @@ name: platform-agents
 version: 0.6.0
 domain: platform
 sub_domain: platform-agents
-last_updated: 2026-04-29
+last_updated: 2026-04-30
 triggered_by: requirements_pipeline
 source_hash: 2837441a102548bef06fba7b2eca5d2c3dbc03490ce3cb2864d5e3ca6a4c3c26
 richness_score: 96
