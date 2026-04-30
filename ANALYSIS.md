@@ -15785,6 +15785,15 @@
           "dependencies": []
         },
         {
+          "id": "package:greenlet",
+          "kind": "external-package",
+          "risk_score": 0.2,
+          "signals": [
+            "version:loosely-pinned"
+          ],
+          "dependencies": []
+        },
+        {
           "id": "package:httpx",
           "kind": "external-package",
           "risk_score": 0.2,
@@ -17357,6 +17366,7 @@
           "dependencies": [
             "fastapi",
             "sqlalchemy",
+            "greenlet",
             "asyncpg",
             "alembic",
             "psycopg2-binary",
@@ -19009,6 +19019,14 @@
         {
           "source": "manifest:apps/api/requirements.txt",
           "target": "package:fastapi",
+          "kind": "external-package",
+          "risk_signals": [
+            "version:loosely-pinned"
+          ]
+        },
+        {
+          "source": "manifest:apps/api/requirements.txt",
+          "target": "package:greenlet",
           "kind": "external-package",
           "risk_signals": [
             "version:loosely-pinned"
