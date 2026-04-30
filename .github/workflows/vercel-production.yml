@@ -34,6 +34,7 @@ jobs:
       - name: Deploy API to production
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_API_PROJECT_ID }}
         run: npx vercel deploy --prod --yes --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
 
   deploy-dashboard:
@@ -56,4 +57,5 @@ jobs:
       - name: Deploy dashboard to production
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_DASHBOARD_PROJECT_ID }}
         run: npx vercel deploy --prod --yes --force --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
