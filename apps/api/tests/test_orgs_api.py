@@ -337,12 +337,17 @@ def test_runtime_breakdown_returns_breadth_quality_and_pattern() -> None:
     db = Db(
         org=_org(),
         results=[
-            Result(rows=[SimpleNamespace(runtime="Codex", loads_30d=24, unique_skills=4, unique_domains=2, avg_skill_score=55, most_recent_load=now)]),
-            Result(scalar=8),
             Result(rows=[
-                SimpleNamespace(runtime="Codex", domain="agents", loads=18),
-                SimpleNamespace(runtime="Codex", domain="security_compliance", loads=6),
+                *[
+                    SimpleNamespace(runtime="Codex", skill_id=f"skill_{index}", domain="agents", score_total=55, loaded_at=now)
+                    for index in range(18)
+                ],
+                *[
+                    SimpleNamespace(runtime="Codex", skill_id=f"skill_sec_{index}", domain="security_compliance", score_total=55, loaded_at=now)
+                    for index in range(6)
+                ],
             ]),
+            Result(scalar=8),
         ],
     )
 
@@ -356,6 +361,28 @@ def test_runtime_breakdown_returns_breadth_quality_and_pattern() -> None:
     assert item.runtime == "codex_cli"
     assert item.display_name == "Codex CLI"
     assert item.pattern == "High-volume agent loading low-quality guidance"
+
+
+def test_runtime_breakdown_merges_runtime_aliases_before_rendering() -> None:
+    now = datetime.utcnow()
+    db = Db(
+        org=_org(),
+        results=[
+            Result(rows=[
+                SimpleNamespace(runtime="codex", skill_id="skill_1", domain="agents", score_total=80, loaded_at=now),
+                SimpleNamespace(runtime="codex_cli", skill_id="skill_1", domain="agents", score_total=80, loaded_at=now),
+                SimpleNamespace(runtime="claude_code", skill_id="skill_2", domain="testing", score_total=70, loaded_at=now),
+            ]),
+            Result(scalar=2),
+        ],
+    )
+
+    response = asyncio.run(orgs.get_runtime_breakdown("org_1", db))
+
+    assert [item.runtime for item in response.runtimes] == ["codex_cli", "claude_code"]
+    assert response.runtimes[0].loads_30d == 2
+    assert response.runtimes[0].unique_skills == 1
+    assert response.total_loads_30d == 3
 
 
 def test_org_session_tag_updates_existing_session() -> None:

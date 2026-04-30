@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections import defaultdict
+from collections import Counter, defaultdict
 from itertools import combinations
 import json
 import socket
@@ -3474,20 +3474,17 @@ async def get_runtime_breakdown(
 ) -> RuntimeBreakdownResponse:
     cutoff_30 = _utc_now_naive() - timedelta(days=30)
     try:
-        runtime_rows = (
+        event_rows = (
             await db.execute(
                 select(
                     SkillUsageEvent.agent_runtime.label("runtime"),
-                    func.count(SkillUsageEvent.id).label("loads_30d"),
-                    func.count(func.distinct(SkillUsageEvent.skill_id)).label("unique_skills"),
-                    func.count(func.distinct(Skill.domain)).label("unique_domains"),
-                    func.coalesce(func.avg(Skill.score_total), 0).label("avg_skill_score"),
-                    func.max(SkillUsageEvent.loaded_at).label("most_recent_load"),
+                    SkillUsageEvent.skill_id.label("skill_id"),
+                    Skill.domain.label("domain"),
+                    Skill.score_total.label("score_total"),
+                    SkillUsageEvent.loaded_at.label("loaded_at"),
                 )
                 .join(Skill, Skill.id == SkillUsageEvent.skill_id)
                 .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff_30)
-                .group_by(SkillUsageEvent.agent_runtime)
-                .order_by(desc(func.count(SkillUsageEvent.id)))
             )
         ).all()
         total_domains = (
@@ -3497,24 +3494,35 @@ async def get_runtime_breakdown(
                 .where(Repo.org_id == org_id, Repo.is_active.is_(True))
             )
         ).scalar_one()
-        domain_rows = (
-            await db.execute(
-                select(
-                    SkillUsageEvent.agent_runtime.label("runtime"),
-                    Skill.domain.label("domain"),
-                    func.count(SkillUsageEvent.id).label("loads"),
-                )
-                .join(Skill, Skill.id == SkillUsageEvent.skill_id)
-                .where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff_30)
-                .group_by(SkillUsageEvent.agent_runtime, Skill.domain)
-            )
-        ).all()
-        top_domains: dict[str, list[tuple[str, int]]] = {}
-        for row in domain_rows:
-            runtime = normalize_runtime(row.runtime)
-            top_domains.setdefault(runtime, []).append((str(row.domain), int(row.loads or 0)))
-        for runtime in list(top_domains):
-            top_domains[runtime] = sorted(top_domains[runtime], key=lambda item: (-item[1], item[0]))[:3]
+        runtime_usage: dict[str, dict[str, object]] = defaultdict(
+            lambda: {
+                "loads": 0,
+                "skill_ids": set(),
+                "domains": Counter(),
+                "score_sum": 0.0,
+                "score_count": 0,
+                "most_recent_load": None,
+            }
+        )
+        for row in event_rows:
+            runtime = normalize_runtime(_row_value(row, "runtime"))
+            usage = runtime_usage[runtime]
+            usage["loads"] = int(usage["loads"]) + 1
+            skill_id = _row_value(row, "skill_id")
+            if skill_id:
+                usage["skill_ids"].add(str(skill_id))
+            domain = _row_value(row, "domain")
+            if domain:
+                usage["domains"][str(domain)] += 1
+            score = _row_value(row, "score_total")
+            if score is not None:
+                usage["score_sum"] = float(usage["score_sum"]) + float(score or 0)
+                usage["score_count"] = int(usage["score_count"]) + 1
+            loaded_at = _dt_naive(_row_value(row, "loaded_at"))
+            most_recent = usage["most_recent_load"]
+            if loaded_at and (most_recent is None or loaded_at > most_recent):
+                usage["most_recent_load"] = loaded_at
+
         def _runtime_pattern(loads: int, unique_domains: int, avg_score: float, domains: list[str], breadth_score: int) -> str:
             if loads >= 20 and avg_score < 60:
                 return "High-volume agent loading low-quality guidance"
@@ -3527,28 +3535,31 @@ async def get_runtime_breakdown(
             if loads < 3:
                 return "Early signal; collect more sessions"
             return "Steady skill usage"
-        runtimes = [
-            RuntimeBreakdownEntryResponse(
-                runtime=normalize_runtime(row.runtime),
-                display_name=_runtime_display_name(row.runtime),
-                loads_30d=int(row.loads_30d or 0),
-                unique_skills=int(row.unique_skills or 0),
-                top_skill_domain=(top_domains.get(normalize_runtime(row.runtime), [(None, 0)])[0][0]),
-                unique_domains=int(row.unique_domains or 0),
-                avg_skill_score=round(float(row.avg_skill_score or 0), 1),
-                top_domains=[domain for domain, _loads in top_domains.get(normalize_runtime(row.runtime), [])],
-                knowledge_breadth_score=round((int(row.unique_domains or 0) / max(int(total_domains or 0), 1)) * 100),
-                most_recent_load=row.most_recent_load,
-                pattern=_runtime_pattern(
-                    int(row.loads_30d or 0),
-                    int(row.unique_domains or 0),
-                    float(row.avg_skill_score or 0),
-                    [domain for domain, _loads in top_domains.get(normalize_runtime(row.runtime), [])],
-                    round((int(row.unique_domains or 0) / max(int(total_domains or 0), 1)) * 100),
-                ),
+        runtimes = []
+        for runtime, usage in sorted(runtime_usage.items(), key=lambda item: (-int(item[1]["loads"]), item[0])):
+            domain_counts: Counter[str] = usage["domains"]
+            top_domain_pairs = sorted(domain_counts.items(), key=lambda item: (-item[1], item[0]))[:3]
+            top_domain_names = [domain for domain, _loads in top_domain_pairs]
+            unique_domains = len(domain_counts)
+            breadth_score = round((unique_domains / max(int(total_domains or 0), 1)) * 100)
+            score_count = int(usage["score_count"])
+            avg_score = round(float(usage["score_sum"]) / score_count, 1) if score_count else 0
+            loads = int(usage["loads"])
+            runtimes.append(
+                RuntimeBreakdownEntryResponse(
+                    runtime=runtime,
+                    display_name=_runtime_display_name(runtime),
+                    loads_30d=loads,
+                    unique_skills=len(usage["skill_ids"]),
+                    top_skill_domain=top_domain_names[0] if top_domain_names else None,
+                    unique_domains=unique_domains,
+                    avg_skill_score=avg_score,
+                    top_domains=top_domain_names,
+                    knowledge_breadth_score=breadth_score,
+                    most_recent_load=usage["most_recent_load"],
+                    pattern=_runtime_pattern(loads, unique_domains, avg_score, top_domain_names, breadth_score),
+                )
             )
-            for row in runtime_rows
-        ]
         return RuntimeBreakdownResponse(
             runtimes=runtimes,
             total_loads_30d=sum(item.loads_30d for item in runtimes),
