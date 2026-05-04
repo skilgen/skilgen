@@ -16,6 +16,7 @@ from starlette.responses import Response
 
 from packages.db.config import settings
 from apps.api.api.routes import admin, agent_runs, autopilot, cron, digest, feed, health, me, metrics, orgs, registry, repos, review, sessions, skills, slack, sla, stripe, webhook, worker
+from apps.api.api.v8 import flags as v8_flags
 
 
 eval_router = importlib.import_module("apps.api.api.routes.eval")
@@ -143,3 +144,4 @@ app.include_router(slack.router)
 app.include_router(sla.router)
 app.include_router(stripe.router)
 app.include_router(metrics.router)
+app.include_router(v8_flags.router)
