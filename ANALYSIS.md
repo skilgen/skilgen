@@ -6092,6 +6092,29 @@
         "related_imports": []
       },
       {
+        "path": "docs/PRD-v8.docx",
+        "kind": "source",
+        "language": "enterprise_document",
+        "tags": [
+          "enterprise_document"
+        ],
+        "snippet": [
+          "PRD",
+          "The Agent Governance Plane",
+          "Skilgen / Skillayer \u00b7 v8.0 \u2014 Repositioning from skill platform to coding-agent governance",
+          "Author: Ravi",
+          "Status: Draft for engineering review",
+          "Date: May 1, 2026",
+          "Supersedes: PRD v7 (skill platform framing)",
+          "One-line pitch: You don't know what your coding agents did last night. We do.",
+          "This document defines the strategic reframing of Skilgen/Skillayer from an enterprise skill platform into a cross-provider governance plane for coding agents. It covers the new pro",
+          "1. Why this PRD exists",
+          "1.1 The problem with v7",
+          "PRD v7 framed Skilgen as a skill platform. The sidebar grew to ~30 items (Overview, Repos, Skills, PR Inbox, Review, Agent Scorecard, AI Readiness, Connect Agent, My Code Today, Le"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "docs/examples/claude-agent-sdk-python-dashboard.html",
         "kind": "source",
         "language": "enterprise_document",
@@ -6111,29 +6134,6 @@
           "Auto-update on",
           "Git-aware new untracked files",
           "Evidence"
-        ],
-        "related_imports": []
-      },
-      {
-        "path": "docs/examples/claude-code-dashboard.html",
-        "kind": "source",
-        "language": "enterprise_document",
-        "tags": [
-          "enterprise_document"
-        ],
-        "snippet": [
-          "Skilgen Dashboard \u00b7 claude-code",
-          "Skilgen",
-          "Agent Intelligence Surface",
-          "The Pulse",
-          "The Weaver",
-          "The Nexus",
-          "The Foundry",
-          "hub",
-          "ops",
-          "\u00a9 Skilgen",
-          "Skilgen OS",
-          "Repository \u00b7 claude-code"
         ],
         "related_imports": []
       },
@@ -6627,21 +6627,21 @@
         "related_imports": []
       },
       {
-        "path": "docs/examples/README.md",
+        "path": "docs/AGENTS.md",
         "kind": "documentation",
         "language": null,
         "tags": [
           "docs"
         ],
         "snippet": [
-          "# Dashboard Examples",
-          "These are committed, self-contained HTML dashboard snapshots generated with Skilgen and saved into the repo so people can inspect real output.",
-          "GitHub will show the HTML source in the repo view. Download the file or open it locally in a browser to see the full interactive dashboard.",
-          "## Anthropic claude-code",
-          "- Source repo: [anthropics/claude-code](https://github.com/anthropics/claude-code)",
-          "- Source commit: `5a7bf28`",
-          "- Dashboard file: [`claude-code-dashboard.html`](claude-code-dashboard.html)",
-          "- Generated `AGENTS.md`: [`claude-code-AGENTS.md`](claude-code-AGENTS.md)"
+          "# AGENTS.md \u2014 Skillayer v8 Governance-Plane Refactor",
+          "> **This file is your mission brief.** Read it fully before any tool call. Re-read sections relevant to your current task before each major change.",
+          "*Version 8.0.1 \u2014 terminology aligned with prompt set; conventions doc pointer added in \u00a77.*",
+          "---",
+          "## 1. Mission",
+          "Refactor the existing Skilgen / Skillayer codebase from the v7 information architecture (~30 sidebar items, \"skill platform\" framing) to the v8 information architecture (6 sidebar ",
+          "The refactor must:",
+          "1. Preserve every piece of customer data, every existing API contract, and every URL that an authenticated customer might have bookmarked."
         ],
         "related_imports": []
       },
