@@ -5,7 +5,7 @@ These require user/product answers before PR-2 through PR-7 can land.
 ## Contract and repo layout
 
 1. Should the root `AGENTS.md` be replaced with the v8 brief, or should `docs/AGENTS.md` remain the v8 operating contract?
-2. Should PR-1 create an `apps/api/skillayer/` compatibility package to match the brief, or should the convention be updated to `apps/api/api/`?
+2. Should PR-1 add any compatibility import aliases, or is the final convention simply `apps/api/api/v8/<surface>/` with no aliases?
 3. Should `skilgen/hooks/claude_code_hook.py` remain the stable hook path, or should a non-OSS app-owned hook path be introduced later?
 
 ## Information architecture
@@ -28,7 +28,7 @@ These require user/product answers before PR-2 through PR-7 can land.
 
 ## Governance and security
 
-13. What are the exact Policy decision verbs for PRD 4.2.1 if they differ from existing `block/warn/log`?
+13. Q13 (PR-3 work item, not open question): The existing code uses three policy decision verbs (`block/warn/log`). PRD §4.2.1 specifies six (`allow/deny/require_approval/log_only/redact/route_to_dlp`). PR-3 must extend the verb enum, map existing rows to new verbs (`block→deny`, `warn→require_approval`, `log→log_only`), and deprecate the old names.
 14. Which WORM storage targets must Audit support first: S3 Object Lock, GCS Bucket Lock, Azure Immutable Blob, or all three?
 15. Which async system is authoritative for evidence-package exports: existing Celery/worker, QStash, or DB-polled jobs?
 16. Is RBAC in PR-7 required for all tenants, or Enterprise-only?
@@ -39,3 +39,4 @@ These require user/product answers before PR-2 through PR-7 can land.
 18. Should v8 placeholder routes in PR-1 be visible to admin users only, or any tenant with the flag enabled?
 19. What browser/device matrix is required for Playwright screenshots in the v8 surface PRs?
 20. Should frontend coverage be introduced as part of PR-1, or are Playwright smoke tests sufficient for this refactor?
+21. When v8 surface PRs add columns or views to existing v7 tables, are v7 endpoints required to remain bit-for-bit identical in response shape, or are additive non-breaking changes acceptable?

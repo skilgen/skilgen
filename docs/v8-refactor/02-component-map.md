@@ -78,9 +78,9 @@ Disposition vocabulary:
 
 ## Component boundaries to establish in PR-1
 
-- `apps/dashboard/components/SidebarLegacy.tsx`: receives existing nav arrays and renders current IA unchanged.
+- `apps/dashboard/components/SidebarLegacy.tsx`: created by extracting existing sidebar logic from `apps/dashboard/app/dashboard/layout.tsx` with no behavior change. This is an extraction, not a rewrite; the flag-off render tree must remain visually and functionally identical.
 - `apps/dashboard/components/SidebarV8.tsx`: six top-level items only: Activity, Policy, Audit, Skills, Insights, Settings.
-- `apps/dashboard/lib/ia-v8.ts`: flag read helper and route helpers, no tenant DB logic until API side exists.
+- `apps/dashboard/lib/flags.ts`: dashboard flag read helper and route helpers, backed by server-computed tenant flag state.
 - `apps/dashboard/app/(v8)/...`: v8 route group, subject to final convention in PR-1.
 
 No component should be deleted in PR-0 or PR-1.

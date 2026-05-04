@@ -41,6 +41,7 @@ Disposition vocabulary:
 | `/dashboard/insights/risky-repos` | new | PRD 4.5 | Knowledge risk composition. |
 | `/dashboard/insights/coverage-sla` | new | PRD 4.5 | Coverage SLA tab. |
 | `/dashboard/settings` | kept | PRD 3.2, 4.6 | Existing Settings remains top-level. |
+| `/dashboard/settings/notifications` | new | PRD 3.3, 4.6 | Digest becomes a notification setting. |
 | `/dashboard/settings/teams` | new | PRD 4.6 | Teams tab. |
 | `/dashboard/settings/rbac` | new | PRD 4.6 | RBAC tab. |
 | `/dashboard/settings/sso` | new | PRD 4.6 | SSO tab. |
@@ -50,62 +51,62 @@ Disposition vocabulary:
 
 ## Existing sidebar routes
 
-| Existing route | Current renderer | v8 disposition | Target route | PRD citation |
-| --- | --- | --- | --- | --- |
-| `/dashboard` | `apps/dashboard/app/dashboard/page.tsx` | redirected-to-X | `/dashboard/activity` when `IA_V8=true`; keep legacy when off | 3.2, 3.3, 4.1 |
-| `/dashboard/repos` | `apps/dashboard/app/dashboard/repos/page.tsx` | redirected-to-X | `/dashboard/skills/repos` | 3.3, 4.4 |
-| `/dashboard/skills` | `apps/dashboard/app/dashboard/skills/page.tsx` | kept | `/dashboard/skills` | 3.2, 3.3, 4.4 |
-| `/dashboard/agent-prs` | `apps/dashboard/app/dashboard/agent-prs/page.tsx` | redirected-to-X | `/dashboard/activity/live-feed?action_type=pr_open` | 3.3, 4.1 |
-| `/dashboard/review` | `apps/dashboard/app/dashboard/review/page.tsx` | redirected-to-X | `/dashboard/policy/approvals` | 3.3, 4.2 |
-| `/dashboard/agent-scorecard` | `apps/dashboard/app/dashboard/agent-scorecard/page.tsx` | redirected-to-X | `/dashboard/insights/risky-agents` | 3.3, 4.5 |
-| `/dashboard/ai-readiness` | `apps/dashboard/app/dashboard/ai-readiness/page.tsx` | removed-with-redirect-to-X | `/dashboard/activity` | 3.3 |
-| `/dashboard/connect` | `apps/dashboard/app/dashboard/connect/page.tsx` | redirected-to-X | `/dashboard/settings/connectors` | 3.3, 4.6 |
-| `/dashboard/settings` | `apps/dashboard/app/dashboard/settings/page.tsx` | kept | `/dashboard/settings` | 3.2, 4.6 |
-| `/dashboard/my-code-today` | `apps/dashboard/app/dashboard/my-code-today/page.tsx` | removed-with-redirect-to-X | `/dashboard/activity` | 3.3 |
-| `/dashboard/leaderboard` | `apps/dashboard/app/dashboard/leaderboard/page.tsx` | removed-with-redirect-to-X | `/dashboard/insights/risky-agents` | 3.3 |
-| `/dashboard/analytics` | `apps/dashboard/app/dashboard/analytics/page.tsx` | redirected-to-X | `/dashboard/insights/fleet-kpis` | 3.3, 4.5 |
-| `/dashboard/eval` | `apps/dashboard/app/dashboard/eval/page.tsx` | redirected-to-X | `/dashboard/insights/risky-agents` | 3.3, 4.5 |
-| `/dashboard/heatmap` | `apps/dashboard/app/dashboard/heatmap/page.tsx` | redirected-to-X | `/dashboard/activity/heatmap` | 3.3, 4.1 |
-| `/dashboard/intelligence` | `apps/dashboard/app/dashboard/intelligence/page.tsx` | removed-with-redirect-to-X | `/dashboard/insights/fleet-kpis` | 3.3 |
-| `/dashboard/skillql` | `apps/dashboard/app/dashboard/skillql/page.tsx` | redirected-to-X | `/dashboard/skills/skillql` | 3.3, 4.4 |
-| `/dashboard/eval/gaps` | `apps/dashboard/app/dashboard/eval/gaps/page.tsx` | redirected-to-X | `/dashboard/skills/score?filter=coverage` | 3.3, 4.4 |
-| `/dashboard/debt` | `apps/dashboard/app/dashboard/debt/page.tsx` | redirected-to-X | `/dashboard/skills/score?filter=structure-freshness` | 3.3, 4.4 |
-| `/dashboard/knowledge-risk` | `apps/dashboard/app/dashboard/knowledge-risk/page.tsx` | redirected-to-X | `/dashboard/insights/risky-repos` | 3.3, 4.5 |
-| `/dashboard/red-flags` | `apps/dashboard/app/dashboard/red-flags/page.tsx` | redirected-to-X | `/dashboard/policy/violations` | 3.3, 4.2 |
-| `/dashboard/eval/ab-tests` | `apps/dashboard/app/dashboard/eval/ab-tests/page.tsx` | removed-with-redirect-to-X | `/dashboard/insights/risky-agents` | 3.3 |
-| `/dashboard/registry` | `apps/dashboard/app/dashboard/registry/page.tsx` | redirected-to-X | `/dashboard/skills/registry` | 3.3, 4.4 |
-| `/dashboard/sessions` | `apps/dashboard/app/dashboard/sessions/page.tsx` | redirected-to-X | `/dashboard/activity/sessions` | 3.3, 4.1 |
-| `/dashboard/digest` | `apps/dashboard/app/dashboard/digest/page.tsx` | removed-with-redirect-to-X | `/dashboard/settings?tab=notifications` | 3.3, 4.6 |
-| `/dashboard/autopilot` | `apps/dashboard/app/dashboard/autopilot/page.tsx` | redirected-to-X | `/dashboard/policy/rules?mode=auto-approval` | 3.3, 4.2 |
-| `/dashboard/sources` | `apps/dashboard/app/dashboard/sources/page.tsx` | redirected-to-X | `/dashboard/skills/repos` | 3.3, 4.4 |
-| `/dashboard/sla` | `apps/dashboard/app/dashboard/sla/page.tsx` | redirected-to-X | `/dashboard/insights/coverage-sla` | 3.3, 4.5 |
-| `/dashboard/half-life` | `apps/dashboard/app/dashboard/half-life/page.tsx` | redirected-to-X | `/dashboard/skills/drift` | 3.3, 4.4 |
-| `/dashboard/registry/dependency-graph` | `apps/dashboard/app/dashboard/registry/dependency-graph/page.tsx` | redirected-to-X | `/dashboard/skills/provenance` | 3.3, 4.4 |
-| `/dashboard/teams` | `apps/dashboard/app/dashboard/teams/page.tsx` | redirected-to-X | `/dashboard/settings/teams` | 3.3, 4.6 |
-| `/dashboard/audit` | `apps/dashboard/app/dashboard/audit/page.tsx` | kept | `/dashboard/audit` | 3.3, 4.3 |
-| `/dashboard/admin` | `apps/dashboard/app/dashboard/admin/page.tsx` | kept outside primary IA until answered | `/dashboard/settings/admin-audit` or `/dashboard/audit` TBD | Open question, not in PRD 3.3 |
+| Existing route | v7 item (PRD §3.3 row) | Current renderer | v8 disposition | Target route | PRD citation |
+| --- | --- | --- | --- | --- | --- |
+| `/dashboard` | Overview | `apps/dashboard/app/dashboard/page.tsx` | redirected-to-X | `/dashboard/activity` when `IA_V8=true`; keep legacy when off | 3.2, 3.3, 4.1 |
+| `/dashboard/repos` | Repos | `apps/dashboard/app/dashboard/repos/page.tsx` | redirected-to-X | `/dashboard/skills/repos` | 3.3, 4.4 |
+| `/dashboard/skills` | Skills | `apps/dashboard/app/dashboard/skills/page.tsx` | kept | `/dashboard/skills` | 3.2, 3.3, 4.4 |
+| `/dashboard/agent-prs` | PR Inbox | `apps/dashboard/app/dashboard/agent-prs/page.tsx` | redirected-to-X | `/dashboard/activity/live-feed` | 3.3, 4.1 |
+| `/dashboard/review` | Review | `apps/dashboard/app/dashboard/review/page.tsx` | redirected-to-X | `/dashboard/policy/approvals` | 3.3, 4.2 |
+| `/dashboard/agent-scorecard` | Agent Scorecard | `apps/dashboard/app/dashboard/agent-scorecard/page.tsx` | redirected-to-X | `/dashboard/insights/risky-agents` | 3.3, 4.5 |
+| `/dashboard/ai-readiness` | AI Readiness | `apps/dashboard/app/dashboard/ai-readiness/page.tsx` | removed-with-redirect-to-X | `/dashboard/activity` | 3.3 |
+| `/dashboard/connect` | Connect Agent | `apps/dashboard/app/dashboard/connect/page.tsx` | redirected-to-X | `/dashboard/settings/connectors` | 3.3, 4.6 |
+| `/dashboard/settings` | Settings (not in PRD §3.3) | `apps/dashboard/app/dashboard/settings/page.tsx` | kept | `/dashboard/settings` | 3.2, 4.6 |
+| `/dashboard/my-code-today` | My Code Today | `apps/dashboard/app/dashboard/my-code-today/page.tsx` | removed-with-redirect-to-X | `/dashboard/activity` | 3.3 |
+| `/dashboard/leaderboard` | Leaderboard | `apps/dashboard/app/dashboard/leaderboard/page.tsx` | removed-with-redirect-to-X | `/dashboard/insights/risky-agents` | 3.3 |
+| `/dashboard/analytics` | Analytics | `apps/dashboard/app/dashboard/analytics/page.tsx` | redirected-to-X | `/dashboard/insights/fleet-kpis` | 3.3, 4.5 |
+| `/dashboard/eval` | Agent Performance | `apps/dashboard/app/dashboard/eval/page.tsx` | redirected-to-X | `/dashboard/insights/risky-agents` | 3.3, 4.5 |
+| `/dashboard/heatmap` | Heatmap | `apps/dashboard/app/dashboard/heatmap/page.tsx` | redirected-to-X | `/dashboard/activity/heatmap` | 3.3, 4.1 |
+| `/dashboard/intelligence` | Intelligence | `apps/dashboard/app/dashboard/intelligence/page.tsx` | removed-with-redirect-to-X | `/dashboard/insights/fleet-kpis` | 3.3 |
+| `/dashboard/skillql` | SkillQL | `apps/dashboard/app/dashboard/skillql/page.tsx` | redirected-to-X | `/dashboard/skills/skillql` | 3.3, 4.4 |
+| `/dashboard/eval/gaps` | Skill Gaps | `apps/dashboard/app/dashboard/eval/gaps/page.tsx` | redirected-to-X | `/dashboard/skills/score` | 3.3, 4.4 |
+| `/dashboard/debt` | Skill Debt | `apps/dashboard/app/dashboard/debt/page.tsx` | redirected-to-X | `/dashboard/skills/score` | 3.3, 4.4 |
+| `/dashboard/knowledge-risk` | Knowledge Risk | `apps/dashboard/app/dashboard/knowledge-risk/page.tsx` | redirected-to-X | `/dashboard/insights/risky-repos` | 3.3, 4.5 |
+| `/dashboard/red-flags` | Red Flags | `apps/dashboard/app/dashboard/red-flags/page.tsx` | redirected-to-X | `/dashboard/policy/violations` | 3.3, 4.2 |
+| `/dashboard/eval/ab-tests` | A/B Tests | `apps/dashboard/app/dashboard/eval/ab-tests/page.tsx` | removed-with-redirect-to-X | `/dashboard/insights/risky-agents` | 3.3 |
+| `/dashboard/registry` | Registry | `apps/dashboard/app/dashboard/registry/page.tsx` | redirected-to-X | `/dashboard/skills/registry` | 3.3, 4.4 |
+| `/dashboard/sessions` | Sessions | `apps/dashboard/app/dashboard/sessions/page.tsx` | redirected-to-X | `/dashboard/activity/sessions` | 3.3, 4.1 |
+| `/dashboard/digest` | Digest | `apps/dashboard/app/dashboard/digest/page.tsx` | removed-with-redirect-to-X | `/dashboard/settings/notifications` | 3.3, 4.6 |
+| `/dashboard/autopilot` | Autopilot | `apps/dashboard/app/dashboard/autopilot/page.tsx` | redirected-to-X | `/dashboard/policy/rules` | 3.3, 4.2 |
+| `/dashboard/sources` | Sources | `apps/dashboard/app/dashboard/sources/page.tsx` | redirected-to-X | `/dashboard/skills/repos` | 3.3, 4.4 |
+| `/dashboard/sla` | Coverage SLA | `apps/dashboard/app/dashboard/sla/page.tsx` | redirected-to-X | `/dashboard/insights/coverage-sla` | 3.3, 4.5 |
+| `/dashboard/half-life` | Half-life | `apps/dashboard/app/dashboard/half-life/page.tsx` | redirected-to-X | `/dashboard/skills/drift` | 3.3, 4.4 |
+| `/dashboard/registry/dependency-graph` | Dependency Graph | `apps/dashboard/app/dashboard/registry/dependency-graph/page.tsx` | redirected-to-X | `/dashboard/skills/provenance` | 3.3, 4.4 |
+| `/dashboard/teams` | Teams | `apps/dashboard/app/dashboard/teams/page.tsx` | redirected-to-X | `/dashboard/settings/teams` | 3.3, 4.6 |
+| `/dashboard/audit` | Audit | `apps/dashboard/app/dashboard/audit/page.tsx` | kept | `/dashboard/audit` | 3.3, 4.3 |
+| `/dashboard/admin` | Admin (not in PRD §3.3) | `apps/dashboard/app/dashboard/admin/page.tsx` | kept outside primary IA until answered | `/dashboard/settings/admin-audit` or `/dashboard/audit` TBD | Open question |
 
 ## Existing non-sidebar dashboard routes
 
-| Existing route | Current renderer | v8 disposition | Target route | PRD citation |
-| --- | --- | --- | --- | --- |
-| `/dashboard/admin/logins` | `apps/dashboard/app/dashboard/admin/logins/page.tsx` | kept outside primary IA until answered | TBD | Open question |
-| `/dashboard/admin/orgs` | `apps/dashboard/app/dashboard/admin/orgs/page.tsx` | kept outside primary IA until answered | TBD | Open question |
-| `/dashboard/admin/orgs/{orgId}` | `apps/dashboard/app/dashboard/admin/orgs/[orgId]/page.tsx` | kept outside primary IA until answered | TBD | Open question |
-| `/dashboard/admin/users` | `apps/dashboard/app/dashboard/admin/users/page.tsx` | kept outside primary IA until answered | TBD | Open question |
-| `/dashboard/connect/agent-run-spec` | `apps/dashboard/app/dashboard/connect/agent-run-spec/page.tsx` | redirected-to-X | `/dashboard/settings/connectors/agent-run-spec` | 4.6 |
-| `/dashboard/memory` | `apps/dashboard/app/dashboard/memory/page.tsx` | removed-with-redirect-to-X | `/dashboard/activity` | 3.3 |
-| `/dashboard/onboarding` | `apps/dashboard/app/dashboard/onboarding/page.tsx` | kept | `/dashboard/onboarding` | 4.6 |
-| `/dashboard/registry/{registryId}` | `apps/dashboard/app/dashboard/registry/[registryId]/page.tsx` | redirected-to-X | `/dashboard/skills/registry/{registryId}` | 4.4 |
-| `/dashboard/repos/{repoId}` | `apps/dashboard/app/dashboard/repos/[repoId]/page.tsx` | redirected-to-X | `/dashboard/skills/repos/{repoId}` | 4.4 |
-| `/dashboard/repos/{repoId}/time-machine` | `apps/dashboard/app/dashboard/repos/[repoId]/time-machine/page.tsx` | redirected-to-X | `/dashboard/skills/provenance?repo={repoId}&view=time-machine` | 4.4 |
-| `/dashboard/repos/{repoId}/skills/{skillId}` | `apps/dashboard/app/dashboard/repos/[repoId]/skills/[skillId]/page.tsx` | redirected-to-X | `/dashboard/skills/registry/{skillId}` | 4.4 |
-| `/dashboard/repos/{repoId}/skills/{skillId}/time-machine` | `apps/dashboard/app/dashboard/repos/[repoId]/skills/[skillId]/time-machine/page.tsx` | redirected-to-X | `/dashboard/skills/provenance?skill={skillId}&view=time-machine` | 4.4 |
-| `/dashboard/repos/{repoId}/skills/{skillId}/versions/{versionId}` | `apps/dashboard/app/dashboard/repos/[repoId]/skills/[skillId]/versions/[versionId]/page.tsx` | redirected-to-X | `/dashboard/skills/registry/{skillId}/versions/{versionId}` | 4.4 |
-| `/dashboard/sessions/{id}` | `apps/dashboard/app/dashboard/sessions/[id]/page.tsx` | redirected-to-X | `/dashboard/activity/sessions/{id}` | 4.1 |
-| `/dashboard/settings/billing` | `apps/dashboard/app/dashboard/settings/billing/page.tsx` | kept | `/dashboard/settings/billing` | 4.6 |
-| `/dashboard/skills/guide` | `apps/dashboard/app/dashboard/skills/guide/page.tsx` | redirected-to-X | `/dashboard/skills/registry?view=guide` | 4.4 |
-| `/dashboard/upgrade` | `apps/dashboard/app/dashboard/upgrade/page.tsx` | kept | `/dashboard/upgrade` | 4.6 |
+| Existing route | v7 item (PRD §3.3 row) | Current renderer | v8 disposition | Target route | PRD citation |
+| --- | --- | --- | --- | --- | --- |
+| `/dashboard/admin/logins` | Admin (not in PRD §3.3) | `apps/dashboard/app/dashboard/admin/logins/page.tsx` | kept outside primary IA until answered | TBD | Open question |
+| `/dashboard/admin/orgs` | Admin (not in PRD §3.3) | `apps/dashboard/app/dashboard/admin/orgs/page.tsx` | kept outside primary IA until answered | TBD | Open question |
+| `/dashboard/admin/orgs/{orgId}` | Admin (not in PRD §3.3) | `apps/dashboard/app/dashboard/admin/orgs/[orgId]/page.tsx` | kept outside primary IA until answered | TBD | Open question |
+| `/dashboard/admin/users` | Admin (not in PRD §3.3) | `apps/dashboard/app/dashboard/admin/users/page.tsx` | kept outside primary IA until answered | TBD | Open question |
+| `/dashboard/connect/agent-run-spec` | Connect Agent | `apps/dashboard/app/dashboard/connect/agent-run-spec/page.tsx` | redirected-to-X | `/dashboard/settings/connectors/agent-run-spec` | 3.3, 4.6 |
+| `/dashboard/memory` | AI Readiness | `apps/dashboard/app/dashboard/memory/page.tsx` | removed-with-redirect-to-X | `/dashboard/activity` | 3.3 |
+| `/dashboard/onboarding` | Connect Agent | `apps/dashboard/app/dashboard/onboarding/page.tsx` | redirected-to-X | `/dashboard/settings/connectors` | 3.3, 4.6 |
+| `/dashboard/registry/{registryId}` | Registry | `apps/dashboard/app/dashboard/registry/[registryId]/page.tsx` | redirected-to-X | `/dashboard/skills/registry/{registryId}` | 3.3, 4.4 |
+| `/dashboard/repos/{repoId}` | Repos | `apps/dashboard/app/dashboard/repos/[repoId]/page.tsx` | redirected-to-X | `/dashboard/skills/repos/{repoId}` | 3.3, 4.4 |
+| `/dashboard/repos/{repoId}/time-machine` | Dependency Graph | `apps/dashboard/app/dashboard/repos/[repoId]/time-machine/page.tsx` | redirected-to-X | `/dashboard/skills/provenance` | 3.3, 4.4 |
+| `/dashboard/repos/{repoId}/skills/{skillId}` | Registry | `apps/dashboard/app/dashboard/repos/[repoId]/skills/[skillId]/page.tsx` | redirected-to-X | `/dashboard/skills/registry/{skillId}` | 3.3, 4.4 |
+| `/dashboard/repos/{repoId}/skills/{skillId}/time-machine` | Dependency Graph | `apps/dashboard/app/dashboard/repos/[repoId]/skills/[skillId]/time-machine/page.tsx` | redirected-to-X | `/dashboard/skills/provenance` | 3.3, 4.4 |
+| `/dashboard/repos/{repoId}/skills/{skillId}/versions/{versionId}` | Registry | `apps/dashboard/app/dashboard/repos/[repoId]/skills/[skillId]/versions/[versionId]/page.tsx` | redirected-to-X | `/dashboard/skills/registry/{skillId}/versions/{versionId}` | 3.3, 4.4 |
+| `/dashboard/sessions/{id}` | Sessions | `apps/dashboard/app/dashboard/sessions/[id]/page.tsx` | redirected-to-X | `/dashboard/activity/sessions/{id}` | 3.3, 4.1 |
+| `/dashboard/settings/billing` | Settings (not in PRD §3.3) | `apps/dashboard/app/dashboard/settings/billing/page.tsx` | kept | `/dashboard/settings/billing` | 3.2, 4.6 |
+| `/dashboard/skills/guide` | Skills | `apps/dashboard/app/dashboard/skills/guide/page.tsx` | redirected-to-X | `/dashboard/skills/registry` | 3.3, 4.4 |
+| `/dashboard/upgrade` | Settings (not in PRD §3.3) | `apps/dashboard/app/dashboard/upgrade/page.tsx` | kept | `/dashboard/upgrade` | 3.2, 4.6 |
 
 ## Redirect rule
 

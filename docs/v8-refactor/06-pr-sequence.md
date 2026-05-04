@@ -9,11 +9,18 @@ Depends on: PR-0 approval
 
 Scope:
 
-- Establish final v8 path convention for this repo: either `apps/api/api/v8/...` or a compatibility package that makes the brief's `apps/api/skillayer/v8/...` true.
-- Add `IA_V8` env default and per-tenant override.
+- Establish the v8 API path convention as `apps/api/api/v8/<surface>/`.
+- Add `IA_V8_DEFAULT` env default and per-tenant override at `orgs.settings.feature_flags.IA_V8`.
 - Add `SidebarLegacy` and `SidebarV8`.
 - Add placeholder v8 routes for Activity, Policy, Audit, Skills, Insights, Settings.
-- Document conventions in `docs/v8-refactor/conventions.md`.
+- Create `docs/v8-refactor/conventions.md` with:
+  - v8 API path convention: `apps/api/api/v8/<surface>/`
+  - v8 dashboard route convention: `apps/dashboard/app/(v8)/<surface>/`
+  - `IA_V8` flag-helper signatures, server and client
+  - Sidebar component contract
+  - Tab-as-sub-route rule, no query-param tabs
+  - Branch naming: `v8/0X-<surface>`
+  - Commit message convention: Conventional Commits, scope `v8`
 
 Files touched:
 
@@ -26,8 +33,8 @@ Files touched:
 - `apps/dashboard/app/(v8)/skills/page.tsx`
 - `apps/dashboard/app/(v8)/insights/page.tsx`
 - `apps/dashboard/app/(v8)/settings/page.tsx`
-- `apps/dashboard/lib/ia-v8.ts`
-- `apps/api/api/...` flag helper path TBD
+- `apps/dashboard/lib/flags.ts`
+- `apps/api/api/v8/flags.py`
 - `apps/api/alembic/versions/...add_ia_v8_tenant_override.py`
 - `docs/v8-refactor/conventions.md`
 - Playwright smoke test path TBD
@@ -51,7 +58,7 @@ Scope:
 Files touched:
 
 - `apps/dashboard/app/(v8)/activity/**`
-- `apps/api/api/v8/activity/**` or convention from PR-1
+- `apps/api/api/v8/activity/**`
 - Existing reusable components from `apps/dashboard/app/dashboard/analytics/LiveFeed.tsx`, `sessions`, `heatmap`
 - Optional Alembic migration for activity heatmap view
 - Tests under `apps/api/tests` and dashboard E2E
@@ -70,11 +77,12 @@ Scope:
 - Build Policy tabs: Rules, Violations, Approvals, Quarantine.
 - Reuse org policies, red flags, review, and autopilot logic.
 - Add YAML DSL parser and starter packs only as PRD 4.2 requires.
+- Extend policy decision verbs from existing `block/warn/log` to PRD 4.2.1 `allow/deny/require_approval/log_only/redact/route_to_dlp`; map existing rows `block→deny`, `warn→require_approval`, `log→log_only`, and deprecate the old names.
 
 Files touched:
 
 - `apps/dashboard/app/(v8)/policy/**`
-- `apps/api/api/v8/policy/**` or convention from PR-1
+- `apps/api/api/v8/policy/**`
 - `apps/api/api/v8/policy/dsl/**`
 - `apps/api/api/v8/policy/starter_packs/**`
 - Existing services: `policy.py`, `policy_engine.py`, review/redflags wrappers
@@ -100,7 +108,7 @@ Scope:
 Files touched:
 
 - `apps/dashboard/app/(v8)/audit/**`
-- `apps/api/api/v8/audit/**` or convention from PR-1
+- `apps/api/api/v8/audit/**`
 - `apps/api/api/v8/audit/chain.py`
 - Existing audit/manifest services
 - Optional Alembic migration for hash chain/evidence package jobs
@@ -124,7 +132,7 @@ Scope:
 Files touched:
 
 - `apps/dashboard/app/(v8)/skills/**`
-- `apps/api/api/v8/skills/**` or convention from PR-1
+- `apps/api/api/v8/skills/**`
 - Existing dashboard components from registry, debt, eval/gaps, half-life, skillql, repos, sources
 - Existing API wrappers for skills, registry, repos, orgs skill endpoints
 - Tests under `apps/api/tests` and dashboard E2E
@@ -147,7 +155,7 @@ Scope:
 Files touched:
 
 - `apps/dashboard/app/(v8)/insights/**`
-- `apps/api/api/v8/insights/**` or convention from PR-1
+- `apps/api/api/v8/insights/**`
 - Existing dashboard components from analytics, agent-scorecard, knowledge-risk, sla
 - Optional Alembic migration for risky-agent/repo SQL views
 - Tests under `apps/api/tests` and dashboard E2E
@@ -170,7 +178,7 @@ Scope:
 Files touched:
 
 - `apps/dashboard/app/(v8)/settings/**`
-- `apps/api/api/v8/settings/**` or convention from PR-1
+- `apps/api/api/v8/settings/**`
 - Existing dashboard components from settings, teams, connect, sources, billing
 - Optional Alembic migration for roles/role_bindings
 - Tests under `apps/api/tests` and dashboard E2E

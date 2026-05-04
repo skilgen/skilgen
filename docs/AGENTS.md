@@ -30,9 +30,9 @@ If the PRD is missing or unreadable, **stop and report**. Do not proceed from me
 | Layer | Tech | Conventions |
 |------|------|-------------|
 | Dashboard | Next.js 15 App Router, TypeScript, Vercel | App Router routes under `apps/dashboard/app/`. Server components by default. Tailwind. |
-| API | FastAPI, Python 3.12, Uvicorn | Service code under `apps/api/skillayer/`. SQLAlchemy 2.0 typed models. Alembic migrations. |
+| API | FastAPI, Python 3.12, Uvicorn | Service code under `apps/api/api/`. SQLAlchemy 2.0 typed models. Alembic migrations. |
 | DB | Neon Postgres (serverless) | Migrations only via Alembic. Never raw `ALTER` in code. |
-| Auth | WorkOS (SSO/SAML) + org API keys (`sk-` prefix) | Auth middleware in `apps/api/skillayer/auth/`. Do not bypass. |
+| Auth | WorkOS (SSO/SAML) + org API keys (`sk-` prefix) | Auth middleware in `apps/api/api/auth.py`. Do not bypass. |
 | Realtime | SSE + DB polling | Existing pattern at `GET /orgs/{id}/feed/stream`. Reuse it for Activity. |
 | CLI | `skilgen` (Python, OSS) | Separate repo / package. **Do not modify** unless the PRD explicitly requires CLI changes. |
 | Agent hook | `claude_code_hook.py` PostToolUse | Already in production. Treat as a stable ingest source. |
@@ -48,7 +48,7 @@ If the PRD is missing or unreadable, **stop and report**. Do not proceed from me
 5. **Migrations are forward-only and reversible.** Every Alembic migration must have a tested `downgrade()`.
 6. **No data loss, ever.** Renaming a table is a copy-then-cut migration across two releases, not a rename.
 7. **One PR per surface.** Activity, Policy, Audit, Skills, Insights, Settings each get their own PR. Plus PR-0 (plan), PR-1 (IA shell + flag), PR-8 (deprecate v7 routes — opens last, after user approval).
-8. **Scope your tooling.** When running tests or linters, scope to the package you changed (`pytest apps/api/skillayer/activity/`, not the full suite). Run the full suite only at PR finalization.
+8. **Scope your tooling.** When running tests or linters, scope to the package you changed (`pytest apps/api/api/v8/activity/`, not the full suite). Run the full suite only at PR finalization.
 9. **Never modify auth, billing, or migration files outside the explicit scope of a PR.** If a change requires touching them, stop and ask.
 10. **Never commit secrets, API keys, customer data, or `.env` files.** This is a hard ban regardless of how convenient it would be.
 
@@ -59,7 +59,7 @@ Run this before doing anything else. Output the findings into `docs/v8-refactor/
 1. Repository layout: produce a tree of the top three levels, annotated with what each folder contains.
 2. Sidebar inventory: locate the current sidebar component (likely `apps/dashboard/components/Sidebar.tsx` or similar). List every item, the route it links to, and the file that renders that route.
 3. v7→v8 mapping audit: for every item in PRD §3.3, confirm it exists in the codebase. Flag any item the PRD names that you cannot find, and any sidebar item that exists in code but is not named in the PRD.
-4. API surface inventory: list every endpoint under `apps/api/skillayer/`, grouped by router. Identify which endpoints back which sidebar items.
+4. API surface inventory: list every endpoint under `apps/api/api/`, grouped by router. Identify which endpoints back which sidebar items.
 5. DB schema inventory: list every table, with row counts where possible. Flag tables whose names match v7 concepts (e.g. `ai_readiness_*`, `leaderboard_*`) that the PRD says to cut — these need migration plans, not deletion.
 6. Existing feature flags: list every flag in use today, the mechanism (env var, LaunchDarkly, internal table), and current values per environment.
 7. Test coverage: report % coverage per package and identify packages below 60% — these need extra caution.
@@ -91,7 +91,7 @@ Branch: `v8/01-ia-shell`. Depends on PR-0 approval.
 
 Scope:
 
-- Add `IA_V8` flag plumbing (env var + per-tenant override row in `tenants` table — Alembic migration with downgrade).
+- Add `IA_V8` flag plumbing (`IA_V8_DEFAULT` env default + per-tenant override at `orgs.settings.feature_flags.IA_V8` — Alembic migration with downgrade).
 - Add the new sidebar component (`SidebarV8.tsx`) with the six items: Activity, Policy, Audit, Skills, Insights, Settings. Each links to a placeholder page that renders "Coming soon — v8 surface".
 - Wire the existing layout to render `SidebarV8` when `IA_V8=true` for the current tenant, otherwise the existing sidebar.
 - No logic changes. No deletions. No redirects yet.
@@ -99,7 +99,7 @@ Scope:
 
 This PR must be mergeable to main with the flag defaulted to off, and have zero observable effect for existing users.
 
-**After this PR merges:** the conventions established here (route group naming, flag-helper signatures, sidebar component contract, file paths under `apps/api/skillayer/v8/` and `apps/dashboard/app/(v8)/`) are documented in `docs/v8-refactor/conventions.md`. Every subsequent agent (PR-2 through PR-7) must read that file before starting, in addition to this AGENTS.md and the PRD.
+**After this PR merges:** the conventions established here (route group naming, flag-helper signatures, sidebar component contract, file paths under `apps/api/api/v8/` and `apps/dashboard/app/(v8)/`) are documented in `docs/v8-refactor/conventions.md`. Every subsequent agent (PR-2 through PR-7) must read that file before starting, in addition to this AGENTS.md and the PRD.
 
 ## 8. PR-2 through PR-7: the six surfaces (parallelizable)
 
@@ -111,7 +111,7 @@ For each surface:
 
 1. Read PRD §4.X for that surface in full. Build only what §4.X specifies.
 2. Add the routes under `apps/dashboard/app/(v8)/<surface>/` so they live in a route group flagged on `IA_V8`.
-3. Add API endpoints under `apps/api/skillayer/v8/<surface>/`. Reuse existing models where the PRD's data shape matches. Add new SQLAlchemy models only where the PRD demands new entities.
+3. Add API endpoints under `apps/api/api/v8/<surface>/`. Reuse existing models where the PRD's data shape matches. Add new SQLAlchemy models only where the PRD demands new entities.
 4. Each tab specified in PRD §4.X is a sub-route, not a client-side toggle, so deep links work.
 5. Tests required per surface: unit tests on new models, contract tests on new endpoints, one Playwright happy-path per tab. Aim 80%+ coverage on new code.
 6. Update `docs/v8-refactor/06-pr-sequence.md` with the actual files changed once the PR opens, so future agents can audit drift between plan and execution.
@@ -119,8 +119,8 @@ For each surface:
 Surface-specific notes (the PRD has full detail; these are reminders, not substitutes):
 
 - **Activity** (PR-2): Live feed reuses the existing SSE feed at `/orgs/{id}/feed/stream`. Sessions reuses session records. Replay needs a new endpoint. Heatmap is a materialized view — Alembic migration required.
-- **Policy** (PR-3): YAML DSL parser is a new module under `apps/api/skillayer/v8/policy/dsl/`. Decision verbs from PRD §4.2.1. Starter library lives in `apps/api/skillayer/v8/policy/starter_packs/` as YAML files committed to the repo.
-- **Audit** (PR-4): Hash-chain implementation must be testable in isolation — put it under `apps/api/skillayer/v8/audit/chain.py` with property-based tests. Evidence-pack export is async (Celery / RQ — match what's already in use).
+- **Policy** (PR-3): YAML DSL parser is a new module under `apps/api/api/v8/policy/dsl/`. Decision verbs from PRD §4.2.1. Starter library lives in `apps/api/api/v8/policy/starter_packs/` as YAML files committed to the repo.
+- **Audit** (PR-4): Hash-chain implementation must be testable in isolation — put it under `apps/api/api/v8/audit/chain.py` with property-based tests. Evidence-pack export is async (Celery / RQ — match what's already in use).
 - **Skills** (PR-5): This is mostly relabel-and-move from v7. Registry, Score, Drift, Provenance, SkillQL, Repos already exist as separate v7 sidebar items. Their backing logic moves under `v8/skills/<tab>/`. **No algorithm changes** in this PR — that's a separate work stream.
 - **Insights** (PR-6): Mostly composition over existing analytics endpoints. Risky-agents and Risky-repos rankings are new SQL views.
 - **Settings** (PR-7): Largely a reorganization. RBAC scoping is the one new substantive piece — new `roles` and `role_bindings` tables if not already present.
@@ -192,7 +192,7 @@ Asking is cheap. Re-doing a botched refactor is not.
 |---|---|
 | Edit any file | Have I completed §5 discovery? Is there an open PR-0? |
 | Create a new route | Is it under `(v8)` route group? Does it gate on `IA_V8`? |
-| Add a new endpoint | Is it under `apps/api/skillayer/v8/`? Is it documented in `03-api-map.md`? |
+| Add a new endpoint | Is it under `apps/api/api/v8/`? Is it documented in `03-api-map.md`? |
 | Write a migration | Does it have a tested `downgrade()`? Does it touch only the tables in `04-data-map.md`? |
 | Delete or rename anything | Have I read §11 anti-patterns and §9 deprecation rules? |
 | Open a PR | Have I run §10 success criteria as a checklist in the PR description? |

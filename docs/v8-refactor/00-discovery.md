@@ -42,7 +42,7 @@ Top three levels, annotated:
 `-- pyproject.toml                   Python package and dependency config.
 ```
 
-Stack note: the brief says API service code is under `apps/api/skillayer/`, but the actual app uses `apps/api/api/`. The auth entrypoint is `apps/api/api/auth.py`. The hook exists at `skilgen/hooks/claude_code_hook.py`, not repo root. User approved treating `apps/api/api/` as the effective API root for Phase A.
+Stack note: the API service code uses `apps/api/api/`. The v8 brief was corrected in PR-0 review to match this path. The auth entrypoint is `apps/api/api/auth.py`. The hook exists at `skilgen/hooks/claude_code_hook.py`, not repo root.
 
 ## 2. Sidebar inventory
 
@@ -598,7 +598,7 @@ Last 10 Alembic migration files by recent git history:
 
 ## Risks I flagged
 
-1. Stack-path drift from the brief: the API lives under `apps/api/api/`, not `apps/api/skillayer/`; auth is `apps/api/api/auth.py`, not `apps/api/skillayer/auth/`; and the hook is under `skilgen/hooks/claude_code_hook.py`. PR-0 must normalize conventions before parallel PRs start.
+1. Stack-path convention must stay anchored at `apps/api/api/v8/<surface>/`; auth is `apps/api/api/auth.py`, and the hook is under `skilgen/hooks/claude_code_hook.py`. PR-0 review corrected the brief rather than renaming or symlinking code.
 2. Root `AGENTS.md` is still the generated Skilgen contract. The v8 brief is committed as `docs/AGENTS.md` for this branch by user direction. Future agents may read the wrong contract unless PR-0 resolves this.
 3. `Admin` is an actual sidebar surface not named in PRD §3.3. It is gated by `NEXT_PUBLIC_ADMIN_EMAILS`, but v8 routing/redirect plans must explicitly decide whether it remains outside the six-item IA or moves under Settings/Audit.
 4. Several v8 destination surfaces already partially exist under v7 routes and endpoints (policy, audit, manifests, agent PRs, my-code-today, standup, digest, SkillQL). The plan must avoid rebuilding working behavior and must preserve bookmarked URLs with redirects.

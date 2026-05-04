@@ -26,7 +26,7 @@ Proposed environment variables:
 
 | Variable | Scope | Default | Meaning |
 | --- | --- | --- | --- |
-| `IA_V8` | API/dashboard server runtime | `false` | Global default for all tenants. |
+| `IA_V8_DEFAULT` | API/dashboard server runtime | `false` | Global default for all tenants. |
 | `NEXT_PUBLIC_IA_V8` | Dashboard client only if unavoidable | unset | Avoid unless a client component cannot receive server-computed value. |
 
 Per-tenant override:
@@ -57,7 +57,7 @@ Preferred storage: `orgs.settings.feature_flags.IA_V8` if current JSON settings 
 2. PR-2 through PR-7: each surface checks `IA_V8`; legacy routes stay live.
 3. Tenant pilot: set per-tenant override true for one internal/test org.
 4. Broader rollout: set override true for named beta tenants.
-5. Default-on: set env `IA_V8=true` after all surface PRs are merged and approved.
+5. Default-on: set env `IA_V8_DEFAULT=true` after all surface PRs are merged and approved.
 6. PR-8: add v7 redirects and deprecation headers after user-approved deprecation date.
 
 ## Rollback plan
@@ -65,7 +65,7 @@ Preferred storage: `orgs.settings.feature_flags.IA_V8` if current JSON settings 
 Immediate rollback:
 
 - Set tenant override `feature_flags.IA_V8=false`, or remove the override.
-- If env default was enabled, set `IA_V8=false`.
+- If env default was enabled, set `IA_V8_DEFAULT=false`.
 - No migrations should be required to roll back route visibility.
 
 Data rollback:

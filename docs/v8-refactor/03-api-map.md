@@ -2,7 +2,7 @@
 
 Source inputs: `docs/PRD-v8.docx` sections 3.2, 3.3, and 4.1-4.6; API inventory in `docs/v8-refactor/00-discovery.md`.
 
-Effective API root: `apps/api/api/`. The v8 brief says `apps/api/skillayer/`; user approved treating `apps/api/api/` as the effective root during discovery. PR-1 should document the convention before any surface PR starts.
+Effective API root and v8 home: `apps/api/api/v8/<surface>/`. The v8 brief has been corrected to match the repository path. PR-1 should document this convention before any surface PR starts.
 
 Disposition vocabulary:
 
@@ -150,8 +150,8 @@ GET  /v8/orgs/{org_id}/activity/feed
 GET  /v8/orgs/{org_id}/activity/feed/stream
 GET  /v8/orgs/{org_id}/activity/sessions
 GET  /v8/orgs/{org_id}/activity/sessions/{session_id}
-GET  /v8/repos/{repo_id}/activity/sessions/{session_id}/replay
-GET  /v8/repos/{repo_id}/activity/heatmap
+GET  /v8/orgs/{org_id}/repos/{repo_id}/activity/sessions/{session_id}/replay
+GET  /v8/orgs/{org_id}/repos/{repo_id}/activity/heatmap
 
 GET  /v8/orgs/{org_id}/policy/rules
 POST /v8/orgs/{org_id}/policy/rules

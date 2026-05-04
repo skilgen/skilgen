@@ -4,6 +4,10 @@ Source inputs: SQLAlchemy models under `packages/db/models`, Alembic migrations 
 
 No SQL is written in PR-0. No v7 table is proposed for deletion. Tables backing cut surfaces are marked for eventual `_deprecated_v7_` prefix rename only in PR-8 or later, per `docs/AGENTS.md` section 9.
 
+Gate: No `_deprecated_v7_` rename ships in PR-8 or any later PR without a documented row count from staging or a sanitized clone, recorded in this file.
+
+Required before PR-1: read-only access to staging or a sanitized clone, so row counts can be filled in for every table marked `deprecate-later` or `keep/extend`.
+
 Row counts were unavailable during discovery because no non-secret DB connection was configured locally.
 
 ## Table dispositions
