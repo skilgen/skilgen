@@ -1,8 +1,12 @@
 import { expect, test } from "@playwright/test";
+import { spawn, type ChildProcess } from "node:child_process";
+import path from "node:path";
 
-const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:3000";
-const IA_V8_DEFAULT = (process.env.IA_V8_DEFAULT || "").toLowerCase();
-const isDefaultOn = ["1", "true", "yes", "on"].includes(IA_V8_DEFAULT);
+const TEST_API_URL = process.env.PLAYWRIGHT_TEST_API_URL || "http://127.0.0.1:59999";
+const FLAG_OFF_URL = process.env.PLAYWRIGHT_FLAG_OFF_URL;
+const FLAG_ON_URL = process.env.PLAYWRIGHT_FLAG_ON_URL;
+const FLAG_OFF_PORT = Number(process.env.PLAYWRIGHT_FLAG_OFF_PORT || 4310);
+const FLAG_ON_PORT = Number(process.env.PLAYWRIGHT_FLAG_ON_PORT || 4311);
 
 const legacyRoutes = [
   "/dashboard",
@@ -82,45 +86,127 @@ const v8Surfaces = [
 
 test.setTimeout(120000);
 test.use({ viewport: { width: 1440, height: 1000 } });
+test.describe.configure({ mode: "serial" });
 
-test.describe("IA_V8 flag off", () => {
-  test.skip(isDefaultOn, "Run this smoke with IA_V8_DEFAULT unset or false.");
+type ManagedServer = {
+  name: string;
+  process: ChildProcess;
+};
 
-  test("legacy sidebar renders and v7 routes are valid", async ({ page }) => {
-    for (const route of legacyRoutes) {
-      const response = await page.goto(`${BASE_URL}${route}`, { timeout: 15000, waitUntil: "commit" });
-      expect(response?.status(), route).toBeLessThan(400);
+let flagOffBaseUrl = FLAG_OFF_URL || "";
+let flagOnBaseUrl = FLAG_ON_URL || "";
+const managedServers: ManagedServer[] = [];
+
+function dashboardCwd(): string {
+  return process.cwd().endsWith(`${path.sep}apps${path.sep}dashboard`)
+    ? process.cwd()
+    : path.join(process.cwd(), "apps", "dashboard");
+}
+
+async function waitForReady(url: string, server: ManagedServer): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  let lastError = "";
+
+  while (Date.now() < deadline) {
+    if (server.process.exitCode !== null) {
+      throw new Error(`${server.name} exited before it was ready. ${lastError}`);
     }
 
-    await page.goto(`${BASE_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-    await expect(page.locator("aside")).toBeVisible();
-    for (const label of legacySidebarItems) {
-      await expect(page.locator("aside").getByText(label, { exact: true })).toBeVisible();
+    try {
+      const response = await fetch(url);
+      if (response.status < 500) return;
+      lastError = `Last status: ${response.status}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
     }
-    await page.screenshot({ path: "test-results/ia-v8-flag-off-v7-sidebar.png", fullPage: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(`${server.name} did not become ready at ${url}. ${lastError}`);
+}
+
+async function startDashboardServer(name: string, port: number, iaV8Default: "true" | "false"): Promise<string> {
+  const url = `http://127.0.0.1:${port}`;
+  const server = spawn("npx", ["next", "start", "--hostname", "127.0.0.1", "--port", String(port)], {
+    cwd: dashboardCwd(),
+    env: {
+      ...process.env,
+      API_URL: TEST_API_URL,
+      NEXT_PUBLIC_API_URL: TEST_API_URL,
+      IA_V8_DEFAULT: iaV8Default,
+      NEXT_TELEMETRY_DISABLED: "1",
+      PORT: String(port),
+    },
+    stdio: "ignore",
   });
+
+  const managedServer = { name, process: server };
+  managedServers.push(managedServer);
+
+  await waitForReady(url, managedServer);
+  return url;
+}
+
+test.beforeAll(async () => {
+  if (!flagOffBaseUrl) {
+    flagOffBaseUrl = await startDashboardServer("ia-v8-off", FLAG_OFF_PORT, "false");
+  }
+  if (!flagOnBaseUrl) {
+    flagOnBaseUrl = await startDashboardServer("ia-v8-on", FLAG_ON_PORT, "true");
+  }
 });
 
-test.describe("IA_V8 flag on", () => {
-  test.skip(!isDefaultOn, "Run this smoke with IA_V8_DEFAULT=true.");
+test.afterAll(async () => {
+  await Promise.all(
+    managedServers.map(
+      (server) =>
+        new Promise<void>((resolve) => {
+          if (server.process.exitCode !== null) {
+            resolve();
+            return;
+          }
+          server.process.once("exit", () => resolve());
+          server.process.kill("SIGTERM");
+          setTimeout(() => {
+            if (server.process.exitCode === null) server.process.kill("SIGKILL");
+            resolve();
+          }, 2_000).unref();
+        }),
+    ),
+  );
+});
 
-  test("v8 sidebar and placeholders render", async ({ page }) => {
-    for (const surface of v8Surfaces) {
-      const response = await page.goto(`${BASE_URL}${surface.path}`, { waitUntil: "domcontentloaded" });
-      expect(response?.status(), surface.path).toBeLessThan(400);
-      await expect(page.locator("aside").getByText(surface.label, { exact: true })).toBeVisible();
-      await expect(page.getByRole("heading", { name: surface.label })).toBeVisible();
-      await expect(page.getByText("Coming soon — v8 surface")).toBeVisible();
-      await page.screenshot({ path: `test-results/ia-v8-${surface.label.toLowerCase()}.png`, fullPage: true });
-    }
+test("legacy sidebar renders and v7 routes are valid", async ({ page }) => {
+  for (const route of legacyRoutes) {
+    const response = await page.goto(`${flagOffBaseUrl}${route}`, { timeout: 15000, waitUntil: "commit" });
+    expect(response?.status(), route).toBeLessThan(400);
+  }
 
-    const links = page.locator("aside nav a");
-    await expect(links).toHaveCount(6);
-  });
+  await page.goto(`${flagOffBaseUrl}/dashboard`, { waitUntil: "domcontentloaded" });
+  await expect(page.locator("aside")).toBeVisible();
+  for (const label of legacySidebarItems) {
+    await expect(page.locator("aside").getByText(label, { exact: true })).toBeVisible();
+  }
+  await page.screenshot({ path: "test-results/ia-v8-flag-off-v7-sidebar.png", fullPage: true });
+});
 
-  test("missing tenant override falls back to env default", async ({ page }) => {
-    const response = await page.goto(`${BASE_URL}/activity`, { waitUntil: "domcontentloaded" });
-    expect(response?.status()).toBeLessThan(400);
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
-  });
+test("v8 sidebar and placeholders render", async ({ page }) => {
+  for (const surface of v8Surfaces) {
+    const response = await page.goto(`${flagOnBaseUrl}${surface.path}`, { waitUntil: "domcontentloaded" });
+    expect(response?.status(), surface.path).toBeLessThan(400);
+    await expect(page.locator("aside").getByText(surface.label, { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: surface.label })).toBeVisible();
+    await expect(page.getByText("Coming soon — v8 surface")).toBeVisible();
+    await page.screenshot({ path: `test-results/ia-v8-${surface.label.toLowerCase()}.png`, fullPage: true });
+  }
+
+  const links = page.locator("aside nav a");
+  await expect(links).toHaveCount(6);
+});
+
+test("missing tenant override falls back to env default", async ({ page }) => {
+  const response = await page.goto(`${flagOnBaseUrl}/activity`, { waitUntil: "domcontentloaded" });
+  expect(response?.status()).toBeLessThan(400);
+  await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
 });
