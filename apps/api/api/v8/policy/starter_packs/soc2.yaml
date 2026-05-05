@@ -1,0 +1,10 @@
+id: soc2-change-management
+title: "SOC2 CC8.1 requires approval for production change commands"
+scope:
+  action_class: shell_exec
+match:
+  command_regex: "\\b(terraform apply|kubectl apply|gh pr merge)\\b"
+  file_glob: ["infra/prod/*", "k8s/prod/*", ".github/workflows/*"]
+decision: require_approval
+notify: ["#sec-aiops"]
+compliance_tags: ["SOC2:CC8.1", "SOC2:CC7.2", "SOC2:CC6.1"]

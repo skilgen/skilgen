@@ -5,8 +5,10 @@ import asyncio
 from celery import Celery
 
 from apps.api.api.analysis import run_analysis
+from apps.api.api.v8.audit.router import build_evidence_package_for_job
 from packages.db.config import settings
 from packages.db.database import AsyncSessionLocal
+from packages.db.models import Job
 
 
 celery_app = Celery("skillayer", broker=settings.REDIS_URL, backend=settings.REDIS_URL)
@@ -45,6 +47,32 @@ def run_analysis_task(
                 base_score=base_score,
                 head_sha=head_sha,
             )
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        raise self.retry(exc=exc, countdown=60) from exc
+
+
+@celery_app.task(bind=True, name="build_evidence_package", max_retries=3)
+def build_evidence_package_task(self, job_id: str, org_id: str, control: str, period_start: str, period_end: str) -> None:
+    async def _run() -> None:
+        async with AsyncSessionLocal() as db:
+            job = await db.get(Job, job_id)
+            if job is None:
+                return
+            job.status = "running"
+            await db.commit()
+            try:
+                result = await build_evidence_package_for_job(db, job_id, org_id, control, period_start, period_end)
+                job.status = "completed"
+                job.result_json = {**(job.result_json or {}), **result}
+                await db.commit()
+            except Exception as exc:
+                job.status = "failed"
+                job.result_json = {**(job.result_json or {}), "error": str(exc)}
+                await db.commit()
+                raise
 
     try:
         asyncio.run(_run())

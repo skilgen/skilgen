@@ -16,7 +16,13 @@ from starlette.responses import Response
 
 from packages.db.config import settings
 from apps.api.api.routes import admin, agent_runs, autopilot, cron, digest, feed, health, me, metrics, orgs, registry, repos, review, sessions, skills, slack, sla, stripe, webhook, worker
+from apps.api.api.v8.audit import router as v8_audit_router
 from apps.api.api.v8 import flags as v8_flags
+from apps.api.api.v8 import settings as v8_settings
+from apps.api.api.v8.activity import router as v8_activity_router
+from apps.api.api.v8.insights import router as v8_insights_router
+from apps.api.api.v8.policy import router as v8_policy_router
+from apps.api.api.v8.skills import router as v8_skills_router
 
 
 eval_router = importlib.import_module("apps.api.api.routes.eval")
@@ -145,3 +151,9 @@ app.include_router(sla.router)
 app.include_router(stripe.router)
 app.include_router(metrics.router)
 app.include_router(v8_flags.router)
+app.include_router(v8_activity_router)
+app.include_router(v8_audit_router)
+app.include_router(v8_insights_router)
+app.include_router(v8_policy_router)
+app.include_router(v8_skills_router)
+app.include_router(v8_settings.router)

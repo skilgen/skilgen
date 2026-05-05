@@ -76,12 +76,21 @@ const legacySidebarItems = [
 ];
 
 const v8Surfaces = [
-  { label: "Activity", path: "/activity" },
-  { label: "Policy", path: "/policy" },
-  { label: "Audit", path: "/audit" },
-  { label: "Skills", path: "/skills" },
-  { label: "Insights", path: "/insights" },
-  { label: "Settings", path: "/settings" },
+  { label: "Activity", path: "/activity", heading: "Activity", placeholder: false },
+  { label: "Policy", path: "/policy", heading: "Agent Governance Rules", placeholder: false },
+  { label: "Audit", path: "/audit", heading: "Audit", placeholder: false },
+  { label: "Skills", path: "/skills", heading: "Skills", placeholder: false },
+  { label: "Insights", path: "/insights", heading: "Insights", placeholder: false },
+  { label: "Settings", path: "/settings", heading: "Settings", placeholder: false },
+];
+
+const v8SkillsTabs = [
+  { label: "Registry", path: "/skills/registry" },
+  { label: "Score", path: "/skills/score" },
+  { label: "Drift", path: "/skills/drift" },
+  { label: "Provenance", path: "/skills/provenance" },
+  { label: "SkillQL", path: "/skills/skillql" },
+  { label: "Repos", path: "/skills/repos" },
 ];
 
 test.setTimeout(120000);
@@ -196,8 +205,10 @@ test("v8 sidebar and placeholders render", async ({ page }) => {
     const response = await page.goto(`${flagOnBaseUrl}${surface.path}`, { waitUntil: "domcontentloaded" });
     expect(response?.status(), surface.path).toBeLessThan(400);
     await expect(page.locator("aside").getByText(surface.label, { exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { name: surface.label })).toBeVisible();
-    await expect(page.getByText("Coming soon — v8 surface")).toBeVisible();
+    await expect(page.getByRole("heading", { name: surface.heading })).toBeVisible();
+    if (surface.placeholder) {
+      await expect(page.getByText("Coming soon — v8 surface")).toBeVisible();
+    }
     await page.screenshot({ path: `test-results/ia-v8-${surface.label.toLowerCase()}.png`, fullPage: true });
   }
 
@@ -205,8 +216,49 @@ test("v8 sidebar and placeholders render", async ({ page }) => {
   await expect(links).toHaveCount(6);
 });
 
+test("v8 skills tabs render as routes", async ({ page }) => {
+  const landing = await page.goto(`${flagOnBaseUrl}/skills`, { waitUntil: "domcontentloaded" });
+  expect(landing?.status(), "/skills").toBeLessThan(400);
+  await expect(page).toHaveURL(/\/skills\/registry$/);
+
+  for (const tab of v8SkillsTabs) {
+    const response = await page.goto(`${flagOnBaseUrl}${tab.path}`, { waitUntil: "domcontentloaded" });
+    expect(response?.status(), tab.path).toBeLessThan(400);
+    await expect(page.getByRole("heading", { name: "Skills" })).toBeVisible();
+    await expect(page.getByRole("link", { name: tab.label })).toBeVisible();
+    await page.screenshot({ path: `test-results/ia-v8-skills-${tab.label.toLowerCase()}.png`, fullPage: true });
+  }
+});
+
 test("missing tenant override falls back to env default", async ({ page }) => {
   const response = await page.goto(`${flagOnBaseUrl}/activity`, { waitUntil: "domcontentloaded" });
   expect(response?.status()).toBeLessThan(400);
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
+});
+
+test("settings rbac create, binding, admin audit nav, and notifications config render", async ({ page }) => {
+  await page.goto(`${flagOnBaseUrl}/settings/rbac`, { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /RBAC/i })).toBeVisible();
+
+  await page.getByLabel("Role name").fill("Payments approver");
+  await page.getByRole("button", { name: "Create role" }).click();
+  await expect(page.getByText("Payments approver")).toBeVisible();
+
+  await page.getByLabel("Principal").fill("payments-reviewer@example.com");
+  await page.getByLabel("Scope expression").fill("repo:payments/*");
+  await page.getByRole("button", { name: "Add binding" }).click();
+  await expect(page.getByText("payments-reviewer@example.com")).toBeVisible();
+  await expect(page.getByText("repo:payments/*", { exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: /Admin audit/i }).click();
+  await expect(page).toHaveURL(/\/settings\/admin-audit/);
+  await expect(page.getByText("No admin audit events yet.")).toBeVisible();
+
+  await page.getByRole("link", { name: /Notifications/i }).click();
+  await expect(page).toHaveURL(/\/settings\/notifications/);
+  await page.getByLabel("Title").fill("Weekly Governance Digest");
+  await page.getByLabel("Recipients").fill("platform@example.com");
+  await page.getByRole("button", { name: "Save config" }).click();
+  await expect(page.getByText(/Notification config/)).toBeVisible();
 });

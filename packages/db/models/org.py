@@ -11,6 +11,7 @@ from packages.db.models.base import Base, new_uuid, utcnow
 if TYPE_CHECKING:
     from packages.db.models.digest_config import DigestConfig
     from packages.db.models.repo import Repo
+    from packages.db.models.rbac import Role, RoleBinding
     from packages.db.models.source_connection import SourceConnection
 
 
@@ -57,3 +58,5 @@ class Org(Base):
     repos: Mapped[list["Repo"]] = relationship(back_populates="org")
     source_connections: Mapped[list["SourceConnection"]] = relationship(back_populates="org")
     digest_config: Mapped["DigestConfig | None"] = relationship(back_populates="org")
+    roles: Mapped[list["Role"]] = relationship(back_populates="org")
+    role_bindings: Mapped[list["RoleBinding"]] = relationship(back_populates="org")

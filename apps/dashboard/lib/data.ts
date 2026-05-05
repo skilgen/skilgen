@@ -703,6 +703,14 @@ export type AuditLogEvent = {
   severity: "info" | "warning" | "critical";
   metadata: Record<string, unknown>;
   created_at: string;
+  chain?: {
+    event_id: string;
+    sequence: number;
+    event_hash: string;
+    previous_hash: string;
+    root_hash: string;
+    merkle_proof: Array<Record<string, string>>;
+  } | null;
 };
 
 export type AuditLogResponse = {
@@ -721,6 +729,53 @@ export type AuditLogStats = {
   analysis_runs_30d: number;
   gate_failures_30d: number;
   gate_pass_rate: number | null;
+};
+
+export type V8AuditReportDefinition = {
+  id: string;
+  title: string;
+  control_mapping: string;
+  description: string;
+};
+
+export type V8AuditReportRow = {
+  id: string;
+  event_type: string;
+  action: string;
+  actor_login: string | null;
+  repo_name: string | null;
+  skill_domain: string | null;
+  severity: string;
+  summary: string;
+  created_at: string;
+  commit_sha: string | null;
+  policy_id: string | null;
+  policy_decision: string | null;
+  control_mapping: string | null;
+  agent_runtime: string | null;
+  sensitivity_tier: string | null;
+};
+
+export type V8AuditReport = {
+  report: V8AuditReportDefinition;
+  rows: V8AuditReportRow[];
+  generated_at: string;
+};
+
+export type V8AuditExportResponse = {
+  format: string;
+  event_count: number;
+  content_type: string;
+  body: string | Record<string, unknown> | Array<Record<string, unknown>> | null;
+  destination: string | null;
+  audit_event_logged: boolean;
+};
+
+export type V8EvidencePackage = {
+  job_id: string;
+  status: string;
+  result?: Record<string, unknown>;
+  created_at?: string;
 };
 
 export type GovernancePolicy = {
@@ -771,6 +826,64 @@ export type PolicyCheckResult = {
   checked_at: string;
 };
 
+export type V8PolicyRule = PolicyRule & {
+  decision: "allow" | "deny" | "require_approval" | "log_only" | "redact" | "route_to_dlp";
+  deprecated_decision: string | null;
+  dsl_yaml: string | null;
+  dsl_version: number;
+  policy_pack: string | null;
+};
+
+export type V8PolicyStarterPack = {
+  pack_id: string;
+  id: string;
+  title: string;
+  decision: V8PolicyRule["decision"];
+  compliance_tags: string[];
+  yaml: string;
+};
+
+export type V8PolicyViolation = {
+  id: string;
+  policy_id: string;
+  policy_name: string;
+  decision: V8PolicyRule["decision"];
+  severity: string;
+  repo_id: string | null;
+  repo_name: string | null;
+  skill_id: string | null;
+  skill_domain: string | null;
+  description: string;
+  flagged: boolean;
+  sla_started_at: string;
+  sla_due_at: string;
+  sla_minutes_remaining: number;
+};
+
+export type V8PolicyViolationsResponse = {
+  items: V8PolicyViolation[];
+  checked_at: string;
+};
+
+export type V8PolicyApprovalsResponse = {
+  items: V8PolicyViolation[];
+  rbac: {
+    available: boolean;
+    integration: string;
+    fallback: string;
+  };
+};
+
+export type V8QuarantineItem = {
+  id: string;
+  name: string;
+  domain: string;
+  version: string;
+  disposition: "quarantined" | "retired";
+  score_total: number;
+  updated_at: string;
+};
+
 export type LLMConfig = {
   provider: string | null;
   model: string | null;
@@ -800,6 +913,7 @@ export type Repo = {
   full_name: string;
   installation_id: number | null;
   language: string | null;
+  sensitivity_tier?: string | null;
   languages?: string[];
   display_language?: string;
   is_monorepo?: boolean;
@@ -1320,6 +1434,80 @@ export type SLAPolicy = {
   last_status: "compliant" | "breaching" | "unknown" | string;
 };
 
+export type InsightsTrendMetric = {
+  key: string;
+  label: string;
+  current: number | null;
+  previous: number | null;
+  delta: number | null;
+  delta_percent: number | null;
+  unit: "count" | "percent" | "minutes" | "hours";
+  source: string;
+  status: "available" | "unavailable";
+};
+
+export type InsightsFleetKpis = {
+  period_days: number;
+  current_start: string;
+  current_end: string;
+  previous_start: string;
+  previous_end: string;
+  generated_at: string;
+  metrics: InsightsTrendMetric[];
+};
+
+export type InsightsRiskRow = {
+  id: string;
+  name: string;
+  volume: number;
+  denied_count: number;
+  deny_rate: number;
+  scope_sensitivity: number;
+  sensitivity_tier: string | null;
+  composite_risk: number;
+  window_days: number;
+};
+
+export type InsightsRiskRanking = {
+  window_days: number;
+  generated_at: string;
+  formula: string;
+  rows: InsightsRiskRow[];
+};
+
+export type InsightsCoverageSkill = {
+  id: string;
+  domain: string;
+  skill_category: string | null;
+  score_total: number;
+  last_grounded_at: string | null;
+  policy_bindings: string[];
+};
+
+export type InsightsCriticalOperationCoverage = {
+  operation_id: string;
+  label: string;
+  required_skill_categories: string[];
+  skills: InsightsCoverageSkill[];
+  covered: boolean;
+};
+
+export type InsightsCoverageRepo = {
+  repo_id: string;
+  repo_name: string;
+  sensitivity_tier: string | null;
+  last_grounded_at: string | null;
+  policy_bindings: string[];
+  critical_operations: InsightsCriticalOperationCoverage[];
+};
+
+export type InsightsCoverageSla = {
+  generated_at: string;
+  product_review_required: boolean;
+  product_review_note: string;
+  repos: InsightsCoverageRepo[];
+};
+
 export type RegistryList = {
   skills: RegistrySkill[];
   total: number;
@@ -1624,6 +1812,45 @@ export async function configureAuditWebhook(
   return Boolean(result?.configured);
 }
 
+export async function getV8AuditLog(accessToken: string | null, orgId: string, params?: URLSearchParams): Promise<AuditLogResponse | null> {
+  const query = params?.toString();
+  return apiFetch<AuditLogResponse>(`/v8/orgs/${orgId}/audit/event-log${query ? `?${query}` : ""}`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8AuditReports(accessToken: string | null, orgId: string): Promise<V8AuditReportDefinition[] | null> {
+  return apiFetch<V8AuditReportDefinition[]>(`/v8/orgs/${orgId}/audit/reports`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8AuditReport(accessToken: string | null, orgId: string, reportId: string): Promise<V8AuditReport | null> {
+  return apiFetch<V8AuditReport>(`/v8/orgs/${orgId}/audit/reports/${reportId}`, { accessToken, cache: "no-store" });
+}
+
+export async function createV8AuditExport(
+  accessToken: string | null,
+  orgId: string,
+  payload: { format: string; destination?: string | null },
+): Promise<V8AuditExportResponse | null> {
+  return apiFetch<V8AuditExportResponse>(`/v8/orgs/${orgId}/audit/exports`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+}
+
+export async function createV8EvidencePackage(
+  accessToken: string | null,
+  orgId: string,
+  payload: { control: string; period_start: string; period_end: string },
+): Promise<V8EvidencePackage | null> {
+  return apiFetch<V8EvidencePackage>(`/v8/orgs/${orgId}/audit/evidence-packages`, {
+    accessToken,
+    method: "POST",
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+}
+
 export async function getPolicies(accessToken: string | null, orgId: string): Promise<PolicyRule[]> {
   return (await apiFetch<PolicyRule[]>(`/orgs/${orgId}/policies`, { accessToken, cache: "no-store" })) ?? [];
 }
@@ -1647,6 +1874,26 @@ export async function deletePolicy(accessToken: string, orgId: string, policyId:
 
 export async function runPolicyCheck(accessToken: string, orgId: string): Promise<PolicyCheckResult | null> {
   return apiFetch<PolicyCheckResult>(`/orgs/${orgId}/policy-check`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8PolicyRules(accessToken: string | null, orgId: string): Promise<V8PolicyRule[]> {
+  return (await apiFetch<V8PolicyRule[]>(`/v8/orgs/${orgId}/policy/rules`, { accessToken, cache: "no-store" })) ?? [];
+}
+
+export async function getV8PolicyStarterPacks(accessToken: string | null, orgId: string): Promise<V8PolicyStarterPack[]> {
+  return (await apiFetch<V8PolicyStarterPack[]>(`/v8/orgs/${orgId}/policy/rules/starter-packs`, { accessToken, cache: "no-store" })) ?? [];
+}
+
+export async function getV8PolicyViolations(accessToken: string | null, orgId: string): Promise<V8PolicyViolationsResponse | null> {
+  return apiFetch<V8PolicyViolationsResponse>(`/v8/orgs/${orgId}/policy/violations`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8PolicyApprovals(accessToken: string | null, orgId: string): Promise<V8PolicyApprovalsResponse | null> {
+  return apiFetch<V8PolicyApprovalsResponse>(`/v8/orgs/${orgId}/policy/approvals`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8PolicyQuarantine(accessToken: string | null, orgId: string): Promise<V8QuarantineItem[]> {
+  return (await apiFetch<V8QuarantineItem[]>(`/v8/orgs/${orgId}/policy/quarantine`, { accessToken, cache: "no-store" })) ?? [];
 }
 
 export async function getLLMConfig(accessToken: string | null, orgId: string): Promise<LLMConfig | null> {
@@ -1902,6 +2149,22 @@ export async function getKnowledgeRisk(accessToken: string | null, orgId: string
 
 export async function getSLAPolicies(accessToken: string | null, orgId: string): Promise<SLAPolicy[] | null> {
   return apiFetch<SLAPolicy[]>(`/orgs/${orgId}/sla`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8FleetKpis(accessToken: string | null, orgId: string): Promise<InsightsFleetKpis | null> {
+  return apiFetch<InsightsFleetKpis>(`/v8/orgs/${orgId}/insights/fleet-kpis`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8RiskyAgents(accessToken: string | null, orgId: string): Promise<InsightsRiskRanking | null> {
+  return apiFetch<InsightsRiskRanking>(`/v8/orgs/${orgId}/insights/risky-agents`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8RiskyRepos(accessToken: string | null, orgId: string): Promise<InsightsRiskRanking | null> {
+  return apiFetch<InsightsRiskRanking>(`/v8/orgs/${orgId}/insights/risky-repos`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8CoverageSla(accessToken: string | null, orgId: string): Promise<InsightsCoverageSla | null> {
+  return apiFetch<InsightsCoverageSla>(`/v8/orgs/${orgId}/insights/coverage-sla`, { accessToken, cache: "no-store" });
 }
 
 export async function getOrgSources(accessToken: string | null, orgId: string): Promise<SourceConnection[] | null> {

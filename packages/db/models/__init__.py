@@ -2,6 +2,7 @@ from packages.db.models.agent_session import AgentSession
 from packages.db.models.agent_load_event import AgentLoadEvent
 from packages.db.models.analysis_run import AnalysisRun
 from packages.db.models.audit_event import AuditEvent
+from packages.db.models.audit_chain import AuditHashChain, AuditWormRoot
 from packages.db.models.autopilot_task import AutopilotTask
 from packages.db.models.base import Base
 from packages.db.models.dependency import Dependency
@@ -24,6 +25,7 @@ from packages.db.models.pr_comment import PRComment
 from packages.db.models.pull_request import Commit, PullRequest
 from packages.db.models.repo import Repo
 from packages.db.models.registry_skill import RegistrySkill
+from packages.db.models.rbac import Role, RoleBinding
 from packages.db.models.registry import MarketplaceInstall, SkillDependency, SkillRegistryEntry
 from packages.db.models.review_run import ReviewRun
 from packages.db.models.score_history import ScoreHistory
@@ -42,6 +44,8 @@ __all__ = [
     "AnalysisRun",
     "ABTest",
     "AuditEvent",
+    "AuditHashChain",
+    "AuditWormRoot",
     "AutopilotTask",
     "Base",
     "Dependency",
@@ -62,6 +66,8 @@ __all__ = [
     "PullRequest",
     "Commit",
     "Repo",
+    "Role",
+    "RoleBinding",
     "ReviewRun",
     "RegistrySkill",
     "ScoreHistory",

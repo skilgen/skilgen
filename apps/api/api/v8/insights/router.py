@@ -1,0 +1,519 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import UTC, datetime, timedelta
+from statistics import median
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import desc, func, select, text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from apps.api.api.auth import get_current_org_id
+from apps.api.api.v8.flags import is_v8, request_flag_cache
+from packages.db.database import get_db
+from packages.db.models import AgentSession, AuditEvent, OrgPolicy, PRAttribution, PullRequest, Repo, Skill, SkillMemoryStub, SkillUsageEvent
+
+
+router = APIRouter(
+    prefix="/v8/orgs/{org_id}/insights",
+    tags=["v8-insights"],
+    dependencies=[Depends(request_flag_cache)],
+)
+
+SENSITIVITY_WEIGHTS: dict[str, float] = {
+    "public": 0.25,
+    "internal": 1.0,
+    "sensitive": 2.0,
+    "regulated": 3.0,
+}
+SENSITIVITY_ORDER = {"public": 0, "internal": 1, "sensitive": 2, "regulated": 3}
+VIOLATION_SEVERITIES = {"critical", "error", "fatal", "high", "block", "deny", "denied"}
+CRITICAL_OPERATIONS = [
+    {
+        "id": "critical-operations-placeholder",
+        "label": "Product review required",
+        "required_skill_categories": ["operational_knowledge", "security_compliance", "codebase_architecture"],
+    }
+]
+
+
+class TrendMetric(BaseModel):
+    key: str
+    label: str
+    current: float | None
+    previous: float | None
+    delta: float | None
+    delta_percent: float | None
+    unit: Literal["count", "percent", "minutes", "hours"]
+    source: str
+    status: Literal["available", "unavailable"] = "available"
+
+
+class FleetKpisResponse(BaseModel):
+    period_days: int
+    current_start: datetime
+    current_end: datetime
+    previous_start: datetime
+    previous_end: datetime
+    generated_at: datetime
+    metrics: list[TrendMetric]
+
+
+class RiskRow(BaseModel):
+    id: str
+    name: str
+    volume: int
+    denied_count: int
+    deny_rate: float
+    scope_sensitivity: float
+    sensitivity_tier: str | None = None
+    composite_risk: float
+    window_days: int
+
+
+class RiskRankingResponse(BaseModel):
+    window_days: int
+    generated_at: datetime
+    formula: str = "deny_rate * scope_sensitivity * volume"
+    rows: list[RiskRow]
+
+
+class CoverageSkill(BaseModel):
+    id: str
+    domain: str
+    skill_category: str | None
+    score_total: int
+    last_grounded_at: datetime | None
+    policy_bindings: list[str]
+
+
+class CriticalOperationCoverage(BaseModel):
+    operation_id: str
+    label: str
+    required_skill_categories: list[str]
+    skills: list[CoverageSkill]
+    covered: bool
+
+
+class CoverageRepo(BaseModel):
+    repo_id: str
+    repo_name: str
+    sensitivity_tier: str | None
+    last_grounded_at: datetime | None
+    policy_bindings: list[str]
+    critical_operations: list[CriticalOperationCoverage]
+
+
+class CoverageSlaResponse(BaseModel):
+    generated_at: datetime
+    product_review_required: bool
+    product_review_note: str
+    repos: list[CoverageRepo]
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _window(period_days: int) -> tuple[datetime, datetime, datetime, datetime]:
+    current_end = _utc_now()
+    current_start = current_end - timedelta(days=period_days)
+    previous_end = current_start
+    previous_start = previous_end - timedelta(days=period_days)
+    return current_start, current_end, previous_start, previous_end
+
+
+def _row_value(row: object, name: str, default: Any = None) -> Any:
+    if hasattr(row, "_mapping") and name in row._mapping:
+        return row._mapping[name]
+    return getattr(row, name, default)
+
+
+def _metric(key: str, label: str, current: float | None, previous: float | None, unit: Literal["count", "percent", "minutes", "hours"], source: str) -> TrendMetric:
+    delta = None if current is None or previous is None else round(current - previous, 4)
+    if current is None or previous in {None, 0}:
+        delta_percent = None
+    else:
+        delta_percent = round(((current - previous) / previous) * 100, 2)
+    return TrendMetric(key=key, label=label, current=current, previous=previous, delta=delta, delta_percent=delta_percent, unit=unit, source=source)
+
+
+def _unavailable(key: str, label: str, unit: Literal["count", "percent", "minutes", "hours"], source: str) -> TrendMetric:
+    return TrendMetric(key=key, label=label, current=None, previous=None, delta=None, delta_percent=None, unit=unit, source=source, status="unavailable")
+
+
+def _has_violation(items: object) -> bool:
+    if not isinstance(items, list):
+        return False
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        severity = str(item.get("severity") or item.get("decision") or item.get("outcome") or "").lower()
+        if severity in VIOLATION_SEVERITIES:
+            return True
+    return False
+
+
+def _sensitivity_weight(tier: object) -> float:
+    return SENSITIVITY_WEIGHTS.get(str(tier or "internal").lower(), 1.0)
+
+
+def _sensitivity_tier(repo: object) -> str | None:
+    value = getattr(repo, "sensitivity_tier", None)
+    return str(value).lower() if value else None
+
+
+async def _require_v8(org_id: str, db: AsyncSession, current_org_id: str) -> None:
+    if org_id != current_org_id:
+        raise HTTPException(status_code=403, detail="Org access denied")
+    if not await is_v8(org_id, db):
+        raise HTTPException(status_code=404, detail="Insights v8 is not enabled")
+
+
+async def _count_skill_usage(db: AsyncSession, org_id: str, start: datetime, end: datetime) -> int:
+    return int(
+        (
+            await db.execute(
+                select(func.count(SkillUsageEvent.id)).where(
+                    SkillUsageEvent.org_id == org_id,
+                    SkillUsageEvent.loaded_at >= start,
+                    SkillUsageEvent.loaded_at < end,
+                )
+            )
+        ).scalar()
+        or 0
+    )
+
+
+async def _pull_requests_and_attributions(db: AsyncSession, org_id: str, start: datetime, end: datetime) -> tuple[list[PullRequest], dict[str, PRAttribution]]:
+    repos = (await db.execute(select(Repo.id).where(Repo.org_id == org_id, Repo.is_active.is_(True)))).scalars().all()
+    repo_ids = [str(repo_id) for repo_id in repos]
+    if not repo_ids:
+        return [], {}
+    prs = (
+        await db.execute(
+            select(PullRequest).where(
+                PullRequest.repo_id.in_(repo_ids),
+                PullRequest.opened_at >= start,
+                PullRequest.opened_at < end,
+            )
+        )
+    ).scalars().all()
+    pr_ids = [pr.id for pr in prs]
+    attrs = (await db.execute(select(PRAttribution).where(PRAttribution.pr_id.in_(pr_ids)))).scalars().all() if pr_ids else []
+    return list(prs), {attr.pr_id: attr for attr in attrs}
+
+
+async def _deny_rate(db: AsyncSession, org_id: str, start: datetime, end: datetime) -> float | None:
+    prs, attrs = await _pull_requests_and_attributions(db, org_id, start, end)
+    if not prs:
+        return None
+    denied = sum(1 for pr in prs if _has_violation(attrs.get(pr.id).skills_violated if attrs.get(pr.id) else []))
+    return round(denied / len(prs), 4)
+
+
+async def _attribution_rate(db: AsyncSession, org_id: str, start: datetime, end: datetime) -> float | None:
+    prs, attrs = await _pull_requests_and_attributions(db, org_id, start, end)
+    if not prs:
+        return None
+    attributed = sum(1 for pr in prs if pr.id in attrs)
+    return round(attributed / len(prs), 4)
+
+
+async def _memory_approval_stats(db: AsyncSession, org_id: str, start: datetime, end: datetime) -> tuple[float | None, float | None]:
+    rows = (
+        await db.execute(
+            select(SkillMemoryStub.status, SkillMemoryStub.created_at, SkillMemoryStub.reviewed_at).where(
+                SkillMemoryStub.org_id == org_id,
+                SkillMemoryStub.created_at >= start,
+                SkillMemoryStub.created_at < end,
+                SkillMemoryStub.status.in_(["approved", "merged", "rejected"]),
+            )
+        )
+    ).all()
+    if not rows:
+        return None, None
+    approved_durations: list[float] = []
+    approved = 0
+    for row in rows:
+        status = str(_row_value(row, "status", "")).lower()
+        created_at = _row_value(row, "created_at")
+        reviewed_at = _row_value(row, "reviewed_at")
+        if status in {"approved", "merged"}:
+            approved += 1
+            if isinstance(created_at, datetime) and isinstance(reviewed_at, datetime):
+                approved_durations.append(max(0.0, (reviewed_at - created_at).total_seconds() / 60))
+    approval_rate = round(approved / len(rows), 4)
+    median_minutes = round(float(median(approved_durations)), 2) if approved_durations else None
+    return approval_rate, median_minutes
+
+
+async def _count_drift_events(db: AsyncSession, org_id: str, start: datetime, end: datetime) -> int:
+    return int(
+        (
+            await db.execute(
+                select(func.count(AuditEvent.id)).where(
+                    AuditEvent.org_id == org_id,
+                    AuditEvent.created_at >= start,
+                    AuditEvent.created_at < end,
+                    AuditEvent.event_type.ilike("%drift%"),
+                )
+            )
+        ).scalar()
+        or 0
+    )
+
+
+async def _weekly_active_humans(db: AsyncSession, org_id: str, end: datetime) -> int:
+    start = end - timedelta(days=7)
+    rows = (
+        await db.execute(
+            select(AgentSession.engineer_login).where(
+                AgentSession.org_id == org_id,
+                AgentSession.created_at >= start,
+                AgentSession.created_at < end,
+                AgentSession.engineer_login.is_not(None),
+            )
+        )
+    ).scalars().all()
+    return len({str(row) for row in rows if row})
+
+
+@router.get("", response_model=FleetKpisResponse)
+async def insights_default(
+    org_id: str,
+    period_days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> FleetKpisResponse:
+    return await get_fleet_kpis(org_id, period_days, db, current_org_id)
+
+
+@router.get("/fleet-kpis", response_model=FleetKpisResponse)
+async def get_fleet_kpis(
+    org_id: str,
+    period_days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> FleetKpisResponse:
+    await _require_v8(org_id, db, current_org_id)
+    current_start, current_end, previous_start, previous_end = _window(period_days)
+    current_approvals, current_median = await _memory_approval_stats(db, org_id, current_start, current_end)
+    previous_approvals, previous_median = await _memory_approval_stats(db, org_id, previous_start, previous_end)
+    metrics = [
+        _metric("total_agent_actions", "Total agent actions", await _count_skill_usage(db, org_id, current_start, current_end), await _count_skill_usage(db, org_id, previous_start, previous_end), "count", "skill_usage_events"),
+        _metric("deny_rate", "Deny rate", await _deny_rate(db, org_id, current_start, current_end), await _deny_rate(db, org_id, previous_start, previous_end), "percent", "pr_attributions.skills_violated"),
+        _metric("approval_rate", "Approval rate", current_approvals, previous_approvals, "percent", "skill_memory_stubs"),
+        _metric("median_time_to_approve", "Median time to approve", current_median, previous_median, "minutes", "skill_memory_stubs"),
+        _metric("drift_events", "Drift events", await _count_drift_events(db, org_id, current_start, current_end), await _count_drift_events(db, org_id, previous_start, previous_end), "count", "audit_events"),
+        _unavailable("quarantined_skills", "Quarantined skills", "count", "quarantine_state_not_present"),
+        _unavailable("mttr_violations", "MTTR for violations", "hours", "violation_resolution_state_not_present"),
+        _metric("attributed_agent_commits", "Agent commits with full attribution", await _attribution_rate(db, org_id, current_start, current_end), await _attribution_rate(db, org_id, previous_start, previous_end), "percent", "pr_attributions"),
+        _metric("weekly_active_human_users", "Weekly active human users", await _weekly_active_humans(db, org_id, current_end), await _weekly_active_humans(db, org_id, previous_end), "count", "agent_sessions"),
+    ]
+    return FleetKpisResponse(
+        period_days=period_days,
+        current_start=current_start,
+        current_end=current_end,
+        previous_start=previous_start,
+        previous_end=previous_end,
+        generated_at=_utc_now(),
+        metrics=metrics,
+    )
+
+
+async def _risk_rows_from_view(db: AsyncSession, org_id: str, view_name: str, id_field: str, name_field: str, limit: int) -> list[RiskRow]:
+    rows = (
+        await db.execute(
+            text(
+                f"""
+                SELECT *
+                FROM {view_name}
+                WHERE org_id = :org_id
+                ORDER BY composite_risk DESC, volume DESC, {name_field} ASC
+                LIMIT :limit
+                """
+            ),
+            {"org_id": org_id, "limit": limit},
+        )
+    ).mappings().all()
+    return [
+        RiskRow(
+            id=str(row[id_field]),
+            name=str(row[name_field]),
+            volume=int(row["volume"] or 0),
+            denied_count=int(row["denied_count"] or 0),
+            deny_rate=round(float(row["deny_rate"] or 0), 4),
+            scope_sensitivity=round(float(row["scope_sensitivity"] or 0), 4),
+            sensitivity_tier=str(row["sensitivity_tier"]) if row.get("sensitivity_tier") else None,
+            composite_risk=round(float(row["composite_risk"] or 0), 4),
+            window_days=int(row["window_days"] or 30),
+        )
+        for row in rows
+    ]
+
+
+async def _risk_fallback(db: AsyncSession, org_id: str, group: Literal["agent", "repo"], limit: int) -> list[RiskRow]:
+    generated_at = _utc_now()
+    cutoff = generated_at - timedelta(days=30)
+    repos = (await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)))).scalars().all()
+    repo_by_id = {repo.id: repo for repo in repos}
+    if not repo_by_id:
+        return []
+    prs = (await db.execute(select(PullRequest).where(PullRequest.repo_id.in_(repo_by_id.keys()), PullRequest.opened_at >= cutoff))).scalars().all()
+    attrs = (await db.execute(select(PRAttribution).where(PRAttribution.pr_id.in_([pr.id for pr in prs])))).scalars().all() if prs else []
+    attr_by_pr = {attr.pr_id: attr for attr in attrs}
+    buckets: dict[str, dict[str, Any]] = defaultdict(lambda: {"volume": 0, "denied_count": 0, "scope_sum": 0.0, "name": "", "tier": None})
+    for pr in prs:
+        repo = repo_by_id.get(pr.repo_id)
+        if repo is None:
+            continue
+        attr = attr_by_pr.get(pr.id)
+        key = str(attr.primary_agent if group == "agent" and attr else repo.id)
+        row = buckets[key]
+        row["name"] = key if group == "agent" else repo.full_name
+        row["volume"] += 1
+        row["denied_count"] += 1 if _has_violation(attr.skills_violated if attr else []) else 0
+        tier = _sensitivity_tier(repo)
+        row["tier"] = tier
+        row["scope_sum"] += _sensitivity_weight(tier)
+    ranked = []
+    for key, row in buckets.items():
+        volume = int(row["volume"])
+        deny_rate = round((int(row["denied_count"]) / volume) if volume else 0.0, 4)
+        scope = round(float(row["scope_sum"]) / volume, 4) if volume else 0.0
+        ranked.append(
+            RiskRow(
+                id=key,
+                name=str(row["name"]),
+                volume=volume,
+                denied_count=int(row["denied_count"]),
+                deny_rate=deny_rate,
+                scope_sensitivity=scope,
+                sensitivity_tier=row["tier"],
+                composite_risk=round(deny_rate * scope * volume, 4),
+                window_days=30,
+            )
+        )
+    return sorted(ranked, key=lambda item: (-item.composite_risk, -item.volume, item.name))[:limit]
+
+
+@router.get("/risky-agents", response_model=RiskRankingResponse)
+async def get_risky_agents(
+    org_id: str,
+    limit: int = Query(default=25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> RiskRankingResponse:
+    await _require_v8(org_id, db, current_org_id)
+    try:
+        rows = await _risk_rows_from_view(db, org_id, "v8_insights_risky_agents", "agent_runtime", "agent_runtime", limit)
+    except SQLAlchemyError:
+        await db.rollback()
+        rows = await _risk_fallback(db, org_id, "agent", limit)
+    return RiskRankingResponse(window_days=30, generated_at=_utc_now(), rows=rows)
+
+
+@router.get("/risky-repos", response_model=RiskRankingResponse)
+async def get_risky_repos(
+    org_id: str,
+    limit: int = Query(default=25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> RiskRankingResponse:
+    await _require_v8(org_id, db, current_org_id)
+    try:
+        rows = await _risk_rows_from_view(db, org_id, "v8_insights_risky_repos", "repo_id", "repo_name", limit)
+    except SQLAlchemyError:
+        await db.rollback()
+        rows = await _risk_fallback(db, org_id, "repo", limit)
+    return RiskRankingResponse(window_days=30, generated_at=_utc_now(), rows=rows)
+
+
+def _policy_bindings(policy_rows: list[OrgPolicy], repo_id: str) -> list[str]:
+    bindings: list[str] = []
+    for policy in policy_rows:
+        cfg = policy.rule_config or {}
+        applies = not cfg.get("repo_id") and not cfg.get("repo_ids")
+        if str(cfg.get("repo_id") or "") == repo_id:
+            applies = True
+        if isinstance(cfg.get("repo_ids"), list) and repo_id in {str(item) for item in cfg.get("repo_ids", [])}:
+            applies = True
+        if applies:
+            bindings.append(policy.name)
+    return bindings
+
+
+def _repo_in_scope(repo: Repo) -> bool:
+    tier = _sensitivity_tier(repo)
+    if tier is None:
+        return True
+    return SENSITIVITY_ORDER.get(tier, 1) >= SENSITIVITY_ORDER["internal"]
+
+
+@router.get("/coverage-sla", response_model=CoverageSlaResponse)
+async def get_coverage_sla(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> CoverageSlaResponse:
+    await _require_v8(org_id, db, current_org_id)
+    repos = (
+        await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Repo.full_name))
+    ).scalars().all()
+    scoped_repos = [repo for repo in repos if _repo_in_scope(repo)]
+    skills = (
+        await db.execute(select(Skill).where(Skill.repo_id.in_([repo.id for repo in scoped_repos])).order_by(desc(Skill.updated_at)))
+    ).scalars().all() if scoped_repos else []
+    policies = (
+        await db.execute(select(OrgPolicy).where(OrgPolicy.org_id == org_id, OrgPolicy.enabled.is_(True)).order_by(OrgPolicy.name))
+    ).scalars().all()
+    skills_by_repo: dict[str, list[Skill]] = defaultdict(list)
+    for skill in skills:
+        skills_by_repo[skill.repo_id].append(skill)
+    response_repos: list[CoverageRepo] = []
+    for repo in scoped_repos:
+        repo_policy_bindings = _policy_bindings(list(policies), repo.id)
+        repo_skills = skills_by_repo.get(repo.id, [])
+        operations: list[CriticalOperationCoverage] = []
+        for operation in CRITICAL_OPERATIONS:
+            categories = [str(item) for item in operation["required_skill_categories"]]
+            matched = [skill for skill in repo_skills if (skill.skill_category or "") in categories]
+            operations.append(
+                CriticalOperationCoverage(
+                    operation_id=str(operation["id"]),
+                    label=str(operation["label"]),
+                    required_skill_categories=categories,
+                    covered=bool(matched) and bool(repo_policy_bindings),
+                    skills=[
+                        CoverageSkill(
+                            id=skill.id,
+                            domain=skill.domain,
+                            skill_category=skill.skill_category,
+                            score_total=int(skill.score_total or 0),
+                            last_grounded_at=skill.updated_at or skill.created_at,
+                            policy_bindings=repo_policy_bindings,
+                        )
+                        for skill in matched
+                    ],
+                )
+            )
+        response_repos.append(
+            CoverageRepo(
+                repo_id=repo.id,
+                repo_name=repo.full_name,
+                sensitivity_tier=_sensitivity_tier(repo),
+                last_grounded_at=repo.last_analysed_at,
+                policy_bindings=repo_policy_bindings,
+                critical_operations=operations,
+            )
+        )
+    return CoverageSlaResponse(
+        generated_at=_utc_now(),
+        product_review_required=True,
+        product_review_note="critical_ops.yaml is a placeholder pending product review of critical operation taxonomy.",
+        repos=response_repos,
+    )

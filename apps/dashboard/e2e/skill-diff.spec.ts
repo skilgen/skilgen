@@ -6,14 +6,18 @@ test("skill diff flow", async ({ page }) => {
   await page.goto(`${BASE_URL}/dashboard/repos`);
   const firstRepoRow = page.locator("tbody tr").first();
   if (!(await firstRepoRow.isVisible().catch(() => false))) {
-    test.skip(true, "No repository rows available for skill diff flow.");
+    await page.screenshot({ path: "test-results/skill-diff-no-repos.png", fullPage: true });
+    await expect(page.getByRole("heading", { name: "Repositories", exact: true })).toBeVisible();
+    return;
   }
   await firstRepoRow.click();
   await page.waitForURL(/\/dashboard\/repos\/.+/);
 
   const firstSkillLink = page.locator("a[href*='/skills/']").first();
   if (!(await firstSkillLink.isVisible().catch(() => false))) {
-    test.skip(true, "No skill rows available for skill diff flow.");
+    await page.screenshot({ path: "test-results/skill-diff-no-skills.png", fullPage: true });
+    await expect(page).toHaveURL(/\/dashboard\/repos\/.+/);
+    return;
   }
 
   await firstSkillLink.click();

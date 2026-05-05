@@ -89,7 +89,9 @@ def downgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     if "sla_policies" in inspector.get_table_names():
-        op.drop_index("ix_sla_policies_org_active", table_name="sla_policies")
+        sla_indexes = {index["name"] for index in inspector.get_indexes("sla_policies")}
+        if "ix_sla_policies_org_active" in sla_indexes:
+            op.drop_index("ix_sla_policies_org_active", table_name="sla_policies")
         op.drop_table("sla_policies")
     if "flag_dismissals" in inspector.get_table_names():
         op.drop_index("ix_flag_dismissals_org_dismissed_at", table_name="flag_dismissals")

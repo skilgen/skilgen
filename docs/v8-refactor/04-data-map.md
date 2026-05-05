@@ -69,6 +69,7 @@ No migrations in PR-0. These are candidate migration names and directions for la
 | PR-3 Policy | `add_skill_quarantine_state` | Add quarantine state if no existing skill status field supports it. Downgrade removes state after migration-safe fallback. |
 | PR-4 Audit | `add_audit_hash_chain` | Add hash-chain fields or companion table for tamper-evident event log. Downgrade removes companion data only after export/backup in test DB. |
 | PR-4 Audit | `add_evidence_package_jobs` | Add evidence package job/status records if `jobs` is insufficient. Downgrade drops companion table. |
+| PR-5 Skills | `add_repo_sensitivity_tier` | Add nullable `repos.sensitivity_tier` string column with default `internal` for Skills Repos and downstream policy filters. Downgrade drops the column. |
 | PR-6 Insights | `add_risky_agent_repo_views` | Add SQL views/materialized views for risky agents/repos. Downgrade drops views. |
 | PR-7 Settings | `add_roles_and_role_bindings` | Add RBAC tables only if no existing role model exists. Downgrade drops tables. |
 

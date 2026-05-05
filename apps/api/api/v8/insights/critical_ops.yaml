@@ -1,0 +1,11 @@
+# Placeholder for product-reviewed critical operations.
+# PR-6 keeps this explicit so the Coverage SLA tab can ship without
+# hard-coding unreviewed enterprise policy taxonomy.
+product_review_required: true
+operations:
+  - id: critical-operations-placeholder
+    label: Product review required
+    required_skill_categories:
+      - operational_knowledge
+      - security_compliance
+      - codebase_architecture

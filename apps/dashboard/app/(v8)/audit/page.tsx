@@ -1,5 +1,5 @@
-import { V8PlaceholderPage } from "../../../components/SidebarV8";
+import { redirect } from "next/navigation";
 
 export default function AuditPage() {
-  return <V8PlaceholderPage surface="Audit" />;
+  redirect("/audit/event-log");
 }

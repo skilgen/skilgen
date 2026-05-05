@@ -2,6 +2,7 @@ import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { AlertTriangle, ArrowRight, ChevronRight, Eye, GitBranch, PlusCircle, RefreshCw, Wrench } from "lucide-react";
 
+import { mockOrg } from "@/lib/mock-data";
 import {
   getOrgActionItems,
   getBootstrapOrg,
@@ -20,9 +21,11 @@ import {
   type Org,
   type Repo,
 } from "../../lib/data";
+import { isDashboardV8Enabled } from "../../lib/flags";
 import { AgentSetupBanner } from "./agent-setup-banner";
 import { AnalyseRepoButton, QuickActions as OverviewQuickActions } from "./overview-actions";
 import { OverviewChart } from "./overview-chart";
+import { ActivityHome } from "../(v8)/activity/ActivityHome";
 
 function todayLabel(): string {
   return new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date());
@@ -275,12 +278,22 @@ async function resolveOrg(): Promise<{ accessToken: string; org: Org | null; fir
   } catch {
     // Auth can be unavailable in local preview; continue with bootstrap data.
   }
-  const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
+  const fallbackOrg: Org = {
+    id: mockOrg.id,
+    login: "skillayer",
+    name: mockOrg.name,
+    plan: mockOrg.plan,
+  };
+  const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg()) ?? fallbackOrg;
   return { accessToken, org, firstName };
 }
 
 export default async function OverviewPage() {
   const { accessToken, org, firstName } = await resolveOrg();
+  if (org?.id && (await isDashboardV8Enabled(org.id))) {
+    return <ActivityHome />;
+  }
+
   const [stats, scoreTrend, heatmap, repos, setupStatus, actionItems, roi, skillGaps, memoryScore, skillDebt] = org
     ? await Promise.all([
         getOrgStats(accessToken, org.id),

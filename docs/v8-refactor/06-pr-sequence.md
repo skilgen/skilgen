@@ -82,12 +82,23 @@ Scope:
 Files touched:
 
 - `apps/dashboard/app/(v8)/policy/**`
+- `apps/dashboard/e2e/policy-v8.spec.ts`
+- `apps/dashboard/e2e/ia-v8.spec.ts`
+- `apps/dashboard/lib/data.ts`
+- `apps/api/api/index.py`
 - `apps/api/api/v8/policy/**`
 - `apps/api/api/v8/policy/dsl/**`
 - `apps/api/api/v8/policy/starter_packs/**`
-- Existing services: `policy.py`, `policy_engine.py`, review/redflags wrappers
-- Optional Alembic migration for policy DSL metadata/quarantine state
-- Tests under `apps/api/tests` and dashboard E2E
+- `packages/db/models/org_policy.py`
+- `apps/api/alembic/versions/20260505_0005_policy_verbs_dsl.py`
+- `apps/api/tests/test_v8_policy.py`
+
+Implementation notes:
+
+- Existing policy services remain intact; v8 Policy wraps them and does not change `red_flags`.
+- Migration creates `policy_violations_v8` as a query view over flagged policy decisions (`deny`, `require_approval`, `log_only`) with SLA timestamps.
+- Settings RBAC middleware is not present on `v8/integration` yet, so Policy exposes a dependency interface that delegates to `apps.api.api.v8.settings.rbac.require_permission` when available and returns 501 for approval mutations until Settings lands.
+- Quarantine uses `skill_registry_entries` disposition state (`tags`, `is_deprecated`, `deprecation_message`) and exposes only promote/retire decisions.
 
 Success criteria reference:
 
@@ -136,6 +147,8 @@ Files touched:
 - Existing dashboard components from registry, debt, eval/gaps, half-life, skillql, repos, sources
 - Existing API wrappers for skills, registry, repos, orgs skill endpoints
 - Tests under `apps/api/tests` and dashboard E2E
+- Actual PR-5 additions: `apps/api/api/v8/skills/router.py`, `apps/api/api/v8/skills/__init__.py`, `apps/dashboard/app/(v8)/skills/{layout,page}.tsx`, `apps/dashboard/app/(v8)/skills/{registry,score,drift,provenance,skillql,repos}/page.tsx`, `apps/api/alembic/versions/20260505_0001_add_repo_sensitivity_tier.py`, `docs/v8-refactor/skills/score-rubric.md`, `apps/api/tests/test_v8_skills.py`, `apps/dashboard/e2e/ia-v8.spec.ts`.
+- Actual PR-5 updates: `packages/db/models/repo.py`, `apps/api/api/index.py`, `apps/dashboard/lib/data.ts`.
 
 Success criteria reference:
 

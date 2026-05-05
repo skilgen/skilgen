@@ -1,5 +1,7 @@
-import { V8PlaceholderPage } from "../../../components/SidebarV8";
+import { ActivityHome } from "./ActivityHome";
 
-export default function ActivityPage() {
-  return <V8PlaceholderPage surface="Activity" />;
+type PageSearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default function ActivityPage({ searchParams }: { searchParams?: PageSearchParams }) {
+  return <ActivityHome searchParams={searchParams} />;
 }

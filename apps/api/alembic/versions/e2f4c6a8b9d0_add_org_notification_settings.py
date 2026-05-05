@@ -30,7 +30,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove org-level score and notification settings."""
-    op.drop_column("orgs", "notify_on_stale")
-    op.drop_column("orgs", "notify_on_pr")
-    op.drop_column("orgs", "slack_webhook_url")
-    op.drop_column("orgs", "score_threshold")
+    org_columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("orgs")}
+    for column_name in ("notify_on_stale", "notify_on_pr", "slack_webhook_url", "score_threshold"):
+        if column_name in org_columns:
+            op.drop_column("orgs", column_name)

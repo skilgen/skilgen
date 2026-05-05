@@ -42,12 +42,14 @@ from packages.db.models.analysis_run import AnalysisRun
 from packages.db.models.skill import Skill
 from packages.db.models.agent_session import AgentSession
 from packages.db.models.audit_event import AuditEvent
+from packages.db.models.audit_chain import AuditHashChain, AuditWormRoot
 from packages.db.models.half_life import SkillHalfLife
 from packages.db.models.org_llm_config import OrgLLMConfig
 from packages.db.models.org_policy import OrgPolicy
 from packages.db.models.pr_attribution import PRAttribution
 from packages.db.models.pr_comment import PRComment
 from packages.db.models.pull_request import Commit, PullRequest
+from packages.db.models.rbac import Role, RoleBinding
 from packages.db.models.skill_memory_stub import SkillMemoryStub
 from packages.db.models.skill_snapshot import SkillSnapshot
 from packages.db.models.skill_version import SkillVersion

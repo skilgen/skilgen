@@ -1,0 +1,10 @@
+id: hipaa-phi-redaction
+title: "HIPAA baseline redacts PHI before model exposure"
+scope:
+  action_class: file_read
+match:
+  file_glob: ["**/patients/**", "**/claims/**", "**/*phi*"]
+  data_class: "phi"
+decision: redact
+notify: ["#privacy"]
+compliance_tags: ["HIPAA:164.312", "HIPAA:minimum-necessary"]

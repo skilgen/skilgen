@@ -1,5 +1,5 @@
-import { V8PlaceholderPage } from "../../../components/SidebarV8";
+import { PolicySurface } from "./policy-surface";
 
 export default function PolicyPage() {
-  return <V8PlaceholderPage surface="Policy" />;
+  return <PolicySurface tab="rules" />;
 }

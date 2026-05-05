@@ -1,5 +1,5 @@
-import { V8PlaceholderPage } from "../../../components/SidebarV8";
+import { redirect } from "next/navigation";
 
 export default function SkillsPage() {
-  return <V8PlaceholderPage surface="Skills" />;
+  redirect("/skills/registry");
 }

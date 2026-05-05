@@ -27,6 +27,7 @@ class Repo(Base):
     name: Mapped[str] = mapped_column(String(255))
     default_branch: Mapped[str] = mapped_column(String(255), default="main")
     language: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sensitivity_tier: Mapped[str | None] = mapped_column(String(32), nullable=True, default="internal")
     is_monorepo: Mapped[bool] = mapped_column(default=False)
     is_active: Mapped[bool] = mapped_column(default=True)
     last_analysed_at: Mapped[datetime | None] = mapped_column(nullable=True)

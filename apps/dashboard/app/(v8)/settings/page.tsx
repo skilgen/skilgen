@@ -1,5 +1,5 @@
-import { V8PlaceholderPage } from "../../../components/SidebarV8";
+import { redirect } from "next/navigation";
 
 export default function SettingsPage() {
-  return <V8PlaceholderPage surface="Settings" />;
+  redirect("/settings/teams");
 }

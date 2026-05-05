@@ -1,0 +1,9 @@
+id: internal-ip-protected-files
+title: "Internal IP files cannot be read by coding agents"
+scope:
+  action_class: file_read
+match:
+  file_glob: ["**/strategy/**", "**/roadmap/**", "**/*trade-secret*"]
+decision: deny
+notify: ["#legal-security"]
+compliance_tags: ["internal:IP-policy"]
