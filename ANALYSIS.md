@@ -4436,25 +4436,6 @@
         "related_imports": []
       },
       {
-        "path": "packages/db/models/base.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from datetime import datetime",
-          "import uuid",
-          "from sqlalchemy.orm import DeclarativeBase",
-          "def utcnow() -> datetime:",
-          "return datetime.utcnow()",
-          "def new_uuid() -> str:",
-          "return str(uuid.uuid4())",
-          "class Base(DeclarativeBase):",
-          "pass"
-        ],
-        "related_imports": []
-      },
-      {
         "path": "apps/api/api/auth.py",
         "kind": "source",
         "language": "python",
@@ -4472,6 +4453,25 @@
           "from jose.utils import base64url_decode",
           "from sqlalchemy import select",
           "from sqlalchemy.ext.asyncio import AsyncSession"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "packages/db/models/base.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "import uuid",
+          "from sqlalchemy.orm import DeclarativeBase",
+          "def utcnow() -> datetime:",
+          "return datetime.utcnow()",
+          "def new_uuid() -> str:",
+          "return str(uuid.uuid4())",
+          "class Base(DeclarativeBase):",
+          "pass"
         ],
         "related_imports": []
       },
@@ -4579,6 +4579,27 @@
         ]
       },
       {
+        "path": "apps/api/api/routes/orgs.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import asyncio",
+          "import base64",
+          "from collections import Counter, defaultdict",
+          "from itertools import combinations",
+          "import json",
+          "import socket",
+          "import urllib.error",
+          "import urllib.request",
+          "from dataclasses import asdict",
+          "from datetime import UTC, datetime, timedelta",
+          "import hashlib"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/core/requirements.py",
         "kind": "source",
         "language": "python",
@@ -4606,27 +4627,6 @@
           "skilgen/core/document_ingestion.py",
           "skilgen/core/models.py"
         ]
-      },
-      {
-        "path": "apps/api/api/routes/orgs.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import asyncio",
-          "import base64",
-          "from collections import Counter, defaultdict",
-          "from itertools import combinations",
-          "import json",
-          "import socket",
-          "import urllib.error",
-          "import urllib.request",
-          "from dataclasses import asdict",
-          "from datetime import UTC, datetime, timedelta",
-          "import hashlib"
-        ],
-        "related_imports": []
       },
       {
         "path": "packages/db/models/skill.py",
@@ -4702,6 +4702,27 @@
           "urllib.request",
           "uuid"
         ]
+      },
+      {
+        "path": "packages/db/models/org.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "from typing import TYPE_CHECKING",
+          "from sqlalchemy import JSON, BigInteger, String, Text",
+          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
+          "from packages.db.models.base import Base, new_uuid, utcnow",
+          "if TYPE_CHECKING:",
+          "from packages.db.models.digest_config import DigestConfig",
+          "from packages.db.models.repo import Repo",
+          "from packages.db.models.rbac import Role, RoleBinding",
+          "from packages.db.models.source_connection import SourceConnection",
+          "class Org(Base):"
+        ],
+        "related_imports": []
       },
       {
         "path": "skilgen/api/service.py",
@@ -4855,14 +4876,14 @@
           "from packages.db.models.agent_load_event import AgentLoadEvent",
           "from packages.db.models.analysis_run import AnalysisRun",
           "from packages.db.models.audit_event import AuditEvent",
+          "from packages.db.models.audit_chain import AuditHashChain, AuditWormRoot",
           "from packages.db.models.autopilot_task import AutopilotTask",
           "from packages.db.models.base import Base",
           "from packages.db.models.dependency import Dependency",
           "from packages.db.models.cross_repo_opportunity import CrossRepoOpportunity",
           "from packages.db.models.coverage_gap import CoverageGap",
           "from packages.db.models.dependency_graph_cache import DependencyGraphCache",
-          "from packages.db.models.digest_config import DigestConfig",
-          "from packages.db.models.eval import ABTest, AgentTask, EvalSession, SkillGap"
+          "from packages.db.models.digest_config import DigestConfig"
         ],
         "related_imports": []
       },
@@ -4896,23 +4917,23 @@
         ]
       },
       {
-        "path": "packages/db/models/org.py",
+        "path": "apps/api/api/index.py",
         "kind": "source",
         "language": "python",
         "tags": [],
         "snippet": [
           "from __future__ import annotations",
-          "from datetime import datetime",
-          "from typing import TYPE_CHECKING",
-          "from sqlalchemy import JSON, BigInteger, String, Text",
-          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
-          "from packages.db.models.base import Base, new_uuid, utcnow",
-          "if TYPE_CHECKING:",
-          "from packages.db.models.digest_config import DigestConfig",
-          "from packages.db.models.repo import Repo",
-          "from packages.db.models.source_connection import SourceConnection",
-          "class Org(Base):",
-          "__tablename__ = \"orgs\""
+          "import json",
+          "import logging",
+          "import time",
+          "import uuid",
+          "import importlib",
+          "from collections.abc import Awaitable, Callable",
+          "from datetime import datetime, timezone",
+          "from pathlib import Path",
+          "from fastapi import FastAPI, Request",
+          "from fastapi.middleware.cors import CORSMiddleware",
+          "from fastapi.responses import JSONResponse"
         ],
         "related_imports": []
       },
@@ -5049,6 +5070,27 @@
           "if config.config_file_name is not None:",
           "fileConfig(config.config_file_name)",
           "DATABASE_URL = os.getenv(\"DATABASE_URL\", \"\")"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "apps/api/api/v8/audit/router.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import UTC, datetime",
+          "from io import StringIO",
+          "import csv",
+          "import json",
+          "import os",
+          "from typing import Any, Literal",
+          "from fastapi import APIRouter, Depends, HTTPException, Query, Request",
+          "from fastapi.responses import JSONResponse, Response, StreamingResponse",
+          "from pydantic import BaseModel, Field",
+          "from sqlalchemy import desc, func, select, text",
+          "from sqlalchemy.ext.asyncio import AsyncSession"
         ],
         "related_imports": []
       },
@@ -5564,70 +5606,6 @@
           "skilgen/external_skills.py",
           "sys",
           "typing"
-        ]
-      },
-      {
-        "path": "skilgen/core/freshness.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "import hashlib",
-          "import json",
-          "from dataclasses import asdict",
-          "from pathlib import Path",
-          "from skilgen.core.generated_outputs import is_generated_output_path",
-          "from skilgen.core.models import DomainGraph, FreshnessReport, FreshnessState, RequirementsContext",
-          "IGNORED_PARTS = {",
-          "\".git\",",
-          "\".skilgen\",",
-          "\".vercel\",",
-          "\".venv\","
-        ],
-        "related_imports": [
-          "__future__",
-          "dataclasses",
-          "hashlib",
-          "json",
-          "pathlib",
-          "skilgen/core/generated_outputs.py",
-          "skilgen/core/models.py"
-        ]
-      },
-      {
-        "path": "skilgen/enterprise_skills.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from dataclasses import asdict, dataclass",
-          "from datetime import UTC, datetime",
-          "import json",
-          "import os",
-          "import re",
-          "import shutil",
-          "import subprocess",
-          "from pathlib import Path",
-          "from urllib.parse import urlparse",
-          "from urllib.request import urlopen",
-          "from skilgen.core.config import load_config"
-        ],
-        "related_imports": [
-          "__future__",
-          "dataclasses",
-          "datetime",
-          "json",
-          "os",
-          "pathlib",
-          "re",
-          "shutil",
-          "skilgen/core/config.py",
-          "skilgen/core/document_ingestion.py",
-          "subprocess",
-          "urllib.parse",
-          "urllib.request"
         ]
       },
       {
@@ -13663,6 +13641,28 @@
         "env:REVISION_SCRIPT_FILENAME",
         "env:URL",
         "env:WARNING"
+      ],
+      "apps/api/api/v8/insights/critical_ops.yaml": [
+        "env:SLA"
+      ],
+      "apps/api/api/v8/policy/starter_packs/fedramp-mod.yaml": [
+        "env:DLP",
+        "env:NIST"
+      ],
+      "apps/api/api/v8/policy/starter_packs/hipaa.yaml": [
+        "env:HIPAA",
+        "env:PHI"
+      ],
+      "apps/api/api/v8/policy/starter_packs/license-hygiene.yaml": [
+        "env:AGPL",
+        "env:GPL"
+      ],
+      "apps/api/api/v8/policy/starter_packs/soc2.yaml": [
+        "env:CC6",
+        "env:CC7",
+        "env:CC8",
+        "env:SOC2",
+        "runtime:kubernetes"
       ],
       "apps/api/requirements.txt": [
         "runtime:postgres",
