@@ -37,5 +37,21 @@ export default async function middleware(request: NextRequest, event: NextFetchE
 }
 
 export const config = {
-  matcher: ["/dashboard", "/dashboard/:path*", "/api/admin/:path*"],
+  matcher: [
+    "/dashboard",
+    "/dashboard/:path*",
+    "/activity",
+    "/activity/:path*",
+    "/policy",
+    "/policy/:path*",
+    "/audit",
+    "/audit/:path*",
+    "/skills",
+    "/skills/:path*",
+    "/insights",
+    "/insights/:path*",
+    "/settings",
+    "/settings/:path*",
+    "/api/admin/:path*",
+  ],
 };
