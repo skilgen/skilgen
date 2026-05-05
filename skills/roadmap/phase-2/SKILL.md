@@ -3,7 +3,7 @@ name: roadmap-phase-2
 version: 0.6.0
 domain: roadmap
 sub_domain: roadmap-phase-2
-last_updated: 2026-05-04
+last_updated: 2026-05-05
 triggered_by: requirements_pipeline
 source_hash: 2837441a102548bef06fba7b2eca5d2c3dbc03490ce3cb2864d5e3ca6a4c3c26
 richness_score: 72
@@ -33,10 +33,10 @@ Roadmap phase node for phase-2 planning and sequencing guidance.
 - delivery planning
 ### Dependency signals
 - `@eslint/js` in `packages/config/package.json` is medium; npm install @eslint/js.
+- `@playwright/test` in `apps/dashboard/package.json` is medium; npm install @playwright/test.
 - `@radix-ui/react-avatar` in `packages/ui/package.json` is medium; npm install @radix-ui/react-avatar.
 - `@radix-ui/react-dialog` in `packages/ui/package.json` is medium; npm install @radix-ui/react-dialog.
 - `@radix-ui/react-dropdown-menu` in `packages/ui/package.json` is medium; npm install @radix-ui/react-dropdown-menu.
-- `@radix-ui/react-label` in `packages/ui/package.json` is medium; npm install @radix-ui/react-label.
 
 ## Anti-patterns
 - **Introduce a second pattern for the same workflow**: Don't introduce a second pattern for the same workflow — duplicated conventions make agent edits unreliable

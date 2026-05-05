@@ -13807,9 +13807,11 @@
         "env:B4RT",
         "env:BSD",
         "env:CC0",
+        "env:DDKA",
         "env:DJ8BJS4E",
         "env:G3ZA",
         "env:G5KYP6",
+        "env:HBV",
         "env:IICI",
         "env:ISC",
         "env:JTF99U",
@@ -15358,6 +15360,7 @@
             "recharts",
             "swr",
             "tailwindcss",
+            "@playwright/test",
             "@types/node",
             "@types/react",
             "@types/react-dom",
@@ -15437,6 +15440,15 @@
         },
         {
           "id": "package:@eslint/js",
+          "kind": "external-package",
+          "risk_score": 0.2,
+          "signals": [
+            "version:loosely-pinned"
+          ],
+          "dependencies": []
+        },
+        {
+          "id": "package:@playwright/test",
           "kind": "external-package",
           "risk_score": 0.2,
           "signals": [
@@ -19093,6 +19105,14 @@
         },
         {
           "source": "manifest:apps/dashboard/package.json",
+          "target": "package:@playwright/test",
+          "kind": "external-package",
+          "risk_signals": [
+            "version:loosely-pinned"
+          ]
+        },
+        {
+          "source": "manifest:apps/dashboard/package.json",
           "target": "package:@skillayer/config",
           "kind": "external-package",
           "risk_signals": [
@@ -22462,7 +22482,7 @@
       "recommendations": [
         "Break internal dependency cycles before materializing fine-grained skills around those files or packages.",
         "High fan-out dependency hotspots surfaced in: scripts/deploy_api.py, skilgen/agents/__init__.py, skilgen/agents/architecture_planner.py, skilgen/agents/codebase_signals.py, skilgen/agents/decision_planner.py.",
-        "Loosely pinned external dependencies increase drift risk: package:@eslint/js, package:@radix-ui/react-avatar, package:@radix-ui/react-dialog, package:@radix-ui/react-dropdown-menu, package:@radix-ui/react-label, package:@radix-ui/react-popover."
+        "Loosely pinned external dependencies increase drift risk: package:@eslint/js, package:@playwright/test, package:@radix-ui/react-avatar, package:@radix-ui/react-dialog, package:@radix-ui/react-dropdown-menu, package:@radix-ui/react-label."
       ]
     }
   },

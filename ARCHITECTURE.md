@@ -81,7 +81,7 @@ graph TD
 - Config/runtime files: `45`
 - Tests mapped to code: `72`
 - Runtime artifacts ingested: `1`
-- Dependency risk nodes: `271`
+- Dependency risk nodes: `272`
 
 ## Parser Backends
 - `empty`: `3` files
