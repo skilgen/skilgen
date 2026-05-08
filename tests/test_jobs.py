@@ -110,12 +110,15 @@ class JobPersistenceTests(unittest.TestCase):
             self.assertEqual(resumed["job_type"], "deliver")
             resumed_id = resumed["job_id"]
 
-            deadline = time.monotonic() + 5.0
+            current_resumed = resumed
+            deadline = time.monotonic() + 20.0
             while time.monotonic() < deadline:
                 current = job_status_payload(resumed_id, root)
                 if current["status"] in {"completed", "failed", "cancelled"}:
+                    current_resumed = current
                     break
                 time.sleep(0.05)
+            self.assertIn(current_resumed["status"], {"completed", "failed", "cancelled"})
 
 
 if __name__ == "__main__":
