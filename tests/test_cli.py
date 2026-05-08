@@ -371,7 +371,7 @@ class CliTests(unittest.TestCase):
             self.assertIn("% |", result.stderr)
             self.assertIn("Starting delivery", result.stderr)
             self.assertIn("Finished delivery", result.stderr)
-            progress_lines = [line for line in result.stderr.splitlines() if line.strip()]
+            progress_lines = [line for line in result.stderr.splitlines() if "[skilgen ⬡⬢⬡ " in line]
             self.assertGreaterEqual(len(progress_lines), 2)
             self.assertLessEqual(len(progress_lines), 4)
 
