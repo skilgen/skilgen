@@ -5,6 +5,14 @@ export default async function AuditEventLogPage() {
   const { accessToken, orgId } = await loadAuditOrg();
   const audit = orgId ? await getV8AuditLog(accessToken, orgId, new URLSearchParams({ limit: "50" })) : null;
   const events = audit?.events ?? [];
+  if (audit === null) {
+    return (
+      <div className="rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-10 text-center text-sm text-[color:var(--text-secondary)]">
+        <p className="text-[15px] font-semibold text-[color:var(--text-primary)]">Audit could not reach the API.</p>
+        <p className="mx-auto mt-2 max-w-xl leading-6">Refresh after sign-in. Existing audit events will appear here once the authenticated API call succeeds.</p>
+      </div>
+    );
+  }
   return (
     <div className="overflow-x-auto border-y border-[color:var(--bg-border)]">
       <table className="w-full min-w-[980px] border-collapse text-left text-[13px]">

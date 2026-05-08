@@ -18,13 +18,14 @@ export default async function ConnectorsSettingsPage() {
   const connectors = payload?.connectors ?? [];
   const connected = connectors.filter((connector) => connector.connected).length;
   const categories = new Set(connectors.map((connector) => connector.category));
+  const apiUnavailable = payload === null;
 
   return (
     <SettingsShell active="Connectors">
       <div className="grid gap-4 md:grid-cols-3">
-        <Metric label="Registry entries" value={connectors.length || 22} sub="Data-driven, no new implementations" />
+        <Metric label="Registry entries" value={connectors.length} sub="Data-driven, no new implementations" />
         <Metric label="Connected" value={connected} sub="Backed by existing source connections" />
-        <Metric label="Categories" value={categories.size || 8} sub="Agents, SCM, SIEM, WORM, provenance" />
+        <Metric label="Categories" value={categories.size} sub="Agents, SCM, SIEM, WORM, provenance" />
       </div>
 
       {connectors.length ? (
@@ -43,8 +44,10 @@ export default async function ConnectorsSettingsPage() {
             </article>
           ))}
         </section>
+      ) : apiUnavailable ? (
+        <EmptyPanel detail="The connector API did not respond for this session. Refresh after sign-in, or use Analyze repo while the connector registry reloads." icon={<PlugZap className="h-5 w-5" />} title="Connector registry unavailable." />
       ) : (
-        <EmptyPanel detail="The connector catalog is now a registry file under Settings. Available rows will reflect existing source connections when the API is reachable." icon={<PlugZap className="h-5 w-5" />} title="Connector registry ready." />
+        <EmptyPanel detail="No connectors are configured yet. Connect GitHub or another source to populate live connection status." icon={<PlugZap className="h-5 w-5" />} title="No connectors connected yet." />
       )}
     </SettingsShell>
   );

@@ -19,7 +19,21 @@ function riskClass(band: ActivityEvent["risk_band"]): string {
   return "border-[color:var(--accent-green)]/40 bg-[color:var(--accent-green)]/10 text-[color:var(--accent-green)]";
 }
 
-export function LiveFeedPanel({ events, orgId, searchParams, streamKey }: { events: ActivityEvent[]; orgId: string; searchParams: URLSearchParams; streamKey: string }) {
+export function LiveFeedPanel({
+  events,
+  feedAvailable,
+  orgId,
+  searchParams,
+  sessionCount,
+  streamKey,
+}: {
+  events: ActivityEvent[];
+  feedAvailable: boolean;
+  orgId: string;
+  searchParams: URLSearchParams;
+  sessionCount: number;
+  streamKey: string;
+}) {
   const [rows, setRows] = useState(events);
   const [status, setStatus] = useState(streamKey ? "connecting" : "offline");
 
@@ -106,7 +120,25 @@ export function LiveFeedPanel({ events, orgId, searchParams, streamKey }: { even
             </article>
           ))
         ) : (
-          <div className="border-t border-[color:var(--bg-border)] p-8 text-center text-sm text-[color:var(--text-secondary)]">No activity matched the current filters.</div>
+          <div className="border-t border-[color:var(--bg-border)] p-8 text-center text-sm text-[color:var(--text-secondary)]">
+            <div className="mx-auto max-w-xl">
+              <p className="text-[15px] font-semibold text-[color:var(--text-primary)]">
+                {feedAvailable ? "No live skill-load events in this window." : "Activity could not reach the API."}
+              </p>
+              <p className="mt-2 leading-6">
+                {sessionCount > 0
+                  ? `There ${sessionCount === 1 ? "is" : "are"} ${sessionCount} recorded agent ${sessionCount === 1 ? "session" : "sessions"}. Start with Sessions, then use Replay or Heatmap once events stream in.`
+                  : "Start by analyzing a repo or connecting an agent. New agent sessions and skill-load events will appear here."}
+              </p>
+              <div className="mt-5 flex flex-wrap justify-center gap-3">
+                {sessionCount > 0 ? (
+                  <Link className="rounded-md bg-[color:var(--accent-primary)] px-4 py-2 text-[13px] font-semibold text-[color:var(--bg-base)]" href="/activity/sessions">View sessions</Link>
+                ) : null}
+                <Link className="rounded-md border border-[color:var(--bg-border)] px-4 py-2 text-[13px] font-semibold text-[color:var(--text-primary)] hover:border-[color:var(--accent-primary)]" href="/skills/repos">Analyze repo</Link>
+                <Link className="rounded-md border border-[color:var(--bg-border)] px-4 py-2 text-[13px] font-semibold text-[color:var(--text-primary)] hover:border-[color:var(--accent-primary)]" href="/settings/connectors">Connectors</Link>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 

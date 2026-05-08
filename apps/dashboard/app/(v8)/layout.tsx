@@ -104,11 +104,11 @@ export default async function V8Layout({
             <div className="h-5 w-px bg-[color:var(--bg-surface)]" />
             <Link
               className="inline-flex items-center rounded-md bg-[color:var(--accent-primary)] px-3 py-1.5 text-[13px] font-semibold text-[color:var(--bg-base)] transition-colors hover:bg-[color:var(--accent-bright)]"
-              href="/skills"
+              href="/skills/repos"
             >
               <Plus className="mr-1.5 h-3.5 w-3.5" />
-              <span className="hidden sm:inline">New analysis</span>
-              <span className="sm:hidden">New</span>
+              <span className="hidden sm:inline">Analyze repo</span>
+              <span className="sm:hidden">Analyze</span>
             </Link>
           </div>
         </header>

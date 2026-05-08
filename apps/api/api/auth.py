@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import os
 import time
+from urllib.parse import urlparse
 from typing import Any
 
 import httpx
@@ -67,10 +68,41 @@ async def _fetch_jwks(url: str) -> list[dict[str, Any]]:
     return list(keys)
 
 
-async def _workos_jwks() -> list[dict[str, Any]]:
+def _workos_api_issuer() -> str:
+    return "https://api.workos.com/"
+
+
+def _workos_api_jwks_uri() -> str:
     if not settings.WORKOS_CLIENT_ID:
         raise HTTPException(status_code=500, detail="WORKOS_CLIENT_ID is not configured")
-    return await _fetch_jwks(f"https://api.workos.com/sso/jwks/{settings.WORKOS_CLIENT_ID}")
+    return f"https://api.workos.com/sso/jwks/{settings.WORKOS_CLIENT_ID}"
+
+
+def _configured_authkit_issuer() -> str:
+    return os.getenv("WORKOS_AUTHKIT_ISSUER", "").strip().rstrip("/")
+
+
+def _is_allowed_authkit_issuer(issuer: str) -> bool:
+    parsed = urlparse(issuer)
+    if parsed.scheme != "https" or not parsed.netloc:
+        return False
+    configured = _configured_authkit_issuer()
+    if configured and issuer.rstrip("/") == configured:
+        return True
+    return parsed.netloc.endswith(".authkit.app")
+
+
+def _workos_jwks_uri_for_issuer(issuer: str) -> str:
+    normalized = issuer.strip().rstrip("/")
+    if normalized == _workos_api_issuer().rstrip("/"):
+        return _workos_api_jwks_uri()
+    if _is_allowed_authkit_issuer(normalized):
+        return f"{normalized}/oauth2/jwks"
+    raise HTTPException(status_code=401, detail="Invalid token")
+
+
+async def _workos_jwks(issuer: str) -> list[dict[str, Any]]:
+    return await _fetch_jwks(_workos_jwks_uri_for_issuer(issuer))
 
 
 async def _oidc_jwks() -> list[dict[str, Any]]:
@@ -94,14 +126,16 @@ def _verify_signature(token: str, signing_key: dict[str, Any]) -> None:
 
 async def _verify_workos_token(token: str) -> dict[str, Any]:
     header = jwt.get_unverified_header(token)
-    signing_key = _signing_key(await _workos_jwks(), header.get("kid"))
+    claims = jwt.get_unverified_claims(token)
+    issuer = str(claims.get("iss") or _workos_api_issuer()).rstrip("/")
+    signing_key = _signing_key(await _workos_jwks(issuer), header.get("kid"))
     _verify_signature(token, signing_key)
     payload = jwt.decode(
         token,
         signing_key,
         algorithms=[header.get("alg", "RS256")],
         audience=settings.WORKOS_CLIENT_ID,
-        issuer="https://api.workos.com/",
+        issuer=issuer if issuer != _workos_api_issuer().rstrip("/") else _workos_api_issuer(),
     )
     return dict(payload)
 
