@@ -20,6 +20,7 @@ from packages.db.models import Org
 
 
 bearer_scheme = HTTPBearer(auto_error=True)
+optional_bearer = HTTPBearer(auto_error=False)
 _JWKS_CACHE: dict[str, dict[str, Any]] = {}
 _JWKS_TTL_SECONDS = 3600
 
@@ -173,9 +174,19 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(b
 
 
 async def get_current_org_id(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_bearer),
     db: AsyncSession = Depends(get_db),
 ) -> str:
+    if _deployment_mode() == "bootstrap":
+        result = await db.execute(select(Org).limit(1))
+        org = result.scalar_one_or_none()
+        if org is None:
+            raise HTTPException(status_code=403, detail="No org found")
+        return org.id
+
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     token = credentials.credentials.strip()
     if token.startswith("sk-"):
         result = await db.execute(select(Org).where(Org.api_key == token))
@@ -199,9 +210,6 @@ async def get_current_org_id(
     if org is None:
         raise HTTPException(status_code=403, detail="No org found")
     return org.id
-
-
-optional_bearer = HTTPBearer(auto_error=False)
 
 
 async def get_current_org_id_optional(
