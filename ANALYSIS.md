@@ -4445,14 +4445,14 @@
           "import hmac",
           "import os",
           "import time",
+          "from urllib.parse import urlparse",
           "from typing import Any",
           "import httpx",
           "from fastapi import Depends, Header, HTTPException",
           "from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer",
           "from jose import JWTError, jwk, jwt",
           "from jose.utils import base64url_decode",
-          "from sqlalchemy import select",
-          "from sqlalchemy.ext.asyncio import AsyncSession"
+          "from sqlalchemy import select"
         ],
         "related_imports": []
       },
