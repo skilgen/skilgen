@@ -5,7 +5,7 @@ domain: requirements
 sub_domain: platform
 last_updated: 2026-05-10
 triggered_by: requirements_pipeline
-source_hash: 2837441a102548bef06fba7b2eca5d2c3dbc03490ce3cb2864d5e3ca6a4c3c26
+source_hash: b4c9e7f22fe4e1bc0333928f09a338ca6bd8f64a6ef5403383dcc6824d71e026
 richness_score: 83
 score:
   total: 83
@@ -61,24 +61,23 @@ Planning and product-intent domain used to keep the skill tree aligned with requ
 
 ### README.md
 ```
-<p align="center">
-  <img src="docs/assets/skilgen.svg" alt="Skilgen" width="480" />
-</p>
+# Skillayer
 
-<h2 align="center">The living skill system for AI coding agents</h2>
+Skillayer is a governance plane for AI coding agents. It helps platform, security, and engineering leadership answer the questions that matter once Claude Code, Codex, Cursor, GitHub Copilot, and internal agents are active across a company:
 
-<p align="center">
-  Every agent session starts from zero. Skilgen ends that.<br/>
-  Generate, govern, and keep your codebase's agent knowledge current automatically.
-</p>
+- What did agents do across repos, tools, sessions, and users?
+- Which actions violated policy, and were they blocked, approved, or sent for more review?
+- Which skills are trusted, stale, drifted, quarantined, or bound to policy?
+- Can audit evidence be exported with attribution, policy decisions, and tamper-evident history?
+- Where is fleet risk increasing across agents, repos, skills, and critical operations?
 
-<p align="center">
-  <a href="https://pypi.org/project/skilgen/"><img src="https://img.shields.io/pypi/v/skilgen?color=efd37a&labelColor=0d1117&label=skilgen" alt="PyPI" /></a>
-  <a href="https://pypi.org/project/skilgen/"><img src="https://img.shields.io/pypi/pyversions/skilgen?color=8fd9a8&labelColor=0d1117" alt="Python" /></a>
+The current product direction is defined by `docs/PRD-v8.docx`: Skillayer v8 reduces the product to six enterprise surfaces and treats the older skill-generation system as the substrate underneath the governance experience.
+
+## Product Surfaces
 ```
 
 ## Traceability
-- Generated from requirements source hash: `2837441a102548bef06fba7b2eca5d2c3dbc03490ce3cb2864d5e3ca6a4c3c26`
+- Generated from requirements source hash: `b4c9e7f22fe4e1bc0333928f09a338ca6bd8f64a6ef5403383dcc6824d71e026`
 - Domain path: `requirements/platform`
 - Read `../../TRACEABILITY.md` for full requirement-to-output mapping.
 - Use the detected file patterns in this skill before creating new structure.

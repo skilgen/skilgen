@@ -4,83 +4,83 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 
 ## Requirements Source
 - Source file: `README.md`
-- Source hash: `2837441a1025`
+- Source hash: `b4c9e7f22fe4`
 
 ## Intent To Output Mapping
 ### Endpoints
-- Intent: # Export a provider key, or point Skilgen at a private model endpoint below.
+- Intent: | Surface | Purpose | Key Routes |
   Domain: `backend`
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
-- Intent: export OPENAI_API_KEY="your_key"
+- Intent: - Coverage SLA critical-operation taxonomy loading from `apps/api/api/v8/insights/critical_ops.yaml`.
   Domain: `backend`
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
-- Intent: # or ANTHROPIC_API_KEY / GOOGLE_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY
+- Intent: - v8 Audit APIs for event log, reports, exports, evidence packages, hash-chain verification, and WORM root publishing.
   Domain: `backend`
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
-- Intent: Current v0.6.0 breadth: `58` CLI entry points spanning delivery, architecture, dashboard, score, diff, analytics, enterprise skills, external skills, MCP connectors, and server APIs.
+- Intent: - v8 Skills APIs and screens for registry, score, drift, provenance, SkillQL, and repos.
   Domain: `backend`
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
-- Intent: Skilgen indexes every non-excluded file in the repo, not just files that happen to match route, service, or model naming patterns. Phase 1 builds a cached structural and text index across the full corpus without using an LLM. Phase 2 uses importance scoring plus cluster-aware sampling to choose the most architecturally significant files for deeper analysis.
+- Intent: - v8 Settings APIs and screens for connectors and RBAC foundations.
   Domain: `backend`
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
-- Intent: Phase 1 corpus indexing never touches an LLM. For model-backed synthesis, Skilgen can target private endpoints so the source leaves only the network boundary you choose.
+- Intent: | Dashboard | `apps/dashboard` | Next.js App Router dashboard. v8 routes live in `apps/dashboard/app/(v8)`. |
   Domain: `backend`
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
 
 ### UI Flows
-- Intent: <a href="https://github.com/skilgen/skilgen/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/skilgen/skilgen/ci.yml?branch=main&color=8fd9a8&labelColor=0d1117" alt="CI" /></a>
+- Intent: The migrated v8 app lives under `apps/dashboard/app/(v8)` and uses the Skillayer governance shell.
   Domain: `frontend`
   Evidence: requirements-driven only
   Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
-- Intent: ## Dashboard
+- Intent: | Dashboard | `apps/dashboard` | Next.js App Router dashboard. v8 routes live in `apps/dashboard/app/(v8)`. |
   Domain: `frontend`
   Evidence: requirements-driven only
   Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
-- Intent: Run `skilgen dashboard` and get a branded HTML surface for score health, architecture domains, evidence graph, dependency signals, freshness, analytics, and agent readiness in one place.
+- Intent: Run the dashboard:
   Domain: `frontend`
   Evidence: requirements-driven only
   Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
-- Intent: skilgen dashboard --project-root . --requirements docs/requirements.docx
+- Intent: npm --workspace apps/dashboard run dev
   Domain: `frontend`
   Evidence: requirements-driven only
   Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
-- Intent: `skilgen deliver --project-root .` already writes `skilgen-dashboard.html` automatically. Use `skilgen dashboard` when you want to regenerate or inspect the dashboard separately from a full delivery run.
+- Intent: Useful dashboard checks:
   Domain: `frontend`
   Evidence: requirements-driven only
   Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
-- Intent: - [Anthropic claude-code dashboard](docs/examples/README.md#anthropic-claude-code)
+- Intent: npm run lint --workspace apps/dashboard
   Domain: `frontend`
   Evidence: requirements-driven only
   Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
 
 ### Feature Planning
-- Intent: - `5` inferred child or subordinate surfaces such as `plugins/hookify` and roadmap phase skills.
+- Intent: Current feature slices tracked in `FEATURES.md` include:
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
-- Intent: - `FEATURES.md`
+- Intent: ## Feature Delivery Rules
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
-- Intent: Skilgen indexes every non-excluded file in the repo, not just files that happen to match route, service, or model naming patterns. Phase 1 builds a cached structural and text index across the full corpus without using an LLM. Phase 2 uses importance scoring plus cluster-aware sampling to choose the most architecturally significant files for deeper analysis.
+- Intent: 1. Pick one coherent PRD feature slice.
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
-- Intent: Phase 1 corpus indexing never touches an LLM. For model-backed synthesis, Skilgen can target private endpoints so the source leaves only the network boundary you choose.
+- Intent: 8. Open or update a GitHub PR for the automation run with feature summary, verification results, evaluator result, and screenshot proof.
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
-- Intent: ├── FEATURES.md
+- Intent: New feature PRs should attach fresh desktop and mobile screenshots for changed v8 screens. Screenshot capture failures should be treated as blockers unless explicitly accepted by the reviewer.
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
-- Intent: 1. **Index**: Phase 1 reads every non-excluded file with AST and text extraction. No LLM. Cached.
+- Intent: - `FEATURES.md`: feature inventory and completed slices.
   Domain: `operations`
   Evidence: `skilgen/api/jobs.py`, `tests/test_jobs.py`, `tests/__init__.py`, `tests/oidc_test_utils.py`
   Generated output: `skills/roadmap/SKILL.md`, `skills/GRAPH.md`, `REPORT.md`
@@ -185,13 +185,13 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 - Installed `anthropic-skills` from `https://github.com/anthropics/skills.git`
   Trust: `official` score `7`
   License: `unknown`
-- Installed `langchain-skills` from `https://github.com/langchain-ai/langchain-skills.git`
-  Trust: `official` score `7`
-  License: `unknown`
+- Installed `awesome-copilot` from `https://github.com/github/awesome-copilot.git`
+  Trust: `official` score `8`
+  License: `MIT License`
 
 ### Preferred External Packs
 - `anthropic-skills`: Detected Claude/Anthropic repo hints.
-- `langchain-skills`: Detected LangChain/LangGraph/Deep Agents dependencies.
+- `awesome-copilot`: Detected GitHub Copilot instructions or workspace setup.
 - `agentskills-spec`: Detected SKILL.md-style files or an existing skills tree.
 
 ## Enterprise Skill Traceability

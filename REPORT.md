@@ -41,10 +41,10 @@
 - Active packs: 3
 - Preferred packs to load first:
   - `anthropic-skills` (score 87, trust `official`, license `unknown`)
-  - `langchain-skills` (score 80, trust `official`, license `unknown`)
+  - `awesome-copilot` (score 87, trust `official`, license `MIT License`)
   - `agentskills-spec` (score 58, trust `spec`, license `Apache License`)
 
 ## External Skill Provenance
 - `agentskills-spec` from `https://github.com/agentskills/agentskills.git` at `2d3e01f590f68bee2cb76a3200823e93b2cc9eaa`
 - `anthropic-skills` from `https://github.com/anthropics/skills.git` at `f458cee31a7577a47ba0c9a101976fa599385174`
-- `langchain-skills` from `https://github.com/langchain-ai/langchain-skills.git` at `648df5daa32ef7a742a07740d9c5d13e3b8229c4`
+- `awesome-copilot` from `https://github.com/github/awesome-copilot.git` at `12d7da51ae6c65f5a9f9803edc68738cfa4348a9`

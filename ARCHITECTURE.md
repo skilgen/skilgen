@@ -78,7 +78,7 @@ graph TD
 - Symbol graph files: `177`
 - Cross-file symbol relationships: `91`
 - Call graph files: `174`
-- Config/runtime files: `50`
+- Config/runtime files: `51`
 - Tests mapped to code: `72`
 - Runtime artifacts ingested: `1`
 - Dependency risk nodes: `272`

@@ -4403,14 +4403,14 @@
           "requirements"
         ],
         "snippet": [
-          "<h2 align=\"center\">The living skill system for AI coding agents</h2>",
-          "Every agent session starts from zero. Skilgen ends that.<br/>",
-          "Generate, govern, and keep your codebase's agent knowledge current automatically.",
-          "A hand-written `CLAUDE.md` captures what you remember about your codebase on the day you write it. Skilgen generates repo-local agent context from actual code evidence, requirements inputs, architecture domains, and config signals, then refreshes that context as the code changes. A hand-written file drifts silently. Skilgen gives you generated artifacts, freshness tracking, and a score that tells you when the skill system is no longer trustworthy.",
-          "Every agent session starts from zero. It reads files, infers structure, guesses patterns, and then the session ends. The next session repeats the same exploration. Skilgen captures that understanding once, stores it as versioned repo-local skills and docs grounded in real repository evidence, and makes it available to every session, every tool, and every engineer on the team.",
-          "Run `skilgen dashboard` and get a branded HTML surface for score health, architecture domains, evidence graph, dependency signals, freshness, analytics, and agent readiness in one place.",
-          "skilgen dashboard --project-root . --requirements docs/requirements.docx",
-          "- [Anthropic claude-agent-sdk-python dashboard](docs/examples/README.md#anthropic-claude-agent-sdk-python)"
+          "# Skillayer",
+          "Skillayer is a governance plane for AI coding agents. It helps platform, security, and engineering leadership answer the questions that matter once Claude Code, Codex, Cursor, GitHub Copilot, and internal agents are active across a company:",
+          "- What did agents do across repos, tools, sessions, and users?",
+          "- Which skills are trusted, stale, drifted, quarantined, or bound to policy?",
+          "- Where is fleet risk increasing across agents, repos, skills, and critical operations?",
+          "The current product direction is defined by `docs/PRD-v8.docx`: Skillayer v8 reduces the product to six enterprise surfaces and treats the older skill-generation system as the substrate underneath the governance experience.",
+          "The migrated v8 app lives under `apps/dashboard/app/(v8)` and uses the Skillayer governance shell.",
+          "| Activity | The default investigation homepage for live agent activity, sessions, replay, and heatmaps. | `/activity`, `/activity/live-feed`, `/activity/sessions`, `/activity/replay`, `/activity/heatmap` |"
         ],
         "related_imports": []
       },
@@ -4917,6 +4917,52 @@
         ]
       },
       {
+        "path": "skilgen/api/server.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [
+          "backend_routes"
+        ],
+        "snippet": [
+          "from __future__ import annotations",
+          "from dataclasses import dataclass",
+          "import hmac",
+          "import hashlib",
+          "import ipaddress",
+          "import json",
+          "import logging",
+          "import os",
+          "import socket",
+          "import threading",
+          "import time",
+          "import uuid"
+        ],
+        "related_imports": [
+          "__future__",
+          "concurrent.futures",
+          "dataclasses",
+          "hashlib",
+          "hmac",
+          "http.server",
+          "ipaddress",
+          "json",
+          "logging",
+          "os",
+          "pathlib",
+          "skilgen/api/service.py",
+          "skilgen/core/audit.py",
+          "skilgen/core/auth_tokens.py",
+          "skilgen/core/identity_policy_store.py",
+          "skilgen/core/rate_limit_store.py",
+          "skilgen/core/runtime_data.py",
+          "socket",
+          "threading",
+          "time",
+          "urllib.parse",
+          "uuid"
+        ]
+      },
+      {
         "path": "apps/api/api/index.py",
         "kind": "source",
         "language": "python",
@@ -5080,7 +5126,7 @@
         "tags": [],
         "snippet": [
           "from __future__ import annotations",
-          "from datetime import UTC, datetime",
+          "from datetime import UTC, datetime, timedelta",
           "from io import StringIO",
           "import csv",
           "import json",
@@ -5178,52 +5224,6 @@
           "skilgen/agents/workspace_graph.py",
           "skilgen/core/models.py",
           "skilgen/deep_agents_core.py"
-        ]
-      },
-      {
-        "path": "skilgen/api/server.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [
-          "backend_routes"
-        ],
-        "snippet": [
-          "from __future__ import annotations",
-          "from dataclasses import dataclass",
-          "import hmac",
-          "import hashlib",
-          "import ipaddress",
-          "import json",
-          "import logging",
-          "import os",
-          "import socket",
-          "import threading",
-          "import time",
-          "import uuid"
-        ],
-        "related_imports": [
-          "__future__",
-          "concurrent.futures",
-          "dataclasses",
-          "hashlib",
-          "hmac",
-          "http.server",
-          "ipaddress",
-          "json",
-          "logging",
-          "os",
-          "pathlib",
-          "skilgen/api/service.py",
-          "skilgen/core/audit.py",
-          "skilgen/core/auth_tokens.py",
-          "skilgen/core/identity_policy_store.py",
-          "skilgen/core/rate_limit_store.py",
-          "skilgen/core/runtime_data.py",
-          "socket",
-          "threading",
-          "time",
-          "urllib.parse",
-          "uuid"
         ]
       },
       {
@@ -5441,6 +5441,27 @@
         ]
       },
       {
+        "path": "apps/api/api/v8/flags.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "import os",
+          "from contextvars import ContextVar",
+          "from collections.abc import AsyncGenerator",
+          "from typing import Any",
+          "from fastapi import APIRouter, Depends, HTTPException",
+          "from pydantic import BaseModel",
+          "from sqlalchemy.ext.asyncio import AsyncSession",
+          "from apps.api.api.auth import get_current_org_id",
+          "from packages.db.database import AsyncSessionLocal, get_db",
+          "from packages.db.models import Org",
+          "router = APIRouter(prefix=\"/v8/orgs/{org_id}/flags\", tags=[\"v8-flags\"])"
+        ],
+        "related_imports": []
+      },
+      {
         "path": "skilgen/agents/evidence_graph.py",
         "kind": "source",
         "language": "python",
@@ -5565,47 +5586,6 @@
           "re",
           "skilgen/core/models.py",
           "yaml"
-        ]
-      },
-      {
-        "path": "skilgen/generators/package.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from dataclasses import asdict, dataclass",
-          "from datetime import datetime",
-          "from html import escape",
-          "import json",
-          "import re",
-          "import sys",
-          "from pathlib import Path",
-          "from typing import Callable",
-          "from skilgen.agents import analyze_codebase, build_agent_decision, build_architecture_blueprint, build_evidence_graph, build_import_graph, fingerprint_project",
-          "from skilgen.agents.feature_extractor import extract_features",
-          "from skilgen.agents.requirements_parser import parse_project_intent"
-        ],
-        "related_imports": [
-          "__future__",
-          "dataclasses",
-          "datetime",
-          "html",
-          "json",
-          "pathlib",
-          "re",
-          "skilgen/agents/__init__.py",
-          "skilgen/agents/feature_extractor.py",
-          "skilgen/agents/requirements_parser.py",
-          "skilgen/core/config.py",
-          "skilgen/core/context.py",
-          "skilgen/core/models.py",
-          "skilgen/deep_agents_core.py",
-          "skilgen/deep_agents_runtime.py",
-          "skilgen/enterprise_skills.py",
-          "skilgen/external_skills.py",
-          "sys",
-          "typing"
         ]
       },
       {
@@ -6536,14 +6516,14 @@
           "docs"
         ],
         "snippet": [
-          "# Features",
-          "Search this file before implementing any feature to avoid duplicating work.",
+          "# Skillayer Feature Inventory",
+          "Use this file before starting a feature slice. It tracks the migrated Skillayer v8 product surfaces and the completed automation slices that should not be duplicated.",
           "| Feature Name | Domain | Location | Description | Status | Last Modified |",
           "| --- | --- | --- | --- | --- | --- |",
-          "| Requirements-driven scan | requirements | `README.md` | Parse the requirements input and generate skills and project docs. | active | current |",
-          "| Project folder analysis | analysis | `skilgen` | Analyze the input folder and generate outputs into that same folder. | active | current |",
-          "| Backend route: skilgen/api/__init__.py | backend | `skilgen/api/__init__.py` | Detected route or handler implementation in the scanned codebase. | active | current |",
-          "| Backend route: skilgen/api/jobs.py | backend | `skilgen/api/jobs.py` | Detected route or handler implementation in the scanned codebase. | active | current |"
+          "| v8 governance shell | frontend | `apps/dashboard/app/(v8)/layout.tsx` | Six-surface Skillayer IA with Activity, Policy, Audit, Skills, Insights, and Settings navigation. | active",
+          "| Activity surface | full-stack | `apps/api/api/v8/activity`, `apps/dashboard/app/(v8)/activity` | Live feed, sessions, replay, and heatmap surfaces for AI agent activity investiga",
+          "| Setup readiness next action | full-stack | `apps/api/api/routes/orgs.py`, `apps/api/tests/test_orgs_api.py`, `apps/dashboard/lib/data.ts`, `apps/dashboard/app/(v8)/activity/Activ",
+          "| Activity investigation filters | full-stack | `apps/api/api/v8/activity/router.py`, `apps/api/tests/test_v8_activity_api.py`, `apps/dashboard/app/(v8)/activity/LiveFeedPanel.tsx`"
         ],
         "related_imports": []
       },
@@ -6555,14 +6535,14 @@
           "docs"
         ],
         "snippet": [
-          "<p align=\"center\">",
-          "<img src=\"docs/assets/skilgen.svg\" alt=\"Skilgen\" width=\"480\" />",
-          "</p>",
-          "<h2 align=\"center\">The living skill system for AI coding agents</h2>",
-          "<p align=\"center\">",
-          "Every agent session starts from zero. Skilgen ends that.<br/>",
-          "Generate, govern, and keep your codebase's agent knowledge current automatically.",
-          "</p>"
+          "# Skillayer",
+          "Skillayer is a governance plane for AI coding agents. It helps platform, security, and engineering leadership answer the questions that matter once Claude Code, Codex, Cursor, GitH",
+          "- What did agents do across repos, tools, sessions, and users?",
+          "- Which actions violated policy, and were they blocked, approved, or sent for more review?",
+          "- Which skills are trusted, stale, drifted, quarantined, or bound to policy?",
+          "- Can audit evidence be exported with attribution, policy decisions, and tamper-evident history?",
+          "- Where is fleet risk increasing across agents, repos, skills, and critical operations?",
+          "The current product direction is defined by `docs/PRD-v8.docx`: Skillayer v8 reduces the product to six enterprise surfaces and treats the older skill-generation system as the subs"
         ],
         "related_imports": []
       },
@@ -13644,6 +13624,11 @@
       ],
       "apps/api/api/v8/insights/critical_ops.yaml": [
         "env:SLA"
+      ],
+      "apps/api/api/v8/policy/starter_packs/agent-compliance.yaml": [
+        "env:CC6",
+        "env:CLI",
+        "env:SOC2"
       ],
       "apps/api/api/v8/policy/starter_packs/fedramp-mod.yaml": [
         "env:DLP",
