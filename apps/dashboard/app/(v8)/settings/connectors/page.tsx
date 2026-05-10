@@ -9,6 +9,8 @@ type Connector = {
   category: string;
   status: string;
   connected: boolean;
+  description?: string | null;
+  capabilities?: string[];
   connection_status?: string | null;
 };
 
@@ -23,9 +25,9 @@ export default async function ConnectorsSettingsPage() {
   return (
     <SettingsShell active="Connectors">
       <div className="grid gap-4 md:grid-cols-3">
-        <Metric label="Registry entries" value={connectors.length} sub="Data-driven, no new implementations" />
+        <Metric label="Registry entries" value={connectors.length} sub="Data-driven connector catalog" />
         <Metric label="Connected" value={connected} sub="Backed by existing source connections" />
-        <Metric label="Categories" value={categories.size} sub="Agents, SCM, SIEM, WORM, provenance" />
+        <Metric label="Categories" value={categories.size} sub="Compliance, agents, SCM, SIEM, WORM" />
       </div>
 
       {connectors.length ? (
@@ -41,6 +43,18 @@ export default async function ConnectorsSettingsPage() {
                   {connector.connected ? "Connected" : connector.status}
                 </span>
               </div>
+              {connector.description ? (
+                <p className="mt-3 text-[13px] leading-6 text-[color:var(--text-secondary)]">{connector.description}</p>
+              ) : null}
+              {connector.capabilities?.length ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {connector.capabilities.map((capability) => (
+                    <span className="rounded-full border border-[color:var(--bg-border)] px-2 py-1 text-[11px] font-semibold text-[color:var(--text-tertiary)]" key={capability}>
+                      {capability}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </article>
           ))}
         </section>

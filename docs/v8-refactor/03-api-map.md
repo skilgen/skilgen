@@ -187,8 +187,18 @@ GET  /v8/orgs/{org_id}/settings/teams
 GET  /v8/orgs/{org_id}/settings/rbac
 GET  /v8/orgs/{org_id}/settings/sso
 GET  /v8/orgs/{org_id}/settings/connectors
+GET  /v8/orgs/{org_id}/settings/connectors/agent-compliance
+POST /v8/orgs/{org_id}/settings/connectors/agent-compliance
+POST /v8/orgs/{org_id}/settings/connectors/{connector_id}/sync
 GET  /v8/orgs/{org_id}/settings/admin-audit
+
+GET  /v8/orgs/{org_id}/audit/agent-compliance
+GET  /v8/orgs/{org_id}/activity/compliance-events
+GET  /v8/orgs/{org_id}/insights/intelligence-usage
+GET  /v8/orgs/{org_id}/insights/access-grants
 ```
+
+Agent compliance ingestion note: the PRD names coding-agent connectors, but provider compliance ingestion is made explicit in `docs/v8-refactor/08-agent-compliance-ingestion.md`. These proposed endpoints cover OpenAI Compliance Platform, Anthropic Compliance API, Claude Cowork OpenTelemetry, Claude Code, Codex CLI, Cursor, and similar sources. They are not part of PR-8 deprecation.
 
 ## Rules for PR-1 through PR-8
 

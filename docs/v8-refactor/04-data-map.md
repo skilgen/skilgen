@@ -72,6 +72,10 @@ No migrations in PR-0. These are candidate migration names and directions for la
 | PR-5 Skills | `add_repo_sensitivity_tier` | Add nullable `repos.sensitivity_tier` string column with default `internal` for Skills Repos and downstream policy filters. Downgrade drops the column. |
 | PR-6 Insights | `add_risky_agent_repo_views` | Add SQL views/materialized views for risky agents/repos. Downgrade drops views. |
 | PR-7 Settings | `add_roles_and_role_bindings` | Add RBAC tables only if no existing role model exists. Downgrade drops tables. |
+| Follow-up Agent Compliance | `add_agent_compliance_connections` | Add tenant-scoped compliance connector config/cursors for OpenAI, Anthropic, Claude Cowork OTel, Claude Code, Codex CLI, Cursor, and similar agent sources. Downgrade drops only connector metadata after export in test DB. |
+| Follow-up Agent Compliance | `add_agent_compliance_events` | Add normalized append-only provider event table with source envelope hash, actor, model/intelligence tier, access scope, tool/file/repo targets, and redaction state. Downgrade drops only normalized copies after export in test DB. |
+| Follow-up Agent Compliance | `add_agent_access_grants` | Add derived table or materialized view for full-access/autonomous-access grants and approval decisions by user/provider/repo/window. Downgrade drops derived object. |
+| Follow-up Agent Compliance | `add_agent_model_usage_rollups` | Add derived table or materialized view for very-high/high/medium/low intelligence-tier usage, token/cost metrics, and provider coverage. Downgrade drops derived object. |
 
 ## v7 cut table handling
 

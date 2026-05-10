@@ -10,12 +10,65 @@ class ConnectorDefinition:
     category: str
     status: str = "planned"
     source_type: str | None = None
+    description: str | None = None
+    capabilities: tuple[str, ...] = ()
 
 
 CONNECTORS: tuple[ConnectorDefinition, ...] = (
-    ConnectorDefinition("claude-code", "Claude Code", "coding-agent", "planned"),
-    ConnectorDefinition("codex-cli", "Codex CLI", "coding-agent", "planned"),
-    ConnectorDefinition("cursor", "Cursor", "coding-agent", "planned"),
+    ConnectorDefinition(
+        "openai-compliance",
+        "OpenAI Compliance Platform",
+        "compliance-telemetry",
+        "planned",
+        "openai_compliance",
+        "ChatGPT Enterprise/Edu compliance logs and metadata for audit, DLP, SIEM, and eDiscovery workflows.",
+        ("audit logs", "chat metadata", "user activity", "model usage"),
+    ),
+    ConnectorDefinition(
+        "anthropic-compliance",
+        "Anthropic Compliance API",
+        "compliance-telemetry",
+        "planned",
+        "anthropic_compliance",
+        "Claude Enterprise compliance activity, chat data, file content, and audit log records where the tenant has API access.",
+        ("audit logs", "chat data", "file content", "user activity"),
+    ),
+    ConnectorDefinition(
+        "claude-cowork-otel",
+        "Claude Cowork OpenTelemetry",
+        "compliance-telemetry",
+        "planned",
+        "claude_cowork_otel",
+        "Real-time Cowork telemetry for prompts, tool/MCP calls, file access, approvals, model usage, and errors.",
+        ("prompts", "tool calls", "file access", "approval decisions", "model usage"),
+    ),
+    ConnectorDefinition(
+        "claude-code",
+        "Claude Code",
+        "coding-agent",
+        "planned",
+        "claude_code",
+        "Coding-agent activity, tool use, file access, skills, and permission decisions from Claude Code hooks or supported telemetry.",
+        ("agent sessions", "tool calls", "file access", "permission decisions"),
+    ),
+    ConnectorDefinition(
+        "codex-cli",
+        "Codex CLI",
+        "coding-agent",
+        "planned",
+        "codex_cli",
+        "Codex CLI sessions, model/intelligence tier, command/tool access, file access, and approval decisions from local hooks.",
+        ("agent sessions", "model tier", "tool access", "file access"),
+    ),
+    ConnectorDefinition(
+        "cursor",
+        "Cursor",
+        "coding-agent",
+        "planned",
+        "cursor",
+        "Cursor agent usage, full-access grants, model tier, tool calls, and workspace/repo activity where enterprise telemetry is available.",
+        ("agent sessions", "model tier", "full-access grants", "repo activity"),
+    ),
     ConnectorDefinition("windsurf", "Windsurf", "coding-agent", "planned"),
     ConnectorDefinition("aider", "Aider", "coding-agent", "planned"),
     ConnectorDefinition("github-copilot", "GitHub Copilot", "coding-agent", "planned"),

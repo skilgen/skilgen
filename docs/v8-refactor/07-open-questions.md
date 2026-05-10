@@ -40,3 +40,7 @@ These require user/product answers before PR-2 through PR-7 can land.
 19. What browser/device matrix is required for Playwright screenshots in the v8 surface PRs?
 20. Should frontend coverage be introduced as part of PR-1, or are Playwright smoke tests sufficient for this refactor?
 21. When v8 surface PRs add columns or views to existing v7 tables, are v7 endpoints required to remain bit-for-bit identical in response shape, or are additive non-breaking changes acceptable?
+22. For agent compliance ingestion, should tenants store raw prompt/chat/file/tool-parameter content, or should Skillayer default to metadata-only with optional customer-enabled content retention?
+23. Which sources are required for the first compliance-ingestion release: OpenAI Compliance Platform, Anthropic Compliance API, Claude Cowork OTel, Claude Code hooks, Codex CLI hooks, Cursor, GitHub Copilot, Windsurf, Aider, or all of them?
+24. Confirm whether "Cowork" means Anthropic Claude Cowork. If yes, it must be treated as OpenTelemetry operational telemetry because Anthropic states Cowork activity is not captured in audit logs, Compliance API, or data exports.
+25. What exact intelligence-tier vocabulary should the product expose across providers: `very_high/high/medium/low`, provider-native model names, or both?

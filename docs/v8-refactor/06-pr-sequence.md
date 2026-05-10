@@ -224,6 +224,40 @@ Success criteria reference:
 
 - PRD 3.3, AGENTS sections 9 and 10.
 
+## Follow-up: Agent compliance ingestion
+
+Branch: `v8/09-agent-compliance-ingestion`  
+Depends on: v8 six surfaces merged and connector credentials available
+
+Scope:
+
+- Add Settings connector setup for OpenAI Compliance Platform, Anthropic Compliance API, Claude Cowork OpenTelemetry, Claude Code, Codex CLI, Cursor, and similar coding-agent sources.
+- Add ingestion jobs using existing async infrastructure and provider cursors.
+- Normalize provider events into Audit, Activity, Insights, and Policy without changing v7 routes.
+- Add intelligence-tier rollups: very-high, high, medium, low.
+- Add full-access/tool-permission reporting by user, provider, repo/file target, and time window.
+- Keep raw content retention tenant-configurable and metadata-only by default.
+
+Files touched:
+
+- `apps/api/api/v8/settings/**`
+- `apps/api/api/v8/audit/**`
+- `apps/api/api/v8/activity/**`
+- `apps/api/api/v8/insights/**`
+- `apps/api/api/v8/policy/**`
+- `apps/api/alembic/versions/...agent_compliance...py`
+- `apps/dashboard/app/(v8)/settings/connectors/**`
+- `apps/dashboard/app/(v8)/audit/**`
+- `apps/dashboard/app/(v8)/activity/**`
+- `apps/dashboard/app/(v8)/insights/**`
+- `docs/v8-refactor/08-agent-compliance-ingestion.md`
+
+Success criteria reference:
+
+- OpenAI Compliance Platform and Anthropic Compliance API contracts cited in `08-agent-compliance-ingestion.md`.
+- No fake connected states; every connected provider must be backed by tenant connector config.
+- Provider sync tests cover pagination/cursor resume, 30-day OpenAI log retention handling, redaction, and downgrade.
+
 ## Risk controls across all PRs
 
 - No changes to root `skilgen/` OSS CLI except stable hook references explicitly approved by user.
