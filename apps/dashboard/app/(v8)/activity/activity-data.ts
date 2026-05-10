@@ -2,7 +2,7 @@ import "server-only";
 
 import { withAuth } from "@workos-inc/authkit-nextjs";
 
-import { API_URL, getBootstrapOrg, getMyOrg, getOrgApiKey, getOrgRepos, type Org, type Repo } from "../../../lib/data";
+import { API_URL, getBootstrapOrg, getMyOrg, getOrgApiKey, getOrgRepos, getOrgSetupStatus, type Org, type Repo, type SetupStatus } from "../../../lib/data";
 
 export type ActivityEvent = {
   id: string;
@@ -26,6 +26,22 @@ export type ActivityEvent = {
   risk_band: "low" | "medium" | "high";
   session_id: string;
   session_db_id: string | null;
+};
+
+export type ActivityComplianceEvent = {
+  id: string;
+  timestamp: string | null;
+  provider: string;
+  actor_login: string | null;
+  repo_name: string | null;
+  model: string | null;
+  intelligence_tier: string | null;
+  access_scope: string | null;
+  policy_decision: string | null;
+  source_envelope_hash: string | null;
+  summary: string;
+  risk_score: number;
+  risk_band: "low" | "medium" | "high";
 };
 
 export type ActivitySession = {
@@ -135,6 +151,11 @@ export async function getActivityFeed(accessToken: string, orgId: string, params
   return activityFetch<{ events: ActivityEvent[]; total: number }>(accessToken, `/v8/orgs/${orgId}/activity/feed${query ? `?${query}` : ""}`);
 }
 
+export async function getActivityComplianceEvents(accessToken: string, orgId: string, params: URLSearchParams): Promise<{ events: ActivityComplianceEvent[]; total: number; content_retention: "metadata-only" } | null> {
+  const query = params.toString();
+  return activityFetch<{ events: ActivityComplianceEvent[]; total: number; content_retention: "metadata-only" }>(accessToken, `/v8/orgs/${orgId}/activity/compliance-events${query ? `?${query}` : ""}`);
+}
+
 export async function getActivitySessions(accessToken: string, orgId: string, params: URLSearchParams): Promise<{ sessions: ActivitySession[]; total: number; rollup: ActivityRollup } | null> {
   const query = params.toString();
   return activityFetch<{ sessions: ActivitySession[]; total: number; rollup: ActivityRollup }>(accessToken, `/v8/orgs/${orgId}/activity/sessions${query ? `?${query}` : ""}`);
@@ -151,4 +172,8 @@ export async function getActivityHeatmap(accessToken: string, orgId: string, rep
 
 export async function getActivityRepos(accessToken: string, orgId: string): Promise<Repo[]> {
   return (await getOrgRepos(accessToken, orgId)) ?? [];
+}
+
+export async function getActivitySetupStatus(accessToken: string, orgId: string): Promise<SetupStatus | null> {
+  return getOrgSetupStatus(accessToken, orgId);
 }

@@ -121,4 +121,23 @@ Final required verification:
 - Phase D performance smoke:
   - Policy evaluator 100-rule corpus: p95 `0.2273ms`, below the 50ms target.
   - v8 Insights dashboard 1M-action aggregate fixture: `/insights` rendered in `798.7ms`, below the 2s target.
-  - Final dashboard checks after e2e test edits: `npm --workspace apps/dashboard run type-check` -> passed; `npm --workspace apps/dashboard run lint` -> passed.
+- Final dashboard checks after e2e test edits: `npm --workspace apps/dashboard run type-check` -> passed; `npm --workspace apps/dashboard run lint` -> passed.
+
+## 2026-05-10 — v8 Insights Coverage SLA critical-ops wiring
+
+- Backend: `apps/api/api/v8/insights/router.py` now loads critical operations from `apps/api/api/v8/insights/critical_ops.yaml` (with safe fallback + cache) instead of hard-coding the placeholder list.
+- Backend tests: added Coverage SLA contract tests for YAML override + invalid YAML fallback in `apps/api/tests/test_v8_insights.py`.
+- Frontend: Coverage SLA tab now displays required skill categories per critical operation and includes a safe fallback message for empty `product_review_note`.
+- Verification:
+  - Backend syntax: ran `python -m py_compile apps/api/api/v8/insights/router.py apps/api/tests/test_v8_insights.py` -> passed.
+  - Backend touched checks: directly invoked `test_coverage_sla_reads_critical_ops_from_yaml` and `test_coverage_sla_falls_back_when_critical_ops_yaml_invalid` with `MonkeyPatch` + temp YAML files -> passed.
+  - Backend full file caveat: `python -m pytest apps/api/tests/test_v8_insights.py -q` exits with code `-1` and no output in the local Python 3.13 shell, so the touched contract checks above were used for this run.
+  - Frontend: ran `npm run lint --workspace apps/dashboard`, `npm run type-check --workspace apps/dashboard`, and `npm run build --workspace apps/dashboard` -> passed.
+- UX screenshot gate:
+  - Production preview screenshots captured for the migrated Skillayer Coverage SLA empty state:
+    - `docs/v8-refactor/screenshots/automation-20260510/coverage-sla-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260510/coverage-sla-mobile.png`
+  - Data-backed production preview screenshots captured with a local mock API to prove the changed review note and required-category UI:
+    - `docs/v8-refactor/screenshots/automation-20260510/coverage-sla-data-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260510/coverage-sla-data-mobile.png`
+  - Browser checks confirmed the product-review note, `Requires: security_compliance, codebase_architecture`, `Requires: operational_knowledge`, repo card, gap state, and mobile `bodyWidth` equals the viewport width.

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id
 from packages.db.database import get_db
-from packages.db.models import AgentSession, Repo
+from packages.db.models import AgentSession, AuditEvent, Repo
 
 
 router = APIRouter(prefix="/orgs", tags=["agent-runs"])
@@ -109,6 +109,120 @@ def _code_text(payload: AgentRunPayload, artifacts: list[dict[str, Any]]) -> str
     return "\n\n".join(chunk for chunk in chunks if chunk).strip() or None
 
 
+def _metadata_string(metadata: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = metadata.get(key)
+        if value not in {None, ""}:
+            return str(value)
+    return None
+
+
+def _metadata_bool(metadata: dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "full", "full-access", "autonomous"}:
+            return True
+    return False
+
+
+def _safe_tool_label(value: object) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, dict):
+        for key in ("name", "tool", "tool_name", "mcp_tool", "id"):
+            label = value.get(key)
+            if isinstance(label, str) and label.strip():
+                return label.strip()
+        return None
+    return None
+
+
+def _tool_names(artifacts: list[dict[str, Any]], metadata: dict[str, Any]) -> list[str]:
+    names = [str(item.get("tool")) for item in artifacts if item.get("tool")]
+    for key in ("tool_permissions", "tools", "tool_calls", "mcp_tools"):
+        value = metadata.get(key)
+        if isinstance(value, list):
+            names.extend(label for item in value if (label := _safe_tool_label(item)))
+        elif isinstance(value, dict):
+            label = _safe_tool_label(value)
+            if label:
+                names.append(label)
+            else:
+                names.extend(str(item) for item in value.keys() if item not in {"args", "arguments", "parameters", "params", "input", "content", "prompt", "diff"})
+        elif isinstance(value, str) and value.strip():
+            names.append(value.strip())
+    return sorted(dict.fromkeys(names))
+
+
+def _sanitized_agent_run_envelope(payload: AgentRunPayload, artifacts: list[dict[str, Any]], repo: Repo, session_key: str, runtime: str) -> dict[str, Any]:
+    return {
+        "spec_version": payload.spec_version,
+        "run_id": payload.run_id,
+        "session_id": session_key,
+        "agent": payload.agent.model_dump(mode="json", exclude_none=True),
+        "repo": {"id": repo.id, "name": repo.name, "full_name": repo.full_name},
+        "user": payload.user.model_dump(mode="json", exclude_none=True) if payload.user else None,
+        "runtime": runtime,
+        "started_at": payload.started_at.isoformat() if payload.started_at else None,
+        "ended_at": payload.ended_at.isoformat() if payload.ended_at else None,
+        "skills_loaded": [_skill_name(item) for item in payload.skills_loaded],
+        "artifacts": [
+            {
+                "file_path": item.get("file_path"),
+                "tool": item.get("tool"),
+                "before_hash": item.get("before_hash"),
+                "after_hash": item.get("after_hash"),
+                "ts": item.get("ts"),
+            }
+            for item in artifacts
+        ],
+        "outcome": payload.outcome,
+    }
+
+
+def _agent_compliance_audit_event(org_id: str, payload: AgentRunPayload, repo: Repo, session_key: str, runtime: str, artifacts: list[dict[str, Any]]) -> AuditEvent:
+    metadata = dict(payload.metadata or {})
+    sanitized_envelope = _sanitized_agent_run_envelope(payload, artifacts, repo, session_key, runtime)
+    envelope_hash = hashlib.sha256(json.dumps(sanitized_envelope, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    provider = _metadata_string(metadata, "provider", "agent_provider", "source_provider") or f"{payload.agent.vendor} {payload.agent.product}".strip()
+    access_scope = _metadata_string(metadata, "access_scope", "permission_scope", "grant_scope") or ("full-access" if _metadata_bool(metadata, "full_access", "full_access_granted") else "unspecified")
+    tool_permissions = _tool_names(artifacts, metadata)
+    compliance_metadata: dict[str, Any] = {
+        "provider": provider,
+        "agent_provider": provider,
+        "agent_runtime": runtime,
+        "model": _metadata_string(metadata, "model", "model_name", "model_id"),
+        "intelligence_tier": _metadata_string(metadata, "intelligence_tier", "model_tier", "reasoning_tier"),
+        "access_scope": access_scope,
+        "full_access": _metadata_bool(metadata, "full_access", "full_access_granted") or access_scope == "full-access",
+        "autonomous_access": _metadata_bool(metadata, "autonomous_access", "autonomous"),
+        "tool_permissions": tool_permissions,
+        "repo_name": repo.full_name or repo.name,
+        "source_envelope_hash": envelope_hash,
+        "provider_event_id": session_key,
+        "formal_compliance_record": False,
+        "content_retention": "metadata-only",
+        "redaction_state": "raw-content-dropped",
+    }
+    compliance_metadata = {key: value for key, value in compliance_metadata.items() if value is not None and value != "" and value != []}
+    severity = "critical" if compliance_metadata.get("full_access") or compliance_metadata.get("autonomous_access") else "warning" if tool_permissions else "info"
+    return AuditEvent(
+        org_id=org_id,
+        event_type="agent.compliance",
+        action="ingested",
+        summary=f"Normalized AgentRun metadata for {provider}",
+        actor_login=payload.user.login if payload.user else None,
+        repo_id=repo.id,
+        repo_name=repo.full_name or repo.name,
+        resource_type="agent_run",
+        resource_id=session_key,
+        severity=severity,
+        metadata_json=compliance_metadata,
+    )
+
+
 async def _resolve_repo(db: AsyncSession, org_id: str, payload: AgentRunPayload) -> Repo:
     repo_id = payload.repo_id or (payload.repo.id if payload.repo else None)
     if repo_id:
@@ -188,6 +302,7 @@ async def ingest_agent_run(
         session.files_touched = touched
         if code_text:
             session.code_produced = f"{session.code_produced}\n\n{code_text}".strip() if session.code_produced else code_text
+        db.add(_agent_compliance_audit_event(org_id, payload, repo, session_key, runtime, artifacts))
         await db.commit()
     except HTTPException:
         raise

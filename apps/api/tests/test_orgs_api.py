@@ -133,6 +133,30 @@ def test_org_stats_counts_active_agent_runtimes_from_skill_usage() -> None:
     assert response["active_agents"] == 2
 
 
+def test_setup_status_exposes_next_action_guidance() -> None:
+    cases = [
+        ((0, 0, 0, 0), 0, "connect_repo", "/skills/repos"),
+        ((1, 0, 0, 0), 25, "generate_skills", "/skills/repos"),
+        ((1, 3, 0, 0), 50, "connect_agent", "/settings/connectors"),
+        ((1, 3, 0, 2), 75, "improve_skills", "/skills/score"),
+        ((1, 3, 1, 2), 100, None, "/activity"),
+    ]
+
+    for scalars, percent, next_step_id, action_url in cases:
+        db = Db(results=[Result(scalar=value) for value in scalars])
+
+        response = asyncio.run(orgs.get_org_setup_status("org_1", db, "org_1"))
+
+        assert response.completion_percent == percent
+        assert response.completion_label == f"{percent // 25} of 4 setup steps complete"
+        assert response.next_step_id == next_step_id
+        assert response.next_action_url == action_url
+        if next_step_id is not None:
+            assert response.next_step_title
+            assert response.next_step_guidance
+            assert response.next_step_guidance != "Complete the next setup step to unlock live governance activity."
+
+
 def test_org_sources_include_detected_and_common_unconnected_sources() -> None:
     db = Db(
         org=_org(),

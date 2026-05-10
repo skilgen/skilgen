@@ -58,6 +58,7 @@ def test_activity_router_is_registered_on_main_app() -> None:
     paths = {route.path for route in index_app.routes}
 
     assert "/v8/orgs/{org_id}/activity/feed" in paths
+    assert "/v8/orgs/{org_id}/activity/compliance-events" in paths
     assert "/v8/orgs/{org_id}/repos/{repo_id}/activity/sessions/{session_id}/replay" in paths
     assert "/v8/orgs/{org_id}/repos/{repo_id}/activity/heatmap" in paths
 
@@ -109,6 +110,119 @@ def test_feed_contract_returns_v8_view_model() -> None:
     assert payload["events"][0]["skill_signature_status"] == "verified"
     assert payload["events"][0]["repo_sensitivity_tier"] == "confidential"
     assert payload["events"][0]["trigger"]["label"] == "PAY-4421"
+    assert payload["filters"] == {"hours": 24, "risk_band": "low"}
+
+
+def test_feed_contract_echoes_shareable_investigation_filters() -> None:
+    event = SimpleNamespace(id="evt_1", org_id="org_1", repo_id="repo_1", skill_id="skill_1", agent_runtime="codex", session_id="sess_ext", loaded_at=datetime(2026, 5, 5, 1, 0, 0))
+    repo = SimpleNamespace(id="repo_1", org_id="org_1", name="api", full_name="acme/api", sensitivity_tier="confidential")
+    skill = SimpleNamespace(id="skill_1", repo_id="repo_1", domain="api", skill_path="skills/api/SKILL.md", content_hash="hash")
+    session = SimpleNamespace(id="sess_db", repo_id="repo_1", session_id="sess_ext", engineer_login="ravi", files_touched=["src/app.py"], task_description="PAY-4421", notes=None)
+    client = _client(Db([Result(rows=[event]), Result(rows=[repo]), Result(rows=[skill]), Result(rows=[session])]))
+
+    response = client.get(
+        "/v8/orgs/org_1/activity/feed"
+        "?hours=168&repo_id=repo_1&skill_id=skill_1&agent_provider=codex"
+        "&action_class=read&outcome=allowed&risk_band=medium&repo_sensitivity_tier=confidential&user=ravi"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["filters"] == {
+        "hours": 168,
+        "repo_id": "repo_1",
+        "skill_id": "skill_1",
+        "agent_provider": "codex",
+        "action_class": "read",
+        "outcome": "allowed",
+        "risk_band": "medium",
+        "repo_sensitivity_tier": "confidential",
+        "user": "ravi",
+    }
+
+
+def test_compliance_events_contract_returns_metadata_only_activity() -> None:
+    event = SimpleNamespace(
+        id="evt_agent_1",
+        org_id="org_1",
+        event_type="agent.compliance",
+        actor_login="ravi",
+        repo_name="acme/payments",
+        resource_type="codex_cli",
+        severity="warning",
+        summary="Codex CLI full-access session observed",
+        created_at=datetime(2026, 5, 5, 1, 0, 0),
+        metadata_json={
+            "provider": "Codex CLI",
+            "model": "gpt-5.2",
+            "intelligence_tier": "very-high",
+            "access_scope": "full-access",
+            "policy_decision": "allow-with-review",
+            "source_envelope_hash": "abc123def456",
+            "raw_prompt": "must not be returned",
+        },
+    )
+    client = _client(Db([Result(rows=[event])]))
+
+    response = client.get("/v8/orgs/org_1/activity/compliance-events?hours=24")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["content_retention"] == "metadata-only"
+    assert payload["events"][0]["provider"] == "Codex CLI"
+    assert payload["events"][0]["intelligence_tier"] == "very-high"
+    assert payload["events"][0]["risk_band"] == "high"
+    assert "raw_prompt" not in payload["events"][0]
+
+
+def test_compliance_events_filters_provider_after_metadata_projection() -> None:
+    event = SimpleNamespace(
+        id="evt_agent_1",
+        org_id="org_1",
+        event_type="agent.compliance",
+        actor_login="ravi",
+        repo_name="acme/payments",
+        resource_type="codex_cli",
+        severity="info",
+        summary="Codex CLI session observed",
+        created_at=datetime(2026, 5, 5, 1, 0, 0),
+        metadata_json={"provider": "Codex CLI", "access_scope": "workspace-write"},
+    )
+    client = _client(Db([Result(rows=[event])]))
+
+    response = client.get("/v8/orgs/org_1/activity/compliance-events?provider=Cursor")
+
+    assert response.status_code == 200
+    assert response.json()["events"] == []
+
+
+def test_feed_filters_can_scan_past_newer_non_matching_events() -> None:
+    stale_events = [
+        SimpleNamespace(id=f"evt_{index}", org_id="org_1", repo_id="repo_1", skill_id="other", agent_runtime="codex", session_id="other", loaded_at=datetime(2026, 5, 5, 2, 0, 0))
+        for index in range(200)
+    ]
+    match = SimpleNamespace(id="evt_match", org_id="org_1", repo_id="repo_1", skill_id="skill_1", agent_runtime="codex", session_id="sess_ext", loaded_at=datetime(2026, 5, 5, 1, 0, 0))
+    repo = SimpleNamespace(id="repo_1", org_id="org_1", name="api", full_name="acme/api", sensitivity_tier="confidential")
+    skill = SimpleNamespace(id="skill_1", repo_id="repo_1", domain="api", skill_path="skills/api/SKILL.md", content_hash="hash")
+    session = SimpleNamespace(id="sess_db", repo_id="repo_1", session_id="sess_ext", engineer_login="ravi", files_touched=["src/app.py"], task_description=None, notes=None)
+    client = _client(
+        Db(
+            [
+                Result(rows=stale_events),
+                Result(rows=[repo]),
+                Result(rows=[]),
+                Result(rows=[]),
+                Result(rows=[match]),
+                Result(rows=[repo]),
+                Result(rows=[skill]),
+                Result(rows=[session]),
+            ]
+        )
+    )
+
+    response = client.get("/v8/orgs/org_1/activity/feed?skill_id=skill_1&limit=1")
+
+    assert response.status_code == 200
+    assert response.json()["events"][0]["id"] == "evt_match"
 
 
 def test_sessions_contract_includes_cross_provider_rollup() -> None:

@@ -20,18 +20,32 @@ export const metadata: Metadata = {
   description: "Skillayer dashboard",
 };
 
+const workOSRedirectUri = process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI || process.env.WORKOS_REDIRECT_URI || "";
+
+const isWorkOSConfigured = Boolean(
+  process.env.WORKOS_API_KEY &&
+    process.env.WORKOS_CLIENT_ID &&
+    process.env.WORKOS_COOKIE_PASSWORD &&
+    process.env.WORKOS_COOKIE_PASSWORD.length >= 32 &&
+    workOSRedirectUri,
+);
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const content = (
+    <>
+      <PostHogProvider />
+      {children}
+    </>
+  );
+
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <AuthKitProvider>
-          <PostHogProvider />
-          {children}
-        </AuthKitProvider>
+        {isWorkOSConfigured ? <AuthKitProvider>{content}</AuthKitProvider> : content}
       </body>
     </html>
   );

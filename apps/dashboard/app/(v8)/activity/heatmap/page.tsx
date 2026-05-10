@@ -1,5 +1,8 @@
+import Link from "next/link";
+
 import { ActivityHeader } from "../ActivityNav";
-import { getActivityHeatmap, getActivityRepos, loadActivityContext, normalizeSearchParams, type HeatmapCell } from "../activity-data";
+import { SetupReadinessBanner } from "../SetupReadinessBanner";
+import { getActivityHeatmap, getActivityRepos, getActivitySetupStatus, loadActivityContext, normalizeSearchParams, type HeatmapCell } from "../activity-data";
 
 type PageSearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -19,6 +22,7 @@ export default async function ActivityHeatmapPage({ searchParams }: { searchPara
   const heatmapParams = new URLSearchParams(params);
   heatmapParams.delete("repo_id");
   const payload = context.org?.id ? await getActivityHeatmap(context.accessToken, context.org.id, repoId, heatmapParams) : null;
+  const setupStatus = context.org?.id ? await getActivitySetupStatus(context.accessToken, context.org.id) : null;
   const cells = payload?.cells ?? [];
   const repoNames = [...new Map(cells.map((cell) => [cell.repo_id, cell.repo_name])).entries()];
   const hours = Array.from({ length: 24 }, (_, hour) => hour);
@@ -27,6 +31,7 @@ export default async function ActivityHeatmapPage({ searchParams }: { searchPara
   return (
     <div className="space-y-6">
       <ActivityHeader active="heatmap" />
+      <SetupReadinessBanner setupStatus={setupStatus} />
 
       <form className="grid gap-3 rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4 md:grid-cols-[minmax(0,1fr)_180px_180px_auto]" method="get">
         <select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={repoId} name="repo_id">
@@ -63,7 +68,16 @@ export default async function ActivityHeatmapPage({ searchParams }: { searchPara
             </div>
           ))}
         </div>
-        {repoNames.length === 0 ? <div className="p-8 text-center text-sm text-[color:var(--text-secondary)]">No activity was found for the selected window.</div> : null}
+        {repoNames.length === 0 ? (
+          <div className="p-8 text-center text-sm text-[color:var(--text-secondary)]">
+            <p>No activity was found for the selected window.</p>
+            {setupStatus?.next_action_url ? (
+              <Link className="mt-3 inline-flex rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-[13px] font-semibold text-[color:var(--text-primary)] hover:border-[color:var(--accent-primary)]" href={setupStatus.next_action_url}>
+                {setupStatus.next_step_title ?? "Continue setup"}
+              </Link>
+            ) : null}
+          </div>
+        ) : null}
       </section>
     </div>
   );

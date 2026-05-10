@@ -21,7 +21,7 @@ from apps.api.api.v8.activity.view_model import (
     replay_timeline,
 )
 from packages.db.database import get_db
-from packages.db.models import AgentSession, Org, Repo, Skill, SkillUsageEvent
+from packages.db.models import AgentSession, AuditEvent, Org, Repo, Skill, SkillUsageEvent
 
 
 router = APIRouter(
@@ -29,6 +29,15 @@ router = APIRouter(
     tags=["v8-activity"],
     dependencies=[Depends(request_flag_cache)],
 )
+
+AGENT_COMPLIANCE_EVENT_TYPES = {
+    "agent.compliance",
+    "agent_compliance",
+    "agent.telemetry",
+    "agent_telemetry",
+    "coding_agent.compliance",
+    "coding_agent.telemetry",
+}
 
 
 async def _require_v8(org_id: str, current_org_id: str | None, db: AsyncSession) -> None:
@@ -109,6 +118,66 @@ def _matches_filters(item: dict[str, Any], filters: dict[str, str | None]) -> bo
     return True
 
 
+def _active_feed_filters(
+    *,
+    hours: int,
+    repo_id: str | None,
+    skill_id: str | None,
+    agent_provider: str | None,
+    action_class: str | None,
+    outcome: str | None,
+    risk_band: str | None,
+    repo_sensitivity_tier: str | None,
+    user: str | None,
+) -> dict[str, int | str]:
+    raw: dict[str, int | str | None] = {
+        "hours": hours,
+        "repo_id": repo_id,
+        "skill_id": skill_id,
+        "agent_provider": agent_provider,
+        "action_class": action_class,
+        "outcome": outcome,
+        "risk_band": risk_band,
+        "repo_sensitivity_tier": repo_sensitivity_tier,
+        "user": user,
+    }
+    return {key: value for key, value in raw.items() if value not in {None, ""}}
+
+
+def _metadata_value(metadata: object, *keys: str) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    for key in keys:
+        value = metadata.get(key)
+        if value not in {None, ""}:
+            return str(value)
+    return None
+
+
+def _compliance_activity_item(event: AuditEvent) -> dict[str, Any]:
+    metadata = event.metadata_json or {}
+    provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or event.resource_type or event.event_type
+    access_scope = _metadata_value(metadata, "access_scope", "permission_scope", "grant_scope")
+    policy_decision = _metadata_value(metadata, "policy_decision", "decision", "outcome")
+    severity = str(event.severity or "info").lower()
+    risk = 80 if severity == "critical" or access_scope == "full-access" else 55 if severity == "warning" or access_scope else 25
+    return {
+        "id": event.id,
+        "timestamp": event.created_at.isoformat() if event.created_at else None,
+        "provider": provider,
+        "actor_login": event.actor_login,
+        "repo_name": event.repo_name or _metadata_value(metadata, "repo_name", "repo"),
+        "model": _metadata_value(metadata, "model", "model_name", "model_id"),
+        "intelligence_tier": _metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier"),
+        "access_scope": access_scope,
+        "policy_decision": policy_decision,
+        "source_envelope_hash": _metadata_value(metadata, "source_envelope_hash", "envelope_hash", "event_hash"),
+        "summary": event.summary,
+        "risk_score": risk,
+        "risk_band": risk_band(risk),
+    }
+
+
 async def _feed_items(
     db: AsyncSession,
     org_id: str,
@@ -122,21 +191,37 @@ async def _feed_items(
     statement = select(SkillUsageEvent).where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff)
     if repo_id:
         statement = statement.where(SkillUsageEvent.repo_id == repo_id)
-    events = (await db.execute(statement.order_by(desc(SkillUsageEvent.loaded_at)).limit(limit * 3))).scalars().all()
-    repos = await _repos_by_id(db, [event.repo_id for event in events])
-    skills = await _skills_by_id(db, [event.skill_id for event in events])
-    sessions = await _sessions_for_events(db, org_id, events)
-    items = [
-        feed_event_view(
-            event,
-            repos.get(event.repo_id),
-            skills.get(event.skill_id),
-            sessions.get((event.repo_id, event.session_id)),
-        )
-        for event in events
-    ]
     active_filters = filters or {}
-    return [item for item in items if _matches_filters(item, active_filters)][:limit]
+    if active_filters.get("skill_id"):
+        statement = statement.where(SkillUsageEvent.skill_id == active_filters["skill_id"])
+    if active_filters.get("agent_provider"):
+        statement = statement.where(SkillUsageEvent.agent_runtime == active_filters["agent_provider"])
+    page_size = min(max(limit * 3, 200), 1000)
+    offset = 0
+    scanned = 0
+    items: list[dict[str, Any]] = []
+    while len(items) < limit and scanned < 5000:
+        events = (await db.execute(statement.order_by(desc(SkillUsageEvent.loaded_at)).limit(page_size).offset(offset))).scalars().all()
+        if not events:
+            break
+        repos = await _repos_by_id(db, [event.repo_id for event in events])
+        skills = await _skills_by_id(db, [event.skill_id for event in events])
+        sessions = await _sessions_for_events(db, org_id, events)
+        page_items = [
+            feed_event_view(
+                event,
+                repos.get(event.repo_id),
+                skills.get(event.skill_id),
+                sessions.get((event.repo_id, event.session_id)),
+            )
+            for event in events
+        ]
+        items.extend(item for item in page_items if _matches_filters(item, active_filters))
+        scanned += len(events)
+        if len(events) < page_size:
+            break
+        offset += page_size
+    return items[:limit]
 
 
 @router.get("/activity/feed")
@@ -172,7 +257,63 @@ async def activity_feed(
             "user": user,
         },
     )
-    return {"events": items, "total": len(items), "filters": {"hours": hours, "repo_id": repo_id}}
+    return {
+        "events": items,
+        "total": len(items),
+        "filters": _active_feed_filters(
+            hours=hours,
+            repo_id=repo_id,
+            skill_id=skill_id,
+            agent_provider=agent_provider,
+            action_class=action_class,
+            outcome=outcome,
+            risk_band=risk_band_filter,
+            repo_sensitivity_tier=repo_sensitivity_tier,
+            user=user,
+        ),
+    }
+
+
+@router.get("/activity/compliance-events")
+async def activity_compliance_events(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+    provider: str | None = None,
+    actor: str | None = None,
+    access_scope: str | None = None,
+    hours: int = Query(default=24, ge=1, le=24 * 30),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    await _require_v8(org_id, current_org_id, db)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
+    filters: list[Any] = [
+        AuditEvent.org_id == org_id,
+        AuditEvent.created_at >= cutoff,
+        AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+    ]
+    if actor:
+        filters.append(AuditEvent.actor_login.ilike(f"%{actor}%"))
+    rows = (
+        await db.execute(
+            select(AuditEvent)
+            .where(*filters)
+            .order_by(desc(AuditEvent.created_at))
+            .limit(limit)
+        )
+    ).scalars().all()
+    items = [_compliance_activity_item(event) for event in rows]
+    if provider:
+        provider_lower = provider.lower()
+        items = [item for item in items if str(item["provider"]).lower() == provider_lower]
+    if access_scope:
+        items = [item for item in items if item["access_scope"] == access_scope]
+    return {
+        "events": items,
+        "total": len(items),
+        "content_retention": "metadata-only",
+        "filters": {key: value for key, value in {"hours": hours, "provider": provider, "actor": actor, "access_scope": access_scope}.items() if value not in {None, ""}},
+    }
 
 
 @router.get("/activity/feed/stream")
@@ -182,6 +323,15 @@ async def activity_feed_stream(
     key: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_org_id: str | None = Depends(get_current_org_id_optional),
+    hours: int = Query(default=1, ge=1, le=24 * 30),
+    repo_id: str | None = None,
+    skill_id: str | None = None,
+    agent_provider: str | None = None,
+    action_class: str | None = None,
+    outcome: str | None = None,
+    risk_band_filter: str | None = Query(default=None, alias="risk_band"),
+    repo_sensitivity_tier: str | None = None,
+    user: str | None = None,
 ) -> StreamingResponse:
     key_org_id = await _org_from_key(key, db)
     actual_org_id = key_org_id or current_org_id
@@ -191,7 +341,22 @@ async def activity_feed_stream(
         started = datetime.now(UTC)
         sent: set[str] = set()
         while (datetime.now(UTC) - started) < timedelta(minutes=5):
-            items = await _feed_items(db, org_id, limit=25, hours=1)
+            items = await _feed_items(
+                db,
+                org_id,
+                limit=25,
+                hours=hours,
+                repo_id=repo_id,
+                filters={
+                    "skill_id": skill_id,
+                    "agent_provider": agent_provider,
+                    "action_class": action_class,
+                    "outcome": outcome,
+                    "risk_band": risk_band_filter,
+                    "repo_sensitivity_tier": repo_sensitivity_tier,
+                    "user": user,
+                },
+            )
             for item in reversed(items):
                 event_id = str(item["id"])
                 if event_id in sent:

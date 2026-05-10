@@ -6,6 +6,7 @@ import type { NextConfig } from "next";
 // Vercel's prebuilt deployment runner).  Set BUILD_STANDALONE=1 in the
 // Docker build environment to opt in.
 const nextConfig: NextConfig = {
+  devIndicators: false,
   transpilePackages: ["@skillayer/config", "@skillayer/types", "@skillayer/ui"],
   ...(process.env.BUILD_STANDALONE === "1" ? { output: "standalone" } : {}),
 };

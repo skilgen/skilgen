@@ -30,9 +30,31 @@ function v8LegacyRedirect(request: NextRequest): NextResponse | null {
   if (!readBooleanEnv(process.env.IA_V8_DEFAULT)) return null;
 
   const { pathname, search } = request.nextUrl;
-  if (pathname === "/dashboard/repos") {
-    return NextResponse.redirect(new URL(`/skills/repos${search}`, request.url));
-  }
+  const redirect = (target: string) => NextResponse.redirect(new URL(`${target}${search}`, request.url));
+
+  if (pathname === "/dashboard") return redirect("/activity");
+
+  const redirects: Record<string, string> = {
+    "/dashboard/repos": "/skills/repos",
+    "/dashboard/agent-prs": "/activity/live-feed",
+    "/dashboard/review": "/policy/approvals",
+    "/dashboard/agent-scorecard": "/insights/risky-agents",
+    "/dashboard/ai-readiness": "/activity",
+    "/dashboard/connect": "/settings/connectors",
+    "/dashboard/onboarding": "/settings/connectors",
+    "/dashboard/digest": "/settings/notifications",
+    "/dashboard/autopilot": "/policy/rules",
+    "/dashboard/sources": "/skills/repos",
+    "/dashboard/sla": "/insights/coverage-sla",
+    "/dashboard/half-life": "/skills/drift",
+    "/dashboard/registry/dependency-graph": "/skills/provenance",
+    "/dashboard/teams": "/settings/teams",
+    "/dashboard/settings": "/settings",
+    "/dashboard/settings/billing": "/settings/billing",
+  };
+
+  const target = redirects[pathname];
+  if (target) return redirect(target);
 
   return null;
 }

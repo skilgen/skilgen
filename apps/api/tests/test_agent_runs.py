@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from apps.api.api.auth import get_current_org_id
 from apps.api.api.routes import agent_runs
 from packages.db.database import get_db
-from packages.db.models import AgentSession
+from packages.db.models import AgentSession, AuditEvent
 
 
 class Result:
@@ -72,6 +72,13 @@ def test_agent_run_ingest_creates_session_from_http_payload() -> None:
             "repo_id": "repo_1",
             "skills_loaded": ["agents", {"domain": "cli"}],
             "code_artifacts": [{"file_path": "apps/api/routes/review.py", "tool": "Write", "after_hash": "abc", "diff": "+hello"}],
+            "metadata": {
+                "model": "gpt-5.2",
+                "intelligence_tier": "very-high",
+                "access_scope": "full-access",
+                "full_access": True,
+                "tool_calls": [{"name": "shell", "parameters": {"command": "cat secret.txt"}, "content": "raw tool payload"}],
+            },
             "outcome": "success",
         },
     )
@@ -87,6 +94,23 @@ def test_agent_run_ingest_creates_session_from_http_payload() -> None:
     assert session.produced_file_hashes == {"apps/api/routes/review.py": "abc"}
     assert session.files_touched == ["apps/api/routes/review.py"]
     assert "+hello" in session.code_produced
+    audit = db.added[1]
+    assert isinstance(audit, AuditEvent)
+    assert audit.event_type == "agent.compliance"
+    assert audit.resource_type == "agent_run"
+    assert audit.resource_id == "codex-run-1"
+    assert audit.metadata_json["provider"] == "OpenAI Codex CLI"
+    assert audit.metadata_json["model"] == "gpt-5.2"
+    assert audit.metadata_json["intelligence_tier"] == "very-high"
+    assert audit.metadata_json["access_scope"] == "full-access"
+    assert audit.metadata_json["content_retention"] == "metadata-only"
+    assert audit.metadata_json["redaction_state"] == "raw-content-dropped"
+    assert audit.metadata_json["tool_permissions"] == ["Write", "shell"]
+    assert "source_envelope_hash" in audit.metadata_json
+    assert "diff" not in audit.metadata_json
+    assert "content" not in audit.metadata_json
+    assert "secret.txt" not in str(audit.metadata_json)
+    assert "raw tool payload" not in str(audit.metadata_json)
 
 
 def test_agent_run_ingest_derives_after_hash_from_artifact_content() -> None:
@@ -144,7 +168,9 @@ def test_agent_run_ingest_updates_existing_session_idempotently() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"session_id": "session_1", "status": "updated"}
-    assert db.added == []
+    assert len(db.added) == 1
+    assert isinstance(db.added[0], AuditEvent)
+    assert db.added[0].metadata_json["provider"] == "Anthropic Claude Code"
     assert session.skills_loaded == ["auth", "security"]
     assert session.closed_at == datetime(2026, 4, 27, 10, 15, 0)
     assert session.produced_file_hashes["src/auth.py"] == "def"

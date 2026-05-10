@@ -8,13 +8,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from apps.api.api.auth import get_current_org_id
 from apps.api.api.services import audit
 from apps.api.api.services.audit import get_actor_login
 from apps.api.api.v8.flags import is_v8, request_flag_cache
 from apps.api.api.v8.settings.connectors_registry import connector_registry
-from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission
+from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, require_permission
 from packages.db.database import get_db
 from packages.db.models import AuditEvent, DigestConfig, Org, Role, RoleBinding, SourceConnection
 
@@ -63,6 +64,21 @@ class DigestConfigPayload(BaseModel):
     layout: dict[str, object] = Field(default_factory=dict)
 
 
+class AgentComplianceConnectorPayload(BaseModel):
+    connector_id: str = Field(min_length=1, max_length=64)
+    enabled: bool = True
+    source_types: list[str] = Field(default_factory=list)
+    scopes: list[str] = Field(default_factory=list)
+    cursor: str | None = Field(default=None, max_length=512)
+    last_sync_status: Literal["pending", "success", "failed"] | None = None
+    content_retention: Literal["metadata-only", "tenant-enabled-content"] = "metadata-only"
+
+
+class AgentComplianceSyncPayload(BaseModel):
+    cursor: str | None = Field(default=None, max_length=512)
+    dry_run: bool = True
+
+
 async def _assert_v8_org(org_id: str, current_org_id: str, db: AsyncSession) -> None:
     if org_id != current_org_id:
         raise HTTPException(status_code=403, detail="Org access denied")
@@ -108,6 +124,53 @@ def _digest_response(config: DigestConfig) -> dict[str, object]:
         "layout": dict(config.layout or {}),
         "created_at": config.created_at,
         "updated_at": config.updated_at,
+    }
+
+
+def _agent_compliance_registry() -> list[dict[str, Any]]:
+    return [
+        item
+        for item in connector_registry()
+        if item.get("category") in {"compliance-telemetry", "coding-agent"}
+    ]
+
+
+def _agent_connector_settings(org: Org | None) -> dict[str, dict[str, object]]:
+    settings = dict(getattr(org, "settings", None) or {}) if org else {}
+    raw = settings.get("v8_agent_compliance_connectors")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): dict(value) for key, value in raw.items() if isinstance(value, dict)}
+
+
+def _agent_connector_response(org: Org | None) -> dict[str, object]:
+    configured = _agent_connector_settings(org)
+    connectors: list[dict[str, object]] = []
+    for item in _agent_compliance_registry():
+        connector_id = str(item["id"])
+        row = configured.get(connector_id) or {}
+        enabled = bool(row.get("enabled"))
+        connectors.append(
+            {
+                **item,
+                "configured": connector_id in configured,
+                "enabled": enabled,
+                "connected": False,
+                "source_types": list(row.get("source_types") or []),
+                "scopes": list(row.get("scopes") or []),
+                "last_cursor": row.get("cursor"),
+                "last_sync_status": row.get("last_sync_status") or ("pending" if enabled else None),
+                "last_sync_requested_at": row.get("last_sync_requested_at"),
+                "last_sync_mode": row.get("last_sync_mode"),
+                "content_retention": row.get("content_retention") or "metadata-only",
+                "updated_at": row.get("updated_at"),
+            }
+        )
+    return {
+        "content_retention_default": "metadata-only",
+        "configured_count": sum(1 for item in connectors if item["configured"]),
+        "enabled_count": sum(1 for item in connectors if item["enabled"]),
+        "connectors": connectors,
     }
 
 
@@ -323,6 +386,132 @@ async def get_connectors(
             }
         )
     return {"connectors": connectors}
+
+
+@router.get("/connectors/agent-compliance")
+async def get_agent_compliance_connectors(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    return _agent_connector_response(org)
+
+
+@router.post(
+    "/connectors/agent-compliance",
+    dependencies=[Depends(require_permission("settings.connectors.manage"))],
+)
+async def configure_agent_compliance_connector(
+    org_id: str,
+    payload: AgentComplianceConnectorPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    registry_ids = {str(item["id"]) for item in _agent_compliance_registry()}
+    if payload.connector_id not in registry_ids:
+        raise HTTPException(status_code=404, detail="Agent compliance connector not found")
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+
+    settings = dict(org.settings or {})
+    configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+    configured[payload.connector_id] = {
+        "enabled": payload.enabled,
+        "source_types": [item.strip() for item in payload.source_types if item.strip()],
+        "scopes": [item.strip() for item in payload.scopes if item.strip()],
+        "cursor": payload.cursor,
+        "last_sync_status": payload.last_sync_status or ("pending" if payload.enabled else None),
+        "content_retention": payload.content_retention,
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    settings["v8_agent_compliance_connectors"] = configured
+    org.settings = settings
+    flag_modified(org, "settings")
+    await audit.emit(
+        db,
+        org_id,
+        "settings.agent_compliance_connector_configured",
+        "updated",
+        f"Configured agent compliance connector {payload.connector_id}",
+        actor_login=get_actor_login(request),
+        resource_type="agent_compliance_connector",
+        resource_id=payload.connector_id,
+        metadata={
+            "enabled": payload.enabled,
+            "source_type_count": len(payload.source_types),
+            "scope_count": len(payload.scopes),
+            "content_retention": payload.content_retention,
+        },
+    )
+    await db.commit()
+    return _agent_connector_response(org)
+
+
+@router.post(
+    "/connectors/{connector_id}/sync",
+    dependencies=[Depends(require_permission("settings.connectors.manage"))],
+)
+async def request_agent_compliance_connector_sync(
+    org_id: str,
+    connector_id: str,
+    payload: AgentComplianceSyncPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    registry_ids = {str(item["id"]) for item in _agent_compliance_registry()}
+    if connector_id not in registry_ids:
+        raise HTTPException(status_code=404, detail="Agent compliance connector not found")
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+
+    settings = dict(org.settings or {})
+    configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+    current = dict(configured.get(connector_id) or {})
+    if not current.get("enabled"):
+        raise HTTPException(status_code=409, detail="Agent compliance connector must be enabled before sync")
+    if not payload.dry_run:
+        raise HTTPException(status_code=400, detail="Agent compliance sync readiness only supports dry-run requests")
+    now = datetime.utcnow().isoformat()
+    current.update(
+        {
+            "cursor": payload.cursor or current.get("cursor"),
+            "last_sync_status": "pending",
+            "last_sync_requested_at": now,
+            "last_sync_mode": "dry-run",
+            "updated_at": now,
+        }
+    )
+    configured[connector_id] = current
+    settings["v8_agent_compliance_connectors"] = configured
+    org.settings = settings
+    flag_modified(org, "settings")
+    await audit.emit(
+        db,
+        org_id,
+        "settings.agent_compliance_connector_sync_requested",
+        "requested",
+        f"Requested agent compliance connector sync for {connector_id}",
+        actor_login=get_actor_login(request),
+        resource_type="agent_compliance_connector",
+        resource_id=connector_id,
+        metadata={
+            "dry_run": payload.dry_run,
+            "cursor_supplied": bool(payload.cursor),
+            "content_retention": current.get("content_retention") or "metadata-only",
+        },
+    )
+    await db.commit()
+    return _agent_connector_response(org)
 
 
 @router.get("/admin-audit")

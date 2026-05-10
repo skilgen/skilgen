@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import StringIO
 import csv
 import json
@@ -19,7 +19,7 @@ from apps.api.api.services.audit import get_actor_login
 import apps.api.api.v8.audit.chain as chain
 from apps.api.api.v8.audit.evidence import build_evidence_package_zip
 from apps.api.api.v8.audit.reports import REPORTS, REPORTS_BY_ID, report_sql
-from apps.api.api.v8.audit.storage import publish_worm_root, root_document
+from apps.api.api.v8.audit.storage import WormStorageProvider, publish_worm_root, root_document, worm_target_status
 from apps.api.api.v8.flags import is_v8, request_flag_cache
 from packages.db.database import get_db
 from packages.db.models.base import new_uuid
@@ -114,6 +114,7 @@ class ExportResponse(BaseModel):
 
 class PublishRootRequest(BaseModel):
     cadence: str = Field(default="daily", max_length=32)
+    storage_provider: WormStorageProvider = "s3_object_lock"
 
 
 class PublishRootResponse(BaseModel):
@@ -121,6 +122,18 @@ class PublishRootResponse(BaseModel):
     object_key: str | None
     status: str
     event_count: int
+    storage_provider: WormStorageProvider
+
+
+class WormTargetResponse(BaseModel):
+    provider: WormStorageProvider
+    label: str
+    configured: bool
+    bucket_env: str
+    prefix_env: str
+    prefix: str
+    status: Literal["configured", "pending"]
+    content_retention: Literal["root-and-proof-only"]
 
 
 class EvidencePackageRequest(BaseModel):
@@ -133,6 +146,39 @@ class EvidencePackageResponse(BaseModel):
     job_id: str
     status: str
     queued: bool
+
+
+AGENT_COMPLIANCE_EVENT_TYPES = {
+    "agent.compliance",
+    "agent_compliance",
+    "agent.telemetry",
+    "agent_telemetry",
+    "coding_agent.compliance",
+    "coding_agent.telemetry",
+}
+
+
+class AgentComplianceAuditEvent(BaseModel):
+    id: str
+    event_type: str
+    actor_login: str | None
+    provider: str | None
+    model: str | None
+    intelligence_tier: str | None
+    access_scope: str | None
+    repo_name: str | None
+    policy_decision: str | None
+    source_envelope_hash: str | None
+    severity: Literal["info", "warning", "critical"]
+    summary: str
+    created_at: datetime
+
+
+class AgentComplianceAuditResponse(BaseModel):
+    total: int
+    window_days: int
+    content_retention: Literal["metadata-only"] = "metadata-only"
+    events: list[AgentComplianceAuditEvent]
 
 
 def _event_payload(event: AuditEvent) -> dict[str, Any]:
@@ -191,6 +237,36 @@ def _event_response(event: AuditEvent, chain_row: AuditHashChain | None = None) 
         metadata=event.metadata_json or {},
         created_at=event.created_at,
         chain=_chain_response(chain_row),
+    )
+
+
+def _metadata_value(metadata: object, *keys: str) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    for key in keys:
+        value = metadata.get(key)
+        if value not in {None, ""}:
+            return str(value)
+    return None
+
+
+def _agent_compliance_response(event: AuditEvent) -> AgentComplianceAuditEvent:
+    metadata = event.metadata_json or {}
+    severity = event.severity if event.severity in {"info", "warning", "critical"} else "info"
+    return AgentComplianceAuditEvent(
+        id=event.id,
+        event_type=event.event_type,
+        actor_login=event.actor_login,
+        provider=_metadata_value(metadata, "provider", "agent_provider", "source_provider"),
+        model=_metadata_value(metadata, "model", "model_name", "model_id"),
+        intelligence_tier=_metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier"),
+        access_scope=_metadata_value(metadata, "access_scope", "permission_scope", "grant_scope"),
+        repo_name=event.repo_name or _metadata_value(metadata, "repo_name", "repo"),
+        policy_decision=_metadata_value(metadata, "policy_decision", "decision", "outcome"),
+        source_envelope_hash=_metadata_value(metadata, "source_envelope_hash", "envelope_hash", "event_hash"),
+        severity=severity,
+        summary=event.summary,
+        created_at=event.created_at,
     )
 
 
@@ -374,6 +450,40 @@ async def get_event_log(
     )
 
 
+@router.get("/agent-compliance", response_model=AgentComplianceAuditResponse)
+async def get_agent_compliance_audit(
+    org_id: str,
+    provider: str | None = None,
+    actor: str | None = None,
+    window_days: int = Query(default=30, ge=1, le=180),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AgentComplianceAuditResponse:
+    await _assert_enabled(org_id, current_org_id, db)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=window_days)
+    filters: list[Any] = [
+        AuditEvent.org_id == org_id,
+        AuditEvent.created_at >= cutoff,
+        AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+    ]
+    if actor:
+        filters.append(AuditEvent.actor_login.ilike(f"%{actor}%"))
+    rows = (
+        await db.execute(
+            select(AuditEvent)
+            .where(*filters)
+            .order_by(desc(AuditEvent.created_at))
+            .limit(limit)
+        )
+    ).scalars().all()
+    events = [_agent_compliance_response(event) for event in rows]
+    if provider:
+        provider_lower = provider.lower()
+        events = [event for event in events if (event.provider or "").lower() == provider_lower]
+    return AgentComplianceAuditResponse(total=len(events), window_days=window_days, events=events)
+
+
 @router.get("/reports", response_model=list[AuditReportDefinitionResponse])
 async def list_reports(org_id: str, db: AsyncSession = Depends(get_db), current_org_id: str = Depends(get_current_org_id)) -> list[AuditReportDefinitionResponse]:
     await _assert_enabled(org_id, current_org_id, db)
@@ -430,6 +540,16 @@ async def export_report(
     writer.writeheader()
     writer.writerows(rows)
     return Response(buffer.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={report_id}.csv"})
+
+
+@router.get("/chain/worm-targets", response_model=list[WormTargetResponse])
+async def get_worm_targets(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[WormTargetResponse]:
+    await _assert_enabled(org_id, current_org_id, db)
+    return [WormTargetResponse(**target) for target in worm_target_status()]
 
 
 @router.post("/exports", response_model=ExportResponse)
@@ -495,8 +615,9 @@ async def publish_root(
         event_count=len(chain_rows),
         merkle_proof=list(last.merkle_proof or []),
         cadence=payload.cadence,
+        storage_provider=payload.storage_provider,
     )
-    object_key, status = publish_worm_root(document)
+    object_key, status = publish_worm_root(document, provider=payload.storage_provider)
     db.add(
         AuditWormRoot(
             org_id=org_id,
@@ -511,7 +632,7 @@ async def publish_root(
         )
     )
     await db.commit()
-    return PublishRootResponse(root_hash=last.root_hash, object_key=object_key, status=status, event_count=len(chain_rows))
+    return PublishRootResponse(root_hash=last.root_hash, object_key=object_key, status=status, event_count=len(chain_rows), storage_provider=payload.storage_provider)
 
 
 @router.post("/evidence-packages", response_model=EvidencePackageResponse)

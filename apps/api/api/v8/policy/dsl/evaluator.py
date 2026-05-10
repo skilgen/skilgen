@@ -8,6 +8,21 @@ from typing import Any
 
 from apps.api.api.v8.policy.dsl.models import EvaluationContext, PolicyDecision, PolicyRule, RESTRICTIVENESS
 
+AGENT_COMPLIANCE_ALIASES: dict[str, tuple[str, ...]] = {
+    "provider": ("provider", "agent_provider", "source_provider"),
+    "model": ("model", "model_name", "model_id"),
+    "intelligence_tier": ("intelligence_tier", "model_tier", "reasoning_tier"),
+    "access_scope": ("access_scope", "permission_scope", "grant_scope"),
+    "full_access": ("full_access", "is_full_access", "has_full_access", "access_scope", "permission_scope", "grant_scope"),
+    "tool_permissions": ("tool_permissions", "tools", "tool_calls", "mcp_tools"),
+    "mcp_server": ("mcp_server", "mcp_server_name", "mcp_server_id"),
+    "mcp_tool": ("mcp_tool", "mcp_tool_name", "tool_name", "mcp_tools", "tool_permissions", "tools", "tool_calls"),
+    "mcp_tools": ("mcp_tools", "tool_permissions", "tools", "tool_calls"),
+    "repo_sensitivity": ("repo_sensitivity", "repo_sensitivity_tier", "sensitivity_tier"),
+    "policy_decision": ("policy_decision", "decision", "outcome"),
+    "source_envelope_hash": ("source_envelope_hash", "envelope_hash", "event_hash"),
+}
+
 
 def evaluate_rules(rules: Iterable[PolicyRule], context: EvaluationContext) -> PolicyDecision:
     started = time.perf_counter()
@@ -30,15 +45,18 @@ def evaluate_rules(rules: Iterable[PolicyRule], context: EvaluationContext) -> P
 
 
 def context_from_mapping(payload: dict[str, Any]) -> EvaluationContext:
-    files_raw = payload.get("files") or payload.get("file_scope") or []
+    files_raw = payload.get("files") or payload.get("file_scope") or payload.get("file_paths") or []
     files = [str(item) for item in files_raw] if isinstance(files_raw, list) else [str(files_raw)]
+    reserved = {"repo", "agent", "action_class", "command", "files", "file_scope", "file_paths", "metadata"}
+    metadata = dict(payload.get("metadata") or {}) if isinstance(payload.get("metadata"), dict) else {}
+    metadata.update({key: value for key, value in payload.items() if key not in reserved})
     return EvaluationContext(
         repo=_string_or_none(payload.get("repo")),
         agent=_string_or_none(payload.get("agent")),
         action_class=_string_or_none(payload.get("action_class")),
         command=_string_or_none(payload.get("command")),
         files=files,
-        metadata={key: value for key, value in payload.items() if key not in {"repo", "agent", "action_class", "command", "files", "file_scope"}},
+        metadata=metadata,
     )
 
 
@@ -47,6 +65,7 @@ def _rule_matches(rule: PolicyRule, context: EvaluationContext) -> bool:
 
 
 def _mapping_matches(mapping: dict[str, Any], context: EvaluationContext, *, scope: bool) -> bool:
+    recognized = {"repo", "agent", "action_class", "command_regex", "file_glob", "files_glob", "metadata"} | set(AGENT_COMPLIANCE_ALIASES)
     for key, expected in mapping.items():
         if key == "repo" and not _value_matches(context.repo, expected):
             return False
@@ -60,21 +79,31 @@ def _mapping_matches(mapping: dict[str, Any], context: EvaluationContext, *, sco
             return False
         if key == "metadata" and not _metadata_matches(context.metadata, expected):
             return False
-        if not scope and key not in {"repo", "agent", "action_class", "command_regex", "file_glob", "files_glob", "metadata"}:
-            value = context.metadata.get(key)
-            if not _value_matches(_string_or_none(value), expected):
+        if key in AGENT_COMPLIANCE_ALIASES and not _value_matches(_metadata_lookup(context.metadata, key), expected):
+            return False
+        if not scope and key not in recognized:
+            if not _value_matches(_metadata_lookup(context.metadata, key), expected):
                 return False
     return True
 
 
-def _value_matches(actual: str | None, expected: object) -> bool:
+def _value_matches(actual: object, expected: object) -> bool:
     if isinstance(expected, list):
         return any(_value_matches(actual, item) for item in expected)
+    if isinstance(actual, (list, tuple, set)):
+        return any(_value_matches(item, expected) for item in actual)
+    if isinstance(expected, bool):
+        if isinstance(actual, bool):
+            return actual is expected
+        if actual is None:
+            return False
+        normalized = str(actual).strip().lower()
+        return normalized in {"true", "1", "yes", "full-access"} if expected else normalized in {"false", "0", "no", ""}
     if not isinstance(expected, str):
         return actual == str(expected)
     if actual is None:
         return False
-    return fnmatch.fnmatchcase(actual, expected)
+    return fnmatch.fnmatchcase(str(actual), expected)
 
 
 def _regex_matches(actual: str, expected: object) -> bool:
@@ -91,7 +120,16 @@ def _any_file_matches(files: list[str], expected: object) -> bool:
 def _metadata_matches(metadata: dict[str, Any], expected: object) -> bool:
     if not isinstance(expected, dict):
         return False
-    return all(_value_matches(_string_or_none(metadata.get(key)), value) for key, value in expected.items())
+    return all(_value_matches(_metadata_lookup(metadata, key), value) for key, value in expected.items())
+
+
+def _metadata_lookup(metadata: dict[str, Any], key: str) -> object:
+    aliases = AGENT_COMPLIANCE_ALIASES.get(key, (key,))
+    for alias in aliases:
+        value = metadata.get(alias)
+        if value is not None and value != "":
+            return value
+    return None
 
 
 def _redaction_targets(rule: PolicyRule) -> str:
@@ -120,4 +158,3 @@ def _string_or_none(value: object) -> str | None:
 
 def _elapsed_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 4)
-

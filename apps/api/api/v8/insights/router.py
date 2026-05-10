@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
+from pathlib import Path
 from statistics import median
 from typing import Any, Literal
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,13 +34,64 @@ SENSITIVITY_WEIGHTS: dict[str, float] = {
 }
 SENSITIVITY_ORDER = {"public": 0, "internal": 1, "sensitive": 2, "regulated": 3}
 VIOLATION_SEVERITIES = {"critical", "error", "fatal", "high", "block", "deny", "denied"}
-CRITICAL_OPERATIONS = [
-    {
-        "id": "critical-operations-placeholder",
-        "label": "Product review required",
-        "required_skill_categories": ["operational_knowledge", "security_compliance", "codebase_architecture"],
-    }
-]
+AGENT_COMPLIANCE_EVENT_TYPES = {
+    "agent.compliance",
+    "agent_compliance",
+    "agent.telemetry",
+    "agent_telemetry",
+    "coding_agent.compliance",
+    "coding_agent.telemetry",
+}
+
+CRITICAL_OPS_DEFAULT_NOTE = "critical_ops.yaml is a placeholder pending product review of critical operation taxonomy."
+CRITICAL_OPS_FALLBACK_OPERATION = {
+    "id": "critical-operations-placeholder",
+    "label": "Product review required",
+    "required_skill_categories": ["operational_knowledge", "security_compliance", "codebase_architecture"],
+}
+
+
+class CriticalOperationConfig(BaseModel):
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    required_skill_categories: list[str] = Field(default_factory=list)
+
+
+class CriticalOpsConfig(BaseModel):
+    product_review_required: bool = True
+    product_review_note: str | None = None
+    operations: list[CriticalOperationConfig] = Field(default_factory=list)
+
+
+def _critical_ops_path() -> Path:
+    return Path(__file__).with_name("critical_ops.yaml")
+
+
+@lru_cache(maxsize=1)
+def _load_critical_ops_config() -> CriticalOpsConfig:
+    path = _critical_ops_path()
+    if not path.exists():
+        return CriticalOpsConfig(
+            product_review_required=True,
+            product_review_note=CRITICAL_OPS_DEFAULT_NOTE,
+            operations=[CriticalOperationConfig.model_validate(CRITICAL_OPS_FALLBACK_OPERATION)],
+        )
+    try:
+        source = path.read_text(encoding="utf-8")
+        raw = yaml.safe_load(source) or {}
+    except (OSError, yaml.YAMLError):
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    try:
+        config = CriticalOpsConfig.model_validate(raw)
+    except Exception:
+        config = CriticalOpsConfig(product_review_required=True)
+    if not config.operations:
+        config.operations = [CriticalOperationConfig.model_validate(CRITICAL_OPS_FALLBACK_OPERATION)]
+    if config.product_review_required and not config.product_review_note:
+        config.product_review_note = CRITICAL_OPS_DEFAULT_NOTE
+    return config
 
 
 class TrendMetric(BaseModel):
@@ -112,6 +166,42 @@ class CoverageSlaResponse(BaseModel):
     product_review_required: bool
     product_review_note: str
     repos: list[CoverageRepo]
+
+
+class IntelligenceTierUsage(BaseModel):
+    provider: str
+    model: str | None = None
+    intelligence_tier: str
+    events: int
+    users: int
+
+
+class AccessGrantExposure(BaseModel):
+    actor_login: str
+    provider: str
+    repo_name: str | None = None
+    access_scope: str
+    full_access_events: int
+    autonomous_events: int
+    tool_permission_events: int
+    last_seen_at: datetime | None = None
+
+
+class IntelligenceUsageResponse(BaseModel):
+    window_days: int
+    generated_at: datetime
+    source: str = "audit_events.metadata"
+    content_retention: Literal["metadata-only"] = "metadata-only"
+    tier_usage: list[IntelligenceTierUsage]
+    access_grants: list[AccessGrantExposure]
+
+
+class AccessGrantsResponse(BaseModel):
+    window_days: int
+    generated_at: datetime
+    source: str = "audit_events.metadata"
+    content_retention: Literal["metadata-only"] = "metadata-only"
+    grants: list[AccessGrantExposure]
 
 
 def _utc_now() -> datetime:
@@ -454,6 +544,115 @@ def _repo_in_scope(repo: Repo) -> bool:
     return SENSITIVITY_ORDER.get(tier, 1) >= SENSITIVITY_ORDER["internal"]
 
 
+def _metadata_value(metadata: object, *keys: str) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    for key in keys:
+        value = metadata.get(key)
+        if value not in {None, ""}:
+            return str(value)
+    return None
+
+
+def _metadata_bool(metadata: object, *keys: str) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.lower() in {"1", "true", "yes", "full", "autonomous"}:
+            return True
+    return False
+
+
+def _tool_permission_count(metadata: object) -> int:
+    if not isinstance(metadata, dict):
+        return 0
+    for key in ("tool_permissions", "tools", "tool_calls", "mcp_tools"):
+        value = metadata.get(key)
+        if isinstance(value, list):
+            return len(value)
+        if isinstance(value, dict):
+            return len(value)
+        if isinstance(value, int):
+            return max(0, value)
+    return 0
+
+
+def _is_agent_compliance_event(event: object) -> bool:
+    return str(getattr(event, "event_type", "") or "").lower() in AGENT_COMPLIANCE_EVENT_TYPES
+
+
+def _intelligence_usage_from_events(events: list[AuditEvent], window_days: int) -> IntelligenceUsageResponse:
+    tier_buckets: dict[tuple[str, str | None, str], dict[str, object]] = {}
+    access_buckets: dict[tuple[str, str, str | None, str], dict[str, object]] = {}
+    for event in events:
+        if not _is_agent_compliance_event(event):
+            continue
+        metadata = getattr(event, "metadata_json", {}) or {}
+        provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or str(getattr(event, "resource_type", None) or getattr(event, "event_type", "unknown")).split(".")[0]
+        model = _metadata_value(metadata, "model", "model_name", "model_id")
+        tier = _metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier")
+        actor = str(getattr(event, "actor_login", None) or _metadata_value(metadata, "actor_login", "user") or "unknown")
+        if tier:
+            key = (provider, model, tier)
+            bucket = tier_buckets.setdefault(key, {"events": 0, "users": set()})
+            bucket["events"] = int(bucket["events"]) + 1
+            users = bucket["users"]
+            if isinstance(users, set):
+                users.add(actor)
+
+        access_scope = _metadata_value(metadata, "access_scope", "permission_scope", "grant_scope")
+        is_full_access = _metadata_bool(metadata, "full_access", "full_access_granted")
+        is_autonomous = _metadata_bool(metadata, "autonomous_access", "autonomous")
+        tool_events = _tool_permission_count(metadata)
+        if access_scope or is_full_access or is_autonomous or tool_events:
+            scope = access_scope or ("full-access" if is_full_access else "tool-permission")
+            repo_name = str(getattr(event, "repo_name", None) or _metadata_value(metadata, "repo_name", "repo") or "") or None
+            key = (actor, provider, repo_name, scope)
+            bucket = access_buckets.setdefault(
+                key,
+                {
+                    "full_access_events": 0,
+                    "autonomous_events": 0,
+                    "tool_permission_events": 0,
+                    "last_seen_at": None,
+                },
+            )
+            if is_full_access or scope == "full-access":
+                bucket["full_access_events"] = int(bucket["full_access_events"]) + 1
+            if is_autonomous:
+                bucket["autonomous_events"] = int(bucket["autonomous_events"]) + 1
+            bucket["tool_permission_events"] = int(bucket["tool_permission_events"]) + tool_events
+            created_at = getattr(event, "created_at", None)
+            if isinstance(created_at, datetime):
+                last_seen_at = bucket["last_seen_at"]
+                if not isinstance(last_seen_at, datetime) or created_at > last_seen_at:
+                    bucket["last_seen_at"] = created_at
+
+    tier_usage = [
+        IntelligenceTierUsage(provider=provider, model=model, intelligence_tier=tier, events=int(values["events"]), users=len(values["users"]) if isinstance(values["users"], set) else 0)
+        for (provider, model, tier), values in tier_buckets.items()
+    ]
+    access_grants = [
+        AccessGrantExposure(
+            actor_login=actor,
+            provider=provider,
+            repo_name=repo_name,
+            access_scope=scope,
+            full_access_events=int(values["full_access_events"]),
+            autonomous_events=int(values["autonomous_events"]),
+            tool_permission_events=int(values["tool_permission_events"]),
+            last_seen_at=values["last_seen_at"] if isinstance(values["last_seen_at"], datetime) else None,
+        )
+        for (actor, provider, repo_name, scope), values in access_buckets.items()
+    ]
+    tier_usage.sort(key=lambda item: (-item.events, item.provider, item.intelligence_tier))
+    access_grants.sort(key=lambda item: (-(item.full_access_events + item.autonomous_events + item.tool_permission_events), item.actor_login, item.provider))
+    return IntelligenceUsageResponse(window_days=window_days, generated_at=_utc_now(), tier_usage=tier_usage, access_grants=access_grants)
+
+
 @router.get("/coverage-sla", response_model=CoverageSlaResponse)
 async def get_coverage_sla(
     org_id: str,
@@ -461,6 +660,7 @@ async def get_coverage_sla(
     current_org_id: str = Depends(get_current_org_id),
 ) -> CoverageSlaResponse:
     await _require_v8(org_id, db, current_org_id)
+    critical_ops = _load_critical_ops_config()
     repos = (
         await db.execute(select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Repo.full_name))
     ).scalars().all()
@@ -479,13 +679,13 @@ async def get_coverage_sla(
         repo_policy_bindings = _policy_bindings(list(policies), repo.id)
         repo_skills = skills_by_repo.get(repo.id, [])
         operations: list[CriticalOperationCoverage] = []
-        for operation in CRITICAL_OPERATIONS:
-            categories = [str(item) for item in operation["required_skill_categories"]]
+        for operation in critical_ops.operations:
+            categories = [str(item) for item in operation.required_skill_categories]
             matched = [skill for skill in repo_skills if (skill.skill_category or "") in categories]
             operations.append(
                 CriticalOperationCoverage(
-                    operation_id=str(operation["id"]),
-                    label=str(operation["label"]),
+                    operation_id=operation.id,
+                    label=operation.label,
                     required_skill_categories=categories,
                     covered=bool(matched) and bool(repo_policy_bindings),
                     skills=[
@@ -513,7 +713,60 @@ async def get_coverage_sla(
         )
     return CoverageSlaResponse(
         generated_at=_utc_now(),
-        product_review_required=True,
-        product_review_note="critical_ops.yaml is a placeholder pending product review of critical operation taxonomy.",
+        product_review_required=critical_ops.product_review_required,
+        product_review_note=critical_ops.product_review_note or "",
         repos=response_repos,
+    )
+
+
+@router.get("/intelligence-usage", response_model=IntelligenceUsageResponse)
+async def get_intelligence_usage(
+    org_id: str,
+    window_days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> IntelligenceUsageResponse:
+    await _require_v8(org_id, db, current_org_id)
+    cutoff = _utc_now() - timedelta(days=window_days)
+    events = (
+        await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.org_id == org_id,
+                AuditEvent.created_at >= cutoff,
+                AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+            )
+            .order_by(desc(AuditEvent.created_at))
+            .limit(5000)
+        )
+    ).scalars().all()
+    return _intelligence_usage_from_events(list(events), window_days)
+
+
+@router.get("/access-grants", response_model=AccessGrantsResponse)
+async def get_access_grants(
+    org_id: str,
+    window_days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AccessGrantsResponse:
+    await _require_v8(org_id, db, current_org_id)
+    cutoff = _utc_now() - timedelta(days=window_days)
+    events = (
+        await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.org_id == org_id,
+                AuditEvent.created_at >= cutoff,
+                AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+            )
+            .order_by(desc(AuditEvent.created_at))
+            .limit(5000)
+        )
+    ).scalars().all()
+    usage = _intelligence_usage_from_events(list(events), window_days)
+    return AccessGrantsResponse(
+        window_days=window_days,
+        generated_at=usage.generated_at,
+        grants=usage.access_grants,
     )

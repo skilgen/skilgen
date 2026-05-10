@@ -2,15 +2,16 @@ import Link from "next/link";
 
 const tabs = [
   { href: "/activity/live-feed", label: "Live feed" },
+  { href: "/activity/compliance-events", label: "Compliance events" },
   { href: "/activity/sessions", label: "Sessions" },
   { href: "/activity/replay", label: "Replay" },
   { href: "/activity/heatmap", label: "Heatmap" },
 ] as const;
 
-export function ActivityNav({ active }: { active: "live-feed" | "sessions" | "replay" | "heatmap" }) {
+export function ActivityNav({ active }: { active: "live-feed" | "compliance-events" | "sessions" | "replay" | "heatmap" }) {
   return (
     <div className="border-b border-[color:var(--bg-border)]">
-      <nav aria-label="Activity tabs" className="flex gap-1 overflow-x-auto">
+      <nav aria-label="Activity tabs" className="flex flex-wrap gap-1">
         {tabs.map((tab) => {
           const isActive = tab.href.endsWith(active);
           return (
@@ -28,7 +29,7 @@ export function ActivityNav({ active }: { active: "live-feed" | "sessions" | "re
   );
 }
 
-export function ActivityHeader({ active }: { active: "live-feed" | "sessions" | "replay" | "heatmap" }) {
+export function ActivityHeader({ active }: { active: "live-feed" | "compliance-events" | "sessions" | "replay" | "heatmap" }) {
   return (
     <header className="space-y-4">
       <div>

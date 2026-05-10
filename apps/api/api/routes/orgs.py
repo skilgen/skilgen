@@ -874,6 +874,11 @@ class SetupStatusResponse(BaseModel):
     has_high_score_skills: bool
     setup_steps: list[SetupStatusStep]
     completion_percent: int
+    completion_label: str
+    next_step_id: str | None = None
+    next_step_title: str | None = None
+    next_action_url: str | None = None
+    next_step_guidance: str | None = None
 
 
 class OrgApiKeyResponse(BaseModel):
@@ -1951,37 +1956,46 @@ async def get_org_setup_status(
             id="connect_repo",
             title="Connect a repository",
             done=has_repos,
-            action_url="/dashboard/repos",
+            action_url="/skills/repos",
+            description="Connect GitHub or add a repository so Skillayer can start generating skills",
         ),
         SetupStatusStep(
             id="generate_skills",
             title="Generate your first skills",
             done=has_skills,
-            action_url="/dashboard/repos",
-            description="Open Repos and run Analyse now from the dashboard",
+            action_url="/skills/repos",
+            description="Open Repos and run Analyze repo from the governance shell",
         ),
         SetupStatusStep(
             id="connect_agent",
             title="Connect your AI agent",
             done=has_agent_loads,
-            action_url="/dashboard/connect",
+            action_url="/settings/connectors",
             description="Configure Claude Code, Cursor, or Codex to load your skills",
         ),
         SetupStatusStep(
             id="improve_skills",
             title="Improve skill quality to 70+",
             done=has_high_score_skills,
+            action_url="/skills/score",
             description="Use the improvement plan to boost your lowest-scoring skills",
         ),
     ]
     completed = sum(1 for step in steps if step.done)
+    next_step = next((step for step in steps if not step.done), None)
+    completion_percent = completed * 25
     return SetupStatusResponse(
         has_repos=has_repos,
         has_skills=has_skills,
         has_agent_loads=has_agent_loads,
         has_high_score_skills=has_high_score_skills,
         setup_steps=steps,
-        completion_percent=completed * 25,
+        completion_percent=completion_percent,
+        completion_label=f"{completed} of {len(steps)} setup steps complete",
+        next_step_id=next_step.id if next_step else None,
+        next_step_title=next_step.title if next_step else "Setup complete",
+        next_action_url=next_step.action_url if next_step else "/activity",
+        next_step_guidance=next_step.description if next_step else "Your repositories, skills, agent loads, and quality gates are ready.",
     )
 
 

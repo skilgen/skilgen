@@ -365,6 +365,11 @@ export type SetupStatus = {
   has_high_score_skills: boolean;
   setup_steps: SetupStep[];
   completion_percent: number;
+  completion_label: string;
+  next_step_id?: string | null;
+  next_step_title?: string | null;
+  next_action_url?: string | null;
+  next_step_guidance?: string | null;
 };
 
 export type OrgApiKey = {
@@ -771,6 +776,40 @@ export type V8AuditExportResponse = {
   audit_event_logged: boolean;
 };
 
+export type V8WormTarget = {
+  provider: "s3_object_lock" | "gcs_bucket_lock" | "azure_immutable_blob";
+  label: string;
+  configured: boolean;
+  bucket_env: string;
+  prefix_env: string;
+  prefix: string;
+  status: "configured" | "pending";
+  content_retention: "root-and-proof-only";
+};
+
+export type V8AgentComplianceAuditEvent = {
+  id: string;
+  event_type: string;
+  actor_login: string | null;
+  provider: string | null;
+  model: string | null;
+  intelligence_tier: string | null;
+  access_scope: string | null;
+  repo_name: string | null;
+  policy_decision: string | null;
+  source_envelope_hash: string | null;
+  severity: "info" | "warning" | "critical";
+  summary: string;
+  created_at: string;
+};
+
+export type V8AgentComplianceAuditResponse = {
+  total: number;
+  window_days: number;
+  content_retention: "metadata-only";
+  events: V8AgentComplianceAuditEvent[];
+};
+
 export type V8EvidencePackage = {
   job_id: string;
   status: string;
@@ -840,6 +879,8 @@ export type V8PolicyStarterPack = {
   title: string;
   decision: V8PolicyRule["decision"];
   compliance_tags: string[];
+  match_fields?: string[];
+  predicate_count?: number;
   yaml: string;
 };
 
@@ -858,6 +899,8 @@ export type V8PolicyViolation = {
   sla_started_at: string;
   sla_due_at: string;
   sla_minutes_remaining: number;
+  review_decision: "approve" | "deny" | "request_info" | null;
+  reviewed_at: string | null;
 };
 
 export type V8PolicyViolationsResponse = {
@@ -1508,6 +1551,42 @@ export type InsightsCoverageSla = {
   repos: InsightsCoverageRepo[];
 };
 
+export type InsightsIntelligenceTierUsage = {
+  provider: string;
+  model: string | null;
+  intelligence_tier: string;
+  events: number;
+  users: number;
+};
+
+export type InsightsAccessGrantExposure = {
+  actor_login: string;
+  provider: string;
+  repo_name: string | null;
+  access_scope: string;
+  full_access_events: number;
+  autonomous_events: number;
+  tool_permission_events: number;
+  last_seen_at: string | null;
+};
+
+export type InsightsIntelligenceUsage = {
+  window_days: number;
+  generated_at: string;
+  source: string;
+  content_retention: "metadata-only";
+  tier_usage: InsightsIntelligenceTierUsage[];
+  access_grants: InsightsAccessGrantExposure[];
+};
+
+export type InsightsAccessGrants = {
+  window_days: number;
+  generated_at: string;
+  source: string;
+  content_retention: "metadata-only";
+  grants: InsightsAccessGrantExposure[];
+};
+
 export type RegistryList = {
   skills: RegistrySkill[];
   total: number;
@@ -1823,6 +1902,14 @@ export async function getV8AuditReports(accessToken: string | null, orgId: strin
 
 export async function getV8AuditReport(accessToken: string | null, orgId: string, reportId: string): Promise<V8AuditReport | null> {
   return apiFetch<V8AuditReport>(`/v8/orgs/${orgId}/audit/reports/${reportId}`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8AgentComplianceAudit(accessToken: string | null, orgId: string): Promise<V8AgentComplianceAuditResponse | null> {
+  return apiFetch<V8AgentComplianceAuditResponse>(`/v8/orgs/${orgId}/audit/agent-compliance`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8AuditWormTargets(accessToken: string | null, orgId: string): Promise<V8WormTarget[] | null> {
+  return apiFetch<V8WormTarget[]>(`/v8/orgs/${orgId}/audit/chain/worm-targets`, { accessToken, cache: "no-store" });
 }
 
 export async function createV8AuditExport(
@@ -2165,6 +2252,14 @@ export async function getV8RiskyRepos(accessToken: string | null, orgId: string)
 
 export async function getV8CoverageSla(accessToken: string | null, orgId: string): Promise<InsightsCoverageSla | null> {
   return apiFetch<InsightsCoverageSla>(`/v8/orgs/${orgId}/insights/coverage-sla`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8IntelligenceUsage(accessToken: string | null, orgId: string): Promise<InsightsIntelligenceUsage | null> {
+  return apiFetch<InsightsIntelligenceUsage>(`/v8/orgs/${orgId}/insights/intelligence-usage`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8AccessGrants(accessToken: string | null, orgId: string): Promise<InsightsAccessGrants | null> {
+  return apiFetch<InsightsAccessGrants>(`/v8/orgs/${orgId}/insights/access-grants`, { accessToken, cache: "no-store" });
 }
 
 export async function getOrgSources(accessToken: string | null, orgId: string): Promise<SourceConnection[] | null> {

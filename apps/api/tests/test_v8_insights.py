@@ -60,7 +60,15 @@ class Db:
 
 
 def _repo(repo_id: str, name: str, tier: str = "internal"):
-    return SimpleNamespace(id=repo_id, org_id="org_1", name=name, full_name=f"acme/{name}", is_active=True, sensitivity_tier=tier)
+    return SimpleNamespace(
+        id=repo_id,
+        org_id="org_1",
+        name=name,
+        full_name=f"acme/{name}",
+        is_active=True,
+        sensitivity_tier=tier,
+        last_analysed_at=None,
+    )
 
 
 def _pr(pr_id: str, repo_id: str, days_old: int = 1) -> PullRequest:
@@ -99,6 +107,8 @@ def test_insights_router_paths_are_registered() -> None:
     assert "/v8/orgs/{org_id}/insights/risky-agents" in paths
     assert "/v8/orgs/{org_id}/insights/risky-repos" in paths
     assert "/v8/orgs/{org_id}/insights/coverage-sla" in paths
+    assert "/v8/orgs/{org_id}/insights/intelligence-usage" in paths
+    assert "/v8/orgs/{org_id}/insights/access-grants" in paths
 
 
 def test_insights_routes_404_when_ia_v8_disabled(monkeypatch) -> None:
@@ -201,3 +211,205 @@ def test_risky_views_migration_upgrade_and_downgrade(monkeypatch) -> None:
 def test_one_million_event_fixture_limitation_is_documented() -> None:
     path = "docs/v8-refactor/insights-pr6-fixture-limitations.md"
     assert "1M-event" in open(path, encoding="utf-8").read()
+
+
+def test_coverage_sla_reads_critical_ops_from_yaml(monkeypatch, tmp_path) -> None:
+    yaml_path = tmp_path / "critical_ops.yaml"
+    yaml_path.write_text(
+        """
+product_review_required: false
+product_review_note: ""
+operations:
+  - id: commit-signing
+    label: Commit signing enforced
+    required_skill_categories: ["security_compliance"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(insights, "_critical_ops_path", lambda: yaml_path)
+    insights._load_critical_ops_config.cache_clear()
+
+    repo = _repo("repo_1", "payments", "internal")
+    skill = SimpleNamespace(
+        id="skill_1",
+        repo_id="repo_1",
+        domain="security",
+        skill_category="security_compliance",
+        score_total=82,
+        updated_at=NOW,
+        created_at=NOW,
+    )
+    policy = SimpleNamespace(name="SOC2", enabled=True, rule_config={})
+    db = Db([Result([repo]), Result([skill]), Result([policy])])
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/coverage-sla")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["product_review_required"] is False
+    assert payload["repos"][0]["critical_operations"][0]["operation_id"] == "commit-signing"
+    assert payload["repos"][0]["critical_operations"][0]["skills"][0]["id"] == "skill_1"
+
+
+def test_coverage_sla_falls_back_when_critical_ops_yaml_invalid(monkeypatch, tmp_path) -> None:
+    yaml_path = tmp_path / "critical_ops.yaml"
+    yaml_path.write_text("operations: definitely-not-a-list", encoding="utf-8")
+
+    monkeypatch.setattr(insights, "_critical_ops_path", lambda: yaml_path)
+    insights._load_critical_ops_config.cache_clear()
+
+    repo = _repo("repo_1", "payments", "internal")
+    db = Db([Result([repo]), Result([]), Result([])])
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/coverage-sla")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["product_review_required"] is True
+    assert payload["repos"][0]["critical_operations"][0]["operation_id"] == "critical-operations-placeholder"
+
+
+def test_intelligence_usage_rolls_up_metadata_only_compliance_events(monkeypatch) -> None:
+    events = [
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="settings.updated",
+            actor_login="admin",
+            repo_name="acme/payments",
+            resource_type="settings",
+            created_at=NOW,
+            metadata_json={
+                "provider": "Unrelated Admin Tool",
+                "model": "not-an-agent",
+                "intelligence_tier": "very-high",
+                "access_scope": "full-access",
+                "full_access": True,
+                "tool_permissions": ["settings.write"],
+            },
+        ),
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="ravi",
+            repo_name="acme/payments",
+            resource_type="codex",
+            created_at=NOW,
+            metadata_json={
+                "provider": "Codex CLI",
+                "model": "gpt-5.2",
+                "intelligence_tier": "very-high",
+                "access_scope": "full-access",
+                "full_access": True,
+                "autonomous_access": True,
+                "tool_permissions": ["shell", "apply_patch"],
+            },
+        ),
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="sam",
+            repo_name="acme/payments",
+            resource_type="cursor",
+            created_at=NOW - timedelta(minutes=5),
+            metadata_json={
+                "provider": "Cursor",
+                "model": "claude-sonnet-4-5",
+                "model_tier": "high",
+                "access_scope": "workspace-write",
+                "tool_calls": 3,
+            },
+        ),
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="ravi",
+            repo_name="acme/payments",
+            resource_type="codex",
+            created_at=NOW - timedelta(minutes=10),
+            metadata_json={
+                "provider": "Codex CLI",
+                "model": "gpt-5.2",
+                "intelligence_tier": "very-high",
+            },
+        ),
+    ]
+    db = Db([Result(events)])
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/intelligence-usage")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["content_retention"] == "metadata-only"
+    assert payload["tier_usage"][0]["provider"] == "Codex CLI"
+    assert payload["tier_usage"][0]["intelligence_tier"] == "very-high"
+    assert payload["tier_usage"][0]["events"] == 2
+    assert payload["tier_usage"][0]["users"] == 1
+    assert all(row["provider"] != "Unrelated Admin Tool" for row in payload["tier_usage"])
+    assert all(row["provider"] != "Unrelated Admin Tool" for row in payload["access_grants"])
+    assert payload["access_grants"][0]["actor_login"] == "ravi"
+    assert payload["access_grants"][0]["full_access_events"] == 1
+    assert payload["access_grants"][0]["autonomous_events"] == 1
+    assert payload["access_grants"][0]["tool_permission_events"] == 2
+
+
+def test_access_grants_endpoint_returns_metadata_only_exposure_rows(monkeypatch) -> None:
+    events = [
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="ravi",
+            repo_name="acme/payments",
+            resource_type="codex",
+            created_at=NOW,
+            metadata_json={
+                "provider": "Codex CLI",
+                "model": "gpt-5.2",
+                "intelligence_tier": "very-high",
+                "access_scope": "full-access",
+                "full_access": True,
+                "tool_permissions": ["shell", "apply_patch"],
+            },
+        ),
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.telemetry",
+            actor_login="sam",
+            repo_name="acme/web",
+            resource_type="cursor",
+            created_at=NOW - timedelta(minutes=5),
+            metadata_json={
+                "provider": "Cursor",
+                "access_scope": "workspace-write",
+                "autonomous_access": True,
+                "tool_calls": 1,
+            },
+        ),
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="maya",
+            repo_name="acme/docs",
+            resource_type="claude",
+            created_at=NOW - timedelta(minutes=10),
+            metadata_json={
+                "provider": "Claude Code",
+                "model": "claude-sonnet-4-5",
+                "intelligence_tier": "high",
+            },
+        ),
+    ]
+    db = Db([Result(events)])
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/access-grants")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["content_retention"] == "metadata-only"
+    assert payload["source"] == "audit_events.metadata"
+    assert len(payload["grants"]) == 2
+    assert payload["grants"][0]["actor_login"] == "ravi"
+    assert payload["grants"][0]["access_scope"] == "full-access"
+    assert payload["grants"][0]["full_access_events"] == 1
+    assert payload["grants"][0]["tool_permission_events"] == 2
+    assert all(row["actor_login"] != "maya" for row in payload["grants"])

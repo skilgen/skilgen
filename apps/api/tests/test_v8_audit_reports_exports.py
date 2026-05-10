@@ -10,7 +10,7 @@ from zipfile import ZipFile
 from apps.api.api.v8.audit.evidence import build_evidence_package_zip
 from apps.api.api.v8.audit.reports import REPORTS, REPORT_VIEW_SQL, report_sql
 from apps.api.api.v8.audit.router import _csv_body, _siem_body
-from apps.api.api.v8.audit.storage import publish_worm_root, read_root_document, root_document
+from apps.api.api.v8.audit.storage import publish_worm_root, read_root_document, root_document, worm_target_status
 from packages.db.models import AuditEvent
 
 
@@ -75,6 +75,24 @@ def test_worm_root_contains_no_event_payload_and_uses_s3_object_lock(monkeypatch
     object_key, status = publish_worm_root(document)
     assert object_key is None
     assert status == "pending"
+    gcs_document = root_document(
+        org_id="org_1",
+        root_hash="c" * 64,
+        start_sequence=0,
+        end_sequence=1,
+        event_count=2,
+        merkle_proof=[],
+        cadence="daily",
+        storage_provider="gcs_bucket_lock",
+    )
+    monkeypatch.setenv("AUDIT_WORM_GCS_BUCKET", "locked-roots")
+    object_key, status = publish_worm_root(gcs_document)
+    assert object_key == f"gs://locked-roots/audit-roots/org_1/{'c' * 64}.json"
+    assert status == "pending"
+    targets = {target["provider"]: target for target in worm_target_status()}
+    assert targets["s3_object_lock"]["status"] == "pending"
+    assert targets["gcs_bucket_lock"]["status"] == "configured"
+    assert targets["azure_immutable_blob"]["content_retention"] == "root-and-proof-only"
     root_path = tmp_path / "root.json"
     root_path.write_text(json.dumps(document), encoding="utf-8")
     assert read_root_document(str(root_path))["root_hash"] == "a" * 64

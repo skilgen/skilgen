@@ -20,6 +20,7 @@ import {
   type MemoryScore,
   type Org,
   type Repo,
+  type SetupStatus,
 } from "../../lib/data";
 import { isDashboardV8Enabled } from "../../lib/flags";
 import { AgentSetupBanner } from "./agent-setup-banner";
@@ -202,6 +203,44 @@ function TodayActions({ items }: { items: ActionItem[] }) {
   );
 }
 
+function SetupProgressCard({ setupStatus }: { setupStatus: SetupStatus | null }) {
+  if (!setupStatus || setupStatus.completion_percent >= 100) return null;
+  const nextStepTitle = setupStatus.next_step_title ?? "Finish setup";
+  const nextActionUrl = setupStatus.next_action_url ?? "/dashboard/connect";
+  const guidance = setupStatus.next_step_guidance ?? "Complete the next setup step to unlock live Skillayer recommendations.";
+  return (
+    <section className="rounded-[8px] border border-[rgb(var(--accent-primary-rgb)/0.28)] bg-[linear-gradient(135deg,rgba(201,151,58,0.12),rgba(16,185,129,0.08),rgba(13,13,20,0.98))] p-5">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px] lg:items-center">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--accent-primary)]">Setup readiness</div>
+          <h2 className="mt-2 text-[22px] font-semibold text-[color:var(--text-primary)]">{nextStepTitle}</h2>
+          <p className="mt-2 max-w-3xl text-[14px] leading-6 text-[color:var(--text-secondary)]">{guidance}</p>
+        </div>
+        <div className="space-y-3 rounded-[8px] border border-[color:var(--bg-border)] bg-black/20 p-4">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="font-medium text-[color:var(--text-secondary)]">{setupStatus.completion_label}</span>
+            <span className="font-semibold text-[color:var(--text-primary)]">{setupStatus.completion_percent}%</span>
+          </div>
+          <div
+            aria-label="Setup completion"
+            aria-valuemax={100}
+            aria-valuemin={0}
+            aria-valuenow={setupStatus.completion_percent}
+            className="h-2 overflow-hidden rounded-full bg-white/10"
+            role="progressbar"
+          >
+            <div className="h-full rounded-full bg-[color:var(--accent-primary)]" style={{ width: `${Math.max(0, Math.min(100, setupStatus.completion_percent))}%` }} />
+          </div>
+          <Link className="inline-flex w-full items-center justify-center gap-2 rounded-[8px] bg-[color:var(--accent-primary)] px-4 py-2.5 text-[13px] font-semibold text-black hover:bg-[color:var(--accent-bright)]" href={nextActionUrl}>
+            Continue setup
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function AttentionTable({ accessToken, orgId, repos }: { accessToken: string; orgId: string; repos: Repo[] }) {
   return (
     <section className="rounded-[28px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
@@ -344,6 +383,7 @@ export default async function OverviewPage() {
       ) : (
         <>
           {showSetupBanner ? <AgentSetupBanner /> : null}
+          <SetupProgressCard setupStatus={setupStatus} />
           <MemoryScoreHero score={memoryScore} />
           {(skillGaps?.length ?? 0) > 0 ? (
             <Link className="flex items-center justify-between gap-4 rounded-xl border border-[#f59e0b]/30 bg-[#f59e0b]/10 p-4 text-sm text-amber-100" href="/dashboard/eval/gaps">

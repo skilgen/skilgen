@@ -1,0 +1,12 @@
+id: agent-compliance-full-access
+title: "Very-high intelligence agents with full access require review"
+scope:
+  provider: ["Codex CLI", "Claude Code", "Cursor", "GitHub Copilot"]
+match:
+  intelligence_tier: "very-high"
+  access_scope: "full-access"
+  tool_permissions: ["shell", "apply_patch", "filesystem.write", "settings.write"]
+  repo_sensitivity: ["confidential", "restricted", "regulated"]
+decision: require_approval
+notify: ["#sec-aiops"]
+compliance_tags: ["agent-compliance", "internal:AI-governance", "SOC2:CC6.6"]

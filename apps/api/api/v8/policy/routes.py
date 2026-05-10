@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from apps.api.api.auth import get_current_org_id
 from apps.api.api.services.policy import evaluate_policies
@@ -18,7 +19,7 @@ from apps.api.api.v8.policy.dsl.parser import PolicyDSLParseError, policy_to_rul
 from apps.api.api.v8.policy.packs import load_starter_packs
 from apps.api.api.v8.policy.rbac import report_policy_rbac_status, require_policy_permission
 from packages.db.database import get_db
-from packages.db.models import OrgPolicy, SkillRegistryEntry
+from packages.db.models import Org, OrgPolicy, SkillRegistryEntry
 
 
 router = APIRouter(
@@ -80,6 +81,8 @@ class ViolationResponse(BaseModel):
     sla_started_at: datetime
     sla_due_at: datetime
     sla_minutes_remaining: int
+    review_decision: Literal["approve", "deny", "request_info"] | None = None
+    reviewed_at: datetime | None = None
 
 
 class ViolationsResponse(BaseModel):
@@ -257,7 +260,8 @@ async def list_approvals(
     current_org_id: str = Depends(get_current_org_id),
 ) -> ApprovalQueueResponse:
     await _ensure_v8(org_id, current_org_id, db)
-    approvals = [item for item in await _violations(org_id, db) if item.decision == "require_approval"]
+    decisions = await _approval_decisions(org_id, db)
+    approvals = _open_approvals(await _violations(org_id, db, approval_decisions=decisions))
     return ApprovalQueueResponse(items=approvals, rbac=await report_policy_rbac_status())
 
 
@@ -270,6 +274,27 @@ async def decide_approval(
     current_org_id: str = Depends(get_current_org_id),
 ) -> dict[str, str | bool]:
     await _ensure_v8(org_id, current_org_id, db)
+    decisions = await _approval_decisions(org_id, db)
+    open_approval_ids = {item.id for item in _open_approvals(await _violations(org_id, db, approval_decisions=decisions))}
+    if approval_id not in open_approval_ids:
+        raise HTTPException(status_code=404, detail="Approval is not open")
+
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+
+    settings = dict(org.settings or {})
+    stored = dict(settings.get("v8_policy_approval_decisions") or {})
+    recorded_at = datetime.utcnow().isoformat()
+    stored[approval_id] = {
+        "decision": payload.decision,
+        "note": payload.note,
+        "recorded_at": recorded_at,
+    }
+    settings["v8_policy_approval_decisions"] = stored
+    org.settings = settings
+    flag_modified(org, "settings")
+    await db.commit()
     return {"recorded": True, "approval_id": approval_id, "decision": payload.decision}
 
 
@@ -369,7 +394,12 @@ async def _policy_violation_counts(org_id: str, db: AsyncSession) -> dict[str, i
     return counts
 
 
-async def _violations(org_id: str, db: AsyncSession) -> list[ViolationResponse]:
+async def _violations(
+    org_id: str,
+    db: AsyncSession,
+    *,
+    approval_decisions: dict[str, dict[str, object]] | None = None,
+) -> list[ViolationResponse]:
     rows = {row.id: row for row in (await db.execute(select(OrgPolicy).where(OrgPolicy.org_id == org_id))).scalars().all()}
     now = datetime.utcnow()
     items: list[ViolationResponse] = []
@@ -381,9 +411,11 @@ async def _violations(org_id: str, db: AsyncSession) -> list[ViolationResponse]:
         started = row.created_at if row and row.created_at else now
         due = started.replace() + _sla_delta_minutes(decision)
         remaining = int((due - now).total_seconds() // 60)
+        approval_id = f"{violation.policy_id}:{violation.repo_id or 'org'}:{violation.skill_id or index}"
+        review_decision, reviewed_at = _approval_review_state(approval_decisions or {}, approval_id)
         items.append(
             ViolationResponse(
-                id=f"{violation.policy_id}:{violation.repo_id or 'org'}:{violation.skill_id or index}",
+                id=approval_id,
                 policy_id=violation.policy_id,
                 policy_name=violation.policy_name,
                 decision=decision,
@@ -397,9 +429,48 @@ async def _violations(org_id: str, db: AsyncSession) -> list[ViolationResponse]:
                 sla_started_at=started,
                 sla_due_at=due,
                 sla_minutes_remaining=remaining,
+                review_decision=review_decision,
+                reviewed_at=reviewed_at,
             )
         )
     return items
+
+
+async def _approval_decisions(org_id: str, db: AsyncSession) -> dict[str, dict[str, object]]:
+    org = await db.get(Org, org_id)
+    settings = dict(getattr(org, "settings", None) or {}) if org else {}
+    raw = settings.get("v8_policy_approval_decisions")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): dict(value) for key, value in raw.items() if isinstance(value, dict)}
+
+
+def _approval_review_state(
+    decisions: dict[str, dict[str, object]],
+    approval_id: str,
+) -> tuple[Literal["approve", "deny", "request_info"] | None, datetime | None]:
+    raw = decisions.get(approval_id)
+    if not raw:
+        return None, None
+    decision = raw.get("decision")
+    if decision not in {"approve", "deny", "request_info"}:
+        return None, None
+    recorded_at = raw.get("recorded_at")
+    reviewed_at = None
+    if isinstance(recorded_at, str):
+        try:
+            reviewed_at = datetime.fromisoformat(recorded_at)
+        except ValueError:
+            reviewed_at = None
+    return decision, reviewed_at
+
+
+def _open_approvals(items: list[ViolationResponse]) -> list[ViolationResponse]:
+    return [
+        item
+        for item in items
+        if item.decision == "require_approval" and item.review_decision not in {"approve", "deny"}
+    ]
 
 
 def _policy_response(policy: OrgPolicy, violation_count: int = 0) -> PolicyRuleResponse:

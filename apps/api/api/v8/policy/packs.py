@@ -22,8 +22,9 @@ def load_starter_packs() -> list[dict[str, object]]:
                 "title": rule.title,
                 "decision": rule.decision,
                 "compliance_tags": list(rule.compliance_tags),
+                "match_fields": sorted({*rule.scope.keys(), *rule.match.keys()}),
+                "predicate_count": len(rule.scope) + len(rule.match),
                 "yaml": source,
             }
         )
     return packs
-

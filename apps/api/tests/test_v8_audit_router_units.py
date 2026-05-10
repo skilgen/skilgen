@@ -18,8 +18,10 @@ from apps.api.api.v8.audit.router import (
     create_evidence_package,
     create_export,
     export_report,
+    get_agent_compliance_audit,
     get_event_log,
     get_report,
+    get_worm_targets,
     list_reports,
     publish_root,
 )
@@ -47,6 +49,35 @@ def _event(event_id: str = "evt_1") -> AuditEvent:
         summary="Blocked privileged action",
         severity="critical",
         metadata_json={"sensitivity_tier": "regulated"},
+        created_at=datetime(2026, 5, 1, 12, 0, 0),
+    )
+
+
+def _agent_event(event_id: str = "evt_agent_1") -> AuditEvent:
+    return AuditEvent(
+        id=event_id,
+        org_id="org_1",
+        event_type="agent.compliance",
+        action="observed",
+        actor_login="ravi",
+        actor_ip=None,
+        repo_id="repo_1",
+        repo_name="acme/payments",
+        skill_id=None,
+        skill_domain=None,
+        resource_type="codex_cli",
+        resource_id="session_1",
+        summary="Codex CLI full-access session observed",
+        severity="warning",
+        metadata_json={
+            "provider": "Codex CLI",
+            "model": "gpt-5.2",
+            "intelligence_tier": "very-high",
+            "access_scope": "full-access",
+            "policy_decision": "allow-with-review",
+            "source_envelope_hash": "abc123",
+            "raw_prompt": "must not be returned",
+        },
         created_at=datetime(2026, 5, 1, 12, 0, 0),
     )
 
@@ -203,6 +234,39 @@ def test_event_log_and_report_endpoints_with_fake_db(monkeypatch) -> None:
     assert asyncio.run(list_reports("org_1", db=ExecuteDb([]), current_org_id="org_1"))[0].id == "ai-assisted-change-log"
 
 
+def test_agent_compliance_audit_returns_metadata_only_events(monkeypatch) -> None:
+    async def allow(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(audit_router, "_assert_enabled", allow)
+    response = asyncio.run(get_agent_compliance_audit("org_1", window_days=30, limit=100, db=ExecuteDb([Result(rows=[_agent_event()])]), current_org_id="org_1"))
+
+    assert response.content_retention == "metadata-only"
+    assert response.events[0].provider == "Codex CLI"
+    assert response.events[0].intelligence_tier == "very-high"
+    assert response.events[0].source_envelope_hash == "abc123"
+    assert not hasattr(response.events[0], "raw_prompt")
+
+
+def test_agent_compliance_audit_filters_provider_after_metadata_projection(monkeypatch) -> None:
+    async def allow(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(audit_router, "_assert_enabled", allow)
+    response = asyncio.run(
+        get_agent_compliance_audit(
+            "org_1",
+            provider="Cursor",
+            window_days=30,
+            limit=100,
+            db=ExecuteDb([Result(rows=[_agent_event()])]),
+            current_org_id="org_1",
+        )
+    )
+
+    assert response.total == 0
+
+
 def test_report_export_publish_root_and_evidence_queue(monkeypatch) -> None:
     async def allow(*_args, **_kwargs) -> None:
         return None
@@ -238,15 +302,18 @@ def test_report_export_publish_root_and_evidence_queue(monkeypatch) -> None:
     async def ensure(*_args, **_kwargs):
         return chain_rows
 
-    def publish(document):
+    def publish(document, provider=None):
         assert "payload" not in document
-        return "audit-roots/org_1/root.json", "published"
+        assert document["storage_provider"] == "gcs_bucket_lock"
+        assert provider == "gcs_bucket_lock"
+        return "gs://locked/audit-roots/org_1/root.json", "pending"
 
     monkeypatch.setattr(audit_router, "_ensure_chain", ensure)
     monkeypatch.setattr(audit_router, "publish_worm_root", publish)
     root_db = ExecuteDb([])
-    root = asyncio.run(publish_root("org_1", PublishRootRequest(cadence="hourly"), db=root_db, current_org_id="org_1"))
-    assert root.status == "published"
+    root = asyncio.run(publish_root("org_1", PublishRootRequest(cadence="hourly", storage_provider="gcs_bucket_lock"), db=root_db, current_org_id="org_1"))
+    assert root.status == "pending"
+    assert root.storage_provider == "gcs_bucket_lock"
     assert root_db.committed is True
 
     fake_task = SimpleNamespace(apply_async=lambda **_kwargs: None)
@@ -262,3 +329,14 @@ def test_report_export_publish_root_and_evidence_queue(monkeypatch) -> None:
     )
     assert evidence.queued is True
     assert evidence_db.committed is True
+
+
+def test_worm_target_endpoint_lists_three_root_only_targets(monkeypatch) -> None:
+    async def allow(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(audit_router, "_assert_enabled", allow)
+    response = asyncio.run(get_worm_targets("org_1", db=ExecuteDb([]), current_org_id="org_1"))
+
+    assert [target.provider for target in response] == ["s3_object_lock", "gcs_bucket_lock", "azure_immutable_blob"]
+    assert all(target.content_retention == "root-and-proof-only" for target in response)
