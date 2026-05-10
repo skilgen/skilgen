@@ -21,7 +21,26 @@ const workOSMiddleware = isWorkOSConfigured
     })
   : null;
 
+function readBooleanEnv(value: string | undefined): boolean {
+  if (!value) return false;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+function v8LegacyRedirect(request: NextRequest): NextResponse | null {
+  if (!readBooleanEnv(process.env.IA_V8_DEFAULT)) return null;
+
+  const { pathname, search } = request.nextUrl;
+  if (pathname === "/dashboard/repos") {
+    return NextResponse.redirect(new URL(`/skills/repos${search}`, request.url));
+  }
+
+  return null;
+}
+
 export default async function middleware(request: NextRequest, event: NextFetchEvent) {
+  const redirect = v8LegacyRedirect(request);
+  if (redirect) return redirect;
+
   if (!workOSMiddleware) {
     const response = NextResponse.next();
     response.headers.set("x-skillayer-auth-mode", "preview");
