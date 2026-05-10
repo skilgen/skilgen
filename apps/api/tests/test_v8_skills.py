@@ -10,7 +10,7 @@ from alembic.operations import Operations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps.api.api.auth import get_current_org_id
+from apps.api.api.auth import get_current_org_id, get_current_org_id_optional
 from apps.api.api.index import app
 from apps.api.api.v8.skills.router import router as v8_skills_router
 from packages.db.database import get_db
@@ -54,6 +54,7 @@ def _client(db: Db) -> TestClient:
     test_app.include_router(v8_skills_router)
     test_app.dependency_overrides[get_db] = lambda: db
     test_app.dependency_overrides[get_current_org_id] = lambda: "org_1"
+    test_app.dependency_overrides[get_current_org_id_optional] = lambda: "org_1"
     return TestClient(test_app)
 
 
@@ -151,6 +152,39 @@ def test_registry_endpoint_keeps_existing_score_contract(monkeypatch) -> None:
     }
     assert payload["items"][0]["signature_status"] == "verified"
     assert payload["items"][0]["sensitivity_tier"] == "regulated"
+
+
+def test_repos_endpoint_allows_dashboard_read_without_bearer_token(monkeypatch) -> None:
+    async def enabled(org_id, db):
+        return True
+
+    monkeypatch.setattr(skills_router_module, "is_v8", enabled)
+    db = Db(
+        [
+            Result(rows=[(_repo(), 3, 1)]),
+            Result(rows=[SimpleNamespace(name="Sensitive repo guard", enabled=True)]),
+        ]
+    )
+    client = _client(db)
+    client.app.dependency_overrides[get_current_org_id_optional] = lambda: None
+
+    response = client.get("/v8/orgs/org_1/skills/repos")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["repos"][0] == {
+        "id": "repo_1",
+        "full_name": "platform/api",
+        "name": "api",
+        "language": "Python",
+        "sensitivity_tier": "regulated",
+        "indexing_status": "indexed",
+        "generated_skill_count": 3,
+        "drift_count": 1,
+        "policy_bindings": ["Sensitive repo guard"],
+        "last_analysed_at": "2026-05-01T12:00:00",
+    }
 
 
 def test_repo_sensitivity_migration_upgrade_and_downgrade(monkeypatch) -> None:

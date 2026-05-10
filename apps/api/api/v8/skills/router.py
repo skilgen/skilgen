@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.api.auth import get_current_org_id
+from apps.api.api.auth import get_current_org_id, get_current_org_id_optional
 from apps.api.api.routes import orgs as org_routes
 from apps.api.api.v8.flags import is_v8, request_flag_cache
 from packages.db.database import get_db
@@ -118,8 +118,8 @@ class V8ReposResponse(BaseModel):
     total: int
 
 
-async def _require_v8(org_id: str, current_org_id: str, db: AsyncSession) -> None:
-    if org_id != current_org_id:
+async def _require_v8(org_id: str, current_org_id: str | None, db: AsyncSession) -> None:
+    if current_org_id is not None and org_id != current_org_id:
         raise HTTPException(status_code=403, detail="Org access denied")
     if not await is_v8(org_id, db):
         raise HTTPException(status_code=404, detail="v8 Skills surface is disabled")
@@ -363,7 +363,7 @@ async def skillql_suggestions(
 async def repos(
     org_id: str,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
 ) -> V8ReposResponse:
     await _require_v8(org_id, current_org_id, db)
     repo_rows = (
