@@ -472,3 +472,17 @@ Final required verification:
   - UX screenshots captured from the built fallback catalog:
     - `docs/v8-refactor/screenshots/automation-20260511/settings-notification-connector-catalog-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/settings-notification-connector-catalog-mobile.png`
+
+## 2026-05-11 — Settings billing readiness overview slice
+
+- Backend: `/v8/orgs/{org_id}/settings/billing` now requires `settings.billing.read` and derives seat utilization, available seats, billing account linkage, portal availability, attention state, and next actions from existing org/Stripe columns without changing checkout, portal, webhook, or subscription handlers.
+- Frontend: the migrated Settings -> Billing page now presents plan, seats, subscription state, Stripe references, and next actions directly in the v8 UX instead of only forwarding users to legacy billing controls.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> 30 passed.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured from the built Billing page:
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-billing-readiness-overview-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-billing-readiness-overview-mobile.png`
