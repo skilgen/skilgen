@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import asyncio
 import statistics
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,7 +18,7 @@ from apps.api.api.v8.policy.dsl.models import DOWNGRADE_DECISION_MAP, PolicyRule
 from apps.api.api.v8.policy.packs import load_starter_packs
 from apps.api.api.v8.policy.routes import ApprovalDecisionPayload, ViolationResponse, _approval_review_state, _open_approvals
 from apps.api.api.v8.policy.rbac import settings_rbac_available
-from packages.db.models import Org
+from packages.db.models import AuditEvent, Org, OrgPolicy
 
 
 MIGRATION = importlib.import_module("apps.api.alembic.versions.20260505_0005_policy_verbs_dsl")
@@ -29,6 +30,7 @@ def test_policy_routes_are_registered() -> None:
     assert "/v8/orgs/{org_id}/policy/rules" in paths
     assert "/v8/orgs/{org_id}/policy/violations" in paths
     assert "/v8/orgs/{org_id}/policy/approvals" in paths
+    assert "/v8/orgs/{org_id}/policy/agent-compliance" in paths
     assert "/v8/orgs/{org_id}/policy/quarantine" in paths
 
 
@@ -229,6 +231,86 @@ def test_evaluate_endpoint_applies_agent_compliance_predicates(monkeypatch) -> N
     payload = response.json()
     assert payload["decision"] == "require_approval"
     assert payload["matched_rule_ids"] == ["agent-compliance-full-access"]
+
+
+def test_agent_compliance_policy_endpoint_evaluates_metadata_only_events(monkeypatch) -> None:
+    class Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    policy = OrgPolicy(
+        id="agent-compliance-full-access",
+        org_id="org-1",
+        name="Very-high intelligence agents with full access require review",
+        rule_type="v8_yaml_dsl",
+        rule_config={},
+        decision="require_approval",
+        enabled=True,
+        dsl_yaml="""
+id: agent-compliance-full-access
+title: "Very-high intelligence agents with full access require review"
+scope:
+  provider: "Codex CLI"
+match:
+  intelligence_tier: "very-high"
+  access_scope: "full-access"
+  mcp_tool: "apply_patch"
+decision: require_approval
+compliance_tags: ["agent-compliance"]
+""",
+    )
+    event = AuditEvent(
+        id="audit-1",
+        org_id="org-1",
+        event_type="agent.compliance",
+        action="ingested",
+        actor_login="ravi",
+        repo_id="repo-1",
+        repo_name="skillayer/api",
+        created_at=datetime(2026, 5, 11, 8, 45, 0),
+        metadata_json={
+            "provider": "Codex CLI",
+            "provider_event_id": "evt-1",
+            "intelligence_tier": "very-high",
+            "access_scope": "full-access",
+            "mcp_tools": ["apply_patch"],
+            "content_retention": "metadata-only",
+            "source_record_type": "operational-telemetry",
+        },
+    )
+
+    class Db:
+        async def execute(self, statement):
+            text = str(statement)
+            if "org_policies" in text:
+                return Result([policy])
+            return Result([event])
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    monkeypatch.setattr(policy_routes, "_ensure_v8", ensure_v8)
+
+    response = asyncio.run(
+        policy_routes.list_agent_compliance_policy_evaluations(
+            "org-1",
+            limit=50,
+            db=Db(),
+            current_org_id="org-1",
+        )
+    )
+
+    assert response.content_retention == "metadata-only"
+    assert response.flagged_count == 1
+    assert response.items[0].decision == "require_approval"
+    assert response.items[0].matched_rule_ids == ["agent-compliance-full-access"]
+    assert response.items[0].provider_event_id == "evt-1"
 
 
 def test_evaluator_is_deterministic_and_most_restrictive_wins() -> None:

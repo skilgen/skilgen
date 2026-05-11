@@ -7,12 +7,14 @@ import {
   API_URL,
   getBootstrapOrg,
   getMyOrg,
+  getV8AgentCompliancePolicy,
   getV8PolicyApprovals,
   getV8PolicyQuarantine,
   getV8PolicyRules,
   getV8PolicyStarterPacks,
   getV8PolicyViolations,
   type Org,
+  type V8AgentCompliancePolicyEvent,
   type V8PolicyRule,
   type V8PolicyStarterPack,
   type V8PolicyViolation,
@@ -20,12 +22,13 @@ import {
 } from "../../../lib/data";
 import { mockOrg } from "@/lib/mock-data";
 
-type PolicyTab = "rules" | "violations" | "approvals" | "quarantine";
+type PolicyTab = "rules" | "violations" | "approvals" | "agent-events" | "quarantine";
 
 const tabs: Array<{ id: PolicyTab; label: string; href: string }> = [
   { id: "rules", label: "Rules", href: "/policy/rules" },
   { id: "violations", label: "Violations", href: "/policy/violations" },
   { id: "approvals", label: "Approvals", href: "/policy/approvals" },
+  { id: "agent-events", label: "Agent events", href: "/policy/agent-events" },
   { id: "quarantine", label: "Quarantine", href: "/policy/quarantine" },
 ];
 
@@ -265,16 +268,18 @@ async function decideQuarantine(formData: FormData) {
 
 export async function PolicySurface({ tab }: { tab: PolicyTab }) {
   const { org, accessToken } = await loadContext();
-  const [rules, starterPacks, violations, approvals, quarantine] = await Promise.all([
+  const [rules, starterPacks, violations, approvals, agentPolicy, quarantine] = await Promise.all([
     getV8PolicyRules(accessToken, org.id),
     getV8PolicyStarterPacks(accessToken, org.id),
     getV8PolicyViolations(accessToken, org.id),
     getV8PolicyApprovals(accessToken, org.id),
+    getV8AgentCompliancePolicy(accessToken, org.id),
     getV8PolicyQuarantine(accessToken, org.id),
   ]);
 
   const violationItems = violations?.items ?? [];
   const approvalItems = approvals?.items ?? [];
+  const agentPolicyItems = agentPolicy?.items ?? [];
 
   return (
     <section className="mx-auto max-w-7xl">
@@ -287,7 +292,7 @@ export async function PolicySurface({ tab }: { tab: PolicyTab }) {
           <Metric label="Rules" value={rules.length} />
           <Metric label="Violations" value={violationItems.length} />
           <Metric label="Approvals" value={approvalItems.length} />
-          <Metric label="Quarantined" value={quarantine.length} />
+          <Metric label="Agent flags" value={agentPolicy?.flagged_count ?? 0} />
         </div>
       </div>
 
@@ -311,6 +316,7 @@ export async function PolicySurface({ tab }: { tab: PolicyTab }) {
         {tab === "rules" ? <RulesTab canApply={Boolean(accessToken)} rules={rules} starterPacks={starterPacks.length ? starterPacks : fallbackStarterPacks} /> : null}
         {tab === "violations" ? <ViolationsTab items={violationItems} /> : null}
         {tab === "approvals" ? <ApprovalsTab canReview={Boolean(accessToken && approvals?.rbac.available)} items={approvalItems} rbacAvailable={Boolean(approvals?.rbac.available)} /> : null}
+        {tab === "agent-events" ? <AgentEventsTab contentRetention={agentPolicy?.content_retention ?? "metadata-only"} items={agentPolicyItems} /> : null}
         {tab === "quarantine" ? <QuarantineTab canReview={Boolean(accessToken)} items={quarantine} /> : null}
       </div>
     </section>
@@ -485,6 +491,51 @@ function ApprovalsTab({ items, rbacAvailable, canReview }: { items: V8PolicyViol
         </div>
       ) : (
         <EmptyPanel icon={<Clock3 className="h-8 w-8 text-[color:var(--accent-primary)]" />} title="No approvals waiting" />
+      )}
+    </div>
+  );
+}
+
+function AgentEventsTab({ items, contentRetention }: { items: V8AgentCompliancePolicyEvent[]; contentRetention: "metadata-only" }) {
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 md:grid-cols-3">
+        <Metric label="Evaluated" value={items.length} />
+        <Metric label="Flagged" value={items.filter((item) => item.decision !== "allow").length} />
+        <div className="border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-3 py-2">
+          <div className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Retention</div>
+          <div className="mt-1 text-sm font-semibold text-[color:var(--accent-primary)]">{contentRetention}</div>
+        </div>
+      </div>
+      {items.length ? (
+        <div className="divide-y divide-[color:var(--bg-border)] border border-[color:var(--bg-border)]">
+          {items.map((item) => (
+            <div className="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_150px_180px] lg:items-center" key={item.event_id}>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <FileWarning className="h-4 w-4 shrink-0 text-[#f59e0b]" />
+                  <div className="font-semibold text-[color:var(--text-primary)]">{item.provider ?? "Agent telemetry"}</div>
+                  <span className="rounded-sm border border-[color:var(--bg-border)] px-2 py-0.5 text-[11px] text-[color:var(--text-tertiary)]">{item.source_record_type ?? "operational-telemetry"}</span>
+                </div>
+                <div className="mt-1 text-[12px] text-[color:var(--text-secondary)]">
+                  {item.actor_login ?? "Unknown actor"} · {item.repo_name ?? "Org scope"} · {item.model ?? "model unknown"}
+                </div>
+                <div className="mt-1 truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">{item.provider_event_id ?? item.event_id}</div>
+                {item.reasons.length ? <div className="mt-2 text-[12px] text-[color:var(--text-secondary)]">{item.reasons.join(", ")}</div> : null}
+              </div>
+              <DecisionBadge decision={item.decision} />
+              <div className="flex flex-wrap gap-1.5">
+                {[item.intelligence_tier, item.access_scope, ...item.compliance_tags].filter(Boolean).slice(0, 4).map((tag) => (
+                  <span className="rounded-sm border border-[color:var(--bg-border)] px-2 py-0.5 text-[11px] text-[color:var(--text-secondary)]" key={`${item.event_id}-${tag}`}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyPanel icon={<CheckCircle2 className="h-8 w-8 text-[color:var(--accent-green)]" />} title="No agent compliance events to evaluate" />
       )}
     </div>
   );

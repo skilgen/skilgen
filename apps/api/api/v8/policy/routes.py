@@ -19,7 +19,7 @@ from apps.api.api.v8.policy.dsl.parser import PolicyDSLParseError, policy_to_rul
 from apps.api.api.v8.policy.packs import load_starter_packs
 from apps.api.api.v8.policy.rbac import report_policy_rbac_status, require_policy_permission
 from packages.db.database import get_db
-from packages.db.models import Org, OrgPolicy, SkillRegistryEntry
+from packages.db.models import AuditEvent, Org, OrgPolicy, SkillRegistryEntry
 
 
 router = APIRouter(
@@ -93,6 +93,33 @@ class ViolationsResponse(BaseModel):
 class ApprovalQueueResponse(BaseModel):
     items: list[ViolationResponse]
     rbac: dict[str, str | bool]
+
+
+class AgentCompliancePolicyEvent(BaseModel):
+    event_id: str
+    provider_event_id: str | None = None
+    provider: str | None = None
+    actor_login: str | None = None
+    repo_id: str | None = None
+    repo_name: str | None = None
+    model: str | None = None
+    intelligence_tier: str | None = None
+    access_scope: str | None = None
+    source_record_type: str | None = None
+    content_retention: Literal["metadata-only"]
+    decision: DecisionVerb
+    matched_rule_ids: list[str]
+    reasons: list[str]
+    compliance_tags: list[str]
+    occurred_at: datetime
+
+
+class AgentCompliancePolicyResponse(BaseModel):
+    total: int
+    evaluated: int
+    flagged_count: int
+    content_retention: Literal["metadata-only"]
+    items: list[AgentCompliancePolicyEvent]
 
 
 class ApprovalDecisionPayload(BaseModel):
@@ -263,6 +290,56 @@ async def list_approvals(
     decisions = await _approval_decisions(org_id, db)
     approvals = _open_approvals(await _violations(org_id, db, approval_decisions=decisions))
     return ApprovalQueueResponse(items=approvals, rbac=await report_policy_rbac_status())
+
+
+@router.get("/agent-compliance", response_model=AgentCompliancePolicyResponse)
+async def list_agent_compliance_policy_evaluations(
+    org_id: str,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AgentCompliancePolicyResponse:
+    await _ensure_v8(org_id, current_org_id, db)
+    rules = [_rule_from_policy(row) for row in await _load_enabled_rules(org_id, db)]
+    rows = (
+        await db.execute(
+            select(AuditEvent)
+            .where(AuditEvent.org_id == org_id, AuditEvent.event_type == "agent.compliance")
+            .order_by(desc(AuditEvent.created_at))
+            .limit(max(1, min(limit, 100)))
+        )
+    ).scalars().all()
+    items: list[AgentCompliancePolicyEvent] = []
+    for row in rows:
+        metadata = dict(row.metadata_json or {})
+        decision = evaluate_rules(rules, _agent_compliance_context(row, metadata))
+        items.append(
+            AgentCompliancePolicyEvent(
+                event_id=row.id,
+                provider_event_id=_string_or_none(metadata.get("provider_event_id")),
+                provider=_string_or_none(metadata.get("provider") or metadata.get("agent_provider")),
+                actor_login=row.actor_login,
+                repo_id=row.repo_id,
+                repo_name=row.repo_name,
+                model=_string_or_none(metadata.get("model")),
+                intelligence_tier=_string_or_none(metadata.get("intelligence_tier") or metadata.get("model_tier")),
+                access_scope=_string_or_none(metadata.get("access_scope")),
+                source_record_type=_string_or_none(metadata.get("source_record_type")),
+                content_retention="metadata-only",
+                decision=decision.decision,
+                matched_rule_ids=list(decision.matched_rule_ids),
+                reasons=list(decision.reasons),
+                compliance_tags=list(decision.compliance_tags),
+                occurred_at=row.created_at,
+            )
+        )
+    return AgentCompliancePolicyResponse(
+        total=len(items),
+        evaluated=len(items),
+        flagged_count=sum(1 for item in items if item.decision in FLAGGED_DECISIONS),
+        content_retention="metadata-only",
+        items=items,
+    )
 
 
 @router.post("/approvals/{approval_id}/decision", dependencies=[Depends(require_policy_permission("policy.approvals.approve"))])
@@ -507,6 +584,30 @@ def _rule_from_policy(policy: OrgPolicy) -> PolicyRule:
         source_pack=getattr(policy, "policy_pack", None),
         deprecated_decision=getattr(policy, "deprecated_decision", None),
     )
+
+
+def _agent_compliance_context(event: AuditEvent, metadata: dict[str, object]):
+    file_targets = metadata.get("file_targets") if isinstance(metadata.get("file_targets"), list) else []
+    provider = metadata.get("provider") or metadata.get("agent_provider")
+    payload = {
+        "repo": event.repo_name or event.repo_id or metadata.get("repo_name") or metadata.get("repo_id"),
+        "agent": provider,
+        "action_class": "agent_compliance",
+        "files": file_targets,
+        "metadata": {
+            **metadata,
+            "provider": provider,
+            "repo_id": event.repo_id or metadata.get("repo_id"),
+            "repo_name": event.repo_name or metadata.get("repo_name"),
+        },
+    }
+    return context_from_mapping(payload)
+
+
+def _string_or_none(value: object) -> str | None:
+    if value is None or value == "":
+        return None
+    return str(value)
 
 
 def _canonical_decision(value: object) -> DecisionVerb:

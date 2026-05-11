@@ -214,3 +214,18 @@ Final required verification:
   - UX screenshots captured:
     - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-ingest-jobs-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-ingest-jobs-mobile.png`
+
+## 2026-05-11 — Policy agent compliance evaluation slice
+
+- Backend: `GET /v8/orgs/{org_id}/policy/agent-compliance` evaluates recent metadata-only `agent.compliance` audit events against enabled v8 Policy rules.
+- Policy projection: maps provider, actor, repo, model, intelligence tier, access scope, file targets, MCP/tools, source record type, and sanitized metadata into the existing YAML DSL evaluator.
+- Frontend: Policy now includes an Agent events tab showing evaluated compliance records, matched decisions, tags, rule reasons, and `metadata-only` retention without displaying raw prompts, chat, diffs, file content, or tool parameters.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_policy.py -q` -> `18 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed after the production build regenerated `.next/types`.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured:
+    - `docs/v8-refactor/screenshots/automation-20260511/policy-agent-compliance-events-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/policy-agent-compliance-events-mobile.png`

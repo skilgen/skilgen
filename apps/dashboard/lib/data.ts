@@ -917,6 +917,33 @@ export type V8PolicyApprovalsResponse = {
   };
 };
 
+export type V8AgentCompliancePolicyEvent = {
+  event_id: string;
+  provider_event_id: string | null;
+  provider: string | null;
+  actor_login: string | null;
+  repo_id: string | null;
+  repo_name: string | null;
+  model: string | null;
+  intelligence_tier: string | null;
+  access_scope: string | null;
+  source_record_type: string | null;
+  content_retention: "metadata-only";
+  decision: V8PolicyRule["decision"];
+  matched_rule_ids: string[];
+  reasons: string[];
+  compliance_tags: string[];
+  occurred_at: string;
+};
+
+export type V8AgentCompliancePolicyResponse = {
+  total: number;
+  evaluated: number;
+  flagged_count: number;
+  content_retention: "metadata-only";
+  items: V8AgentCompliancePolicyEvent[];
+};
+
 export type V8QuarantineItem = {
   id: string;
   name: string;
@@ -2071,6 +2098,10 @@ export async function getV8PolicyViolations(accessToken: string | null, orgId: s
 
 export async function getV8PolicyApprovals(accessToken: string | null, orgId: string): Promise<V8PolicyApprovalsResponse | null> {
   return apiFetch<V8PolicyApprovalsResponse>(`/v8/orgs/${orgId}/policy/approvals`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8AgentCompliancePolicy(accessToken: string | null, orgId: string): Promise<V8AgentCompliancePolicyResponse | null> {
+  return apiFetch<V8AgentCompliancePolicyResponse>(`/v8/orgs/${orgId}/policy/agent-compliance`, { accessToken, cache: "no-store" });
 }
 
 export async function getV8PolicyQuarantine(accessToken: string | null, orgId: string): Promise<V8QuarantineItem[]> {
