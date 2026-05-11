@@ -5,7 +5,7 @@ domain: roadmap
 sub_domain: roadmap-phase-3
 last_updated: 2026-05-11
 triggered_by: requirements_pipeline
-source_hash: 66b8b2c92af28b364d9d8dec414d732cd7b10e8ad09f9bf821482d71570a933a
+source_hash: c35114e3fc43f69cc5ff26ebf7006cab775911c72afd45f90fbc6ef2869245fe
 richness_score: 72
 score:
   total: 72
@@ -49,7 +49,7 @@ Roadmap phase node for phase-3 planning and sequencing guidance.
 3. Prefer cross-linked sibling skills when the change spans multiple closely related surfaces.
 
 ## Traceability
-- Generated from requirements source hash: `66b8b2c92af28b364d9d8dec414d732cd7b10e8ad09f9bf821482d71570a933a`
+- Generated from requirements source hash: `c35114e3fc43f69cc5ff26ebf7006cab775911c72afd45f90fbc6ef2869245fe`
 - Domain path: `roadmap/roadmap-phase-3`
 - Read `../../../TRACEABILITY.md` for full requirement-to-output mapping.
 - Use the detected file patterns in this skill before creating new structure.

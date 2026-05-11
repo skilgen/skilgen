@@ -20,6 +20,6 @@
 - The migrated v8 app lives under `apps/dashboard/app/(v8)` and uses the Skillayer governance shell.
 - | Activity | The default investigation homepage for live agent activity, sessions, replay, and heatmaps. | `/activity`, `/activity/live-feed`, `/activity/sessions`, `/activity/replay`, `/activity/heatmap` |
 - | Skills | The artifact substrate: registry, score, drift, provenance, SkillQL, and repo coverage. | `/skills/registry`, `/skills/score`, `/skills/drift`, `/skills/provenance`, `/skills/skillql`, `/skills/repos` |
-- | Insights | Fleet trends and risk posture: KPIs, risky agents, risky repos, and coverage SLA. | `/insights/fleet-kpis`, `/insights/risky-agents`, `/insights/risky-repos`, `/insights/coverage-sla` |
+- | Insights | Fleet trends and risk posture: KPIs, developer track, risky agents/repos, coverage SLA, and agent compliance metrics. | `/insights/fleet-kpis`, `/insights/developer-track`, `/insights/agent-compliance-metrics`, `/insights/intelligence-usage`, `/insights/access-grants`, `/insights/provider-coverage`, `/insights/coverage-sla` |
 - Current feature slices tracked in `FEATURES.md` include:
 - - Metadata-only agent compliance event ingestion for configured provider connectors, including model tier, access grants, tools/MCP, files, policy decisions, tokens, cost, latency, warnings, violations, and error metrics.
