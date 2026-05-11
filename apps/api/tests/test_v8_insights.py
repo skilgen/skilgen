@@ -129,6 +129,16 @@ def test_fleet_kpis_contract_includes_prior_period_comparison(monkeypatch) -> No
     rejected = SimpleNamespace(status="rejected", created_at=NOW - timedelta(hours=3), reviewed_at=NOW - timedelta(hours=1))
     current_quarantine = SimpleNamespace(tags=["quarantined"], is_deprecated=False)
     previous_retired = SimpleNamespace(tags=[], is_deprecated=True)
+    org = SimpleNamespace(settings={
+        "v8_policy_approval_decisions": {
+            "policy-1:repo_1:skill_1": {"decision": "approve", "recorded_at": (NOW - timedelta(hours=2)).isoformat()},
+            "policy-2:repo_1:skill_2": {"decision": "deny", "recorded_at": (NOW - timedelta(days=31)).isoformat()},
+            "policy-open:repo_1:skill_3": {"decision": "request_info", "recorded_at": (NOW - timedelta(hours=1)).isoformat()},
+        }
+    })
+    current_policy = SimpleNamespace(id="policy-1", created_at=NOW - timedelta(hours=6))
+    previous_policy = SimpleNamespace(id="policy-2", created_at=NOW - timedelta(days=31, hours=8))
+    open_policy = SimpleNamespace(id="policy-open", created_at=NOW - timedelta(hours=2))
     current_pr = _pr("pr_1", "repo_1")
     previous_pr = _pr("pr_2", "repo_1", days_old=31)
     db = Db(
@@ -147,6 +157,8 @@ def test_fleet_kpis_contract_includes_prior_period_comparison(monkeypatch) -> No
             Result(scalar=0),
             Result([current_quarantine, previous_retired]),
             Result([previous_retired]),
+            Result([current_policy, previous_policy, open_policy]),
+            Result([current_policy, previous_policy, open_policy]),
             Result(["repo_1"]),
             Result([current_pr]),
             Result([_attr("pr_1", "codex", violated=True)]),
@@ -155,7 +167,8 @@ def test_fleet_kpis_contract_includes_prior_period_comparison(monkeypatch) -> No
             Result([]),
             Result(["ravi"]),
             Result(["ravi", "sam"]),
-        ]
+        ],
+        org=org,
     )
     response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/fleet-kpis")
 
@@ -171,6 +184,10 @@ def test_fleet_kpis_contract_includes_prior_period_comparison(monkeypatch) -> No
     assert metrics["quarantined_skills"]["source"] == "skill_registry_entries"
     assert metrics["quarantined_skills"]["current"] == 2
     assert metrics["quarantined_skills"]["previous"] == 1
+    assert metrics["mttr_violations"]["status"] == "available"
+    assert metrics["mttr_violations"]["source"] == "org.settings.v8_policy_approval_decisions"
+    assert metrics["mttr_violations"]["current"] == 4
+    assert metrics["mttr_violations"]["previous"] == 8
     assert metrics["attributed_agent_commits"]["previous"] == 0.0
 
 
