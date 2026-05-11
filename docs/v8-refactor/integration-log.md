@@ -365,3 +365,11 @@ Final required verification:
   - UX screenshots captured with a local mock API:
     - `docs/v8-refactor/screenshots/automation-20260511/skills-registry-governance-evidence-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/skills-registry-governance-evidence-mobile.png`
+
+## 2026-05-11 — Settings agent compliance actor fallback slice
+
+- Backend: metadata-only agent compliance ingestion now falls back to the authenticated request actor when a provider event omits `actor_login`, preserving developer attribution in both the normalized audit event and metadata envelope.
+- Safety: the migrated Connectors UI keeps live ingest jobs metadata-only and does not generate synthetic sample compliance events.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> 21 passed.
+  - `git diff --check` -> passed.
