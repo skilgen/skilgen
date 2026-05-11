@@ -20,6 +20,22 @@ Scope: PR-2 through PR-7 in one integration PR. PR-8 deprecation is out of scope
     - `docs/v8-refactor/screenshots/automation-20260511/audit-agent-compliance-evidence-packages-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/audit-agent-compliance-evidence-packages-mobile.png`
 
+## 2026-05-11 — Settings admin audit workflow
+
+- Backend: `/v8/orgs/{org_id}/settings/admin-audit` now accepts actor, event type, resource type, severity, window, and limit filters.
+- Backend: response now includes admin audit summary, severity counts, event-type mix, and resource coverage rollups for settings/member/API-key governance events.
+- Frontend: `/settings/admin-audit` now provides filter controls, summary KPIs, event/resource rollups, severity badges, and responsive event rows in the migrated Skillayer Settings shell.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> `18 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+- UX screenshot gate:
+  - Desktop and mobile proof captured with a local mock API:
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-admin-audit-workflow-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-admin-audit-workflow-mobile.png`
+
 ## Subagent assignments
 
 | Surface | Agent branch | Status | Notes |

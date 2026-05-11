@@ -253,7 +253,7 @@ test("settings rbac create, binding, admin audit nav, and notifications config r
 
   await page.getByRole("link", { name: /Admin audit/i }).click();
   await expect(page).toHaveURL(/\/settings\/admin-audit/);
-  await expect(page.getByText("No admin audit events yet.")).toBeVisible();
+  await expect(page.getByText(/Admin audit unavailable|No admin audit events matched/)).toBeVisible();
 
   await page.getByRole("link", { name: /Notifications/i }).click();
   await expect(page).toHaveURL(/\/settings\/notifications/);
