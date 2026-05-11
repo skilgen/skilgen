@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { BookOpen, GitBranch, ShieldCheck } from "lucide-react";
+import { Bot, BookOpen, GitBranch, ShieldCheck } from "lucide-react";
 
 import { API_URL, getBootstrapOrg, getMyOrg, type Org } from "../../../../lib/data";
 
@@ -75,11 +75,15 @@ function Summary({ items, total }: { items: V8SkillRegistryItem[]; total: number
   const verified = items.filter((item) => item.signature_status === "verified").length;
   const avg = items.length ? Math.round(items.reduce((sum, item) => sum + item.score.total, 0) / items.length) : 0;
   const repos = new Set(items.map((item) => item.repo_id)).size;
+  const dependentAgents = new Set(items.flatMap((item) => item.dependent_agents)).size;
+  const policyBindings = new Set(items.flatMap((item) => item.policy_bindings)).size;
   return (
-    <div className="grid gap-4 md:grid-cols-4">
+    <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
       <Metric label="Generated skills" value={total} />
       <Metric label="Repos covered" value={repos} />
       <Metric label="Verified signatures" value={verified} />
+      <Metric label="Dependent agents" value={dependentAgents} />
+      <Metric label="Policy bindings" value={policyBindings} />
       <Metric label="Average score" value={`${avg}/100`} tone={scoreTone(avg)} />
     </div>
   );
@@ -90,6 +94,20 @@ function Metric({ label, value, tone = "text-[color:var(--text-primary)]" }: { l
     <div className="rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">{label}</div>
       <div className={`mt-3 text-[30px] font-semibold ${tone}`}>{value}</div>
+    </div>
+  );
+}
+
+function PillList({ empty, items }: { empty: string; items: string[] }) {
+  if (!items.length) return <span className="text-xs text-[color:var(--text-tertiary)]">{empty}</span>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.slice(0, 3).map((item) => (
+        <span className="max-w-[180px] truncate rounded-sm border border-[color:var(--bg-border)] px-2 py-0.5 text-[11px] text-[color:var(--text-secondary)]" key={item} title={item}>
+          {item}
+        </span>
+      ))}
+      {items.length > 3 ? <span className="rounded-sm border border-[color:var(--bg-border)] px-2 py-0.5 text-[11px] text-[color:var(--text-tertiary)]">+{items.length - 3}</span> : null}
     </div>
   );
 }
@@ -128,28 +146,41 @@ export default async function SkillsRegistryPage() {
         <>
           <Summary items={items} total={registry.total} />
           <section className="overflow-hidden rounded-[8px] border border-[color:var(--bg-border)]">
-            <div className="grid grid-cols-[minmax(280px,1.5fr)_minmax(180px,1fr)_120px_130px_140px] bg-[color:var(--bg-surface)] px-4 py-3 text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">
-              <span>Skill</span>
-              <span>Repo</span>
-              <span>Score</span>
-              <span>Signature</span>
-              <span>Grounded</span>
+            <div className="overflow-x-auto">
+              <div className="grid min-w-[1040px] grid-cols-[minmax(260px,1.4fr)_minmax(190px,1fr)_minmax(260px,1.2fr)_100px_130px_130px] bg-[color:var(--bg-surface)] px-4 py-3 text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">
+                <span>Skill</span>
+                <span>Repo</span>
+                <span>Governance evidence</span>
+                <span>Score</span>
+                <span>Signature</span>
+                <span>Grounded</span>
+              </div>
+              {items.map((item) => (
+                <article className="grid min-w-[1040px] grid-cols-[minmax(260px,1.4fr)_minmax(190px,1fr)_minmax(260px,1.2fr)_100px_130px_130px] gap-3 border-t border-[color:var(--bg-border)] px-4 py-4 text-sm" key={item.skill_id}>
+                  <div>
+                    <div className="font-medium text-[color:var(--text-primary)]">{item.name}</div>
+                    <div className="mt-1 text-[12px] text-[color:var(--text-tertiary)]">{item.owning_team} · {item.version} · {item.drift_status}</div>
+                  </div>
+                  <Link className="text-[color:var(--accent-primary)] hover:underline" href={`/skills/repos?repo=${encodeURIComponent(item.repo_id)}`}>{item.repo_full_name}</Link>
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2">
+                      <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--accent-primary)]" />
+                      <PillList empty="No dependent agents" items={item.dependent_agents} />
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--accent-primary)]" />
+                      <PillList empty="No policy bindings" items={item.policy_bindings} />
+                    </div>
+                  </div>
+                  <div className={`font-semibold ${scoreTone(item.score.total)}`}>{item.score.total}/100</div>
+                  <div className="inline-flex h-fit w-fit items-center gap-1 rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-[12px] capitalize text-[color:var(--text-secondary)]">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    {item.signature_status}
+                  </div>
+                  <div className="text-[color:var(--text-secondary)]">{fmtDate(item.last_code_grounded_at)}</div>
+                </article>
+              ))}
             </div>
-            {items.map((item) => (
-              <article className="grid grid-cols-[minmax(280px,1.5fr)_minmax(180px,1fr)_120px_130px_140px] gap-3 border-t border-[color:var(--bg-border)] px-4 py-4 text-sm" key={item.skill_id}>
-                <div>
-                  <div className="font-medium text-[color:var(--text-primary)]">{item.name}</div>
-                  <div className="mt-1 text-[12px] text-[color:var(--text-tertiary)]">{item.owning_team} · {item.version} · {item.drift_status}</div>
-                </div>
-                <Link className="text-[color:var(--accent-primary)] hover:underline" href={`/skills/repos?repo=${encodeURIComponent(item.repo_id)}`}>{item.repo_full_name}</Link>
-                <div className={`font-semibold ${scoreTone(item.score.total)}`}>{item.score.total}/100</div>
-                <div className="inline-flex w-fit items-center gap-1 rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-[12px] capitalize text-[color:var(--text-secondary)]">
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  {item.signature_status}
-                </div>
-                <div className="text-[color:var(--text-secondary)]">{fmtDate(item.last_code_grounded_at)}</div>
-              </article>
-            ))}
           </section>
         </>
       )}
