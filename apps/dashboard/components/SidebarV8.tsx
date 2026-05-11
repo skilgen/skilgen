@@ -85,8 +85,8 @@ export function SidebarV8({ handleSignOut, initials = "SU", user }: SidebarV8Pro
 
 export function V8MobileNav() {
   return (
-    <nav className="sticky top-[52px] z-30 border-b border-[color:var(--bg-surface)] bg-[color:var(--bg-base)] px-3 py-2 md:hidden">
-      <div className="flex gap-2 overflow-x-auto pb-1">
+    <nav className="sticky top-[52px] z-30 overflow-hidden border-b border-[color:var(--bg-surface)] bg-[color:var(--bg-base)] px-3 py-2 md:hidden">
+      <div className="flex max-w-full gap-2 overflow-x-auto pb-1">
         {v8NavItems.map((item) => (
           <Link
             className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-3 py-1.5 text-xs font-semibold text-[color:var(--text-secondary)]"

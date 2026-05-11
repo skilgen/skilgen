@@ -20,7 +20,7 @@ The migrated v8 app lives under `apps/dashboard/app/(v8)` and uses the Skillayer
 | Policy | The control plane for YAML rules, violations, human approvals, quarantine, and starter policy packs. | `/policy/rules`, `/policy/violations`, `/policy/approvals`, `/policy/quarantine` |
 | Audit | Compliance evidence, hash-chain verification, audit reports, SIEM-ready exports, and evidence packages. | `/audit/event-log`, `/audit/reports`, `/audit/exports`, `/audit/evidence-packages` |
 | Skills | The artifact substrate: registry, score, drift, provenance, SkillQL, and repo coverage. | `/skills/registry`, `/skills/score`, `/skills/drift`, `/skills/provenance`, `/skills/skillql`, `/skills/repos` |
-| Insights | Fleet trends and risk posture: KPIs, risky agents, risky repos, and coverage SLA. | `/insights/fleet-kpis`, `/insights/risky-agents`, `/insights/risky-repos`, `/insights/coverage-sla` |
+| Insights | Fleet trends and risk posture: KPIs, developer track, risky agents/repos, coverage SLA, and agent compliance metrics. | `/insights/fleet-kpis`, `/insights/developer-track`, `/insights/agent-compliance-metrics`, `/insights/intelligence-usage`, `/insights/access-grants`, `/insights/provider-coverage`, `/insights/coverage-sla` |
 | Settings | Enterprise administration for teams, RBAC, SSO, connectors, admin audit, notifications, and billing. | `/settings/teams`, `/settings/rbac`, `/settings/sso`, `/settings/connectors`, `/settings/admin-audit` |
 
 ## Implemented v8 Capabilities
@@ -33,6 +33,7 @@ Current feature slices tracked in `FEATURES.md` include:
 - Policy review actions for approvals and quarantine, including persisted approval decisions.
 - Coverage SLA critical-operation taxonomy loading from `apps/api/api/v8/insights/critical_ops.yaml`.
 - Metadata-only agent compliance event ingestion for configured provider connectors, including model tier, access grants, tools/MCP, files, policy decisions, tokens, cost, latency, warnings, violations, and error metrics.
+- Consolidated agent compliance metrics for provider, developer, model, repo, session, tool, MCP, file, policy, approval, retention, token, cost, latency, warning, violation, and error rollups.
 - Provider coverage monitoring for configured compliance connectors, highlighting silent, stale, and 30-day retention-risk sources before provider logs become unrecoverable.
 - v8 Audit APIs for event log, reports, exports, evidence packages, hash-chain verification, and WORM root publishing.
 - v8 Skills APIs and screens for registry, score, drift, provenance, SkillQL, and repos.
@@ -54,7 +55,7 @@ Important v8 backend modules:
 - `apps/api/api/v8/policy`: policy DSL, starter packs, approvals, quarantine, and RBAC hooks.
 - `apps/api/api/v8/audit`: hash-chain audit log, reports, exports, WORM roots, and evidence packages.
 - `apps/api/api/v8/skills`: registry, score, drift, provenance, SkillQL, and repo skill coverage.
-- `apps/api/api/v8/insights`: fleet KPIs, risky agents/repos, and coverage SLA.
+- `apps/api/api/v8/insights`: fleet KPIs, risky agents/repos, coverage SLA, and consolidated agent compliance metrics.
 - `apps/api/api/v8/settings`: connectors, RBAC, and admin settings foundations.
 
 ## Local Development

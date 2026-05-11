@@ -171,3 +171,17 @@ Final required verification:
   - UX screenshots captured:
     - `docs/v8-refactor/screenshots/automation-20260511/provider-coverage-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/provider-coverage-mobile.png`
+
+## 2026-05-11 — Insights agent compliance metrics slice
+
+- Backend: `apps/api/api/v8/insights/router.py` adds `GET /v8/orgs/{org_id}/insights/agent-compliance-metrics`.
+- Metrics: consolidates metadata-only compliance and coding-agent telemetry across providers, developers, models, repos, sessions, tools, MCP tools, files, policy decisions, approvals, source record types, retention states, token counts, cost, latency, warnings, violations, and errors.
+- Frontend: `apps/dashboard/app/(v8)/insights/agent-compliance-metrics/page.tsx` adds a migrated Insights tab for end-to-end developer tracking from normalized compliance API records.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_insights.py -q` -> `13 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - UX screenshots captured:
+    - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-metrics-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-metrics-mobile.png`
