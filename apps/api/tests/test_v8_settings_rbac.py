@@ -473,6 +473,27 @@ def test_connector_catalog_covers_required_worm_storage_sources() -> None:
     assert connectors["azure-worm"]["source_type"] == "azure_immutable_blob"
 
 
+def test_connector_catalog_covers_required_provenance_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
+
+    for connector_id in {"sigstore", "slsa-attestations", "github-artifact-attestations"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "provenance"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert {"release evidence", "artifact attestations", "build provenance"} & set(connector["capabilities"])
+
+    assert connectors["sigstore"]["source_type"] == "sigstore"
+    assert "transparency log" in connectors["sigstore"]["capabilities"]
+    assert "certificate identity" in connectors["sigstore"]["capabilities"]
+    assert connectors["slsa-attestations"]["source_type"] == "slsa_attestations"
+    assert "builder identity" in connectors["slsa-attestations"]["capabilities"]
+    assert "artifact digest" in connectors["slsa-attestations"]["capabilities"]
+    assert connectors["github-artifact-attestations"]["source_type"] == "github_artifact_attestations"
+    assert "workflow identity" in connectors["github-artifact-attestations"]["capabilities"]
+    assert "commit SHA" in connectors["github-artifact-attestations"]["capabilities"]
+
+
 def test_request_agent_compliance_connector_sync_requires_enabled_connector(monkeypatch) -> None:
     org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
     db = OrgDb(org)

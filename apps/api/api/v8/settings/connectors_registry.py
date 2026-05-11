@@ -242,7 +242,33 @@ CONNECTORS: tuple[ConnectorDefinition, ...] = (
         "Customer-owned Azure Immutable Blob target for tamper-evident audit-chain roots, Merkle proofs, and regulated evidence retention.",
         ("immutable roots", "Merkle proofs", "audit chain roots", "retention policy", "evidence packages", "customer-owned storage"),
     ),
-    ConnectorDefinition("sigstore", "Sigstore", "provenance", "planned"),
+    ConnectorDefinition(
+        "sigstore",
+        "Sigstore",
+        "provenance",
+        "planned",
+        "sigstore",
+        "Sigstore signing, Rekor transparency-log, and Fulcio certificate evidence for release and skill provenance review.",
+        ("signatures", "transparency log", "certificate identity", "release evidence", "policy review"),
+    ),
+    ConnectorDefinition(
+        "slsa-attestations",
+        "SLSA Attestations",
+        "provenance",
+        "planned",
+        "slsa_attestations",
+        "SLSA provenance attestations for build builder identity, source revision, artifact digest, dependency materials, and supply-chain policy evidence.",
+        ("build provenance", "builder identity", "artifact digest", "dependency materials", "supply-chain policy"),
+    ),
+    ConnectorDefinition(
+        "github-artifact-attestations",
+        "GitHub Artifact Attestations",
+        "provenance",
+        "planned",
+        "github_artifact_attestations",
+        "GitHub artifact attestation evidence for workflow-signed build outputs, repository source, commit SHA, and deployment release review.",
+        ("artifact attestations", "workflow identity", "commit SHA", "repository source", "release evidence"),
+    ),
 )
 
 
