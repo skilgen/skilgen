@@ -108,9 +108,13 @@ def test_evidence_package_zip_uses_html_fallback_index() -> None:
         chain_root={"root_hash": "a" * 64},
         policies=[{"id": "pol_1"}],
         skills=[{"id": "skill_1"}],
+        agent_compliance={"summary": {"events": 1, "tokens_total": 42}, "events": [{"id": "evt_agent_1"}]},
     )
     with ZipFile(BytesIO(package)) as archive:
         assert "index.html" in archive.namelist()
+        assert "agent-compliance-summary.json" in archive.namelist()
         manifest = archive.read("manifest.json").decode("utf-8")
         assert '"index_format": "html"' in manifest
+        assert '"content_retention": "metadata-only"' in manifest
+        assert '"tokens_total": 42' in archive.read("agent-compliance-summary.json").decode("utf-8")
         assert "SOC2 CC8.1" in archive.read("index.html").decode("utf-8")

@@ -146,6 +146,7 @@ class EvidencePackageResponse(BaseModel):
     job_id: str
     status: str
     queued: bool
+    result: dict[str, Any] = Field(default_factory=dict)
 
 
 AGENT_COMPLIANCE_EVENT_TYPES = {
@@ -268,6 +269,309 @@ def _agent_compliance_response(event: AuditEvent) -> AgentComplianceAuditEvent:
         summary=event.summary,
         created_at=event.created_at,
     )
+
+
+RAW_CONTENT_KEYS = {
+    "args",
+    "argument",
+    "arguments",
+    "prompt",
+    "raw_prompt",
+    "completion",
+    "raw_completion",
+    "content",
+    "contents",
+    "messages",
+    "chat",
+    "chat_content",
+    "diff",
+    "input",
+    "inputs",
+    "output",
+    "outputs",
+    "patch",
+    "parameter",
+    "parameters",
+    "file_content",
+    "file_contents",
+    "tool_parameters",
+    "tool_params",
+    "tool_arguments",
+    "tool_args",
+}
+
+
+def _safe_label(value: object) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, int | float | str):
+        return str(value)
+    if isinstance(value, dict):
+        for key in ("name", "tool", "id", "type", "path", "file", "repo", "provider"):
+            item = value.get(key)
+            if isinstance(item, bool):
+                return str(item).lower()
+            if isinstance(item, int | float | str) and str(item):
+                return str(item)
+    return None
+
+
+def _metadata_list(metadata: object, key: str) -> list[str]:
+    if not isinstance(metadata, dict):
+        return []
+    value = metadata.get(key)
+    if isinstance(value, list):
+        return [label for item in value if (label := _safe_label(item))]
+    if isinstance(value, dict):
+        return [label for item in value.keys() if (label := _safe_label(item))]
+    label = _safe_label(value)
+    if label:
+        return [label]
+    return []
+
+
+def _metadata_int(metadata: object, *keys: str) -> int:
+    if not isinstance(metadata, dict):
+        return 0
+    for key in keys:
+        value = metadata.get(key)
+        if value is None or value == "":
+            continue
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int | float):
+            return max(0, int(value))
+        if isinstance(value, str):
+            try:
+                return max(0, int(float(value)))
+            except ValueError:
+                continue
+    return 0
+
+
+def _metadata_float(metadata: object, *keys: str) -> float:
+    if not isinstance(metadata, dict):
+        return 0.0
+    for key in keys:
+        value = metadata.get(key)
+        if value is None or value == "":
+            continue
+        if isinstance(value, int | float):
+            return max(0.0, float(value))
+        if isinstance(value, str):
+            try:
+                return max(0.0, float(value))
+            except ValueError:
+                continue
+    return 0.0
+
+
+def _metadata_bool(metadata: object, *keys: str) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in {"1", "true", "yes", "full-access", "autonomous"}
+    return False
+
+
+def _tool_permission_count(metadata: object) -> int:
+    if not isinstance(metadata, dict):
+        return 0
+    tool_permissions = _metadata_list(metadata, "tool_permissions")
+    if tool_permissions:
+        return len(tool_permissions)
+    return _metadata_int(metadata, "tool_calls", "tool_call_count")
+
+
+def _count(counter: dict[str, int], values: list[str]) -> None:
+    for value in values:
+        counter[value] = counter.get(value, 0) + 1
+
+
+def _counter_payload(counter: dict[str, int], *, limit: int = 12) -> list[dict[str, Any]]:
+    return [
+        {"key": key, "label": key, "count": count}
+        for key, count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    ]
+
+
+def _safe_agent_compliance_metadata(metadata: object) -> dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {}
+    sanitized: dict[str, Any] = {}
+    for key, value in metadata.items():
+        key_text = str(key)
+        if key_text.lower() in RAW_CONTENT_KEYS:
+            continue
+        if isinstance(value, dict):
+            nested = _safe_agent_compliance_metadata(value)
+            if nested:
+                sanitized[key_text] = nested
+        elif isinstance(value, list):
+            safe_items = []
+            for item in value:
+                if isinstance(item, dict):
+                    nested = _safe_agent_compliance_metadata(item)
+                    if nested:
+                        safe_items.append(nested)
+                elif (label := _safe_label(item)) is not None:
+                    safe_items.append(label)
+            sanitized[key_text] = safe_items
+        elif value is None or isinstance(value, bool | int | float | str):
+            sanitized[key_text] = value
+    return sanitized
+
+
+def _agent_compliance_evidence(rows: list[AuditEvent]) -> dict[str, Any]:
+    actors: set[str] = set()
+    providers: set[str] = set()
+    sessions: set[str] = set()
+    repos: set[str] = set()
+    source_hashes: set[str] = set()
+    top_tools: dict[str, int] = {}
+    top_mcp_tools: dict[str, int] = {}
+    top_files: dict[str, int] = {}
+    policy_decisions: dict[str, int] = {}
+    approval_statuses: dict[str, int] = {}
+    source_record_types: dict[str, int] = {}
+    retention_states: dict[str, int] = {}
+    latency_values: list[float] = []
+    summary = {
+        "events": 0,
+        "users": 0,
+        "providers": 0,
+        "sessions": 0,
+        "repos": 0,
+        "file_targets": 0,
+        "tool_permission_events": 0,
+        "mcp_tool_events": 0,
+        "full_access_events": 0,
+        "autonomous_events": 0,
+        "approvals": 0,
+        "denials": 0,
+        "warnings": 0,
+        "violations": 0,
+        "errors": 0,
+        "tokens_input": 0,
+        "tokens_output": 0,
+        "tokens_total": 0,
+        "cost_usd": 0.0,
+        "avg_latency_ms": None,
+        "source_envelope_hashes": 0,
+    }
+    sanitized_events: list[dict[str, Any]] = []
+    for row in rows:
+        if str(row.event_type or "").lower() not in AGENT_COMPLIANCE_EVENT_TYPES:
+            continue
+        metadata = row.metadata_json or {}
+        actor = row.actor_login or _metadata_value(metadata, "actor_login", "user") or "unknown"
+        provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or row.resource_type or "unknown"
+        repo = row.repo_name or _metadata_value(metadata, "repo_name", "repo") or "unknown"
+        session_id = _metadata_value(metadata, "session_id", "agent_session_id", "thread_id")
+        source_hash = _metadata_value(metadata, "source_envelope_hash", "envelope_hash", "event_hash")
+        tool_count = _tool_permission_count(metadata)
+        mcp_tools = _metadata_list(metadata, "mcp_tools")
+        file_targets = _metadata_list(metadata, "file_targets")
+        warning_count = _metadata_int(metadata, "warnings", "warning_count")
+        violation_count = len(_metadata_list(metadata, "violations"))
+        error_count = _metadata_int(metadata, "error_count", "errors")
+        input_tokens = _metadata_int(metadata, "tokens_input", "input_tokens", "prompt_tokens")
+        output_tokens = _metadata_int(metadata, "tokens_output", "output_tokens", "completion_tokens")
+        total_tokens = _metadata_int(metadata, "tokens_total", "total_tokens") or input_tokens + output_tokens
+        cost_usd = _metadata_float(metadata, "cost_usd", "estimated_cost_usd")
+        latency_ms = _metadata_float(metadata, "latency_ms", "duration_ms")
+        decision = _metadata_value(metadata, "policy_decision", "decision", "outcome")
+        approval = _metadata_value(metadata, "approval_status")
+
+        summary["events"] += 1
+        summary["file_targets"] += len(file_targets)
+        summary["tool_permission_events"] += tool_count
+        summary["mcp_tool_events"] += len(mcp_tools)
+        summary["full_access_events"] += int(_metadata_bool(metadata, "full_access", "full_access_granted") or _metadata_value(metadata, "access_scope") == "full-access")
+        summary["autonomous_events"] += int(_metadata_bool(metadata, "autonomous_access", "autonomous"))
+        summary["warnings"] += warning_count
+        summary["violations"] += violation_count
+        summary["errors"] += error_count
+        summary["tokens_input"] += input_tokens
+        summary["tokens_output"] += output_tokens
+        summary["tokens_total"] += total_tokens
+        summary["cost_usd"] += cost_usd
+        if latency_ms:
+            latency_values.append(latency_ms)
+        if decision:
+            policy_decisions[decision] = policy_decisions.get(decision, 0) + 1
+            if decision.lower() in {"deny", "denied", "block", "blocked", "reject", "rejected"}:
+                summary["denials"] += 1
+        if approval:
+            approval_statuses[approval] = approval_statuses.get(approval, 0) + 1
+            if approval.lower() in {"approved", "approve", "allowed", "allow"}:
+                summary["approvals"] += 1
+            elif approval.lower() in {"denied", "deny", "rejected", "reject", "blocked", "block"}:
+                summary["denials"] += 1
+        source_record_type = _metadata_value(metadata, "source_record_type") or "unknown"
+        retention_state = _metadata_value(metadata, "content_retention", "redaction_state") or "metadata-only"
+        source_record_types[source_record_type] = source_record_types.get(source_record_type, 0) + 1
+        retention_states[retention_state] = retention_states.get(retention_state, 0) + 1
+        _count(top_tools, _metadata_list(metadata, "tool_permissions"))
+        _count(top_mcp_tools, mcp_tools)
+        _count(top_files, file_targets)
+        actors.add(actor)
+        providers.add(provider)
+        repos.add(repo)
+        if session_id:
+            sessions.add(session_id)
+        if source_hash:
+            source_hashes.add(source_hash)
+        sanitized_events.append(
+            {
+                "id": row.id,
+                "actor_login": actor,
+                "provider": provider,
+                "model": _metadata_value(metadata, "model", "model_name", "model_id"),
+                "intelligence_tier": _metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier"),
+                "access_scope": _metadata_value(metadata, "access_scope", "permission_scope", "grant_scope"),
+                "repo_name": repo,
+                "policy_decision": decision,
+                "approval_status": approval,
+                "source_envelope_hash": source_hash,
+                "summary": row.summary,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "metadata": _safe_agent_compliance_metadata(metadata),
+            }
+        )
+    summary["users"] = len(actors)
+    summary["providers"] = len(providers)
+    summary["sessions"] = len(sessions)
+    summary["repos"] = len(repos)
+    summary["source_envelope_hashes"] = len(source_hashes)
+    summary["cost_usd"] = round(float(summary["cost_usd"]), 6)
+    summary["avg_latency_ms"] = round(sum(latency_values) / len(latency_values), 2) if latency_values else None
+    return {
+        "content_retention": "metadata-only",
+        "excluded_raw_content_keys": sorted(RAW_CONTENT_KEYS),
+        "summary": summary,
+        "top_tools": _counter_payload(top_tools),
+        "top_mcp_tools": _counter_payload(top_mcp_tools),
+        "top_files": _counter_payload(top_files),
+        "policy_decisions": _counter_payload(policy_decisions),
+        "approval_statuses": _counter_payload(approval_statuses),
+        "source_record_types": _counter_payload(source_record_types),
+        "retention_states": _counter_payload(retention_states),
+        "events": sanitized_events,
+    }
+
+
+def _evidence_event_payload(row: AuditEvent) -> dict[str, Any]:
+    payload = {"id": row.id, **_event_payload(row)}
+    if str(row.event_type or "").lower() in AGENT_COMPLIANCE_EVENT_TYPES:
+        payload["metadata"] = _safe_agent_compliance_metadata(row.metadata_json or {})
+    return payload
 
 
 async def _ensure_chain(db: AsyncSession, org_id: str) -> list[AuditHashChain]:
@@ -643,17 +947,62 @@ async def create_evidence_package(
     current_org_id: str = Depends(get_current_org_id),
 ) -> EvidencePackageResponse:
     await _assert_enabled(org_id, current_org_id, db)
+    preview = {
+        "control": payload.control,
+        "period_start": payload.period_start.isoformat(),
+        "period_end": payload.period_end.isoformat(),
+        "index_format": "html",
+        "content_retention": "metadata-only",
+        "included_files": [
+            "index.html",
+            "manifest.json",
+            "events.json",
+            "agent-compliance-summary.json",
+            "policies.json",
+            "skills.json",
+            "chain-root.json",
+        ],
+        "agent_compliance": {
+            "status": "queued",
+            "metrics": [
+                "events",
+                "users",
+                "providers",
+                "sessions",
+                "repos",
+                "file_targets",
+                "tool_permission_events",
+                "mcp_tool_events",
+                "full_access_events",
+                "autonomous_events",
+                "approvals",
+                "denials",
+                "warnings",
+                "violations",
+                "errors",
+                "tokens_input",
+                "tokens_output",
+                "tokens_total",
+                "cost_usd",
+                "avg_latency_ms",
+                "source_envelope_hashes",
+                "top_tools",
+                "top_mcp_tools",
+                "top_files",
+                "policy_decisions",
+                "approval_statuses",
+                "source_record_types",
+                "retention_states",
+            ],
+        },
+        "excluded_raw_content_keys": sorted(RAW_CONTENT_KEYS),
+    }
     job = Job(
         id=new_uuid(),
         org_id=org_id,
         type="audit_evidence_package",
         status="pending",
-        result_json={
-            "control": payload.control,
-            "period_start": payload.period_start.isoformat(),
-            "period_end": payload.period_end.isoformat(),
-            "index_format": "html",
-        },
+        result_json=preview,
     )
     db.add(job)
     await db.commit()
@@ -667,7 +1016,7 @@ async def create_evidence_package(
         )
     except Exception:
         pass
-    return EvidencePackageResponse(job_id=job.id, status=job.status, queued=True)
+    return EvidencePackageResponse(job_id=job.id, status=job.status, queued=True, result=preview)
 
 
 @router.get("/evidence-packages/{job_id}", response_model=dict[str, Any])
@@ -689,6 +1038,7 @@ async def build_evidence_package_for_job(db: AsyncSession, job_id: str, org_id: 
     end = datetime.fromisoformat(period_end)
     await _ensure_chain(db, org_id)
     rows = (await db.execute(select(AuditEvent).where(*_filters(org_id, date_from=start, date_to=end)).order_by(AuditEvent.created_at))).scalars().all()
+    agent_compliance = _agent_compliance_evidence(list(rows))
     latest_root = (
         await db.execute(select(AuditHashChain).where(AuditHashChain.org_id == org_id).order_by(desc(AuditHashChain.sequence)).limit(1))
     ).scalars().first()
@@ -708,14 +1058,23 @@ async def build_evidence_package_for_job(db: AsyncSession, job_id: str, org_id: 
         control=control,
         period_start=period_start,
         period_end=period_end,
-        events=[{"id": row.id, **_event_payload(row)} for row in rows],
+        events=[_evidence_event_payload(row) for row in rows],
         chain_root=chain_root,
         policies=[{"id": row.id, "name": row.name, "rule_type": row.rule_type} for row in policies],
         skills=[{"id": row.id, "version": row.version_number, "skill_id": row.skill_id, "domain": row.domain} for row in skills],
+        agent_compliance=agent_compliance,
     )
     output_dir = os.getenv("AUDIT_EVIDENCE_PACKAGE_DIR", "/tmp/skillayer-evidence")
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f"{job_id}.zip")
     with open(output_path, "wb") as handle:
         handle.write(package_bytes)
-    return {"path": output_path, "bytes": len(package_bytes), "event_count": len(rows), "index_format": "html", "chain_root": chain_root}
+    return {
+        "path": output_path,
+        "bytes": len(package_bytes),
+        "event_count": len(rows),
+        "index_format": "html",
+        "chain_root": chain_root,
+        "content_retention": "metadata-only",
+        "agent_compliance": agent_compliance,
+    }

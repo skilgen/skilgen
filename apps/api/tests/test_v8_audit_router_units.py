@@ -13,6 +13,8 @@ from apps.api.api.v8.audit.router import (
     PublishRootRequest,
     _event_payload,
     _event_response,
+    _agent_compliance_evidence,
+    _evidence_event_payload,
     _filters,
     _write_raw_ndjson,
     create_evidence_package,
@@ -74,6 +76,9 @@ def _agent_event(event_id: str = "evt_agent_1") -> AuditEvent:
             "model": "gpt-5.2",
             "intelligence_tier": "very-high",
             "access_scope": "full-access",
+            "tool_calls": [{"name": "shell", "arguments": {"cmd": "cat secret.txt"}}],
+            "mcp_tools": [{"name": "github:create_pr", "parameters": {"body": "raw diff"}}],
+            "messages": [{"role": "user", "content": "must not be returned"}],
             "policy_decision": "allow-with-review",
             "source_envelope_hash": "abc123",
             "raw_prompt": "must not be returned",
@@ -328,7 +333,31 @@ def test_report_export_publish_root_and_evidence_queue(monkeypatch) -> None:
         )
     )
     assert evidence.queued is True
+    assert evidence.result["content_retention"] == "metadata-only"
+    assert "agent-compliance-summary.json" in evidence.result["included_files"]
+    assert "raw_prompt" in evidence.result["excluded_raw_content_keys"]
     assert evidence_db.committed is True
+
+
+def test_evidence_package_consolidates_agent_compliance_metrics_metadata_only() -> None:
+    evidence = _agent_compliance_evidence([_agent_event()])
+    event_payload = _evidence_event_payload(_agent_event())
+
+    assert evidence["content_retention"] == "metadata-only"
+    assert evidence["summary"]["events"] == 1
+    assert evidence["summary"]["providers"] == 1
+    assert evidence["summary"]["sessions"] == 0
+    assert evidence["summary"]["full_access_events"] == 1
+    assert evidence["summary"]["source_envelope_hashes"] == 1
+    assert evidence["top_mcp_tools"] == [{"key": "github:create_pr", "label": "github:create_pr", "count": 1}]
+    assert evidence["policy_decisions"] == [{"key": "allow-with-review", "label": "allow-with-review", "count": 1}]
+    assert "raw_prompt" not in evidence["events"][0]["metadata"]
+    assert "messages" not in evidence["events"][0]["metadata"]
+    assert "arguments" not in evidence["events"][0]["metadata"]["tool_calls"][0]
+    assert "parameters" not in evidence["events"][0]["metadata"]["mcp_tools"][0]
+    assert "raw_prompt" not in event_payload["metadata"]
+    assert "must not be returned" not in str(evidence)
+    assert "secret.txt" not in str(evidence)
 
 
 def test_worm_target_endpoint_lists_three_root_only_targets(monkeypatch) -> None:
