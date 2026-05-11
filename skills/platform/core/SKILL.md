@@ -5,7 +5,7 @@ domain: platform
 sub_domain: platform-core
 last_updated: 2026-05-11
 triggered_by: requirements_pipeline
-source_hash: c35114e3fc43f69cc5ff26ebf7006cab775911c72afd45f90fbc6ef2869245fe
+source_hash: 8b23ea8a0e8cf72fff2cfcd6890faa6970d61df0fc06f29f9576437064dcf128
 richness_score: 96
 score:
   total: 96
@@ -92,7 +92,7 @@ def _write_audit_payload(path: Path, payload: dict[str, Any]) -> None:
 ```
 
 ## Traceability
-- Generated from requirements source hash: `c35114e3fc43f69cc5ff26ebf7006cab775911c72afd45f90fbc6ef2869245fe`
+- Generated from requirements source hash: `8b23ea8a0e8cf72fff2cfcd6890faa6970d61df0fc06f29f9576437064dcf128`
 - Domain path: `platform/platform-core`
 - Read `../../../TRACEABILITY.md` for full requirement-to-output mapping.
 - Use the detected file patterns in this skill before creating new structure.

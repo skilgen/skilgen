@@ -5,7 +5,7 @@ domain: platform
 sub_domain: platform-cli
 last_updated: 2026-05-11
 triggered_by: requirements_pipeline
-source_hash: c35114e3fc43f69cc5ff26ebf7006cab775911c72afd45f90fbc6ef2869245fe
+source_hash: 8b23ea8a0e8cf72fff2cfcd6890faa6970d61df0fc06f29f9576437064dcf128
 richness_score: 84
 score:
   total: 84
@@ -72,7 +72,7 @@ def _write_memory_session_template(project_root: Path, output: str | None = None
 ```
 
 ## Traceability
-- Generated from requirements source hash: `c35114e3fc43f69cc5ff26ebf7006cab775911c72afd45f90fbc6ef2869245fe`
+- Generated from requirements source hash: `8b23ea8a0e8cf72fff2cfcd6890faa6970d61df0fc06f29f9576437064dcf128`
 - Domain path: `platform/platform-cli`
 - Read `../../../TRACEABILITY.md` for full requirement-to-output mapping.
 - Use the detected file patterns in this skill before creating new structure.
