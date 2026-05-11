@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+from datetime import datetime
 from types import SimpleNamespace
 
 import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
+from fastapi import BackgroundTasks
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -15,7 +17,7 @@ from apps.api.api.auth import get_current_org_id
 from apps.api.api.v8.flags import request_flag_cache
 from apps.api.api.v8.settings.rbac import has_permission, matches_scope_expression, permission_matches
 from packages.db.database import get_db
-from packages.db.models import AuditEvent, Org
+from packages.db.models import AuditEvent, Job, Org
 
 
 rbac_migration = importlib.import_module("apps.api.alembic.versions.20260505_0002_settings_rbac")
@@ -71,6 +73,8 @@ def test_v8_settings_router_is_registered() -> None:
     assert "/v8/orgs/{org_id}/settings/connectors/agent-compliance" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/sync" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-events" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs/{job_id}" in paths
 
 
 def test_agent_compliance_connector_endpoint_returns_metadata_state(monkeypatch) -> None:
@@ -414,6 +418,112 @@ def test_ingest_agent_compliance_events_normalizes_every_metric_metadata_only(mo
     assert event.metadata_json["safe_metric"] == "kept"
     assert "prompt" not in event.metadata_json
     assert "source_envelope_hash" in event.metadata_json
+
+
+def test_queue_agent_compliance_ingest_job_tracks_cursor_page_state(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "cursor": "cursor-1",
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.queue_agent_compliance_ingest_job(
+            "org-1",
+            "openai-compliance",
+            settings_router.AgentComplianceIngestPayload(
+                cursor="cursor-1",
+                next_cursor="cursor-2",
+                events=[
+                    settings_router.AgentComplianceEventPayload(
+                        provider_event_id="evt-job-1",
+                        provider="OpenAI Compliance Platform",
+                    )
+                ],
+            ),
+            Request({"type": "http", "headers": []}),
+            BackgroundTasks(),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    job = next(item for item in db.added if isinstance(item, Job))
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    assert response.queued is True
+    assert response.event_count == 1
+    assert response.cursor == "cursor-1"
+    assert response.next_cursor == "cursor-2"
+    assert job.type == "agent_compliance.ingest"
+    assert job.status == "queued"
+    assert job.result_json["pagination_strategy"] == "cursor-resume"
+    assert job.result_json["content_retention"] == "metadata-only"
+    assert stored["last_sync_status"] == "queued"
+    assert stored["last_sync_mode"] == "ingest-job"
+    assert stored["last_ingest_job"]["job_id"] == job.id
+    assert stored["last_ingest_job"]["event_count"] == 1
+
+
+def test_agent_compliance_ingest_job_status_is_connector_scoped(monkeypatch) -> None:
+    job = Job(
+        id="job-1",
+        org_id="org-1",
+        type="agent_compliance.ingest",
+        status="completed",
+        result_json={
+            "connector_id": "openai-compliance",
+            "ingested_count": 3,
+            "content_retention": "metadata-only",
+        },
+        created_at=datetime(2026, 5, 11, 8, 30, 0),
+    )
+
+    class JobDb:
+        async def get(self, model: object, row_id: str) -> object | None:
+            assert model is Job
+            assert row_id == "job-1"
+            return job
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+
+    response = asyncio.run(
+        settings_router.get_agent_compliance_ingest_job(
+            "org-1",
+            "openai-compliance",
+            "job-1",
+            db=JobDb(),
+            current_org_id="org-1",
+        )
+    )
+
+    assert response.job_id == "job-1"
+    assert response.status == "completed"
+    assert response.result["ingested_count"] == 3
 
 
 def test_scope_expression_positive_for_payments_repo() -> None:
