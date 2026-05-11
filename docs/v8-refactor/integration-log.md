@@ -322,3 +322,18 @@ Final required verification:
   - UX screenshots captured with a local mock API:
     - `docs/v8-refactor/screenshots/automation-20260511/fleet-kpi-quarantine-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/fleet-kpi-quarantine-mobile.png`
+
+## 2026-05-11 — Insights policy violation MTTR KPI slice
+
+- Backend: `GET /v8/orgs/{org_id}/insights/fleet-kpis` now reports `mttr_violations` from resolved Policy approval decisions instead of leaving it unavailable when reviewed decisions exist.
+- Metric contract: uses terminal `approve` / `deny` records in `org.settings.v8_policy_approval_decisions[*].recorded_at` as the resolution timestamp and the matching policy creation time as the violation start anchor, reporting median hours for current and previous windows.
+- Frontend: existing Fleet KPI cards now render MTTR as an hours metric without UI changes.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_insights.py -q` -> 16 passed.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured with a local mock API:
+    - `docs/v8-refactor/screenshots/automation-20260511/fleet-kpi-policy-mttr-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/fleet-kpi-policy-mttr-mobile.png`

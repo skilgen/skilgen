@@ -541,6 +541,39 @@ async def _count_quarantined_skills(db: AsyncSession, org_id: str, end: datetime
     return count
 
 
+async def _policy_violation_mttr_hours(db: AsyncSession, org_id: str, start: datetime, end: datetime) -> float | None:
+    org = await db.get(Org, org_id)
+    settings = dict(getattr(org, "settings", None) or {}) if org else {}
+    raw_decisions = settings.get("v8_policy_approval_decisions")
+    if not isinstance(raw_decisions, dict):
+        return None
+    policy_rows = (
+        await db.execute(
+            select(OrgPolicy.id, OrgPolicy.created_at).where(OrgPolicy.org_id == org_id)
+        )
+    ).all()
+    policy_started_at = {str(_row_value(row, "id")): _row_value(row, "created_at") for row in policy_rows}
+    durations: list[float] = []
+    for approval_id, raw in raw_decisions.items():
+        if not isinstance(raw, dict) or raw.get("decision") not in {"approve", "deny"}:
+            continue
+        recorded_at = raw.get("recorded_at")
+        if not isinstance(recorded_at, str):
+            continue
+        try:
+            reviewed_at = datetime.fromisoformat(recorded_at)
+        except ValueError:
+            continue
+        if not (start <= reviewed_at < end):
+            continue
+        policy_id = str(approval_id).split(":", 1)[0]
+        violation_started_at = policy_started_at.get(policy_id)
+        if not isinstance(violation_started_at, datetime):
+            continue
+        durations.append(max(0.0, (reviewed_at - violation_started_at).total_seconds() / 3600))
+    return round(float(median(durations)), 2) if durations else None
+
+
 async def _weekly_active_humans(db: AsyncSession, org_id: str, end: datetime) -> int:
     start = end - timedelta(days=7)
     rows = (
@@ -584,7 +617,7 @@ async def get_fleet_kpis(
         _metric("median_time_to_approve", "Median time to approve", current_median, previous_median, "minutes", "skill_memory_stubs"),
         _metric("drift_events", "Drift events", await _count_drift_events(db, org_id, current_start, current_end), await _count_drift_events(db, org_id, previous_start, previous_end), "count", "audit_events"),
         _metric("quarantined_skills", "Quarantined skills", await _count_quarantined_skills(db, org_id, current_end), await _count_quarantined_skills(db, org_id, previous_end), "count", "skill_registry_entries"),
-        _unavailable("mttr_violations", "MTTR for violations", "hours", "violation_resolution_state_not_present"),
+        _metric("mttr_violations", "MTTR for violations", await _policy_violation_mttr_hours(db, org_id, current_start, current_end), await _policy_violation_mttr_hours(db, org_id, previous_start, previous_end), "hours", "org.settings.v8_policy_approval_decisions"),
         _metric("attributed_agent_commits", "Agent commits with full attribution", await _attribution_rate(db, org_id, current_start, current_end), await _attribution_rate(db, org_id, previous_start, previous_end), "percent", "pr_attributions"),
         _metric("weekly_active_human_users", "Weekly active human users", await _weekly_active_humans(db, org_id, current_end), await _weekly_active_humans(db, org_id, previous_end), "count", "agent_sessions"),
     ]
