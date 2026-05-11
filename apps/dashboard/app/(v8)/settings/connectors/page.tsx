@@ -123,6 +123,51 @@ const fallbackConnectors: Connector[] = [
     capabilities: ["agent sessions", "model tier", "full-access grants", "repo activity"],
   },
   {
+    id: "windsurf",
+    label: "Windsurf",
+    category: "coding-agent",
+    status: "planned",
+    connected: false,
+    description: "Windsurf/Cascade coding-agent sessions, model tier, workspace actions, terminal/tool use, and file-target metadata where enterprise telemetry is available.",
+    capabilities: ["agent sessions", "model tier", "tool calls", "file access", "repo activity"],
+  },
+  {
+    id: "aider",
+    label: "Aider",
+    category: "coding-agent",
+    status: "planned",
+    connected: false,
+    description: "Aider coding sessions, repository targets, model usage, git changes, and shell/tool activity from local or enterprise telemetry hooks.",
+    capabilities: ["agent sessions", "model usage", "git changes", "shell access", "file access"],
+  },
+  {
+    id: "github-copilot",
+    label: "GitHub Copilot",
+    category: "coding-agent",
+    status: "planned",
+    connected: false,
+    description: "GitHub Copilot Business/Enterprise coding-agent and chat activity with organization, repo, model, policy, seat, and usage metadata.",
+    capabilities: ["agent sessions", "chat activity", "repo activity", "policy metadata", "model usage"],
+  },
+  {
+    id: "gitlab-duo",
+    label: "GitLab Duo",
+    category: "coding-agent",
+    status: "planned",
+    connected: false,
+    description: "GitLab Duo assistant activity, project targets, model usage, merge-request context, and policy metadata from GitLab telemetry or audit exports.",
+    capabilities: ["agent sessions", "project activity", "merge requests", "policy metadata", "model usage"],
+  },
+  {
+    id: "internal-mcp",
+    label: "Internal MCP servers",
+    category: "runtime",
+    status: "planned",
+    connected: false,
+    description: "Internal MCP server calls, tool names, resource scopes, approval decisions, latency, and error metadata for agent runtime governance.",
+    capabilities: ["mcp calls", "tool access", "resource scopes", "approval decisions", "latency"],
+  },
+  {
     id: "github",
     label: "GitHub",
     category: "source-control",
@@ -343,7 +388,7 @@ export default async function ConnectorsSettingsPage() {
   ]);
   const showingFallback = payload === null || !payload.connectors.length;
   const connectors = showingFallback ? fallbackConnectors : payload.connectors;
-  const agentConnectors = agentCompliance?.connectors ?? fallbackConnectors.filter((connector) => connector.category === "compliance-telemetry" || connector.category === "coding-agent").map((connector) => ({
+  const agentConnectors = agentCompliance?.connectors ?? fallbackConnectors.filter((connector) => connector.category === "compliance-telemetry" || connector.category === "coding-agent" || connector.id === "internal-mcp").map((connector) => ({
     ...connector,
     configured: false,
     enabled: false,
@@ -402,7 +447,7 @@ export default async function ConnectorsSettingsPage() {
           </div>
         </div>
         <div className="grid gap-3 p-4 lg:grid-cols-3">
-          {agentConnectors.slice(0, 6).map((connector) => (
+          {agentConnectors.map((connector) => (
             <article className="flex min-h-[190px] flex-col rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3" key={`agent-${connector.id}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>

@@ -337,3 +337,18 @@ Final required verification:
   - UX screenshots captured with a local mock API:
     - `docs/v8-refactor/screenshots/automation-20260511/fleet-kpi-policy-mttr-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/fleet-kpi-policy-mttr-mobile.png`
+
+## 2026-05-11 — Settings agent connector catalog coverage slice
+
+- Backend: the v8 Settings connector registry now carries actionable source types, descriptions, and metric capabilities for Windsurf, Aider, GitHub Copilot, GitLab Duo, and internal MCP servers.
+- Agent compliance readiness: internal MCP is included in the agent-compliance registry so MCP call, resource-scope, approval, latency, and error metadata can be configured and dry-run planned without live credentials.
+- Frontend: the migrated Settings connector fallback catalog mirrors the required coding-agent and MCP sources so local or unauthenticated previews do not hide PRD-required connectors or imply fake connected state.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> 20 passed.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured with a local mock API:
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-agent-connector-catalog-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-agent-connector-catalog-mobile.png`
