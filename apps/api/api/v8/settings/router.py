@@ -38,6 +38,8 @@ DEFAULT_DIGEST_WIDGETS = [
     "roi_multiplier",
 ]
 ADMIN_AUDIT_ROLLUP_LIMIT = 5000
+BILLING_UNLIMITED_SEAT_LIMIT = 999999
+BILLING_ATTENTION_STATUSES = {"past_due", "unpaid", "incomplete", "incomplete_expired"}
 
 
 class RolePayload(BaseModel):
@@ -232,6 +234,43 @@ def _digest_response(config: DigestConfig) -> dict[str, object]:
         "layout": dict(config.layout or {}),
         "created_at": config.created_at,
         "updated_at": config.updated_at,
+    }
+
+
+def _billing_response(org: Org) -> dict[str, object]:
+    seat_count = int(org.seat_count or 0)
+    seat_limit = int(org.plan_seat_limit or 0)
+    finite_limit = seat_limit if 0 < seat_limit < BILLING_UNLIMITED_SEAT_LIMIT else None
+    available_seats = max(finite_limit - seat_count, 0) if finite_limit is not None else None
+    seat_utilization_pct = round((seat_count / finite_limit) * 100) if finite_limit else 0
+    subscription_status = org.stripe_subscription_status or ("free" if org.plan == "free" else "not_configured")
+    billing_account_connected = bool(org.stripe_customer_id)
+    needs_attention = bool(getattr(org, "is_suspended", False)) or subscription_status in BILLING_ATTENTION_STATUSES
+    actions: list[str] = []
+    if not billing_account_connected and org.plan != "free":
+        actions.append("connect_stripe_customer")
+    if subscription_status in BILLING_ATTENTION_STATUSES:
+        actions.append("review_payment_method")
+    if finite_limit is not None and available_seats == 0:
+        actions.append("increase_seat_limit")
+    if not actions:
+        actions.append("monitor_usage")
+
+    return {
+        "plan": org.plan,
+        "seat_count": seat_count,
+        "seat_limit": seat_limit,
+        "seat_limit_label": "Unlimited" if finite_limit is None else str(finite_limit),
+        "available_seats": available_seats,
+        "seat_utilization_pct": seat_utilization_pct,
+        "stripe_customer_id": org.stripe_customer_id,
+        "stripe_subscription_id": org.stripe_subscription_id,
+        "stripe_subscription_status": org.stripe_subscription_status,
+        "subscription_state": subscription_status,
+        "billing_account_connected": billing_account_connected,
+        "portal_available": billing_account_connected,
+        "needs_attention": needs_attention,
+        "next_actions": actions,
     }
 
 
@@ -1277,7 +1316,7 @@ async def get_admin_audit(
     )
 
 
-@router.get("/billing")
+@router.get("/billing", dependencies=[Depends(require_permission("settings.billing.read"))])
 async def get_billing(
     org_id: str,
     db: AsyncSession = Depends(get_db),
@@ -1287,14 +1326,7 @@ async def get_billing(
     org = await db.get(Org, org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="Org not found")
-    return {
-        "plan": org.plan,
-        "seat_count": org.seat_count,
-        "seat_limit": org.plan_seat_limit,
-        "stripe_customer_id": org.stripe_customer_id,
-        "stripe_subscription_id": org.stripe_subscription_id,
-        "stripe_subscription_status": org.stripe_subscription_status,
-    }
+    return _billing_response(org)
 
 
 @router.get("/notifications/digest")

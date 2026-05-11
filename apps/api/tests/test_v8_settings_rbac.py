@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from apps.api.api.index import app
-from apps.api.api.auth import get_current_org_id
+from apps.api.api.auth import get_current_org_id, get_current_user
 from apps.api.api.v8.flags import request_flag_cache
 from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, matches_scope_expression, permission_matches
 from packages.db.database import get_db
@@ -101,6 +101,7 @@ def test_v8_settings_router_is_registered() -> None:
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs/{job_id}" in paths
     assert "settings.admin_audit.read" in PERMISSIONS
+    assert "settings.billing.read" in PERMISSIONS
 
 
 def test_agent_compliance_connector_endpoint_returns_metadata_state(monkeypatch) -> None:
@@ -513,6 +514,72 @@ def test_connector_catalog_covers_required_provenance_sources() -> None:
     assert connectors["github-artifact-attestations"]["source_type"] == "github_artifact_attestations"
     assert "workflow identity" in connectors["github-artifact-attestations"]["capabilities"]
     assert "commit SHA" in connectors["github-artifact-attestations"]["capabilities"]
+
+
+def test_billing_response_adds_readiness_state() -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        plan="team",
+        seat_count=8,
+        plan_seat_limit=10,
+        stripe_customer_id="cus_123",
+        stripe_subscription_id="sub_123",
+        stripe_subscription_status="active",
+    )
+
+    payload = settings_router._billing_response(org)
+
+    assert payload["seat_count"] == 8
+    assert payload["seat_limit"] == 10
+    assert payload["seat_limit_label"] == "10"
+    assert payload["available_seats"] == 2
+    assert payload["seat_utilization_pct"] == 80
+    assert payload["subscription_state"] == "active"
+    assert payload["billing_account_connected"] is True
+    assert payload["portal_available"] is True
+    assert payload["needs_attention"] is False
+    assert payload["next_actions"] == ["monitor_usage"]
+
+
+def test_billing_response_flags_payment_and_seat_attention() -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        plan="team",
+        seat_count=3,
+        plan_seat_limit=3,
+        stripe_subscription_status="past_due",
+    )
+
+    payload = settings_router._billing_response(org)
+
+    assert payload["available_seats"] == 0
+    assert payload["seat_utilization_pct"] == 100
+    assert payload["billing_account_connected"] is False
+    assert payload["needs_attention"] is True
+    assert payload["next_actions"] == ["connect_stripe_customer", "review_payment_method", "increase_seat_limit"]
+
+
+def test_billing_endpoint_requires_billing_read_permission() -> None:
+    async def db_override():
+        yield Db([])
+
+    app.dependency_overrides[get_current_org_id] = lambda: "org-1"
+    app.dependency_overrides[get_current_user] = lambda: {"email": "viewer@example.com"}
+    app.dependency_overrides[get_db] = db_override
+    app.dependency_overrides[request_flag_cache] = lambda: None
+    try:
+        response = TestClient(app).get("/v8/orgs/org-1/settings/billing")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "RBAC permission denied"
 
 
 def test_request_agent_compliance_connector_sync_requires_enabled_connector(monkeypatch) -> None:
