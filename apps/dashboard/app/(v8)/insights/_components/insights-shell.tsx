@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, CircleSlash,
 
 import {
   getDeveloperLeaderboard,
+  getV8AgentComplianceMetrics,
   getBootstrapOrg,
   getMyOrg,
   getV8AccessGrants,
@@ -14,6 +15,9 @@ import {
   getV8RiskyAgents,
   getV8RiskyRepos,
   type InsightsAccessGrants,
+  type InsightsAgentComplianceMetricBreakdownRow,
+  type InsightsAgentComplianceMetricItem,
+  type InsightsAgentComplianceMetrics,
   type InsightsCoverageSla,
   type InsightsFleetKpis,
   type InsightsIntelligenceUsage,
@@ -26,7 +30,7 @@ import {
   type DeveloperLeaderboardResponse,
 } from "../../../../lib/data";
 
-type InsightsTab = "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "intelligence-usage" | "access-grants" | "provider-coverage";
+type InsightsTab = "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "agent-compliance-metrics" | "intelligence-usage" | "access-grants" | "provider-coverage";
 
 const tabs: Array<{ id: InsightsTab; label: string; href: string }> = [
   { id: "fleet-kpis", label: "Fleet KPIs", href: "/insights/fleet-kpis" },
@@ -34,6 +38,7 @@ const tabs: Array<{ id: InsightsTab; label: string; href: string }> = [
   { id: "risky-agents", label: "Risky agents", href: "/insights/risky-agents" },
   { id: "risky-repos", label: "Risky repos", href: "/insights/risky-repos" },
   { id: "coverage-sla", label: "Coverage SLA", href: "/insights/coverage-sla" },
+  { id: "agent-compliance-metrics", label: "Agent metrics", href: "/insights/agent-compliance-metrics" },
   { id: "intelligence-usage", label: "Intelligence usage", href: "/insights/intelligence-usage" },
   { id: "access-grants", label: "Access grants", href: "/insights/access-grants" },
   { id: "provider-coverage", label: "Provider coverage", href: "/insights/provider-coverage" },
@@ -419,6 +424,112 @@ function IntelligenceUsageEmpty() {
         Connect OpenAI Compliance Platform, Anthropic Compliance API, Claude Cowork OTel, Codex CLI, or Cursor sources to populate metadata-only model tier and access exposure rollups.
       </p>
     </section>
+  );
+}
+
+function ComplianceMetricStat({ label, value, detail }: { label: string; value: string | number; detail: string }) {
+  return (
+    <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">{label}</div>
+      <div className="mt-3 text-[28px] font-semibold text-[color:var(--text-primary)]">{value}</div>
+      <p className="mt-2 text-xs leading-5 text-[color:var(--text-secondary)]">{detail}</p>
+    </article>
+  );
+}
+
+function ComplianceBreakdownTable({ title, rows }: { title: string; rows: InsightsAgentComplianceMetricBreakdownRow[] }) {
+  if (!rows.length) return null;
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-semibold text-[color:var(--text-primary)]">{title}</h2>
+      <div className="overflow-hidden rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
+        <div className="grid grid-cols-[1.5fr_80px_80px_90px_90px_90px_90px] gap-3 bg-black/20 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] max-xl:hidden">
+          <span>Name</span>
+          <span>Events</span>
+          <span>Users</span>
+          <span>Tools</span>
+          <span>Files</span>
+          <span>Risk</span>
+          <span>Cost</span>
+        </div>
+        {rows.map((row) => (
+          <div className="grid gap-3 border-t border-[color:var(--bg-border)] px-4 py-4 text-sm first:border-t-0 xl:grid-cols-[1.5fr_80px_80px_90px_90px_90px_90px]" key={row.key}>
+            <div>
+              <div className="font-semibold text-[color:var(--text-primary)]">{row.label}</div>
+              <div className="mt-1 text-xs text-[color:var(--text-tertiary)]">{row.sessions} sessions · {row.tokens_total.toLocaleString("en-US")} tokens</div>
+            </div>
+            <div className="flex justify-between gap-3 xl:block"><span className="text-xs uppercase text-[color:var(--text-tertiary)] xl:hidden">Events</span>{row.events}</div>
+            <div className="flex justify-between gap-3 xl:block"><span className="text-xs uppercase text-[color:var(--text-tertiary)] xl:hidden">Users</span>{row.users}</div>
+            <div className="flex justify-between gap-3 xl:block"><span className="text-xs uppercase text-[color:var(--text-tertiary)] xl:hidden">Tools</span>{row.tool_permission_events + row.mcp_tool_events}</div>
+            <div className="flex justify-between gap-3 xl:block"><span className="text-xs uppercase text-[color:var(--text-tertiary)] xl:hidden">Files</span>{row.file_targets}</div>
+            <div className="flex justify-between gap-3 font-semibold text-[color:var(--accent-primary)] xl:block"><span className="text-xs uppercase text-[color:var(--text-tertiary)] xl:hidden">Risk</span>{row.full_access_events + row.autonomous_events + row.violations + row.errors}</div>
+            <div className="flex justify-between gap-3 xl:block"><span className="text-xs uppercase text-[color:var(--text-tertiary)] xl:hidden">Cost</span>${row.cost_usd.toFixed(2)}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ComplianceMetricChips({ title, items }: { title: string; items: InsightsAgentComplianceMetricItem[] }) {
+  if (!items.length) return null;
+  return (
+    <section className="min-w-0 overflow-hidden rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+      <h2 className="text-sm font-semibold text-[color:var(--text-primary)]">{title}</h2>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {items.map((item) => (
+          <span className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-2 py-1 text-xs text-[color:var(--text-secondary)]" key={`${title}-${item.key}`}>
+            {item.label}: <strong className="text-[color:var(--text-primary)]">{item.count}</strong>
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export async function AgentComplianceMetricsView() {
+  const { accessToken, org } = await resolveOrgAndToken();
+  const data: InsightsAgentComplianceMetrics | null = org ? await getV8AgentComplianceMetrics(accessToken, org.id) : null;
+  const summary = data?.summary;
+  return (
+    <PageFrame active="agent-compliance-metrics">
+      {!data || !summary ? <EmptyState label="Agent compliance metrics unavailable" /> : null}
+      {summary ? (
+        <>
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <ComplianceMetricStat label="Events" value={summary.events} detail={`${summary.users} users across ${summary.providers} providers and ${summary.sessions} sessions.`} />
+            <ComplianceMetricStat label="Access risk" value={summary.full_access_events + summary.autonomous_events} detail={`${summary.full_access_events} full-access and ${summary.autonomous_events} autonomous grants.`} />
+            <ComplianceMetricStat label="Tools and files" value={summary.tool_permission_events + summary.mcp_tool_events + summary.file_targets} detail={`${summary.tool_permission_events} tool permissions, ${summary.mcp_tool_events} MCP tools, ${summary.file_targets} file targets.`} />
+            <ComplianceMetricStat label="Policy outcomes" value={summary.violations + summary.warnings + summary.errors} detail={`${summary.violations} violations, ${summary.warnings} warnings, ${summary.errors} errors.`} />
+            <ComplianceMetricStat label="Tokens" value={summary.tokens_total.toLocaleString("en-US")} detail={`${summary.tokens_input.toLocaleString("en-US")} input and ${summary.tokens_output.toLocaleString("en-US")} output tokens.`} />
+            <ComplianceMetricStat label="Cost" value={`$${summary.cost_usd.toFixed(2)}`} detail={`${summary.avg_latency_ms ?? "N/A"} ms average latency from compliance metadata.`} />
+            <ComplianceMetricStat label="Approvals" value={summary.approvals} detail={`${summary.denials} denial signals from policy decisions and approvals.`} />
+            <ComplianceMetricStat label="Repos" value={summary.repos} detail="Repositories observed in normalized metadata-only events." />
+          </section>
+
+          <section className="rounded-lg border border-[color:var(--accent-primary)]/35 bg-[color:var(--accent-primary)]/10 p-4">
+            <p className="text-sm leading-6 text-[color:var(--text-secondary)]">
+              Consolidated from normalized `agent.compliance` and coding-agent telemetry records: provider, user, session, model tier, full/autonomous access, tools, MCP calls, file targets, policy decisions, approvals, tokens, cost, latency, warnings, violations, errors, source type, and retention state.
+            </p>
+          </section>
+
+          <ComplianceBreakdownTable title="By Provider" rows={data.by_provider} />
+          <ComplianceBreakdownTable title="By Developer" rows={data.by_actor} />
+          <ComplianceBreakdownTable title="By Model" rows={data.by_model} />
+          <ComplianceBreakdownTable title="By Repository" rows={data.by_repo} />
+
+          <section className="grid gap-4 xl:grid-cols-2">
+            <ComplianceMetricChips title="Tool permissions" items={data.top_tools} />
+            <ComplianceMetricChips title="MCP tools" items={data.top_mcp_tools} />
+            <ComplianceMetricChips title="File targets" items={data.top_files} />
+            <ComplianceMetricChips title="Policy decisions" items={data.policy_decisions} />
+            <ComplianceMetricChips title="Approval statuses" items={data.approval_statuses} />
+            <ComplianceMetricChips title="Source record types" items={data.source_record_types} />
+            <ComplianceMetricChips title="Retention states" items={data.retention_states} />
+          </section>
+        </>
+      ) : null}
+    </PageFrame>
   );
 }
 

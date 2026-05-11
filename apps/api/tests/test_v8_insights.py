@@ -113,6 +113,7 @@ def test_insights_router_paths_are_registered() -> None:
     assert "/v8/orgs/{org_id}/insights/coverage-sla" in paths
     assert "/v8/orgs/{org_id}/insights/intelligence-usage" in paths
     assert "/v8/orgs/{org_id}/insights/access-grants" in paths
+    assert "/v8/orgs/{org_id}/insights/agent-compliance-metrics" in paths
     assert "/v8/orgs/{org_id}/insights/provider-coverage" in paths
 
 
@@ -418,6 +419,108 @@ def test_access_grants_endpoint_returns_metadata_only_exposure_rows(monkeypatch)
     assert payload["grants"][0]["full_access_events"] == 1
     assert payload["grants"][0]["tool_permission_events"] == 2
     assert all(row["actor_login"] != "maya" for row in payload["grants"])
+
+
+def test_agent_compliance_metrics_consolidates_all_ingested_metadata(monkeypatch) -> None:
+    events = [
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="ravi",
+            repo_name="acme/payments",
+            resource_type="codex_cli",
+            created_at=NOW,
+            metadata_json={
+                "connector_id": "codex-cli",
+                "provider": "Codex CLI",
+                "model": "gpt-5.2",
+                "intelligence_tier": "very-high",
+                "access_scope": "full-access",
+                "full_access": True,
+                "autonomous_access": True,
+                "tool_permissions": ["shell", "apply_patch"],
+                "mcp_tools": ["github:create_pr"],
+                "file_targets": ["apps/dashboard/page.tsx", "apps/api/router.py"],
+                "policy_decision": "deny",
+                "approval_status": "rejected",
+                "violations": ["full-access-prod"],
+                "warnings": 2,
+                "tokens_input": 1200,
+                "tokens_output": 800,
+                "cost_usd": 0.42,
+                "latency_ms": 1500,
+                "error_count": 1,
+                "session_id": "sess-1",
+                "source_record_type": "operational-telemetry",
+                "content_retention": "metadata-only",
+            },
+        ),
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.telemetry",
+            actor_login="maya",
+            repo_name="acme/api",
+            resource_type="openai_compliance",
+            created_at=NOW - timedelta(minutes=5),
+            metadata_json={
+                "connector_id": "openai-compliance",
+                "provider": "OpenAI Compliance Platform",
+                "model": "gpt-5.2",
+                "intelligence_tier": "high",
+                "tool_calls": 3,
+                "mcp_tools": ["linear:create_issue", "github:create_pr"],
+                "file_targets": ["apps/api/router.py"],
+                "policy_decision": "allow",
+                "approval_status": "approved",
+                "tokens_total": 900,
+                "cost_usd": "0.18",
+                "latency_ms": "500",
+                "session_id": "sess-2",
+                "source_record_type": "formal-compliance",
+                "redaction_state": "raw-content-dropped",
+            },
+        ),
+    ]
+    db = Db([Result(events)])
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/agent-compliance-metrics")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["content_retention"] == "metadata-only"
+    assert payload["summary"] == {
+        "events": 2,
+        "users": 2,
+        "providers": 2,
+        "sessions": 2,
+        "repos": 2,
+        "file_targets": 3,
+        "tool_permission_events": 5,
+        "mcp_tool_events": 3,
+        "full_access_events": 1,
+        "autonomous_events": 1,
+        "approvals": 1,
+        "denials": 2,
+        "warnings": 2,
+        "violations": 1,
+        "errors": 1,
+        "tokens_input": 1200,
+        "tokens_output": 800,
+        "tokens_total": 2900,
+        "cost_usd": 0.6,
+        "avg_latency_ms": 1000.0,
+    }
+    provider_rows = {row["label"]: row for row in payload["by_provider"]}
+    assert provider_rows["Codex CLI"]["full_access_events"] == 1
+    assert provider_rows["OpenAI Compliance Platform"]["tool_permission_events"] == 3
+    assert payload["top_tools"][0] == {"key": "apply_patch", "label": "apply_patch", "count": 1}
+    assert {"key": "github:create_pr", "label": "github:create_pr", "count": 2} in payload["top_mcp_tools"]
+    assert {"key": "apps/api/router.py", "label": "apps/api/router.py", "count": 2} in payload["top_files"]
+    assert payload["policy_decisions"] == [
+        {"key": "allow", "label": "allow", "count": 1},
+        {"key": "deny", "label": "deny", "count": 1},
+    ]
+    assert {"key": "formal-compliance", "label": "formal-compliance", "count": 1} in payload["source_record_types"]
 
 
 def test_provider_coverage_rolls_up_configured_connectors_and_retention_risk(monkeypatch) -> None:

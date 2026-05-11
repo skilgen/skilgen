@@ -1587,6 +1587,73 @@ export type InsightsAccessGrants = {
   grants: InsightsAccessGrantExposure[];
 };
 
+export type InsightsAgentComplianceMetricSummary = {
+  events: number;
+  users: number;
+  providers: number;
+  sessions: number;
+  repos: number;
+  file_targets: number;
+  tool_permission_events: number;
+  mcp_tool_events: number;
+  full_access_events: number;
+  autonomous_events: number;
+  approvals: number;
+  denials: number;
+  warnings: number;
+  violations: number;
+  errors: number;
+  tokens_input: number;
+  tokens_output: number;
+  tokens_total: number;
+  cost_usd: number;
+  avg_latency_ms: number | null;
+};
+
+export type InsightsAgentComplianceMetricBreakdownRow = {
+  key: string;
+  label: string;
+  events: number;
+  users: number;
+  sessions: number;
+  full_access_events: number;
+  autonomous_events: number;
+  tool_permission_events: number;
+  mcp_tool_events: number;
+  file_targets: number;
+  violations: number;
+  warnings: number;
+  errors: number;
+  tokens_total: number;
+  cost_usd: number;
+  avg_latency_ms: number | null;
+};
+
+export type InsightsAgentComplianceMetricItem = {
+  key: string;
+  label: string;
+  count: number;
+};
+
+export type InsightsAgentComplianceMetrics = {
+  window_days: number;
+  generated_at: string;
+  source: string;
+  content_retention: "metadata-only";
+  summary: InsightsAgentComplianceMetricSummary;
+  by_provider: InsightsAgentComplianceMetricBreakdownRow[];
+  by_actor: InsightsAgentComplianceMetricBreakdownRow[];
+  by_model: InsightsAgentComplianceMetricBreakdownRow[];
+  by_repo: InsightsAgentComplianceMetricBreakdownRow[];
+  top_tools: InsightsAgentComplianceMetricItem[];
+  top_mcp_tools: InsightsAgentComplianceMetricItem[];
+  top_files: InsightsAgentComplianceMetricItem[];
+  policy_decisions: InsightsAgentComplianceMetricItem[];
+  approval_statuses: InsightsAgentComplianceMetricItem[];
+  source_record_types: InsightsAgentComplianceMetricItem[];
+  retention_states: InsightsAgentComplianceMetricItem[];
+};
+
 export type InsightsProviderCoverageRow = {
   connector_id: string;
   label: string;
@@ -2287,6 +2354,10 @@ export async function getV8IntelligenceUsage(accessToken: string | null, orgId: 
 
 export async function getV8AccessGrants(accessToken: string | null, orgId: string): Promise<InsightsAccessGrants | null> {
   return apiFetch<InsightsAccessGrants>(`/v8/orgs/${orgId}/insights/access-grants`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8AgentComplianceMetrics(accessToken: string | null, orgId: string): Promise<InsightsAgentComplianceMetrics | null> {
+  return apiFetch<InsightsAgentComplianceMetrics>(`/v8/orgs/${orgId}/insights/agent-compliance-metrics`, { accessToken, cache: "no-store" });
 }
 
 export async function getV8ProviderCoverage(accessToken: string | null, orgId: string): Promise<InsightsProviderCoverage | null> {

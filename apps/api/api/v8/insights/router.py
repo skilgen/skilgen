@@ -232,6 +232,73 @@ class ProviderCoverageResponse(BaseModel):
     rows: list[ProviderCoverageRow]
 
 
+class AgentComplianceMetricSummary(BaseModel):
+    events: int
+    users: int
+    providers: int
+    sessions: int
+    repos: int
+    file_targets: int
+    tool_permission_events: int
+    mcp_tool_events: int
+    full_access_events: int
+    autonomous_events: int
+    approvals: int
+    denials: int
+    warnings: int
+    violations: int
+    errors: int
+    tokens_input: int
+    tokens_output: int
+    tokens_total: int
+    cost_usd: float
+    avg_latency_ms: float | None = None
+
+
+class AgentComplianceMetricBreakdownRow(BaseModel):
+    key: str
+    label: str
+    events: int
+    users: int
+    sessions: int
+    full_access_events: int
+    autonomous_events: int
+    tool_permission_events: int
+    mcp_tool_events: int
+    file_targets: int
+    violations: int
+    warnings: int
+    errors: int
+    tokens_total: int
+    cost_usd: float
+    avg_latency_ms: float | None = None
+
+
+class AgentComplianceMetricItem(BaseModel):
+    key: str
+    label: str
+    count: int
+
+
+class AgentComplianceMetricsResponse(BaseModel):
+    window_days: int
+    generated_at: datetime
+    source: str = "audit_events.metadata"
+    content_retention: Literal["metadata-only"] = "metadata-only"
+    summary: AgentComplianceMetricSummary
+    by_provider: list[AgentComplianceMetricBreakdownRow]
+    by_actor: list[AgentComplianceMetricBreakdownRow]
+    by_model: list[AgentComplianceMetricBreakdownRow]
+    by_repo: list[AgentComplianceMetricBreakdownRow]
+    top_tools: list[AgentComplianceMetricItem]
+    top_mcp_tools: list[AgentComplianceMetricItem]
+    top_files: list[AgentComplianceMetricItem]
+    policy_decisions: list[AgentComplianceMetricItem]
+    approval_statuses: list[AgentComplianceMetricItem]
+    source_record_types: list[AgentComplianceMetricItem]
+    retention_states: list[AgentComplianceMetricItem]
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
@@ -608,8 +675,309 @@ def _tool_permission_count(metadata: object) -> int:
     return 0
 
 
+def _metadata_int(metadata: object, *keys: str) -> int:
+    if not isinstance(metadata, dict):
+        return 0
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return max(0, value)
+        if isinstance(value, float):
+            return max(0, int(value))
+        if isinstance(value, str):
+            try:
+                return max(0, int(float(value)))
+            except ValueError:
+                continue
+    return 0
+
+
+def _metadata_float(metadata: object, *keys: str) -> float:
+    if not isinstance(metadata, dict):
+        return 0.0
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int | float):
+            return max(0.0, float(value))
+        if isinstance(value, str):
+            try:
+                return max(0.0, float(value))
+            except ValueError:
+                continue
+    return 0.0
+
+
+def _metadata_list(metadata: object, key: str) -> list[str]:
+    if not isinstance(metadata, dict):
+        return []
+    value = metadata.get(key)
+    if isinstance(value, list):
+        return [str(item) for item in value if item not in {None, ""}]
+    if isinstance(value, dict):
+        return [str(item) for item in value.keys()]
+    if isinstance(value, str) and value:
+        return [value]
+    return []
+
+
+def _counter_rows(counter: dict[str, int], *, limit: int = 12) -> list[AgentComplianceMetricItem]:
+    rows = sorted(counter.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    return [AgentComplianceMetricItem(key=key, label=key, count=count) for key, count in rows]
+
+
 def _is_agent_compliance_event(event: object) -> bool:
     return str(getattr(event, "event_type", "") or "").lower() in AGENT_COMPLIANCE_EVENT_TYPES
+
+
+def _empty_breakdown(key: str, label: str) -> dict[str, Any]:
+    return {
+        "key": key,
+        "label": label,
+        "events": 0,
+        "users": set(),
+        "sessions": set(),
+        "full_access_events": 0,
+        "autonomous_events": 0,
+        "tool_permission_events": 0,
+        "mcp_tool_events": 0,
+        "file_targets": 0,
+        "violations": 0,
+        "warnings": 0,
+        "errors": 0,
+        "tokens_total": 0,
+        "cost_usd": 0.0,
+        "latencies": [],
+    }
+
+
+def _add_breakdown_metric(bucket: dict[str, Any], event_metrics: dict[str, Any], actor: str, session_id: str | None) -> None:
+    bucket["events"] = int(bucket["events"]) + 1
+    users = bucket["users"]
+    if isinstance(users, set):
+        users.add(actor)
+    sessions = bucket["sessions"]
+    if session_id and isinstance(sessions, set):
+        sessions.add(session_id)
+    for key in (
+        "full_access_events",
+        "autonomous_events",
+        "tool_permission_events",
+        "mcp_tool_events",
+        "file_targets",
+        "violations",
+        "warnings",
+        "errors",
+        "tokens_total",
+    ):
+        bucket[key] = int(bucket[key]) + int(event_metrics[key])
+    bucket["cost_usd"] = float(bucket["cost_usd"]) + float(event_metrics["cost_usd"])
+    if event_metrics["latency_ms"]:
+        latencies = bucket["latencies"]
+        if isinstance(latencies, list):
+            latencies.append(float(event_metrics["latency_ms"]))
+
+
+def _breakdown_rows(buckets: dict[str, dict[str, Any]], *, limit: int = 12) -> list[AgentComplianceMetricBreakdownRow]:
+    rows: list[AgentComplianceMetricBreakdownRow] = []
+    for bucket in buckets.values():
+        latencies = bucket.get("latencies")
+        avg_latency = round(sum(latencies) / len(latencies), 2) if isinstance(latencies, list) and latencies else None
+        users = bucket.get("users")
+        sessions = bucket.get("sessions")
+        rows.append(
+            AgentComplianceMetricBreakdownRow(
+                key=str(bucket["key"]),
+                label=str(bucket["label"]),
+                events=int(bucket["events"]),
+                users=len(users) if isinstance(users, set) else 0,
+                sessions=len(sessions) if isinstance(sessions, set) else 0,
+                full_access_events=int(bucket["full_access_events"]),
+                autonomous_events=int(bucket["autonomous_events"]),
+                tool_permission_events=int(bucket["tool_permission_events"]),
+                mcp_tool_events=int(bucket["mcp_tool_events"]),
+                file_targets=int(bucket["file_targets"]),
+                violations=int(bucket["violations"]),
+                warnings=int(bucket["warnings"]),
+                errors=int(bucket["errors"]),
+                tokens_total=int(bucket["tokens_total"]),
+                cost_usd=round(float(bucket["cost_usd"]), 6),
+                avg_latency_ms=avg_latency,
+            )
+        )
+    rows.sort(key=lambda item: (-item.events, item.label))
+    return rows[:limit]
+
+
+def _agent_compliance_metrics_from_events(events: list[AuditEvent], window_days: int) -> AgentComplianceMetricsResponse:
+    actors: set[str] = set()
+    providers: set[str] = set()
+    sessions: set[str] = set()
+    repos: set[str] = set()
+    latency_values: list[float] = []
+    summary_totals = {
+        "events": 0,
+        "file_targets": 0,
+        "tool_permission_events": 0,
+        "mcp_tool_events": 0,
+        "full_access_events": 0,
+        "autonomous_events": 0,
+        "approvals": 0,
+        "denials": 0,
+        "warnings": 0,
+        "violations": 0,
+        "errors": 0,
+        "tokens_input": 0,
+        "tokens_output": 0,
+        "tokens_total": 0,
+    }
+    cost_usd = 0.0
+    by_provider: dict[str, dict[str, Any]] = {}
+    by_actor: dict[str, dict[str, Any]] = {}
+    by_model: dict[str, dict[str, Any]] = {}
+    by_repo: dict[str, dict[str, Any]] = {}
+    top_tools: dict[str, int] = {}
+    top_mcp_tools: dict[str, int] = {}
+    top_files: dict[str, int] = {}
+    policy_decisions: dict[str, int] = {}
+    approval_statuses: dict[str, int] = {}
+    source_record_types: dict[str, int] = {}
+    retention_states: dict[str, int] = {}
+
+    for event in events:
+        if not _is_agent_compliance_event(event):
+            continue
+        metadata = getattr(event, "metadata_json", {}) or {}
+        actor = str(getattr(event, "actor_login", None) or _metadata_value(metadata, "actor_login", "user") or "unknown")
+        provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or str(getattr(event, "resource_type", None) or "unknown")
+        model = _metadata_value(metadata, "model", "model_name", "model_id") or "unknown model"
+        tier = _metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier")
+        model_label = f"{model} · {tier}" if tier else model
+        repo_name = str(getattr(event, "repo_name", None) or _metadata_value(metadata, "repo_name", "repo") or "unknown repo")
+        session_id = _metadata_value(metadata, "session_id", "agent_session_id", "thread_id")
+        tool_count = _tool_permission_count(metadata)
+        mcp_tools = _metadata_list(metadata, "mcp_tools")
+        file_targets = _metadata_list(metadata, "file_targets")
+        violation_count = len(_metadata_list(metadata, "violations"))
+        warning_count = _metadata_int(metadata, "warnings", "warning_count")
+        error_count = _metadata_int(metadata, "error_count", "errors")
+        input_tokens = _metadata_int(metadata, "tokens_input", "input_tokens", "prompt_tokens")
+        output_tokens = _metadata_int(metadata, "tokens_output", "output_tokens", "completion_tokens")
+        total_tokens = _metadata_int(metadata, "tokens_total", "total_tokens") or input_tokens + output_tokens
+        event_cost = _metadata_float(metadata, "cost_usd", "estimated_cost_usd")
+        latency_ms = _metadata_float(metadata, "latency_ms", "duration_ms")
+        is_full_access = _metadata_bool(metadata, "full_access", "full_access_granted") or _metadata_value(metadata, "access_scope") == "full-access"
+        is_autonomous = _metadata_bool(metadata, "autonomous_access", "autonomous")
+
+        actors.add(actor)
+        providers.add(provider)
+        repos.add(repo_name)
+        if session_id:
+            sessions.add(session_id)
+        if latency_ms:
+            latency_values.append(latency_ms)
+        summary_totals["events"] += 1
+        summary_totals["file_targets"] += len(file_targets)
+        summary_totals["tool_permission_events"] += tool_count
+        summary_totals["mcp_tool_events"] += len(mcp_tools)
+        summary_totals["full_access_events"] += 1 if is_full_access else 0
+        summary_totals["autonomous_events"] += 1 if is_autonomous else 0
+        summary_totals["warnings"] += warning_count
+        summary_totals["violations"] += violation_count
+        summary_totals["errors"] += error_count
+        summary_totals["tokens_input"] += input_tokens
+        summary_totals["tokens_output"] += output_tokens
+        summary_totals["tokens_total"] += total_tokens
+        cost_usd += event_cost
+
+        decision = _metadata_value(metadata, "policy_decision")
+        if decision:
+            policy_decisions[decision] = policy_decisions.get(decision, 0) + 1
+            if decision.lower() in {"deny", "denied", "block", "blocked", "reject", "rejected"}:
+                summary_totals["denials"] += 1
+        approval = _metadata_value(metadata, "approval_status")
+        if approval:
+            approval_statuses[approval] = approval_statuses.get(approval, 0) + 1
+            if approval.lower() in {"approved", "approve", "allowed", "allow"}:
+                summary_totals["approvals"] += 1
+            elif approval.lower() in {"denied", "deny", "rejected", "reject", "blocked", "block"}:
+                summary_totals["denials"] += 1
+        source_record_type = _metadata_value(metadata, "source_record_type") or "unknown"
+        source_record_types[source_record_type] = source_record_types.get(source_record_type, 0) + 1
+        retention_state = _metadata_value(metadata, "content_retention", "redaction_state") or "metadata-only"
+        retention_states[retention_state] = retention_states.get(retention_state, 0) + 1
+        for tool in _metadata_list(metadata, "tool_permissions"):
+            top_tools[tool] = top_tools.get(tool, 0) + 1
+        if isinstance(metadata, dict) and isinstance(metadata.get("tool_calls"), str):
+            top_tools[str(metadata["tool_calls"])] = top_tools.get(str(metadata["tool_calls"]), 0) + 1
+        for tool in mcp_tools:
+            top_mcp_tools[tool] = top_mcp_tools.get(tool, 0) + 1
+        for file_target in file_targets:
+            top_files[file_target] = top_files.get(file_target, 0) + 1
+
+        event_metrics = {
+            "full_access_events": 1 if is_full_access else 0,
+            "autonomous_events": 1 if is_autonomous else 0,
+            "tool_permission_events": tool_count,
+            "mcp_tool_events": len(mcp_tools),
+            "file_targets": len(file_targets),
+            "violations": violation_count,
+            "warnings": warning_count,
+            "errors": error_count,
+            "tokens_total": total_tokens,
+            "cost_usd": event_cost,
+            "latency_ms": latency_ms,
+        }
+        for buckets, key, label in (
+            (by_provider, provider, provider),
+            (by_actor, actor, actor),
+            (by_model, model_label, model_label),
+            (by_repo, repo_name, repo_name),
+        ):
+            bucket = buckets.setdefault(key, _empty_breakdown(key, label))
+            _add_breakdown_metric(bucket, event_metrics, actor, session_id)
+
+    avg_latency = round(sum(latency_values) / len(latency_values), 2) if latency_values else None
+    return AgentComplianceMetricsResponse(
+        window_days=window_days,
+        generated_at=_utc_now(),
+        summary=AgentComplianceMetricSummary(
+            events=summary_totals["events"],
+            users=len(actors),
+            providers=len(providers),
+            sessions=len(sessions),
+            repos=len(repos),
+            file_targets=summary_totals["file_targets"],
+            tool_permission_events=summary_totals["tool_permission_events"],
+            mcp_tool_events=summary_totals["mcp_tool_events"],
+            full_access_events=summary_totals["full_access_events"],
+            autonomous_events=summary_totals["autonomous_events"],
+            approvals=summary_totals["approvals"],
+            denials=summary_totals["denials"],
+            warnings=summary_totals["warnings"],
+            violations=summary_totals["violations"],
+            errors=summary_totals["errors"],
+            tokens_input=summary_totals["tokens_input"],
+            tokens_output=summary_totals["tokens_output"],
+            tokens_total=summary_totals["tokens_total"],
+            cost_usd=round(cost_usd, 6),
+            avg_latency_ms=avg_latency,
+        ),
+        by_provider=_breakdown_rows(by_provider),
+        by_actor=_breakdown_rows(by_actor),
+        by_model=_breakdown_rows(by_model),
+        by_repo=_breakdown_rows(by_repo),
+        top_tools=_counter_rows(top_tools),
+        top_mcp_tools=_counter_rows(top_mcp_tools),
+        top_files=_counter_rows(top_files),
+        policy_decisions=_counter_rows(policy_decisions),
+        approval_statuses=_counter_rows(approval_statuses),
+        source_record_types=_counter_rows(source_record_types),
+        retention_states=_counter_rows(retention_states),
+    )
 
 
 def _intelligence_usage_from_events(events: list[AuditEvent], window_days: int) -> IntelligenceUsageResponse:
@@ -899,6 +1267,30 @@ async def get_access_grants(
         generated_at=usage.generated_at,
         grants=usage.access_grants,
     )
+
+
+@router.get("/agent-compliance-metrics", response_model=AgentComplianceMetricsResponse)
+async def get_agent_compliance_metrics(
+    org_id: str,
+    window_days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AgentComplianceMetricsResponse:
+    await _require_v8(org_id, db, current_org_id)
+    cutoff = _utc_now() - timedelta(days=window_days)
+    events = (
+        await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.org_id == org_id,
+                AuditEvent.created_at >= cutoff,
+                AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+            )
+            .order_by(desc(AuditEvent.created_at))
+            .limit(5000)
+        )
+    ).scalars().all()
+    return _agent_compliance_metrics_from_events(list(events), window_days)
 
 
 @router.get("/provider-coverage", response_model=ProviderCoverageResponse)
