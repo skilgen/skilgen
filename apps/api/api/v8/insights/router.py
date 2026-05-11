@@ -49,13 +49,19 @@ CRITICAL_OPS_FALLBACK_OPERATION = {
     "id": "critical-operations-placeholder",
     "label": "Product review required",
     "required_skill_categories": ["operational_knowledge", "security_compliance", "codebase_architecture"],
+    "repo_sensitivity_tiers": ["internal", "sensitive", "regulated"],
+    "evidence_requirements": ["product-reviewed taxonomy"],
 }
 
 
 class CriticalOperationConfig(BaseModel):
     id: str = Field(min_length=1)
     label: str = Field(min_length=1)
+    description: str | None = None
     required_skill_categories: list[str] = Field(default_factory=list)
+    repo_sensitivity_tiers: list[str] = Field(default_factory=lambda: ["internal", "sensitive", "regulated"])
+    evidence_requirements: list[str] = Field(default_factory=list)
+    sla_hours: int | None = Field(default=None, ge=1)
 
 
 class CriticalOpsConfig(BaseModel):
@@ -148,7 +154,11 @@ class CoverageSkill(BaseModel):
 class CriticalOperationCoverage(BaseModel):
     operation_id: str
     label: str
+    description: str | None = None
     required_skill_categories: list[str]
+    repo_sensitivity_tiers: list[str]
+    evidence_requirements: list[str]
+    sla_hours: int | None = None
     skills: list[CoverageSkill]
     covered: bool
 
@@ -694,6 +704,11 @@ def _repo_in_scope(repo: Repo) -> bool:
     if tier is None:
         return True
     return SENSITIVITY_ORDER.get(tier, 1) >= SENSITIVITY_ORDER["internal"]
+
+
+def _coverage_repo_tier(repo: Repo) -> str:
+    tier = _sensitivity_tier(repo)
+    return tier if tier in SENSITIVITY_ORDER else "internal"
 
 
 def _metadata_value(metadata: object, *keys: str) -> str | None:
@@ -1448,13 +1463,21 @@ async def get_coverage_sla(
         repo_skills = skills_by_repo.get(repo.id, [])
         operations: list[CriticalOperationCoverage] = []
         for operation in critical_ops.operations:
+            sensitivity_tiers = [str(item).lower() for item in operation.repo_sensitivity_tiers]
+            repo_tier = _coverage_repo_tier(repo)
+            if sensitivity_tiers and repo_tier not in sensitivity_tiers:
+                continue
             categories = [str(item) for item in operation.required_skill_categories]
             matched = [skill for skill in repo_skills if (skill.skill_category or "") in categories]
             operations.append(
                 CriticalOperationCoverage(
                     operation_id=operation.id,
                     label=operation.label,
+                    description=operation.description,
                     required_skill_categories=categories,
+                    repo_sensitivity_tiers=sensitivity_tiers,
+                    evidence_requirements=[str(item) for item in operation.evidence_requirements],
+                    sla_hours=operation.sla_hours,
                     covered=bool(matched) and bool(repo_policy_bindings),
                     skills=[
                         CoverageSkill(

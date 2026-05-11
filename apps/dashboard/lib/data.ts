@@ -1557,7 +1557,11 @@ export type InsightsCoverageSkill = {
 export type InsightsCriticalOperationCoverage = {
   operation_id: string;
   label: string;
+  description: string | null;
   required_skill_categories: string[];
+  repo_sensitivity_tiers: string[];
+  evidence_requirements: string[];
+  sla_hours: number | null;
   skills: InsightsCoverageSkill[];
   covered: boolean;
 };

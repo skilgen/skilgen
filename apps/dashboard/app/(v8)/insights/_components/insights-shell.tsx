@@ -378,7 +378,7 @@ export async function CoverageSlaView() {
       {!repos.length ? <EmptyState label="No internal-or-higher repos in SLA scope" /> : null}
       <section className="grid gap-4">
         {repos.map((repo) => {
-          const allCovered = repo.critical_operations.every((operation) => operation.covered);
+          const allCovered = repo.critical_operations.length > 0 && repo.critical_operations.every((operation) => operation.covered);
           return (
             <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5" key={repo.repo_id}>
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -396,10 +396,21 @@ export async function CoverageSlaView() {
                   <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-4" key={operation.operation_id}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h3 className="text-sm font-semibold">{operation.label}</h3>
-                      <span className="text-xs text-[color:var(--text-secondary)]">{operation.skills.length} covering skills</span>
+                      <div className="flex flex-wrap gap-2 text-xs text-[color:var(--text-secondary)]">
+                        {operation.sla_hours ? <span>{operation.sla_hours}h SLA</span> : null}
+                        <span>{operation.skills.length} covering skills</span>
+                      </div>
                     </div>
+                    {operation.description ? <p className="mt-2 text-xs leading-5 text-[color:var(--text-secondary)]">{operation.description}</p> : null}
                     {operation.required_skill_categories.length ? (
                       <p className="mt-1 text-xs text-[color:var(--text-tertiary)]">Requires: {operation.required_skill_categories.join(", ")}</p>
+                    ) : null}
+                    {operation.evidence_requirements.length ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {operation.evidence_requirements.map((requirement) => (
+                          <span className="rounded-md border border-[color:var(--bg-border)] bg-black/15 px-2 py-1 text-[11px] text-[color:var(--text-tertiary)]" key={requirement}>{requirement}</span>
+                        ))}
+                      </div>
                     ) : null}
                     <div className="mt-3 flex flex-wrap gap-2">
                       {operation.skills.length ? operation.skills.map((skill) => (
