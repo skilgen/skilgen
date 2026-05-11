@@ -421,6 +421,23 @@ def test_connector_catalog_covers_required_git_provider_sources() -> None:
     assert "pull requests" in connectors["bitbucket"]["capabilities"]
 
 
+def test_connector_catalog_covers_required_work_management_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
+
+    for connector_id in {"jira", "linear"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "work-management"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert "issues" in connector["capabilities"]
+        assert "projects" in connector["capabilities"]
+        assert "incident triggers" in connector["capabilities"]
+        assert "external ticket links" in connector["capabilities"]
+
+    assert "change tickets" in connectors["jira"]["capabilities"]
+    assert "cycles" in connectors["linear"]["capabilities"]
+
+
 def test_request_agent_compliance_connector_sync_requires_enabled_connector(monkeypatch) -> None:
     org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
     db = OrgDb(org)

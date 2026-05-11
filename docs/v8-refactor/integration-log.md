@@ -402,3 +402,17 @@ Final required verification:
   - UX screenshots captured from the built fallback catalog:
     - `docs/v8-refactor/screenshots/automation-20260511/settings-git-provider-connector-catalog-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/settings-git-provider-connector-catalog-mobile.png`
+
+## 2026-05-11 — Settings work-management connector catalog slice
+
+- Backend: the v8 Settings connector registry now includes Jira and Linear source types, descriptions, and work-management capabilities for issues, projects, change tickets, cycles, incident triggers, and external ticket links.
+- Frontend: the migrated Settings connector fallback catalog now shows Jira and Linear work-management cards instead of reserving the category only for API-backed data.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> 23 passed.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured from the built fallback catalog:
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-work-management-connector-catalog-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-work-management-connector-catalog-mobile.png`
