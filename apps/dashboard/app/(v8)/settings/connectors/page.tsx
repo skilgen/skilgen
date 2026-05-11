@@ -177,6 +177,33 @@ const fallbackConnectors: Connector[] = [
     capabilities: ["repositories", "pull requests", "source evidence"],
   },
   {
+    id: "github-actions",
+    label: "GitHub Actions",
+    category: "ci-cd",
+    status: "planned",
+    connected: false,
+    description: "Workflow runs, jobs, steps, artifacts, actor attribution, repository scope, and agent-driven CI outcomes from GitHub Actions.",
+    capabilities: ["workflow runs", "jobs", "steps", "artifacts", "test outcomes", "actor attribution"],
+  },
+  {
+    id: "gitlab-ci",
+    label: "GitLab CI",
+    category: "ci-cd",
+    status: "planned",
+    connected: false,
+    description: "Pipelines, jobs, merge-request context, artifacts, runner metadata, and agent-driven CI outcomes from GitLab CI.",
+    capabilities: ["pipelines", "jobs", "artifacts", "merge requests", "test outcomes", "runner metadata"],
+  },
+  {
+    id: "circleci",
+    label: "CircleCI",
+    category: "ci-cd",
+    status: "planned",
+    connected: false,
+    description: "Pipeline, workflow, job, artifact, test, actor, and repository metadata from CircleCI for agent-driven build governance.",
+    capabilities: ["pipelines", "workflows", "jobs", "artifacts", "test outcomes", "actor attribution"],
+  },
+  {
     id: "pagerduty",
     label: "PagerDuty",
     category: "incident",
@@ -221,6 +248,11 @@ const categoryMeta = {
     detail: "Repository activity and delivery evidence.",
     icon: GitBranch,
   },
+  "ci-cd": {
+    title: "CI/CD",
+    detail: "Agent-driven build jobs, artifacts, and test outcomes.",
+    icon: Workflow,
+  },
   runtime: {
     title: "Runtime",
     detail: "Internal MCP and runtime integration surfaces.",
@@ -262,6 +294,7 @@ const categoryOrder = [
   "compliance-telemetry",
   "coding-agent",
   "source-control",
+  "ci-cd",
   "runtime",
   "work-management",
   "notifications",
@@ -388,7 +421,7 @@ export default async function ConnectorsSettingsPage() {
   ]);
   const showingFallback = payload === null || !payload.connectors.length;
   const connectors = showingFallback ? fallbackConnectors : payload.connectors;
-  const agentConnectors = agentCompliance?.connectors ?? fallbackConnectors.filter((connector) => connector.category === "compliance-telemetry" || connector.category === "coding-agent" || connector.id === "internal-mcp").map((connector) => ({
+  const agentConnectors = agentCompliance?.connectors ?? fallbackConnectors.filter((connector) => connector.category === "compliance-telemetry" || connector.category === "coding-agent" || connector.category === "ci-cd" || connector.id === "internal-mcp").map((connector) => ({
     ...connector,
     configured: false,
     enabled: false,
