@@ -438,6 +438,27 @@ def test_connector_catalog_covers_required_work_management_sources() -> None:
     assert "cycles" in connectors["linear"]["capabilities"]
 
 
+def test_connector_catalog_covers_required_notification_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
+
+    for connector_id in {"slack", "email-digest", "notification-webhook"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "notifications"
+        assert connector["source_type"]
+        assert connector["description"]
+
+    assert connectors["slack"]["source_type"] == "slack"
+    assert "chat routing" in connectors["slack"]["capabilities"]
+    assert "slash commands" in connectors["slack"]["capabilities"]
+    assert "digest delivery" in connectors["slack"]["capabilities"]
+    assert connectors["email-digest"]["source_type"] == "email_digest"
+    assert "scheduled summaries" in connectors["email-digest"]["capabilities"]
+    assert "compliance summaries" in connectors["email-digest"]["capabilities"]
+    assert connectors["notification-webhook"]["source_type"] == "notification_webhook"
+    assert "webhook delivery" in connectors["notification-webhook"]["capabilities"]
+    assert "delivery retries" in connectors["notification-webhook"]["capabilities"]
+
+
 def test_connector_catalog_covers_required_siem_export_sources() -> None:
     connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
 
