@@ -396,6 +396,14 @@ def test_agent_compliance_catalog_covers_required_coding_agent_sources() -> None
     assert "mcp calls" in internal_mcp["capabilities"]
     assert "approval decisions" in internal_mcp["capabilities"]
 
+    for connector_id in {"github-actions", "gitlab-ci", "circleci"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "ci-cd"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert "jobs" in connector["capabilities"]
+        assert "test outcomes" in connector["capabilities"]
+
 
 def test_request_agent_compliance_connector_sync_requires_enabled_connector(monkeypatch) -> None:
     org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})

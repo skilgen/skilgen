@@ -373,3 +373,18 @@ Final required verification:
 - Verification:
   - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> 21 passed.
   - `git diff --check` -> passed.
+
+## 2026-05-11 — Settings CI/CD connector catalog slice
+
+- Backend: the v8 Settings connector registry now includes GitHub Actions, GitLab CI, and CircleCI with source types, descriptions, and capabilities for workflow/pipeline runs, jobs, artifacts, actor attribution, and test outcomes.
+- Agent compliance readiness: CI/CD connectors are included in the metadata-only readiness registry so agent-driven build jobs can be configured and dry-run planned without live credentials.
+- Frontend: the migrated Settings connector catalog now shows a CI/CD section in both API-backed and fallback states.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> 21 passed.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured with a local mock API:
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-cicd-connector-catalog-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-cicd-connector-catalog-mobile.png`
