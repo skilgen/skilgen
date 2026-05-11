@@ -35,6 +35,7 @@ Current feature slices tracked in `FEATURES.md` include:
 - Metadata-only agent compliance event ingestion for configured provider connectors, including model tier, access grants, tools/MCP, files, policy decisions, tokens, cost, latency, warnings, violations, and error metrics.
 - Agent compliance sync readiness for configured connectors, including cursor-resume planning, retention windows, formal-vs-operational source type, provider-adapter blockers, and next actions before live pulls run.
 - Queued agent compliance ingest jobs for metadata-only provider pages, with cursor state, job status, and no raw prompt/chat/file/tool-parameter storage.
+- Policy evaluation of normalized agent compliance events, including matched rules, decisions, tags, and metadata-only retention in the migrated Policy surface.
 - Consolidated agent compliance metrics for provider, developer, model, repo, session, tool, MCP, file, policy, approval, retention, token, cost, latency, warning, violation, and error rollups.
 - Provider coverage monitoring for configured compliance connectors, highlighting silent, stale, and 30-day retention-risk sources before provider logs become unrecoverable.
 - v8 Audit APIs for event log, reports, exports, evidence packages, hash-chain verification, and WORM root publishing.
