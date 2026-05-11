@@ -229,3 +229,19 @@ Final required verification:
   - UX screenshots captured:
     - `docs/v8-refactor/screenshots/automation-20260511/policy-agent-compliance-events-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/policy-agent-compliance-events-mobile.png`
+
+## 2026-05-11 — Activity agent compliance sessions slice
+
+- Backend: `GET /v8/orgs/{org_id}/activity/compliance-sessions` groups metadata-only `agent.compliance` telemetry by provider session id.
+- Session rollup: exposes provider, actor, repo, model, intelligence tier, access scopes, source record types, event count, tool calls, MCP tools, file targets, policy decisions, tokens, cost, errors, duration, and risk band.
+- Frontend: Activity now includes an Agent sessions tab for provider/coding-agent telemetry sessions, separate from existing first-party `AgentSession` rows.
+- Privacy: raw prompts, chat content, file content, diffs, raw event bodies, and tool parameters are not returned or displayed.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_activity_api.py -q` -> `14 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured:
+    - `docs/v8-refactor/screenshots/automation-20260511/activity-agent-compliance-sessions-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/activity-agent-compliance-sessions-mobile.png`

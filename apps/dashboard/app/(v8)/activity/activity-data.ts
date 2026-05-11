@@ -44,6 +44,32 @@ export type ActivityComplianceEvent = {
   risk_band: "low" | "medium" | "high";
 };
 
+export type ActivityComplianceSession = {
+  session_id: string;
+  provider: string;
+  actor_login: string | null;
+  repo_name: string | null;
+  model: string | null;
+  intelligence_tier: string | null;
+  access_scopes: string[];
+  source_record_types: string[];
+  event_count: number;
+  tool_calls: number;
+  mcp_tools: string[];
+  file_targets: string[];
+  policy_decisions: Record<string, number>;
+  tokens_input: number;
+  tokens_output: number;
+  cost_usd: number;
+  errors: number;
+  risk_score: number;
+  risk_band: "low" | "medium" | "high";
+  started_at: string | null;
+  last_event_at: string | null;
+  duration_minutes: number | null;
+  content_retention: "metadata-only";
+};
+
 export type ActivitySession = {
   id: string;
   session_id: string;
@@ -154,6 +180,11 @@ export async function getActivityFeed(accessToken: string, orgId: string, params
 export async function getActivityComplianceEvents(accessToken: string, orgId: string, params: URLSearchParams): Promise<{ events: ActivityComplianceEvent[]; total: number; content_retention: "metadata-only" } | null> {
   const query = params.toString();
   return activityFetch<{ events: ActivityComplianceEvent[]; total: number; content_retention: "metadata-only" }>(accessToken, `/v8/orgs/${orgId}/activity/compliance-events${query ? `?${query}` : ""}`);
+}
+
+export async function getActivityComplianceSessions(accessToken: string, orgId: string, params: URLSearchParams): Promise<{ sessions: ActivityComplianceSession[]; total: number; content_retention: "metadata-only" } | null> {
+  const query = params.toString();
+  return activityFetch<{ sessions: ActivityComplianceSession[]; total: number; content_retention: "metadata-only" }>(accessToken, `/v8/orgs/${orgId}/activity/compliance-sessions${query ? `?${query}` : ""}`);
 }
 
 export async function getActivitySessions(accessToken: string, orgId: string, params: URLSearchParams): Promise<{ sessions: ActivitySession[]; total: number; rollup: ActivityRollup } | null> {

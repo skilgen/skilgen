@@ -178,6 +178,107 @@ def _compliance_activity_item(event: AuditEvent) -> dict[str, Any]:
     }
 
 
+def _compliance_session_key(event: AuditEvent) -> str:
+    metadata = event.metadata_json or {}
+    return (
+        _metadata_value(metadata, "session_id", "agent_session_id", "conversation_id", "thread_id")
+        or f"event:{event.id}"
+    )
+
+
+def _compliance_sessions(events: Iterable[AuditEvent]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for event in events:
+        metadata = event.metadata_json or {}
+        session_id = _compliance_session_key(event)
+        provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or event.resource_type or event.event_type
+        access_scope = _metadata_value(metadata, "access_scope", "permission_scope", "grant_scope")
+        intelligence_tier = _metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier")
+        model = _metadata_value(metadata, "model", "model_name", "model_id")
+        source_record_type = _metadata_value(metadata, "source_record_type")
+        risk = 80 if str(event.severity or "").lower() == "critical" or access_scope == "full-access" else 55 if str(event.severity or "").lower() == "warning" or access_scope else 25
+        row = grouped.setdefault(
+            session_id,
+            {
+                "session_id": session_id,
+                "provider": provider,
+                "actor_login": event.actor_login,
+                "repo_name": event.repo_name or _metadata_value(metadata, "repo_name", "repo"),
+                "model": model,
+                "intelligence_tier": intelligence_tier,
+                "access_scopes": set(),
+                "source_record_types": set(),
+                "event_count": 0,
+                "tool_calls": 0,
+                "mcp_tools": set(),
+                "file_targets": set(),
+                "policy_decisions": Counter(),
+                "tokens_input": 0,
+                "tokens_output": 0,
+                "cost_usd": 0.0,
+                "errors": 0,
+                "risk_score": 0,
+                "started_at": event.created_at,
+                "last_event_at": event.created_at,
+            },
+        )
+        row["event_count"] += 1
+        row["risk_score"] = max(int(row["risk_score"]), risk)
+        if event.created_at:
+            row["started_at"] = min(row["started_at"], event.created_at) if row["started_at"] else event.created_at
+            row["last_event_at"] = max(row["last_event_at"], event.created_at) if row["last_event_at"] else event.created_at
+        if access_scope:
+            row["access_scopes"].add(access_scope)
+        if source_record_type:
+            row["source_record_types"].add(source_record_type)
+        policy_decision = _metadata_value(metadata, "policy_decision", "decision", "outcome")
+        if policy_decision:
+            row["policy_decisions"][policy_decision] += 1
+        row["tool_calls"] += int(metadata.get("tool_calls") or 0) if isinstance(metadata, dict) else 0
+        for key, target in (("mcp_tools", "mcp_tools"), ("file_targets", "file_targets")):
+            raw = metadata.get(key) if isinstance(metadata, dict) else []
+            if isinstance(raw, list):
+                row[target].update(str(item) for item in raw if item not in {None, ""})
+        row["tokens_input"] += int(metadata.get("tokens_input") or 0) if isinstance(metadata, dict) else 0
+        row["tokens_output"] += int(metadata.get("tokens_output") or 0) if isinstance(metadata, dict) else 0
+        row["cost_usd"] += float(metadata.get("cost_usd") or 0) if isinstance(metadata, dict) else 0.0
+        row["errors"] += int(metadata.get("error_count") or 0) if isinstance(metadata, dict) else 0
+
+    items: list[dict[str, Any]] = []
+    for row in grouped.values():
+        started = row["started_at"]
+        ended = row["last_event_at"]
+        duration = int((ended - started).total_seconds() // 60) if started and ended else None
+        items.append(
+            {
+                "session_id": row["session_id"],
+                "provider": row["provider"],
+                "actor_login": row["actor_login"],
+                "repo_name": row["repo_name"],
+                "model": row["model"],
+                "intelligence_tier": row["intelligence_tier"],
+                "access_scopes": sorted(row["access_scopes"]),
+                "source_record_types": sorted(row["source_record_types"]),
+                "event_count": row["event_count"],
+                "tool_calls": row["tool_calls"],
+                "mcp_tools": sorted(row["mcp_tools"]),
+                "file_targets": sorted(row["file_targets"]),
+                "policy_decisions": dict(row["policy_decisions"]),
+                "tokens_input": row["tokens_input"],
+                "tokens_output": row["tokens_output"],
+                "cost_usd": round(float(row["cost_usd"]), 6),
+                "errors": row["errors"],
+                "risk_score": row["risk_score"],
+                "risk_band": risk_band(row["risk_score"]),
+                "started_at": started.isoformat() if started else None,
+                "last_event_at": ended.isoformat() if ended else None,
+                "duration_minutes": duration,
+                "content_retention": "metadata-only",
+            }
+        )
+    return sorted(items, key=lambda item: str(item["last_event_at"] or ""), reverse=True)
+
+
 async def _feed_items(
     db: AsyncSession,
     org_id: str,
@@ -313,6 +414,46 @@ async def activity_compliance_events(
         "total": len(items),
         "content_retention": "metadata-only",
         "filters": {key: value for key, value in {"hours": hours, "provider": provider, "actor": actor, "access_scope": access_scope}.items() if value not in {None, ""}},
+    }
+
+
+@router.get("/activity/compliance-sessions")
+async def activity_compliance_sessions(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+    provider: str | None = None,
+    actor: str | None = None,
+    hours: int = Query(default=24, ge=1, le=24 * 30),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    await _require_v8(org_id, current_org_id, db)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
+    filters: list[Any] = [
+        AuditEvent.org_id == org_id,
+        AuditEvent.created_at >= cutoff,
+        AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+    ]
+    if actor:
+        filters.append(AuditEvent.actor_login.ilike(f"%{actor}%"))
+    rows = (
+        await db.execute(
+            select(AuditEvent)
+            .where(*filters)
+            .order_by(desc(AuditEvent.created_at))
+            .limit(min(max(limit * 5, limit), 1000))
+        )
+    ).scalars().all()
+    sessions = _compliance_sessions(rows)
+    if provider:
+        provider_lower = provider.lower()
+        sessions = [item for item in sessions if str(item["provider"]).lower() == provider_lower]
+    sessions = sessions[:limit]
+    return {
+        "sessions": sessions,
+        "total": len(sessions),
+        "content_retention": "metadata-only",
+        "filters": {key: value for key, value in {"hours": hours, "provider": provider, "actor": actor}.items() if value not in {None, ""}},
     }
 
 
