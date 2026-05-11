@@ -115,6 +115,7 @@ def test_insights_router_paths_are_registered() -> None:
     assert "/v8/orgs/{org_id}/insights/access-grants" in paths
     assert "/v8/orgs/{org_id}/insights/agent-compliance-metrics" in paths
     assert "/v8/orgs/{org_id}/insights/provider-coverage" in paths
+    assert "/v8/orgs/{org_id}/insights/developer-track" in paths
 
 
 def test_insights_routes_404_when_ia_v8_disabled(monkeypatch) -> None:
@@ -521,6 +522,105 @@ def test_agent_compliance_metrics_consolidates_all_ingested_metadata(monkeypatch
         {"key": "deny", "label": "deny", "count": 1},
     ]
     assert {"key": "formal-compliance", "label": "formal-compliance", "count": 1} in payload["source_record_types"]
+
+
+def test_developer_track_rolls_up_metadata_only_agent_work_by_actor(monkeypatch) -> None:
+    events = [
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="ravi",
+            repo_name="acme/payments",
+            resource_type="codex_cli",
+            created_at=NOW,
+            metadata_json={
+                "provider": "Codex CLI",
+                "model": "gpt-5.2",
+                "intelligence_tier": "very-high",
+                "session_id": "sess-1",
+                "access_scope": "full-access",
+                "full_access": True,
+                "autonomous_access": True,
+                "tool_permissions": ["shell", "apply_patch"],
+                "mcp_tools": ["github:create_pr"],
+                "file_targets": ["apps/api/router.py", "apps/dashboard/page.tsx"],
+                "policy_decision": "deny",
+                "violations": ["full-access-prod"],
+                "warnings": 2,
+                "tokens_input": 1200,
+                "tokens_output": 800,
+                "cost_usd": 0.42,
+                "latency_ms": 1500,
+                "error_count": 1,
+                "source_record_type": "operational-telemetry",
+                "raw_prompt": "must not be returned",
+            },
+        ),
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.telemetry",
+            actor_login="ravi",
+            repo_name="acme/api",
+            resource_type="codex_cli",
+            created_at=NOW - timedelta(minutes=3),
+            metadata_json={
+                "provider": "Codex CLI",
+                "model": "gpt-5.2",
+                "session_id": "sess-1",
+                "tool_calls": 3,
+                "file_targets": ["apps/api/router.py"],
+                "policy_decision": "allow",
+                "tokens_total": 500,
+                "source_record_type": "compliance-log",
+            },
+        ),
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="maya",
+            repo_name="acme/docs",
+            resource_type="cursor",
+            created_at=NOW - timedelta(minutes=5),
+            metadata_json={
+                "provider": "Cursor",
+                "model": "claude-sonnet",
+                "session_id": "sess-2",
+                "tool_calls": 1,
+                "policy_decision": "allow",
+                "tokens_total": 100,
+            },
+        ),
+    ]
+    db = Db([Result(events)])
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/developer-track")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["content_retention"] == "metadata-only"
+    assert payload["summary"]["developers"] == 2
+    assert payload["summary"]["events"] == 3
+    assert payload["summary"]["sessions"] == 2
+    ravi = payload["developers"][0]
+    assert ravi["actor_login"] == "ravi"
+    assert ravi["events"] == 2
+    assert ravi["sessions"] == 1
+    assert ravi["providers"] == ["Codex CLI"]
+    assert sorted(ravi["repos"]) == ["acme/api", "acme/payments"]
+    assert ravi["tool_calls"] == 5
+    assert ravi["mcp_tool_calls"] == 1
+    assert ravi["file_targets"] == 2
+    assert ravi["full_access_events"] == 1
+    assert ravi["autonomous_events"] == 1
+    assert ravi["denials"] == 1
+    assert ravi["approvals"] == 1
+    assert ravi["warnings"] == 2
+    assert ravi["violations"] == 1
+    assert ravi["errors"] == 1
+    assert ravi["tokens_total"] == 2500
+    assert ravi["risk_band"] == "high"
+    assert ravi["top_tools"][0]["key"] == "apply_patch"
+    assert "raw_prompt" not in ravi
 
 
 def test_provider_coverage_rolls_up_configured_connectors_and_retention_risk(monkeypatch) -> None:
