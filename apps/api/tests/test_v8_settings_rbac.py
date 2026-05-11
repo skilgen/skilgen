@@ -455,6 +455,24 @@ def test_connector_catalog_covers_required_siem_export_sources() -> None:
     assert "sentinel exports" in connectors["sentinel"]["capabilities"]
 
 
+def test_connector_catalog_covers_required_worm_storage_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
+
+    for connector_id in {"s3-worm", "gcs-worm", "azure-worm"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "worm-store"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert "immutable roots" in connector["capabilities"]
+        assert "Merkle proofs" in connector["capabilities"]
+        assert "audit chain roots" in connector["capabilities"]
+        assert "customer-owned storage" in connector["capabilities"]
+
+    assert connectors["s3-worm"]["source_type"] == "s3_object_lock"
+    assert connectors["gcs-worm"]["source_type"] == "gcs_bucket_lock"
+    assert connectors["azure-worm"]["source_type"] == "azure_immutable_blob"
+
+
 def test_request_agent_compliance_connector_sync_requires_enabled_connector(monkeypatch) -> None:
     org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
     db = OrgDb(org)
