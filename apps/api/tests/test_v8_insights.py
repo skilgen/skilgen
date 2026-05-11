@@ -42,10 +42,11 @@ class Result:
 
 
 class Db:
-    def __init__(self, results=None, *, fail_first=False) -> None:
+    def __init__(self, results=None, *, fail_first=False, org=None) -> None:
         self.results = list(results or [])
         self.fail_first = fail_first
         self.rolled_back = False
+        self.org = org
 
     async def execute(self, statement, params=None):
         if self.fail_first:
@@ -57,6 +58,9 @@ class Db:
 
     async def rollback(self):
         self.rolled_back = True
+
+    async def get(self, model, row_id):
+        return self.org
 
 
 def _repo(repo_id: str, name: str, tier: str = "internal"):
@@ -109,6 +113,7 @@ def test_insights_router_paths_are_registered() -> None:
     assert "/v8/orgs/{org_id}/insights/coverage-sla" in paths
     assert "/v8/orgs/{org_id}/insights/intelligence-usage" in paths
     assert "/v8/orgs/{org_id}/insights/access-grants" in paths
+    assert "/v8/orgs/{org_id}/insights/provider-coverage" in paths
 
 
 def test_insights_routes_404_when_ia_v8_disabled(monkeypatch) -> None:
@@ -413,3 +418,89 @@ def test_access_grants_endpoint_returns_metadata_only_exposure_rows(monkeypatch)
     assert payload["grants"][0]["full_access_events"] == 1
     assert payload["grants"][0]["tool_permission_events"] == 2
     assert all(row["actor_login"] != "maya" for row in payload["grants"])
+
+
+def test_provider_coverage_rolls_up_configured_connectors_and_retention_risk(monkeypatch) -> None:
+    org = SimpleNamespace(
+        id="org_1",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "cursor": "cursor-1",
+                    "last_sync_status": "success",
+                    "last_sync_requested_at": "2026-05-04T10:00:00",
+                },
+                "codex-cli": {
+                    "enabled": True,
+                    "cursor": "cursor-2",
+                    "last_sync_status": "success",
+                },
+                "cursor": {
+                    "enabled": True,
+                    "last_sync_status": "pending",
+                },
+            }
+        },
+    )
+    events = [
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="ravi",
+            repo_name="acme/payments",
+            resource_type="openai_compliance",
+            created_at=NOW - timedelta(days=29),
+            metadata_json={
+                "connector_id": "openai-compliance",
+                "provider": "OpenAI Compliance Platform",
+                "model": "gpt-5.2",
+                "intelligence_tier": "very-high",
+            },
+        ),
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="maya",
+            repo_name="acme/api",
+            resource_type="codex_cli",
+            created_at=NOW - timedelta(hours=2),
+            metadata_json={
+                "connector_id": "codex-cli",
+                "provider": "Codex CLI",
+                "model": "gpt-5.2",
+                "intelligence_tier": "high",
+            },
+        ),
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.telemetry",
+            actor_login="maya",
+            repo_name="acme/api",
+            resource_type="codex_cli",
+            created_at=NOW - timedelta(hours=3),
+            metadata_json={
+                "connector_id": "codex-cli",
+                "provider": "Codex CLI",
+                "model": "gpt-5.2",
+                "intelligence_tier": "high",
+            },
+        ),
+    ]
+    db = Db([Result(events)], org=org)
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/provider-coverage")
+
+    assert response.status_code == 200
+    payload = response.json()
+    rows = {row["connector_id"]: row for row in payload["rows"]}
+    assert payload["content_retention"] == "metadata-only"
+    assert rows["openai-compliance"]["status"] == "retention-risk"
+    assert rows["openai-compliance"]["retention_days_remaining"] == 1
+    assert rows["openai-compliance"]["last_cursor"] == "cursor-1"
+    assert rows["codex-cli"]["status"] == "active"
+    assert rows["codex-cli"]["events"] == 2
+    assert rows["codex-cli"]["users"] == 1
+    assert rows["codex-cli"]["intelligence_tiers"] == {"high": 2}
+    assert rows["cursor"]["status"] == "silent"
+    assert rows["anthropic-compliance"]["status"] == "unconfigured"

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, CircleSlash, Clock3, Code2, GitPullRequest, KeyRound, ShieldAlert, Sparkles, UserRoundCheck } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, CircleSlash, Clock3, Code2, GitPullRequest, KeyRound, RadioTower, ShieldAlert, Sparkles, UserRoundCheck } from "lucide-react";
 
 import {
   getDeveloperLeaderboard,
@@ -10,12 +10,15 @@ import {
   getV8CoverageSla,
   getV8FleetKpis,
   getV8IntelligenceUsage,
+  getV8ProviderCoverage,
   getV8RiskyAgents,
   getV8RiskyRepos,
   type InsightsAccessGrants,
   type InsightsCoverageSla,
   type InsightsFleetKpis,
   type InsightsIntelligenceUsage,
+  type InsightsProviderCoverage,
+  type InsightsProviderCoverageRow,
   type InsightsRiskRanking,
   type InsightsRiskRow,
   type InsightsTrendMetric,
@@ -23,7 +26,7 @@ import {
   type DeveloperLeaderboardResponse,
 } from "../../../../lib/data";
 
-type InsightsTab = "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "intelligence-usage" | "access-grants";
+type InsightsTab = "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "intelligence-usage" | "access-grants" | "provider-coverage";
 
 const tabs: Array<{ id: InsightsTab; label: string; href: string }> = [
   { id: "fleet-kpis", label: "Fleet KPIs", href: "/insights/fleet-kpis" },
@@ -33,6 +36,7 @@ const tabs: Array<{ id: InsightsTab; label: string; href: string }> = [
   { id: "coverage-sla", label: "Coverage SLA", href: "/insights/coverage-sla" },
   { id: "intelligence-usage", label: "Intelligence usage", href: "/insights/intelligence-usage" },
   { id: "access-grants", label: "Access grants", href: "/insights/access-grants" },
+  { id: "provider-coverage", label: "Provider coverage", href: "/insights/provider-coverage" },
 ];
 
 async function resolveOrgAndToken() {
@@ -606,6 +610,112 @@ export async function AccessGrantsView() {
           ))}
         </section>
       ) : null}
+    </PageFrame>
+  );
+}
+
+function providerStatusClass(status: InsightsProviderCoverageRow["status"]): string {
+  if (status === "active") return "bg-[color:var(--accent-green)]/15 text-[color:var(--accent-green)]";
+  if (status === "retention-risk") return "bg-red-500/15 text-red-200";
+  if (status === "stale" || status === "silent") return "bg-amber-500/15 text-amber-100";
+  return "bg-[color:var(--bg-base)] text-[color:var(--text-tertiary)]";
+}
+
+function ProviderCoverageRowCard({ row }: { row: InsightsProviderCoverageRow }) {
+  const tierEntries = Object.entries(row.intelligence_tiers);
+  return (
+    <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-[color:var(--text-primary)]">{row.label}</h2>
+          <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">{row.category}</p>
+        </div>
+        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${providerStatusClass(row.status)}`}>{row.status}</span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Events</div>
+          <div className="mt-2 text-xl font-semibold text-[color:var(--text-primary)]">{row.events}</div>
+        </div>
+        <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Users</div>
+          <div className="mt-2 text-xl font-semibold text-[color:var(--text-primary)]">{row.users}</div>
+        </div>
+        <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Retention</div>
+          <div className="mt-2 text-xl font-semibold text-[color:var(--accent-primary)]">{row.retention_days_remaining ?? "N/A"}</div>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2 text-sm text-[color:var(--text-secondary)]">
+        <div className="flex justify-between gap-3">
+          <span>Connector</span>
+          <span className="font-semibold text-[color:var(--text-primary)]">{row.enabled ? "enabled" : row.configured ? "configured" : "unconfigured"}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span>Sync</span>
+          <span className="font-semibold text-[color:var(--text-primary)]">{row.last_sync_status ?? "not started"}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span>Last event</span>
+          <span className="font-semibold text-[color:var(--text-primary)]">{row.last_event_at ? new Date(row.last_event_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "none"}</span>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {row.models.slice(0, 4).map((model) => (
+          <span className="rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs text-[color:var(--text-secondary)]" key={`${row.connector_id}-${model}`}>{model}</span>
+        ))}
+        {tierEntries.map(([tier, count]) => (
+          <span className="rounded-md bg-[color:var(--accent-primary)]/10 px-2 py-1 text-xs font-semibold text-[color:var(--accent-primary)]" key={`${row.connector_id}-${tier}`}>{tier}: {count}</span>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+export async function ProviderCoverageView() {
+  const { accessToken, org } = await resolveOrgAndToken();
+  const data: InsightsProviderCoverage | null = org ? await getV8ProviderCoverage(accessToken, org.id) : null;
+  const rows = data?.rows ?? [];
+  const active = rows.filter((row) => row.status === "active").length;
+  const atRisk = rows.filter((row) => row.status === "retention-risk" || row.status === "stale" || row.status === "silent").length;
+  const configured = rows.filter((row) => row.configured).length;
+  return (
+    <PageFrame active="provider-coverage">
+      <section className="grid gap-4 md:grid-cols-3">
+        <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Active providers</div>
+            <RadioTower className="h-4 w-4 text-[color:var(--accent-primary)]" />
+          </div>
+          <div className="mt-3 text-[28px] font-semibold text-[color:var(--text-primary)]">{active}</div>
+          <p className="mt-2 text-xs text-[color:var(--text-secondary)]">Configured providers with recent metadata-only events.</p>
+        </article>
+        <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Coverage risk</div>
+          <div className="mt-3 text-[28px] font-semibold text-[color:var(--text-primary)]">{atRisk}</div>
+          <p className="mt-2 text-xs text-[color:var(--text-secondary)]">Silent, stale, or close to the compliance retention window.</p>
+        </article>
+        <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Configured</div>
+          <div className="mt-3 text-[28px] font-semibold text-[color:var(--text-primary)]">{configured}</div>
+          <p className="mt-2 text-xs text-[color:var(--text-secondary)]">{data?.retention_window_days ?? 30}-day retention window · metadata-only.</p>
+        </article>
+      </section>
+
+      <section className="rounded-lg border border-[color:var(--accent-primary)]/35 bg-[color:var(--accent-primary)]/10 p-4">
+        <p className="text-sm leading-6 text-[color:var(--text-secondary)]">
+          Provider coverage compares configured compliance connectors with recent `agent.compliance` events so teams can see silent sources before 30-day provider log retention becomes unrecoverable.
+        </p>
+      </section>
+
+      {!data ? <EmptyState label="Provider coverage unavailable" /> : null}
+      {data && !rows.length ? <EmptyState label="No provider connectors in coverage scope" /> : null}
+      <section className="grid gap-4 lg:grid-cols-2">
+        {rows.map((row) => <ProviderCoverageRowCard key={row.connector_id} row={row} />)}
+      </section>
     </PageFrame>
   );
 }

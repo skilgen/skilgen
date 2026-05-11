@@ -58,9 +58,12 @@ GET  /v8/orgs/{org_id}/audit/agent-compliance
 GET  /v8/orgs/{org_id}/activity/compliance-events
 GET  /v8/orgs/{org_id}/insights/intelligence-usage
 GET  /v8/orgs/{org_id}/insights/access-grants
+GET  /v8/orgs/{org_id}/insights/provider-coverage
 ```
 
 The ingest endpoint accepts batches with provider event id, actor, provider, model, model tier, intelligence tier, access scope, full/autonomous access, tool permissions, MCP tools, repo/file targets, policy decision, approval status, violations, warnings, token counts, cost, latency, errors, session id, and source record type. Raw prompt, chat, file content, diffs, tool parameters, and raw event bodies are dropped before persistence. Stored records are `agent.compliance` audit events with `content_retention=metadata-only`, `redaction_state=raw-content-dropped`, and a sanitized source envelope hash.
+
+Provider coverage compares tenant connector metadata with recent normalized audit events. It reports active, silent, stale, and retention-risk providers so operators can catch connector gaps before 30-day provider log retention windows make compliance evidence unrecoverable.
 
 ## Proposed data additions
 

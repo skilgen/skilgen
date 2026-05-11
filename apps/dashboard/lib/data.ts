@@ -1587,6 +1587,33 @@ export type InsightsAccessGrants = {
   grants: InsightsAccessGrantExposure[];
 };
 
+export type InsightsProviderCoverageRow = {
+  connector_id: string;
+  label: string;
+  category: string;
+  configured: boolean;
+  enabled: boolean;
+  status: "unconfigured" | "configured" | "active" | "silent" | "stale" | "retention-risk";
+  events: number;
+  users: number;
+  models: string[];
+  intelligence_tiers: Record<string, number>;
+  last_event_at: string | null;
+  last_sync_status: string | null;
+  last_sync_requested_at: string | null;
+  last_cursor: string | null;
+  retention_days_remaining: number | null;
+  content_retention: "metadata-only";
+};
+
+export type InsightsProviderCoverage = {
+  window_days: number;
+  retention_window_days: number;
+  generated_at: string;
+  content_retention: "metadata-only";
+  rows: InsightsProviderCoverageRow[];
+};
+
 export type RegistryList = {
   skills: RegistrySkill[];
   total: number;
@@ -2260,6 +2287,10 @@ export async function getV8IntelligenceUsage(accessToken: string | null, orgId: 
 
 export async function getV8AccessGrants(accessToken: string | null, orgId: string): Promise<InsightsAccessGrants | null> {
   return apiFetch<InsightsAccessGrants>(`/v8/orgs/${orgId}/insights/access-grants`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8ProviderCoverage(accessToken: string | null, orgId: string): Promise<InsightsProviderCoverage | null> {
+  return apiFetch<InsightsProviderCoverage>(`/v8/orgs/${orgId}/insights/provider-coverage`, { accessToken, cache: "no-store" });
 }
 
 export async function getOrgSources(accessToken: string | null, orgId: string): Promise<SourceConnection[] | null> {

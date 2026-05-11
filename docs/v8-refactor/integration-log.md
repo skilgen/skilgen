@@ -156,3 +156,18 @@ Final required verification:
   - UX screenshots captured:
     - `docs/v8-refactor/screenshots/automation-20260510/agent-compliance-ingestion-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260510/agent-compliance-ingestion-mobile.png`
+
+## 2026-05-11 — Insights provider coverage slice
+
+- Backend: `apps/api/api/v8/insights/router.py` adds `GET /v8/orgs/{org_id}/insights/provider-coverage`.
+- Coverage logic: compares configured agent-compliance connectors with recent metadata-only `agent.compliance` / `agent.telemetry` audit events and marks each provider as active, silent, stale, retention-risk, configured, or unconfigured.
+- Retention framing: exposes days remaining in the configured retention window, defaulting to 30 days for OpenAI-style compliance-log urgency.
+- Frontend: `apps/dashboard/app/(v8)/insights/provider-coverage/page.tsx` adds a migrated Insights tab with active provider, coverage-risk, configured-count, and per-provider evidence cards.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_insights.py -q` -> `12 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - UX screenshots captured:
+    - `docs/v8-refactor/screenshots/automation-20260511/provider-coverage-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/provider-coverage-mobile.png`

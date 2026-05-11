@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.api.auth import get_current_org_id
 from apps.api.api.v8.flags import is_v8, request_flag_cache
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AuditEvent, OrgPolicy, PRAttribution, PullRequest, Repo, Skill, SkillMemoryStub, SkillUsageEvent
+from apps.api.api.v8.settings.connectors_registry import connector_registry
+from packages.db.models import AgentSession, AuditEvent, Org, OrgPolicy, PRAttribution, PullRequest, Repo, Skill, SkillMemoryStub, SkillUsageEvent
 
 
 router = APIRouter(
@@ -202,6 +203,33 @@ class AccessGrantsResponse(BaseModel):
     source: str = "audit_events.metadata"
     content_retention: Literal["metadata-only"] = "metadata-only"
     grants: list[AccessGrantExposure]
+
+
+class ProviderCoverageRow(BaseModel):
+    connector_id: str
+    label: str
+    category: str
+    configured: bool
+    enabled: bool
+    status: Literal["unconfigured", "configured", "active", "silent", "stale", "retention-risk"]
+    events: int
+    users: int
+    models: list[str]
+    intelligence_tiers: dict[str, int]
+    last_event_at: datetime | None = None
+    last_sync_status: str | None = None
+    last_sync_requested_at: str | None = None
+    last_cursor: str | None = None
+    retention_days_remaining: int | None = None
+    content_retention: Literal["metadata-only"] = "metadata-only"
+
+
+class ProviderCoverageResponse(BaseModel):
+    window_days: int
+    retention_window_days: int
+    generated_at: datetime
+    content_retention: Literal["metadata-only"] = "metadata-only"
+    rows: list[ProviderCoverageRow]
 
 
 def _utc_now() -> datetime:
@@ -653,6 +681,107 @@ def _intelligence_usage_from_events(events: list[AuditEvent], window_days: int) 
     return IntelligenceUsageResponse(window_days=window_days, generated_at=_utc_now(), tier_usage=tier_usage, access_grants=access_grants)
 
 
+def _agent_connector_registry() -> list[dict[str, Any]]:
+    return [
+        item
+        for item in connector_registry()
+        if item.get("category") in {"compliance-telemetry", "coding-agent"}
+    ]
+
+
+def _agent_connector_settings(org: Org | None) -> dict[str, dict[str, Any]]:
+    settings = dict(getattr(org, "settings", None) or {}) if org else {}
+    raw = settings.get("v8_agent_compliance_connectors")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): dict(value) for key, value in raw.items() if isinstance(value, dict)}
+
+
+def _connector_event_matches(event: AuditEvent, connector: dict[str, Any]) -> bool:
+    metadata = getattr(event, "metadata_json", {}) or {}
+    connector_id = str(connector.get("id") or "")
+    label = str(connector.get("label") or "")
+    source_type = str(connector.get("source_type") or "")
+    candidates = {
+        _metadata_value(metadata, "connector_id"),
+        _metadata_value(metadata, "provider", "agent_provider", "source_provider"),
+        str(getattr(event, "resource_type", "") or ""),
+    }
+    normalized = {str(item).lower() for item in candidates if item}
+    return any(value and value.lower() in normalized for value in (connector_id, label, source_type))
+
+
+def _provider_coverage_rows(
+    org: Org | None,
+    events: list[AuditEvent],
+    *,
+    window_days: int,
+    retention_window_days: int,
+) -> list[ProviderCoverageRow]:
+    now = _utc_now()
+    configured = _agent_connector_settings(org)
+    rows: list[ProviderCoverageRow] = []
+    for connector in _agent_connector_registry():
+        connector_id = str(connector.get("id") or "")
+        settings = configured.get(connector_id) or {}
+        matched = [event for event in events if _connector_event_matches(event, connector)]
+        users = {
+            str(getattr(event, "actor_login", None) or _metadata_value(getattr(event, "metadata_json", {}) or {}, "actor_login", "user"))
+            for event in matched
+            if getattr(event, "actor_login", None) or _metadata_value(getattr(event, "metadata_json", {}) or {}, "actor_login", "user")
+        }
+        models = sorted(
+            {
+                model
+                for event in matched
+                if (model := _metadata_value(getattr(event, "metadata_json", {}) or {}, "model", "model_name", "model_id"))
+            }
+        )
+        tiers: dict[str, int] = {}
+        for event in matched:
+            tier = _metadata_value(getattr(event, "metadata_json", {}) or {}, "intelligence_tier", "model_tier", "reasoning_tier")
+            if tier:
+                tiers[tier] = tiers.get(tier, 0) + 1
+        last_event_at = max([event.created_at for event in matched if isinstance(event.created_at, datetime)], default=None)
+        configured_flag = connector_id in configured
+        enabled = bool(settings.get("enabled"))
+        if not configured_flag:
+            status: Literal["unconfigured", "configured", "active", "silent", "stale", "retention-risk"] = "unconfigured"
+        elif not enabled:
+            status = "configured"
+        elif not matched:
+            status = "silent"
+        elif last_event_at and (now - last_event_at) > timedelta(days=max(1, retention_window_days - 3)):
+            status = "retention-risk"
+        elif last_event_at and (now - last_event_at) > timedelta(hours=24):
+            status = "stale"
+        else:
+            status = "active"
+        retention_days_remaining = None
+        if last_event_at:
+            retention_days_remaining = max(0, retention_window_days - int((now - last_event_at).total_seconds() // 86400))
+        rows.append(
+            ProviderCoverageRow(
+                connector_id=connector_id,
+                label=str(connector.get("label") or connector_id),
+                category=str(connector.get("category") or "coding-agent"),
+                configured=configured_flag,
+                enabled=enabled,
+                status=status,
+                events=len(matched),
+                users=len(users),
+                models=models,
+                intelligence_tiers=tiers,
+                last_event_at=last_event_at,
+                last_sync_status=str(settings.get("last_sync_status")) if settings.get("last_sync_status") else None,
+                last_sync_requested_at=str(settings.get("last_sync_requested_at")) if settings.get("last_sync_requested_at") else None,
+                last_cursor=str(settings.get("cursor")) if settings.get("cursor") else None,
+                retention_days_remaining=retention_days_remaining,
+            )
+        )
+    return sorted(rows, key=lambda row: (row.status == "unconfigured", row.status == "configured", -row.events, row.label))
+
+
 @router.get("/coverage-sla", response_model=CoverageSlaResponse)
 async def get_coverage_sla(
     org_id: str,
@@ -769,4 +898,35 @@ async def get_access_grants(
         window_days=window_days,
         generated_at=usage.generated_at,
         grants=usage.access_grants,
+    )
+
+
+@router.get("/provider-coverage", response_model=ProviderCoverageResponse)
+async def get_provider_coverage(
+    org_id: str,
+    window_days: int = Query(default=30, ge=1, le=180),
+    retention_window_days: int = Query(default=30, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> ProviderCoverageResponse:
+    await _require_v8(org_id, db, current_org_id)
+    org = await db.get(Org, org_id)
+    cutoff = _utc_now() - timedelta(days=window_days)
+    events = (
+        await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.org_id == org_id,
+                AuditEvent.created_at >= cutoff,
+                AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+            )
+            .order_by(desc(AuditEvent.created_at))
+            .limit(5000)
+        )
+    ).scalars().all()
+    return ProviderCoverageResponse(
+        window_days=window_days,
+        retention_window_days=retention_window_days,
+        generated_at=_utc_now(),
+        rows=_provider_coverage_rows(org, list(events), window_days=window_days, retention_window_days=retention_window_days),
     )

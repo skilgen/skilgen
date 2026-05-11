@@ -33,6 +33,7 @@ Current feature slices tracked in `FEATURES.md` include:
 - Policy review actions for approvals and quarantine, including persisted approval decisions.
 - Coverage SLA critical-operation taxonomy loading from `apps/api/api/v8/insights/critical_ops.yaml`.
 - Metadata-only agent compliance event ingestion for configured provider connectors, including model tier, access grants, tools/MCP, files, policy decisions, tokens, cost, latency, warnings, violations, and error metrics.
+- Provider coverage monitoring for configured compliance connectors, highlighting silent, stale, and 30-day retention-risk sources before provider logs become unrecoverable.
 - v8 Audit APIs for event log, reports, exports, evidence packages, hash-chain verification, and WORM root publishing.
 - v8 Skills APIs and screens for registry, score, drift, provenance, SkillQL, and repos.
 - v8 Settings APIs and screens for connectors and RBAC foundations.
