@@ -430,3 +430,17 @@ Final required verification:
   - UX screenshots captured from the built fallback catalog:
     - `docs/v8-refactor/screenshots/automation-20260511/settings-siem-connector-catalog-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/settings-siem-connector-catalog-mobile.png`
+
+## 2026-05-11 — Settings WORM storage connector catalog slice
+
+- Backend: the v8 Settings connector registry now includes S3 Object Lock, GCS Bucket Lock, and Azure Immutable Blob source types, descriptions, and WORM capabilities for immutable audit-chain roots, Merkle proofs, customer-owned storage, evidence packages, and retention policies.
+- Frontend: the migrated Settings connector fallback catalog now shows all three customer-owned immutable storage targets instead of only S3 Object Lock.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> 25 passed.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured from the built fallback catalog:
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-worm-storage-connector-catalog-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-worm-storage-connector-catalog-mobile.png`
