@@ -379,6 +379,22 @@ def test_request_agent_compliance_connector_sync_marks_formal_compliance_retenti
     assert stored["last_sync_plan"]["content_retention"] == "metadata-only"
 
 
+def test_agent_compliance_catalog_covers_required_coding_agent_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router._agent_compliance_registry()}
+
+    for connector_id in {"cursor", "windsurf", "github-copilot", "gitlab-duo", "codex-cli", "claude-code", "aider"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "coding-agent"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert {"agent sessions", "model usage"} & set(connector["capabilities"])
+
+    internal_mcp = connectors["internal-mcp"]
+    assert internal_mcp["category"] == "runtime"
+    assert "mcp calls" in internal_mcp["capabilities"]
+    assert "approval decisions" in internal_mcp["capabilities"]
+
+
 def test_request_agent_compliance_connector_sync_requires_enabled_connector(monkeypatch) -> None:
     org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
     db = OrgDb(org)

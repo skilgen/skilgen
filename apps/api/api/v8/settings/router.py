@@ -239,7 +239,7 @@ def _agent_compliance_registry() -> list[dict[str, Any]]:
     return [
         item
         for item in connector_registry()
-        if item.get("category") in {"compliance-telemetry", "coding-agent"}
+        if item.get("category") in {"compliance-telemetry", "coding-agent"} or item.get("id") == "internal-mcp"
     ]
 
 
