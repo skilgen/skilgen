@@ -285,7 +285,7 @@ Final required verification:
 - Frontend: Insights -> Developer track now uses the v8 compliance API instead of the legacy `/orgs/{org_id}/developer-leaderboard` endpoint.
 - Privacy: raw prompts, chat content, file content, diffs, raw event bodies, and tool parameters are not returned or displayed.
 - Verification:
-  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_insights.py -q` -> `15 passed`.
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_insights.py -q` -> `16 passed`.
   - `npm --workspace apps/dashboard run type-check` -> passed.
   - `npm --workspace apps/dashboard run lint` -> passed.
   - `npm --workspace apps/dashboard run build` -> passed.
@@ -307,3 +307,18 @@ Final required verification:
   - UX screenshots captured with a local mock API:
     - `docs/v8-refactor/screenshots/automation-20260511/coverage-sla-critical-ops-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/coverage-sla-critical-ops-mobile.png`
+
+## 2026-05-11 — Insights fleet quarantine KPI slice
+
+- Backend: `GET /v8/orgs/{org_id}/insights/fleet-kpis` now reports `quarantined_skills` from `skill_registry_entries` instead of returning an unavailable placeholder.
+- Metric contract: counts entries tagged `quarantined` plus retired/deprecated entries at the current and previous period boundaries.
+- Frontend: existing Fleet KPI cards now render the quarantine metric as an available trend metric without UI changes.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_insights.py -q` -> `15 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured with a local mock API:
+    - `docs/v8-refactor/screenshots/automation-20260511/fleet-kpi-quarantine-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/fleet-kpi-quarantine-mobile.png`

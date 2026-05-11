@@ -10,7 +10,7 @@ from typing import Any, Literal
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select, text
+from sqlalchemy import desc, func, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +18,7 @@ from apps.api.api.auth import get_current_org_id
 from apps.api.api.v8.flags import is_v8, request_flag_cache
 from packages.db.database import get_db
 from apps.api.api.v8.settings.connectors_registry import connector_registry
-from packages.db.models import AgentSession, AuditEvent, Org, OrgPolicy, PRAttribution, PullRequest, Repo, Skill, SkillMemoryStub, SkillUsageEvent
+from packages.db.models import AgentSession, AuditEvent, Org, OrgPolicy, PRAttribution, PullRequest, Repo, Skill, SkillMemoryStub, SkillRegistryEntry, SkillUsageEvent
 
 
 router = APIRouter(
@@ -519,6 +519,28 @@ async def _count_drift_events(db: AsyncSession, org_id: str, start: datetime, en
     )
 
 
+def _registry_entry_owned_by_org(org_id: str):
+    return or_(SkillRegistryEntry.org_id == org_id, SkillRegistryEntry.publisher_org_id == org_id)
+
+
+async def _count_quarantined_skills(db: AsyncSession, org_id: str, end: datetime) -> int:
+    rows = (
+        await db.execute(
+            select(SkillRegistryEntry.tags, SkillRegistryEntry.is_deprecated).where(
+                _registry_entry_owned_by_org(org_id),
+                SkillRegistryEntry.updated_at < end,
+            )
+        )
+    ).all()
+    count = 0
+    for row in rows:
+        tags = _row_value(row, "tags", []) or []
+        is_deprecated = bool(_row_value(row, "is_deprecated", False))
+        if is_deprecated or "quarantined" in {str(tag) for tag in tags}:
+            count += 1
+    return count
+
+
 async def _weekly_active_humans(db: AsyncSession, org_id: str, end: datetime) -> int:
     start = end - timedelta(days=7)
     rows = (
@@ -561,7 +583,7 @@ async def get_fleet_kpis(
         _metric("approval_rate", "Approval rate", current_approvals, previous_approvals, "percent", "skill_memory_stubs"),
         _metric("median_time_to_approve", "Median time to approve", current_median, previous_median, "minutes", "skill_memory_stubs"),
         _metric("drift_events", "Drift events", await _count_drift_events(db, org_id, current_start, current_end), await _count_drift_events(db, org_id, previous_start, previous_end), "count", "audit_events"),
-        _unavailable("quarantined_skills", "Quarantined skills", "count", "quarantine_state_not_present"),
+        _metric("quarantined_skills", "Quarantined skills", await _count_quarantined_skills(db, org_id, current_end), await _count_quarantined_skills(db, org_id, previous_end), "count", "skill_registry_entries"),
         _unavailable("mttr_violations", "MTTR for violations", "hours", "violation_resolution_state_not_present"),
         _metric("attributed_agent_commits", "Agent commits with full attribution", await _attribution_rate(db, org_id, current_start, current_end), await _attribution_rate(db, org_id, previous_start, previous_end), "percent", "pr_attributions"),
         _metric("weekly_active_human_users", "Weekly active human users", await _weekly_active_humans(db, org_id, current_end), await _weekly_active_humans(db, org_id, previous_end), "count", "agent_sessions"),
