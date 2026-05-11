@@ -127,6 +127,8 @@ def test_insights_routes_404_when_ia_v8_disabled(monkeypatch) -> None:
 def test_fleet_kpis_contract_includes_prior_period_comparison(monkeypatch) -> None:
     approved = SimpleNamespace(status="approved", created_at=NOW - timedelta(hours=2), reviewed_at=NOW - timedelta(hours=1))
     rejected = SimpleNamespace(status="rejected", created_at=NOW - timedelta(hours=3), reviewed_at=NOW - timedelta(hours=1))
+    current_quarantine = SimpleNamespace(tags=["quarantined"], is_deprecated=False)
+    previous_retired = SimpleNamespace(tags=[], is_deprecated=True)
     current_pr = _pr("pr_1", "repo_1")
     previous_pr = _pr("pr_2", "repo_1", days_old=31)
     db = Db(
@@ -143,6 +145,8 @@ def test_fleet_kpis_contract_includes_prior_period_comparison(monkeypatch) -> No
             Result([_attr("pr_2", "codex", violated=False)]),
             Result(scalar=1),
             Result(scalar=0),
+            Result([current_quarantine, previous_retired]),
+            Result([previous_retired]),
             Result(["repo_1"]),
             Result([current_pr]),
             Result([_attr("pr_1", "codex", violated=True)]),
@@ -163,8 +167,19 @@ def test_fleet_kpis_contract_includes_prior_period_comparison(monkeypatch) -> No
     assert metrics["deny_rate"]["current"] == 1.0
     assert metrics["approval_rate"]["current"] == 0.5
     assert metrics["median_time_to_approve"]["current"] == 60
-    assert metrics["quarantined_skills"]["status"] == "unavailable"
+    assert metrics["quarantined_skills"]["status"] == "available"
+    assert metrics["quarantined_skills"]["source"] == "skill_registry_entries"
+    assert metrics["quarantined_skills"]["current"] == 2
+    assert metrics["quarantined_skills"]["previous"] == 1
     assert metrics["attributed_agent_commits"]["previous"] == 0.0
+
+
+def test_quarantine_kpi_uses_registry_publisher_ownership() -> None:
+    statement = sa.select(insights.SkillRegistryEntry.id).where(insights._registry_entry_owned_by_org("org_1"))
+    compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
+
+    assert "skill_registry_entries.org_id = 'org_1'" in compiled
+    assert "skill_registry_entries.publisher_org_id = 'org_1'" in compiled
 
 
 def test_risky_agent_fallback_sorts_by_prd_formula(monkeypatch) -> None:
