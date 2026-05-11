@@ -458,3 +458,17 @@ Final required verification:
   - UX screenshots captured from the built fallback catalog:
     - `docs/v8-refactor/screenshots/automation-20260511/settings-provenance-connector-catalog-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/settings-provenance-connector-catalog-mobile.png`
+
+## 2026-05-11 — Settings notification connector catalog slice
+
+- Backend: the v8 Settings connector registry now includes Slack, Email Digest, and Notification Webhooks source types, descriptions, and notification capabilities for chat routing, slash commands, governance digests, policy notifications, compliance summaries, webhook delivery, and retries.
+- Frontend: the migrated Settings connector fallback catalog now shows the notification section with the same Slack, Email Digest, and Notification Webhook entries instead of only relying on API-backed data.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> 27 passed.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured from the built fallback catalog:
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-notification-connector-catalog-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-notification-connector-catalog-mobile.png`
