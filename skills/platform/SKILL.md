@@ -5,7 +5,7 @@ domain: platform
 sub_domain: platform
 last_updated: 2026-05-11
 triggered_by: requirements_pipeline
-source_hash: 886c076cfa1f7cd9fa02ed8ec9fcbd66dcf1f0562e699ad0370fd4fd5b366899
+source_hash: 66b8b2c92af28b364d9d8dec414d732cd7b10e8ad09f9bf821482d71570a933a
 richness_score: 100
 score:
   total: 100
@@ -111,7 +111,7 @@ def _timestamp() -> str:
 ```
 
 ## Traceability
-- Generated from requirements source hash: `886c076cfa1f7cd9fa02ed8ec9fcbd66dcf1f0562e699ad0370fd4fd5b366899`
+- Generated from requirements source hash: `66b8b2c92af28b364d9d8dec414d732cd7b10e8ad09f9bf821482d71570a933a`
 - Domain path: `platform/platform`
 - Read `../../TRACEABILITY.md` for full requirement-to-output mapping.
 - Use the detected file patterns in this skill before creating new structure.
