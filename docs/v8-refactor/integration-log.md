@@ -185,3 +185,17 @@ Final required verification:
   - UX screenshots captured:
     - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-metrics-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-metrics-mobile.png`
+
+## 2026-05-11 — Agent compliance sync readiness slice
+
+- Backend: `POST /v8/orgs/{org_id}/settings/connectors/{connector_id}/sync` now returns a metadata-only sync readiness plan instead of only mutating connector state.
+- Readiness plan: records cursor-resume pagination, provider-adapter requirement, retention window, retention deadline, formal-compliance versus operational-telemetry source type, and explicit next actions before live pulls are enabled.
+- Frontend: Settings -> Connectors displays the latest sync readiness plan for each configured agent compliance connector without marking the source connected.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> `15 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - UX screenshots captured:
+    - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-sync-readiness-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-sync-readiness-mobile.png`

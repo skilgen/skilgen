@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -79,6 +79,23 @@ class AgentComplianceConnectorPayload(BaseModel):
 class AgentComplianceSyncPayload(BaseModel):
     cursor: str | None = Field(default=None, max_length=512)
     dry_run: bool = True
+
+
+class AgentComplianceSyncResponse(BaseModel):
+    connector_id: str
+    status: Literal["pending"]
+    mode: Literal["dry-run"]
+    cursor: str | None = None
+    next_cursor_required: bool
+    provider_adapter_required: bool = True
+    pagination_strategy: str
+    retention_window_days: int
+    retention_deadline_at: str
+    content_retention: Literal["metadata-only"] = "metadata-only"
+    source_record_type: Literal["formal-compliance", "operational-telemetry"]
+    ready_for_provider_pull: bool
+    blocked_reason: str
+    next_actions: list[str]
 
 
 class AgentComplianceEventPayload(BaseModel):
@@ -213,6 +230,42 @@ def _agent_connector_settings(org: Org | None) -> dict[str, dict[str, object]]:
     return {str(key): dict(value) for key, value in raw.items() if isinstance(value, dict)}
 
 
+def _agent_sync_contract(connector_id: str, connector: dict[str, Any], row: dict[str, object], cursor: str | None) -> dict[str, object]:
+    category = str(connector.get("category") or "")
+    retention_window_days = 30 if connector_id in {"openai-compliance", "anthropic-compliance"} else 7
+    source_record_type = "formal-compliance" if category == "compliance-telemetry" and connector_id != "claude-cowork-otel" else "operational-telemetry"
+    source_types = list(row.get("source_types") or connector.get("capabilities") or [])
+    scopes = list(row.get("scopes") or [])
+    next_actions = [
+        "Attach encrypted provider credentials or tenant-authorized telemetry hook.",
+        "Run provider adapter with cursor resume and page-by-page ingest into metadata-only normalized events.",
+        "Persist next cursor only after each page is normalized without raw prompt, chat, file content, diff, or tool-parameter storage.",
+    ]
+    if connector_id in {"openai-compliance", "anthropic-compliance"}:
+        next_actions.insert(1, "Schedule continuous pulls before the 30-day compliance-log retention window expires.")
+    elif connector_id == "claude-cowork-otel":
+        next_actions.insert(1, "Route OpenTelemetry spans as operational telemetry because Cowork is not covered by Anthropic compliance logs.")
+    else:
+        next_actions.insert(1, "Install local or enterprise agent telemetry hook for sessions, tools, files, model tier, and approvals.")
+    ready = bool(row.get("enabled")) and bool(scopes or source_types)
+    return {
+        "connector_id": connector_id,
+        "status": "pending",
+        "mode": "dry-run",
+        "cursor": cursor,
+        "next_cursor_required": bool(cursor),
+        "provider_adapter_required": True,
+        "pagination_strategy": "cursor-resume",
+        "retention_window_days": retention_window_days,
+        "retention_deadline_at": (datetime.now(UTC) + timedelta(days=retention_window_days)).isoformat(),
+        "content_retention": "metadata-only",
+        "source_record_type": source_record_type,
+        "ready_for_provider_pull": ready,
+        "blocked_reason": "provider adapter and credentials are required before live pulls" if ready else "connector setup is incomplete",
+        "next_actions": next_actions,
+    }
+
+
 def _agent_connector_response(org: Org | None) -> dict[str, object]:
     configured = _agent_connector_settings(org)
     connectors: list[dict[str, object]] = []
@@ -220,6 +273,9 @@ def _agent_connector_response(org: Org | None) -> dict[str, object]:
         connector_id = str(item["id"])
         row = configured.get(connector_id) or {}
         enabled = bool(row.get("enabled"))
+        sync_plan = row.get("last_sync_plan")
+        if not isinstance(sync_plan, dict):
+            sync_plan = None
         connectors.append(
             {
                 **item,
@@ -232,6 +288,7 @@ def _agent_connector_response(org: Org | None) -> dict[str, object]:
                 "last_sync_status": row.get("last_sync_status") or ("pending" if enabled else None),
                 "last_sync_requested_at": row.get("last_sync_requested_at"),
                 "last_sync_mode": row.get("last_sync_mode"),
+                "last_sync_plan": sync_plan,
                 "last_ingested_at": row.get("last_ingested_at"),
                 "last_ingested_count": int(row.get("last_ingested_count") or 0),
                 "total_ingested_count": int(row.get("total_ingested_count") or 0),
@@ -645,6 +702,7 @@ async def configure_agent_compliance_connector(
 
 @router.post(
     "/connectors/{connector_id}/sync",
+    response_model=AgentComplianceSyncResponse,
     dependencies=[Depends(require_permission("settings.connectors.manage"))],
 )
 async def request_agent_compliance_connector_sync(
@@ -670,13 +728,19 @@ async def request_agent_compliance_connector_sync(
         raise HTTPException(status_code=409, detail="Agent compliance connector must be enabled before sync")
     if not payload.dry_run:
         raise HTTPException(status_code=400, detail="Agent compliance sync readiness only supports dry-run requests")
-    now = datetime.utcnow().isoformat()
+    connector = next((item for item in _agent_compliance_registry() if item.get("id") == connector_id), None)
+    if connector is None:
+        raise HTTPException(status_code=404, detail="Agent compliance connector not found")
+    now = datetime.now(UTC).isoformat()
+    cursor = payload.cursor or str(current.get("cursor") or "") or None
+    sync_plan = _agent_sync_contract(connector_id, connector, current, cursor)
     current.update(
         {
-            "cursor": payload.cursor or current.get("cursor"),
+            "cursor": cursor,
             "last_sync_status": "pending",
             "last_sync_requested_at": now,
             "last_sync_mode": "dry-run",
+            "last_sync_plan": sync_plan,
             "updated_at": now,
         }
     )
@@ -696,11 +760,15 @@ async def request_agent_compliance_connector_sync(
         metadata={
             "dry_run": payload.dry_run,
             "cursor_supplied": bool(payload.cursor),
+            "pagination_strategy": sync_plan["pagination_strategy"],
+            "retention_window_days": sync_plan["retention_window_days"],
+            "source_record_type": sync_plan["source_record_type"],
+            "ready_for_provider_pull": sync_plan["ready_for_provider_pull"],
             "content_retention": current.get("content_retention") or "metadata-only",
         },
     )
     await db.commit()
-    return _agent_connector_response(org)
+    return AgentComplianceSyncResponse.model_validate(sync_plan)
 
 
 @router.post(
