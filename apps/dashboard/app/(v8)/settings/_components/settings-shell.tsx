@@ -30,7 +30,7 @@ export function SettingsShell({ active, children }: { active: string; children: 
             <Link
               className={
                 isActive
-                  ? "inline-flex h-9 shrink-0 items-center gap-2 rounded-md bg-[color:var(--accent-primary)] px-3 text-[13px] font-semibold text-[color:var(--bg-base)]"
+                  ? "order-first inline-flex h-9 shrink-0 items-center gap-2 rounded-md bg-[color:var(--accent-primary)] px-3 text-[13px] font-semibold text-[color:var(--bg-base)] md:order-none"
                   : "inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-[13px] font-semibold text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--bg-surface)] hover:text-[color:var(--text-primary)]"
               }
               href={tab.href}

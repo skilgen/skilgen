@@ -37,6 +37,7 @@ DEFAULT_DIGEST_WIDGETS = [
     "skill_gaps",
     "roi_multiplier",
 ]
+ADMIN_AUDIT_ROLLUP_LIMIT = 5000
 
 
 class RolePayload(BaseModel):
@@ -1132,33 +1133,60 @@ async def get_agent_compliance_ingest_job(
     )
 
 
-@router.get("/admin-audit")
-async def get_admin_audit(
-    org_id: str,
-    limit: int = 50,
-    db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
+def _admin_audit_payload(
+    *,
+    events: list[AuditEvent],
+    page_events: list[AuditEvent],
+    rollup_truncated: bool,
+    window_days: int,
+    actor: str | None,
+    event_type: str | None,
+    resource_type: str | None,
+    severity: str | None,
+    limit: int,
 ) -> dict[str, object]:
-    await _assert_v8_org(org_id, current_org_id, db)
-    try:
-        events = (
-            await db.execute(
-                select(AuditEvent)
-                .where(
-                    AuditEvent.org_id == org_id,
-                    or_(
-                        AuditEvent.event_type.like("settings.%"),
-                        AuditEvent.event_type.like("member.%"),
-                        AuditEvent.event_type == "api_key_rotated",
-                    ),
-                )
-                .order_by(desc(AuditEvent.created_at))
-                .limit(max(1, min(limit, 100)))
-            )
-        ).scalars().all()
-    except SQLAlchemyError:
-        events = []
+    actors = {event.actor_login for event in events if event.actor_login}
+    event_types: dict[str, int] = {}
+    resource_types: dict[str, int] = {}
+    severity_counts = {"info": 0, "warning": 0, "critical": 0}
+    for event in events:
+        event_types[event.event_type] = event_types.get(event.event_type, 0) + 1
+        if event.resource_type:
+            resource_types[event.resource_type] = resource_types.get(event.resource_type, 0) + 1
+        if event.severity in severity_counts:
+            severity_counts[event.severity] += 1
+    event_type_rows = [
+        {"key": key, "label": key, "count": count}
+        for key, count in sorted(event_types.items(), key=lambda item: (-item[1], item[0]))[:10]
+    ]
+    resource_type_rows = [
+        {"key": key, "label": key, "count": count}
+        for key, count in sorted(resource_types.items(), key=lambda item: (-item[1], item[0]))[:10]
+    ]
     return {
+        "window_days": window_days,
+        "summary": {
+            "events": len(events),
+            "actors": len(actors),
+            "critical": severity_counts["critical"],
+            "warnings": severity_counts["warning"],
+            "resource_types": len(resource_types),
+        },
+        "filters": {
+            "actor": actor,
+            "event_type": event_type,
+            "resource_type": resource_type,
+            "severity": severity,
+            "limit": limit,
+        },
+        "rollup": {
+            "source_events": len(events),
+            "limit": ADMIN_AUDIT_ROLLUP_LIMIT,
+            "truncated": rollup_truncated,
+        },
+        "event_types": event_type_rows,
+        "resource_types": resource_type_rows,
+        "severity_counts": severity_counts,
         "events": [
             {
                 "id": event.id,
@@ -1171,9 +1199,75 @@ async def get_admin_audit(
                 "severity": event.severity,
                 "created_at": event.created_at,
             }
-            for event in events
-        ]
+            for event in page_events
+        ],
     }
+
+
+@router.get("/admin-audit", dependencies=[Depends(require_permission("settings.admin_audit.read"))])
+async def get_admin_audit(
+    org_id: str,
+    actor: str | None = None,
+    event_type: str | None = None,
+    resource_type: str | None = None,
+    severity: Literal["info", "warning", "critical"] | None = None,
+    window_days: int = 30,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    window_days = max(1, min(window_days, 180))
+    limit = max(1, min(limit, 100))
+    filters: list[Any] = [
+        AuditEvent.org_id == org_id,
+        AuditEvent.created_at >= datetime.now(UTC).replace(tzinfo=None) - timedelta(days=window_days),
+        or_(
+            AuditEvent.event_type.like("settings.%"),
+            AuditEvent.event_type.like("member.%"),
+            AuditEvent.event_type == "api_key_rotated",
+        ),
+    ]
+    if actor:
+        filters.append(AuditEvent.actor_login.ilike(f"%{actor}%"))
+    if event_type:
+        filters.append(AuditEvent.event_type == event_type)
+    if resource_type:
+        filters.append(AuditEvent.resource_type == resource_type)
+    if severity:
+        filters.append(AuditEvent.severity == severity)
+    try:
+        rollup_events = (
+            await db.execute(
+                select(AuditEvent)
+                .where(*filters)
+                .order_by(desc(AuditEvent.created_at))
+                .limit(ADMIN_AUDIT_ROLLUP_LIMIT + 1)
+            )
+        ).scalars().all()
+        page_events = (
+            await db.execute(
+                select(AuditEvent)
+                .where(*filters)
+                .order_by(desc(AuditEvent.created_at))
+                .limit(limit)
+            )
+        ).scalars().all()
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Admin audit data unavailable") from exc
+    rollup_truncated = len(rollup_events) > ADMIN_AUDIT_ROLLUP_LIMIT
+    rollup_events = list(rollup_events)[:ADMIN_AUDIT_ROLLUP_LIMIT]
+    return _admin_audit_payload(
+        events=rollup_events,
+        page_events=list(page_events),
+        rollup_truncated=rollup_truncated,
+        window_days=window_days,
+        actor=actor,
+        event_type=event_type,
+        resource_type=resource_type,
+        severity=severity,
+        limit=limit,
+    )
 
 
 @router.get("/billing")

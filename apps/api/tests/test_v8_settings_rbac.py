@@ -15,7 +15,7 @@ from starlette.requests import Request
 from apps.api.api.index import app
 from apps.api.api.auth import get_current_org_id
 from apps.api.api.v8.flags import request_flag_cache
-from apps.api.api.v8.settings.rbac import has_permission, matches_scope_expression, permission_matches
+from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, matches_scope_expression, permission_matches
 from packages.db.database import get_db
 from packages.db.models import AuditEvent, Job, Org
 
@@ -34,6 +34,9 @@ class Result:
     def scalar_one_or_none(self) -> object | None:
         return self._rows[0][0] if self._rows else None
 
+    def scalars(self):
+        return self
+
 
 class Db:
     def __init__(self, rows: list[tuple[object, object]]) -> None:
@@ -41,6 +44,26 @@ class Db:
 
     async def execute(self, _stmt: object) -> Result:
         return Result(self.rows)
+
+
+class EventDb:
+    def __init__(self, events: list[AuditEvent]) -> None:
+        self.events = events
+        self.statements: list[str] = []
+        self.limits: list[int | None] = []
+
+    async def execute(self, stmt: object) -> Result:
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        limit_clause = getattr(stmt, "_limit_clause", None)
+        limit = getattr(limit_clause, "value", None)
+        rows = self.events
+        if "audit_events.severity = 'warning'" in compiled:
+            rows = [event for event in rows if event.severity == "warning"]
+        if "audit_events.actor_login" in compiled and "ravi" in compiled:
+            rows = [event for event in rows if event.actor_login and "ravi" in event.actor_login]
+        self.statements.append(compiled)
+        self.limits.append(limit)
+        return Result(rows[:limit] if limit is not None else rows)
 
 
 class OrgDb:
@@ -75,6 +98,7 @@ def test_v8_settings_router_is_registered() -> None:
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-events" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs/{job_id}" in paths
+    assert "settings.admin_audit.read" in PERMISSIONS
 
 
 def test_agent_compliance_connector_endpoint_returns_metadata_state(monkeypatch) -> None:
@@ -113,6 +137,106 @@ def test_agent_compliance_connector_endpoint_returns_metadata_state(monkeypatch)
     assert payload["configured_count"] == 1
     assert codex["enabled"] is True
     assert codex["content_retention"] == "metadata-only"
+
+
+def test_admin_audit_returns_operator_rollups(monkeypatch) -> None:
+    events = [
+        AuditEvent(
+            id="evt-1",
+            org_id="org-1",
+            event_type="settings.rbac_role_created",
+            action="created",
+            actor_login="ravi",
+            resource_type="role",
+            resource_id="role-1",
+            summary="Created RBAC role Admin",
+            severity="info",
+            created_at=datetime(2026, 5, 11, 10, 0, 0),
+        ),
+        AuditEvent(
+            id="evt-2",
+            org_id="org-1",
+            event_type="settings.agent_compliance_connector_configured",
+            action="updated",
+            actor_login="maya",
+            resource_type="connector",
+            resource_id="codex-cli",
+            summary="Configured connector",
+            severity="warning",
+            created_at=datetime(2026, 5, 11, 9, 0, 0),
+        ),
+        AuditEvent(
+            id="evt-3",
+            org_id="org-1",
+            event_type="member.invited",
+            action="invited",
+            actor_login="maya",
+            resource_type="member",
+            resource_id="member-1",
+            summary="Invited member",
+            severity="warning",
+            created_at=datetime(2026, 5, 11, 8, 0, 0),
+        ),
+    ]
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+
+    db = EventDb(events)
+    response = asyncio.run(
+        settings_router.get_admin_audit(
+            "org-1",
+            severity="warning",
+            limit=1,
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    assert response["summary"] == {"events": 2, "actors": 1, "critical": 0, "warnings": 2, "resource_types": 2}
+    assert response["filters"]["severity"] == "warning"
+    assert response["filters"]["limit"] == 1
+    assert response["rollup"] == {"source_events": 2, "limit": 5000, "truncated": False}
+    assert response["severity_counts"] == {"info": 0, "warning": 2, "critical": 0}
+    assert {"key": "connector", "label": "connector", "count": 1} in response["resource_types"]
+    assert len(response["events"]) == 1
+    assert response["events"][0]["event_type"] == "settings.agent_compliance_connector_configured"
+    assert db.limits == [5001, 1]
+    assert all("audit_events.severity = 'warning'" in statement for statement in db.statements)
+
+
+def test_admin_audit_exposes_truncated_rollup_metadata() -> None:
+    events = [
+        AuditEvent(
+            id=f"evt-{index}",
+            org_id="org-1",
+            event_type="settings.rbac_role_created",
+            action="created",
+            actor_login="ravi",
+            resource_type="role",
+            resource_id=f"role-{index}",
+            summary="Created RBAC role",
+            severity="warning",
+            created_at=datetime(2026, 5, 11, 10, 0, 0),
+        )
+        for index in range(5000)
+    ]
+    payload = settings_router._admin_audit_payload(
+        events=events,
+        page_events=events[:1],
+        rollup_truncated=True,
+        window_days=30,
+        actor=None,
+        event_type=None,
+        resource_type=None,
+        severity="warning",
+        limit=1,
+    )
+
+    assert payload["summary"]["events"] == 5000
+    assert payload["rollup"] == {"source_events": 5000, "limit": 5000, "truncated": True}
 
 
 def test_configure_agent_compliance_connector_persists_metadata_only_state(monkeypatch) -> None:
