@@ -4,7 +4,7 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 
 ## Requirements Source
 - Source file: `README.md`
-- Source hash: `62b179fa1c51`
+- Source hash: `c171704dd887`
 
 ## Intent To Output Mapping
 ### Endpoints
@@ -13,6 +13,10 @@ This file maps requirements and detected code evidence to the generated Skilgen 
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
 - Intent: - Coverage SLA critical-operation taxonomy loading from `apps/api/api/v8/insights/critical_ops.yaml`.
+  Domain: `backend`
+  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
+  Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
+- Intent: - Developer track metrics sourced from the v8 compliance API, showing per-developer provider sessions, repos, models, tools, MCP usage, files, access exposure, policy decisions, tokens, cost, latency, warnings, violations, errors, and risk without raw content.
   Domain: `backend`
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
@@ -25,10 +29,6 @@ This file maps requirements and detected code evidence to the generated Skilgen 
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
 - Intent: - v8 Settings APIs and screens for connectors and RBAC foundations.
-  Domain: `backend`
-  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
-  Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
-- Intent: | Dashboard | `apps/dashboard` | Next.js App Router dashboard. v8 routes live in `apps/dashboard/app/(v8)`. |
   Domain: `backend`
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`

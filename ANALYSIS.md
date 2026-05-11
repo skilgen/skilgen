@@ -6577,7 +6577,7 @@
           "This file maps requirements and detected code evidence to the generated Skilgen outputs.",
           "## Requirements Source",
           "- Source file: `README.md`",
-          "- Source hash: `e84cc5de4bea`",
+          "- Source hash: `62b179fa1c51`",
           "## Intent To Output Mapping",
           "### Endpoints",
           "- Intent: | Surface | Purpose | Key Routes |"
