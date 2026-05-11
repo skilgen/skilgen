@@ -47,17 +47,20 @@ First-class connector entries:
 
 ## Proposed API additions
 
-No implementation is included by this addendum. Proposed signatures:
+The first implementation slice adds metadata-only event ingestion for configured connectors. Provider-specific pull jobs can now normalize into the same contract instead of each surface inventing its own payload shape.
 
 ```text
 GET  /v8/orgs/{org_id}/settings/connectors/agent-compliance
 POST /v8/orgs/{org_id}/settings/connectors/agent-compliance
 POST /v8/orgs/{org_id}/settings/connectors/{connector_id}/sync
+POST /v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-events
 GET  /v8/orgs/{org_id}/audit/agent-compliance
 GET  /v8/orgs/{org_id}/activity/compliance-events
 GET  /v8/orgs/{org_id}/insights/intelligence-usage
 GET  /v8/orgs/{org_id}/insights/access-grants
 ```
+
+The ingest endpoint accepts batches with provider event id, actor, provider, model, model tier, intelligence tier, access scope, full/autonomous access, tool permissions, MCP tools, repo/file targets, policy decision, approval status, violations, warnings, token counts, cost, latency, errors, session id, and source record type. Raw prompt, chat, file content, diffs, tool parameters, and raw event bodies are dropped before persistence. Stored records are `agent.compliance` audit events with `content_retention=metadata-only`, `redaction_state=raw-content-dropped`, and a sanitized source envelope hash.
 
 ## Proposed data additions
 
@@ -77,4 +80,3 @@ Raw prompts, chat content, file content, and tool parameters must be tenant-conf
 - For OpenAI logs, implement continuous pulls because the public help article states a 30-day logs retention window.
 - For Claude Cowork, use OTel ingestion and label it operational telemetry, not formal audit compliance, unless Anthropic changes that contract.
 - All connector setup and sync actions require `settings.connectors.manage`; audit reads require `audit.read`; insights rollups require `insights.read`.
-

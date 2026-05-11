@@ -141,3 +141,18 @@ Final required verification:
     - `docs/v8-refactor/screenshots/automation-20260510/coverage-sla-data-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260510/coverage-sla-data-mobile.png`
   - Browser checks confirmed the product-review note, `Requires: security_compliance, codebase_architecture`, `Requires: operational_knowledge`, repo card, gap state, and mobile `bodyWidth` equals the viewport width.
+
+## 2026-05-10 — Agent compliance metadata ingestion slice
+
+- Backend: `apps/api/api/v8/settings/router.py` adds `POST /v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-events` for configured agent-compliance connectors.
+- Normalization: accepted provider events persist as metadata-only `agent.compliance` audit events with source-envelope hashes and all available provider, model, intelligence-tier, access, tool, MCP, file, policy, token, cost, latency, warning, violation, and error metrics.
+- Privacy: raw prompts, chats, file content, diffs, tool parameters, and raw event bodies are stripped before persistence; stored metadata carries `content_retention=metadata-only` and `redaction_state=raw-content-dropped`.
+- Frontend: Settings -> Connectors now shows last-ingest and total-ingested counts for each agent compliance connector so the UI distinguishes setup/readiness from actual event flow.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py apps/api/tests/test_v8_insights.py apps/api/tests/test_v8_activity_api.py apps/api/tests/test_v8_audit_router_units.py -q` -> `47 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - UX screenshots captured:
+    - `docs/v8-refactor/screenshots/automation-20260510/agent-compliance-ingestion-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260510/agent-compliance-ingestion-mobile.png`
