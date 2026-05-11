@@ -182,11 +182,15 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 - Installed `agentskills-spec` from `https://github.com/agentskills/agentskills.git`
   Trust: `spec` score `7`
   License: `Apache License`
+- Installed `anthropic-skills` from `https://github.com/anthropics/skills.git`
+  Trust: `official` score `7`
+  License: `unknown`
 - Installed `awesome-copilot` from `https://github.com/github/awesome-copilot.git`
   Trust: `official` score `8`
   License: `MIT License`
 
 ### Preferred External Packs
+- `anthropic-skills`: Detected Claude/Anthropic repo hints.
 - `awesome-copilot`: Detected GitHub Copilot instructions or workspace setup.
 - `agentskills-spec`: Detected SKILL.md-style files or an existing skills tree.
 

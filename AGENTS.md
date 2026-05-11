@@ -24,10 +24,12 @@ The current input mode was: `requirements + codebase`.
 
 ## External Skill Packs
 - `agentskills-spec` (spec, trust `spec`): installed at `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/agentskills-spec`
+- `anthropic-skills` (anthropic, trust `official`): installed at `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/anthropic-skills`
 - `awesome-copilot` (github, trust `official`): installed at `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/awesome-copilot`
 
 ## Active External Skill Packs
 - `agentskills-spec` (skill-spec, trust score 7): load from `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/agentskills-spec`
+- `anthropic-skills` (anthropic-skills, trust score 7): load from `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/anthropic-skills`
 - `awesome-copilot` (generic-repo, trust score 8): load from `/home/runner/work/skilgen/skilgen/.skilgen/external-skills/sources/awesome-copilot`
 
 ## External Skill Policy
@@ -36,6 +38,7 @@ The current input mode was: `requirements + codebase`.
 - Auto activate enabled: `True`
 
 ## Preferred External Skill Packs
+- `anthropic-skills` (score 87): Detected Claude/Anthropic repo hints.
 - `awesome-copilot` (score 87): Detected GitHub Copilot instructions or workspace setup.
 - `agentskills-spec` (score 58): Detected SKILL.md-style files or an existing skills tree.
 
@@ -87,13 +90,16 @@ The current input mode was: `requirements + codebase`.
 - `skills/requirements/SKILL.md`
 - `skills/platform/SKILL.md`
 - `skills/roadmap/SKILL.md`
+- `.skilgen/external-skills/normalized/anthropic-skills/SUMMARY.md`
 - `.skilgen/external-skills/normalized/awesome-copilot/SUMMARY.md`
 - `.skilgen/external-skills/normalized/agentskills-spec/SUMMARY.md`
 - Load decision memory in this order:
   - `.skilgen/memory/current_run.json`
   - `.skilgen/state/freshness.json`
   - `.skilgen/external-skills/lock.json`
-  - `.skilgen/memory/runs/run-b935649dcc69.json`
+  - `.skilgen/memory/runs/run-b8e226674862.json`
+  - `.skilgen/external-skills/normalized/anthropic-skills/SUMMARY.md`
+  - `.skilgen/external-skills/normalized/anthropic-skills/index.json`
   - `.skilgen/external-skills/normalized/awesome-copilot/SUMMARY.md`
   - `.skilgen/external-skills/normalized/awesome-copilot/index.json`
   - `.skilgen/external-skills/normalized/agentskills-spec/SUMMARY.md`
