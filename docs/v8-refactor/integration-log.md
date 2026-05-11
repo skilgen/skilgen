@@ -199,3 +199,18 @@ Final required verification:
   - UX screenshots captured:
     - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-sync-readiness-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-sync-readiness-mobile.png`
+
+## 2026-05-11 — Agent compliance ingest jobs slice
+
+- Backend: `POST /v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs` queues metadata-only provider pages through the existing `jobs` model.
+- Backend: `GET /v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs/{job_id}` returns connector-scoped status and result metadata.
+- Job contract: stores cursor-resume pagination state, event count, content retention, queued/running/completed/failed state, and reuses the existing normalizer that drops raw prompts, chat, file content, diffs, raw event bodies, and tool parameters.
+- Frontend: Settings -> Connectors shows the last ingest job on each configured agent compliance connector and exposes a gated queue action without marking any provider connected.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> `17 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - UX screenshots captured:
+    - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-ingest-jobs-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/agent-compliance-ingest-jobs-mobile.png`

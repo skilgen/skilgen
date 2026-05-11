@@ -43,6 +43,15 @@ type AgentComplianceConnector = Connector & {
   last_sync_requested_at?: string | null;
   last_sync_mode?: string | null;
   last_sync_plan?: AgentComplianceSyncPlan | null;
+  last_ingest_job?: {
+    job_id: string;
+    status: string;
+    event_count: number;
+    cursor?: string | null;
+    next_cursor?: string | null;
+    content_retention: "metadata-only";
+    queued_at?: string | null;
+  } | null;
   last_ingested_at?: string | null;
   last_ingested_count: number;
   total_ingested_count: number;
@@ -299,6 +308,33 @@ async function requestAgentComplianceSync(formData: FormData) {
   }
 }
 
+async function queueAgentComplianceIngestJob(formData: FormData) {
+  "use server";
+
+  const connectorId = String(formData.get("connector_id") ?? "");
+  if (!connectorId) return;
+  const { accessToken, org } = await loadSettingsContext();
+  if (!accessToken) return;
+
+  const response = await fetch(`${API_URL}/v8/orgs/${org.id}/settings/connectors/${encodeURIComponent(connectorId)}/ingest-jobs`, {
+    body: JSON.stringify({
+      cursor: String(formData.get("cursor") ?? "") || null,
+      next_cursor: String(formData.get("next_cursor") ?? "") || null,
+      events: [],
+    }),
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  if (response.ok) {
+    revalidatePath("/settings/connectors");
+  }
+}
+
 export default async function ConnectorsSettingsPage() {
   const { accessToken, org } = await loadSettingsContext();
   const [payload, agentCompliance] = await Promise.all([
@@ -318,6 +354,7 @@ export default async function ConnectorsSettingsPage() {
     last_sync_requested_at: null,
     last_sync_mode: null,
     last_sync_plan: null,
+    last_ingest_job: null,
     last_ingested_at: null,
     last_ingested_count: 0,
     total_ingested_count: 0,
@@ -416,6 +453,21 @@ export default async function ConnectorsSettingsPage() {
               {connector.last_provider_event_id ? (
                 <p className="mt-2 truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">Last event {connector.last_provider_event_id}</p>
               ) : null}
+              {connector.last_ingest_job ? (
+                <div className="mt-3 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Ingest job</span>
+                    <span className="rounded-full bg-[color:var(--accent-primary)]/15 px-2 py-1 text-[11px] font-semibold text-[color:var(--accent-primary)]">{connector.last_ingest_job.status}</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-[color:var(--text-secondary)]">
+                    <span>Events: {connector.last_ingest_job.event_count}</span>
+                    <span>Retention: {connector.last_ingest_job.content_retention}</span>
+                    <span>Cursor: {connector.last_ingest_job.cursor ? "resume" : "first page"}</span>
+                    <span>Next: {connector.last_ingest_job.next_cursor ? "stored" : "pending"}</span>
+                  </div>
+                  <p className="mt-2 truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">{connector.last_ingest_job.job_id}</p>
+                </div>
+              ) : null}
               <div className="mt-auto grid gap-2 pt-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                 <form action={configureAgentComplianceConnector}>
                   <input name="connector_id" type="hidden" value={connector.id} />
@@ -438,6 +490,18 @@ export default async function ConnectorsSettingsPage() {
                     type="submit"
                   >
                     {connector.enabled ? "Request sync" : "Sync gated"}
+                  </button>
+                </form>
+                <form action={queueAgentComplianceIngestJob}>
+                  <input name="connector_id" type="hidden" value={connector.id} />
+                  <input name="cursor" type="hidden" value={connector.last_cursor ?? ""} />
+                  <input name="next_cursor" type="hidden" value="" />
+                  <button
+                    className="inline-flex h-9 w-full items-center justify-center rounded-md border border-[color:var(--accent-primary)]/45 px-3 text-[12px] font-semibold text-[color:var(--accent-primary)] disabled:cursor-not-allowed disabled:border-[color:var(--bg-border)] disabled:text-[color:var(--text-tertiary)]"
+                    disabled={!accessToken || !connector.enabled}
+                    type="submit"
+                  >
+                    {connector.enabled ? "Queue ingest" : "Job gated"}
                   </button>
                 </form>
               </div>

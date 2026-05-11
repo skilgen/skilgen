@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, or_, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -18,8 +18,9 @@ from apps.api.api.services.audit import get_actor_login
 from apps.api.api.v8.flags import is_v8, request_flag_cache
 from apps.api.api.v8.settings.connectors_registry import connector_registry
 from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, require_permission
-from packages.db.database import get_db
-from packages.db.models import AuditEvent, DigestConfig, Org, Role, RoleBinding, SourceConnection
+from packages.db.database import get_db, get_sessionmaker
+from packages.db.models import AuditEvent, DigestConfig, Job, Org, Role, RoleBinding, SourceConnection
+from packages.db.models.base import new_uuid
 
 
 router = APIRouter(
@@ -143,6 +144,25 @@ class AgentComplianceIngestResponse(BaseModel):
     next_cursor: str | None = None
     content_retention: Literal["metadata-only"] = "metadata-only"
     metrics: dict[str, Any]
+
+
+class AgentComplianceIngestJobResponse(BaseModel):
+    job_id: str
+    connector_id: str
+    status: str
+    queued: bool
+    cursor: str | None = None
+    next_cursor: str | None = None
+    event_count: int
+    content_retention: Literal["metadata-only"] = "metadata-only"
+
+
+class AgentComplianceIngestJobStatusResponse(BaseModel):
+    job_id: str
+    connector_id: str
+    status: str
+    result: dict[str, Any]
+    created_at: datetime
 
 
 RAW_CONTENT_KEYS = {
@@ -437,6 +457,191 @@ def _ingest_metrics(events: list[AgentComplianceEventPayload]) -> dict[str, Any]
         "latency_ms": sum(event.latency_ms or 0 for event in events),
         "errors": sum(event.error_count or 0 for event in events),
     }
+
+
+async def _ingest_agent_compliance_payload(
+    db: AsyncSession,
+    org: Org,
+    connector_id: str,
+    payload: AgentComplianceIngestPayload,
+    actor_login: str | None,
+) -> AgentComplianceIngestResponse:
+    org_id = org.id
+    settings = dict(org.settings or {})
+    configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+    current = dict(configured.get(connector_id) or {})
+    if not current.get("enabled"):
+        raise HTTPException(status_code=409, detail="Agent compliance connector must be enabled before ingest")
+    if current.get("content_retention") not in {None, "metadata-only"}:
+        raise HTTPException(status_code=400, detail="Only metadata-only ingestion is enabled for this release")
+
+    ingested: list[AgentComplianceEventPayload] = []
+    skipped = 0
+    for event in payload.events:
+        resource_id = f"{connector_id}:{event.provider_event_id}"
+        existing = (
+            await db.execute(
+                select(AuditEvent.id).where(
+                    AuditEvent.org_id == org_id,
+                    AuditEvent.resource_type == "agent_compliance_event",
+                    AuditEvent.resource_id == resource_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            skipped += 1
+            continue
+        metadata = _normalized_event_metadata(connector_id, event)
+        db.add(
+            AuditEvent(
+                org_id=org_id,
+                event_type="agent.compliance",
+                action="ingested",
+                summary=f"Normalized {event.source_record_type.replace('-', ' ')} from {event.provider or connector_id}",
+                actor_login=event.actor_login,
+                repo_id=event.repo_id,
+                repo_name=event.repo_name,
+                resource_type="agent_compliance_event",
+                resource_id=resource_id,
+                severity=_compliance_event_severity(event),
+                metadata_json=metadata,
+                created_at=(event.occurred_at or datetime.now(UTC)).replace(tzinfo=None),
+            )
+        )
+        ingested.append(event)
+
+    now = datetime.now(UTC).isoformat()
+    current.update(
+        {
+            "cursor": payload.next_cursor or payload.cursor or current.get("cursor"),
+            "last_sync_status": "success",
+            "last_sync_mode": "ingest",
+            "last_ingested_at": now,
+            "last_ingested_count": len(ingested),
+            "total_ingested_count": int(current.get("total_ingested_count") or 0) + len(ingested),
+            "last_provider_event_id": ingested[-1].provider_event_id if ingested else current.get("last_provider_event_id"),
+            "content_retention": "metadata-only",
+            "updated_at": now,
+        }
+    )
+    configured[connector_id] = current
+    settings["v8_agent_compliance_connectors"] = configured
+    org.settings = settings
+    flag_modified(org, "settings")
+
+    metrics = _ingest_metrics(ingested)
+    await audit.emit(
+        db,
+        org_id,
+        "settings.agent_compliance_events_ingested",
+        "ingested",
+        f"Ingested {len(ingested)} metadata-only agent compliance events from {connector_id}",
+        actor_login=actor_login,
+        resource_type="agent_compliance_connector",
+        resource_id=connector_id,
+        metadata={
+            "connector_id": connector_id,
+            "ingested_count": len(ingested),
+            "skipped_count": skipped,
+            "content_retention": "metadata-only",
+            "metrics": metrics,
+        },
+    )
+    return AgentComplianceIngestResponse(
+        connector_id=connector_id,
+        ingested_count=len(ingested),
+        skipped_count=skipped,
+        next_cursor=payload.next_cursor or payload.cursor,
+        metrics=metrics,
+    )
+
+
+async def _run_agent_compliance_ingest_job(
+    job_id: str,
+    org_id: str,
+    connector_id: str,
+    payload_data: dict[str, Any],
+    actor_login: str | None,
+) -> None:
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as db:
+        job = await db.get(Job, job_id)
+        org = await db.get(Org, org_id)
+        if job is None or org is None:
+            return
+        job.status = "running"
+        result = dict(job.result_json or {})
+        result["started_at"] = datetime.now(UTC).isoformat()
+        job.result_json = result
+        await db.commit()
+        try:
+            payload = AgentComplianceIngestPayload.model_validate(payload_data)
+            response = await _ingest_agent_compliance_payload(db, org, connector_id, payload, actor_login)
+            settings = dict(org.settings or {})
+            configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+            current = dict(configured.get(connector_id) or {})
+            last_job = dict(current.get("last_ingest_job") or {})
+            last_job.update(
+                {
+                    "job_id": job_id,
+                    "status": "completed",
+                    "event_count": int(result.get("event_count") or len(payload.events)),
+                    "cursor": payload.cursor,
+                    "next_cursor": response.next_cursor,
+                    "content_retention": response.content_retention,
+                    "completed_at": datetime.now(UTC).isoformat(),
+                    "ingested_count": response.ingested_count,
+                    "skipped_count": response.skipped_count,
+                }
+            )
+            current["last_ingest_job"] = last_job
+            configured[connector_id] = current
+            settings["v8_agent_compliance_connectors"] = configured
+            org.settings = settings
+            flag_modified(org, "settings")
+            job.status = "completed"
+            job.result_json = {
+                **result,
+                "completed_at": datetime.now(UTC).isoformat(),
+                "ingested_count": response.ingested_count,
+                "skipped_count": response.skipped_count,
+                "next_cursor": response.next_cursor,
+                "metrics": response.metrics,
+                "content_retention": response.content_retention,
+            }
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            job = await db.get(Job, job_id)
+            if job is not None:
+                org = await db.get(Org, org_id)
+                if org is not None:
+                    settings = dict(org.settings or {})
+                    configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+                    current = dict(configured.get(connector_id) or {})
+                    last_job = dict(current.get("last_ingest_job") or {})
+                    last_job.update(
+                        {
+                            "job_id": job_id,
+                            "status": "failed",
+                            "content_retention": "metadata-only",
+                            "failed_at": datetime.now(UTC).isoformat(),
+                        }
+                    )
+                    current["last_sync_status"] = "failed"
+                    current["last_ingest_job"] = last_job
+                    configured[connector_id] = current
+                    settings["v8_agent_compliance_connectors"] = configured
+                    org.settings = settings
+                    flag_modified(org, "settings")
+                job.status = "failed"
+                job.result_json = {
+                    **result,
+                    "failed_at": datetime.now(UTC).isoformat(),
+                    "error": str(exc),
+                    "content_retention": "metadata-only",
+                }
+                await db.commit()
 
 
 @router.get("")
@@ -792,6 +997,33 @@ async def ingest_agent_compliance_events(
     if org is None:
         raise HTTPException(status_code=404, detail="Org not found")
 
+    response = await _ingest_agent_compliance_payload(db, org, connector_id, payload, get_actor_login(request))
+    await db.commit()
+    return response
+
+
+@router.post(
+    "/connectors/{connector_id}/ingest-jobs",
+    response_model=AgentComplianceIngestJobResponse,
+    dependencies=[Depends(require_permission("settings.connectors.manage"))],
+)
+async def queue_agent_compliance_ingest_job(
+    org_id: str,
+    connector_id: str,
+    payload: AgentComplianceIngestPayload,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AgentComplianceIngestJobResponse:
+    await _assert_v8_org(org_id, current_org_id, db)
+    registry_ids = {str(item["id"]) for item in _agent_compliance_registry()}
+    if connector_id not in registry_ids:
+        raise HTTPException(status_code=404, detail="Agent compliance connector not found")
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+
     settings = dict(org.settings or {})
     configured = dict(settings.get("v8_agent_compliance_connectors") or {})
     current = dict(configured.get(connector_id) or {})
@@ -800,85 +1032,103 @@ async def ingest_agent_compliance_events(
     if current.get("content_retention") not in {None, "metadata-only"}:
         raise HTTPException(status_code=400, detail="Only metadata-only ingestion is enabled for this release")
 
-    ingested: list[AgentComplianceEventPayload] = []
-    skipped = 0
-    for event in payload.events:
-        resource_id = f"{connector_id}:{event.provider_event_id}"
-        existing = (
-            await db.execute(
-                select(AuditEvent.id).where(
-                    AuditEvent.org_id == org_id,
-                    AuditEvent.resource_type == "agent_compliance_event",
-                    AuditEvent.resource_id == resource_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if existing:
-            skipped += 1
-            continue
-        metadata = _normalized_event_metadata(connector_id, event)
-        db.add(
-            AuditEvent(
-                org_id=org_id,
-                event_type="agent.compliance",
-                action="ingested",
-                summary=f"Normalized {event.source_record_type.replace('-', ' ')} from {event.provider or connector_id}",
-                actor_login=event.actor_login,
-                repo_id=event.repo_id,
-                repo_name=event.repo_name,
-                resource_type="agent_compliance_event",
-                resource_id=resource_id,
-                severity=_compliance_event_severity(event),
-                metadata_json=metadata,
-                created_at=(event.occurred_at or datetime.now(UTC)).replace(tzinfo=None),
-            )
-        )
-        ingested.append(event)
-
-    now = datetime.now(UTC).isoformat()
+    job = Job(
+        id=new_uuid(),
+        org_id=org_id,
+        type="agent_compliance.ingest",
+        status="queued",
+        result_json={
+            "connector_id": connector_id,
+            "cursor": payload.cursor,
+            "next_cursor": payload.next_cursor,
+            "event_count": len(payload.events),
+            "content_retention": "metadata-only",
+            "pagination_strategy": "cursor-resume",
+            "queued_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    db.add(job)
     current.update(
         {
-            "cursor": payload.next_cursor or payload.cursor or current.get("cursor"),
-            "last_sync_status": "success",
-            "last_sync_mode": "ingest",
-            "last_ingested_at": now,
-            "last_ingested_count": len(ingested),
-            "total_ingested_count": int(current.get("total_ingested_count") or 0) + len(ingested),
-            "last_provider_event_id": ingested[-1].provider_event_id if ingested else current.get("last_provider_event_id"),
-            "content_retention": "metadata-only",
-            "updated_at": now,
+            "last_sync_status": "queued",
+            "last_sync_mode": "ingest-job",
+            "last_ingest_job": {
+                "job_id": job.id,
+                "status": job.status,
+                "event_count": len(payload.events),
+                "cursor": payload.cursor,
+                "next_cursor": payload.next_cursor,
+                "content_retention": "metadata-only",
+                "queued_at": job.result_json["queued_at"],
+            },
+            "updated_at": datetime.now(UTC).isoformat(),
         }
     )
     configured[connector_id] = current
     settings["v8_agent_compliance_connectors"] = configured
     org.settings = settings
     flag_modified(org, "settings")
-
-    metrics = _ingest_metrics(ingested)
     await audit.emit(
         db,
         org_id,
-        "settings.agent_compliance_events_ingested",
-        "ingested",
-        f"Ingested {len(ingested)} metadata-only agent compliance events from {connector_id}",
+        "settings.agent_compliance_ingest_job_queued",
+        "queued",
+        f"Queued metadata-only agent compliance ingest job for {connector_id}",
         actor_login=get_actor_login(request),
         resource_type="agent_compliance_connector",
         resource_id=connector_id,
         metadata={
+            "job_id": job.id,
             "connector_id": connector_id,
-            "ingested_count": len(ingested),
-            "skipped_count": skipped,
+            "event_count": len(payload.events),
+            "cursor_supplied": bool(payload.cursor),
+            "next_cursor_supplied": bool(payload.next_cursor),
             "content_retention": "metadata-only",
-            "metrics": metrics,
+            "pagination_strategy": "cursor-resume",
         },
     )
     await db.commit()
-    return AgentComplianceIngestResponse(
+    background_tasks.add_task(
+        _run_agent_compliance_ingest_job,
+        job.id,
+        org_id,
+        connector_id,
+        payload.model_dump(mode="json"),
+        get_actor_login(request),
+    )
+    return AgentComplianceIngestJobResponse(
+        job_id=job.id,
         connector_id=connector_id,
-        ingested_count=len(ingested),
-        skipped_count=skipped,
-        next_cursor=payload.next_cursor or payload.cursor,
-        metrics=metrics,
+        status=job.status,
+        queued=True,
+        cursor=payload.cursor,
+        next_cursor=payload.next_cursor,
+        event_count=len(payload.events),
+    )
+
+
+@router.get(
+    "/connectors/{connector_id}/ingest-jobs/{job_id}",
+    response_model=AgentComplianceIngestJobStatusResponse,
+)
+async def get_agent_compliance_ingest_job(
+    org_id: str,
+    connector_id: str,
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AgentComplianceIngestJobStatusResponse:
+    await _assert_v8_org(org_id, current_org_id, db)
+    job = await db.get(Job, job_id)
+    result = job.result_json if job is not None and isinstance(job.result_json, dict) else {}
+    if job is None or job.org_id != org_id or job.type != "agent_compliance.ingest" or result.get("connector_id") != connector_id:
+        raise HTTPException(status_code=404, detail="Agent compliance ingest job not found")
+    return AgentComplianceIngestJobStatusResponse(
+        job_id=job.id,
+        connector_id=connector_id,
+        status=job.status,
+        result=result,
+        created_at=job.created_at,
     )
 
 
