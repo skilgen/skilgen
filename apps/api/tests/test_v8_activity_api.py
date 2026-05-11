@@ -59,6 +59,7 @@ def test_activity_router_is_registered_on_main_app() -> None:
 
     assert "/v8/orgs/{org_id}/activity/feed" in paths
     assert "/v8/orgs/{org_id}/activity/compliance-events" in paths
+    assert "/v8/orgs/{org_id}/activity/compliance-sessions" in paths
     assert "/v8/orgs/{org_id}/repos/{repo_id}/activity/sessions/{session_id}/replay" in paths
     assert "/v8/orgs/{org_id}/repos/{repo_id}/activity/heatmap" in paths
 
@@ -193,6 +194,77 @@ def test_compliance_events_filters_provider_after_metadata_projection() -> None:
 
     assert response.status_code == 200
     assert response.json()["events"] == []
+
+
+def test_compliance_sessions_roll_up_metadata_only_agent_activity() -> None:
+    rows = [
+        SimpleNamespace(
+            id="evt_agent_1",
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="ravi",
+            repo_name="acme/payments",
+            resource_type="codex_cli",
+            severity="warning",
+            summary="Codex CLI shell use",
+            created_at=datetime(2026, 5, 5, 1, 0, 0),
+            metadata_json={
+                "provider": "Codex CLI",
+                "session_id": "session-1",
+                "model": "gpt-5.2",
+                "intelligence_tier": "very-high",
+                "access_scope": "full-access",
+                "tool_calls": 2,
+                "mcp_tools": ["filesystem.read"],
+                "file_targets": ["apps/api/main.py"],
+                "policy_decision": "require_approval",
+                "tokens_input": 120,
+                "tokens_output": 40,
+                "cost_usd": 0.02,
+                "raw_prompt": "must not be returned",
+            },
+        ),
+        SimpleNamespace(
+            id="evt_agent_2",
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="ravi",
+            repo_name="acme/payments",
+            resource_type="codex_cli",
+            severity="info",
+            summary="Codex CLI file read",
+            created_at=datetime(2026, 5, 5, 1, 3, 0),
+            metadata_json={
+                "provider": "Codex CLI",
+                "session_id": "session-1",
+                "access_scope": "workspace-read",
+                "tool_calls": 1,
+                "mcp_tools": ["apply_patch"],
+                "file_targets": ["apps/api/router.py"],
+                "tokens_input": 80,
+                "tokens_output": 20,
+                "cost_usd": 0.01,
+            },
+        ),
+    ]
+    client = _client(Db([Result(rows=rows)]))
+
+    response = client.get("/v8/orgs/org_1/activity/compliance-sessions?hours=24")
+
+    assert response.status_code == 200
+    payload = response.json()
+    session = payload["sessions"][0]
+    assert payload["content_retention"] == "metadata-only"
+    assert session["session_id"] == "session-1"
+    assert session["event_count"] == 2
+    assert session["tool_calls"] == 3
+    assert session["tokens_input"] == 200
+    assert session["tokens_output"] == 60
+    assert session["cost_usd"] == 0.03
+    assert session["risk_band"] == "high"
+    assert session["policy_decisions"] == {"require_approval": 1}
+    assert set(session["mcp_tools"]) == {"apply_patch", "filesystem.read"}
+    assert "raw_prompt" not in session
 
 
 def test_feed_filters_can_scan_past_newer_non_matching_events() -> None:
