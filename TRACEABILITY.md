@@ -4,7 +4,7 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 
 ## Requirements Source
 - Source file: `README.md`
-- Source hash: `b73be97c2745`
+- Source hash: `bc60bd486635`
 
 ## Intent To Output Mapping
 ### Endpoints
@@ -20,6 +20,10 @@ This file maps requirements and detected code evidence to the generated Skilgen 
   Domain: `backend`
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
+- Intent: - Settings admin audit workflow with filtered settings/member/API-key events, severity/resource rollups, and operator-ready event context.
+  Domain: `backend`
+  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
+  Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
 - Intent: - v8 Audit APIs for event log, reports, exports, evidence packages, hash-chain verification, and WORM root publishing.
   Domain: `backend`
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
@@ -28,13 +32,13 @@ This file maps requirements and detected code evidence to the generated Skilgen 
   Domain: `backend`
   Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
   Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
-- Intent: - v8 Settings APIs and screens for connectors and RBAC foundations.
-  Domain: `backend`
-  Evidence: `skilgen/api/__init__.py`, `skilgen/api/jobs.py`, `skilgen/api/server.py`, `skilgen/api/service.py`, `skilgen/parsers/sql_schema.py`, `skilgen/core/auth_tokens.py`
-  Generated output: `skills/backend/SKILL.md`, `skills/backend/api/SKILL.md`, `FEATURES.md`
 
 ### UI Flows
 - Intent: The migrated v8 app lives under `apps/dashboard/app/(v8)` and uses the Skillayer governance shell.
+  Domain: `frontend`
+  Evidence: requirements-driven only
+  Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
+- Intent: - Settings admin audit workflow with filtered settings/member/API-key events, severity/resource rollups, and operator-ready event context.
   Domain: `frontend`
   Evidence: requirements-driven only
   Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
@@ -51,10 +55,6 @@ This file maps requirements and detected code evidence to the generated Skilgen 
   Evidence: requirements-driven only
   Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
 - Intent: Useful dashboard checks:
-  Domain: `frontend`
-  Evidence: requirements-driven only
-  Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
-- Intent: npm run lint --workspace apps/dashboard
   Domain: `frontend`
   Evidence: requirements-driven only
   Generated output: `skills/frontend/SKILL.md`, `skills/frontend/components/SKILL.md`, `FEATURES.md`
