@@ -245,3 +245,18 @@ Final required verification:
   - UX screenshots captured:
     - `docs/v8-refactor/screenshots/automation-20260511/activity-agent-compliance-sessions-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/activity-agent-compliance-sessions-mobile.png`
+
+## 2026-05-11 — Insights compliance developer track slice
+
+- Backend: `GET /v8/orgs/{org_id}/insights/developer-track` rolls up metadata-only `agent.compliance` and `agent.telemetry` records by actor.
+- Developer rollup: exposes developer rank, events, sessions, providers, repos, models, tool calls, MCP tool calls, file targets, full-access/autonomous exposure, policy decisions, approvals, denials, tokens, cost, latency, warnings, violations, errors, source record types, last activity, and risk band.
+- Frontend: Insights -> Developer track now uses the v8 compliance API instead of the legacy `/orgs/{org_id}/developer-leaderboard` endpoint.
+- Privacy: raw prompts, chat content, file content, diffs, raw event bodies, and tool parameters are not returned or displayed.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_insights.py -q` -> `14 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - UX screenshots captured:
+    - `docs/v8-refactor/screenshots/automation-20260511/insights-compliance-developer-track-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/insights-compliance-developer-track-mobile.png`

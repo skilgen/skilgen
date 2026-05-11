@@ -1681,6 +1681,63 @@ export type InsightsAgentComplianceMetrics = {
   retention_states: InsightsAgentComplianceMetricItem[];
 };
 
+export type InsightsDeveloperTrackSummary = {
+  developers: number;
+  events: number;
+  sessions: number;
+  providers: number;
+  repos: number;
+  tool_calls: number;
+  file_targets: number;
+  violations: number;
+  warnings: number;
+  errors: number;
+  tokens_total: number;
+  cost_usd: number;
+};
+
+export type InsightsDeveloperTrackRow = {
+  actor_login: string;
+  rank: number;
+  events: number;
+  sessions: number;
+  providers: string[];
+  repos: string[];
+  models: string[];
+  tool_calls: number;
+  mcp_tool_calls: number;
+  file_targets: number;
+  full_access_events: number;
+  autonomous_events: number;
+  approvals: number;
+  denials: number;
+  warnings: number;
+  violations: number;
+  errors: number;
+  tokens_input: number;
+  tokens_output: number;
+  tokens_total: number;
+  cost_usd: number;
+  avg_latency_ms: number | null;
+  risk_score: number;
+  risk_band: "low" | "medium" | "high";
+  last_active_at: string | null;
+  top_tools: InsightsAgentComplianceMetricItem[];
+  top_mcp_tools: InsightsAgentComplianceMetricItem[];
+  top_files: InsightsAgentComplianceMetricItem[];
+  policy_decisions: InsightsAgentComplianceMetricItem[];
+  source_record_types: InsightsAgentComplianceMetricItem[];
+};
+
+export type InsightsDeveloperTrack = {
+  window_days: number;
+  generated_at: string;
+  source: string;
+  content_retention: "metadata-only";
+  summary: InsightsDeveloperTrackSummary;
+  developers: InsightsDeveloperTrackRow[];
+};
+
 export type InsightsProviderCoverageRow = {
   connector_id: string;
   label: string;
@@ -2389,6 +2446,10 @@ export async function getV8AccessGrants(accessToken: string | null, orgId: strin
 
 export async function getV8AgentComplianceMetrics(accessToken: string | null, orgId: string): Promise<InsightsAgentComplianceMetrics | null> {
   return apiFetch<InsightsAgentComplianceMetrics>(`/v8/orgs/${orgId}/insights/agent-compliance-metrics`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8DeveloperTrack(accessToken: string | null, orgId: string): Promise<InsightsDeveloperTrack | null> {
+  return apiFetch<InsightsDeveloperTrack>(`/v8/orgs/${orgId}/insights/developer-track`, { accessToken, cache: "no-store" });
 }
 
 export async function getV8ProviderCoverage(accessToken: string | null, orgId: string): Promise<InsightsProviderCoverage | null> {

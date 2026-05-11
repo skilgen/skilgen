@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, CircleSlash, Clock3, Code2, GitPullRequest, KeyRound, RadioTower, ShieldAlert, Sparkles, UserRoundCheck } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, CircleSlash, Clock3, Code2, KeyRound, RadioTower, ShieldAlert, Sparkles, UserRoundCheck } from "lucide-react";
 
 import {
-  getDeveloperLeaderboard,
   getV8AgentComplianceMetrics,
   getBootstrapOrg,
   getMyOrg,
   getV8AccessGrants,
   getV8CoverageSla,
+  getV8DeveloperTrack,
   getV8FleetKpis,
   getV8IntelligenceUsage,
   getV8ProviderCoverage,
@@ -19,6 +19,8 @@ import {
   type InsightsAgentComplianceMetricItem,
   type InsightsAgentComplianceMetrics,
   type InsightsCoverageSla,
+  type InsightsDeveloperTrack,
+  type InsightsDeveloperTrackRow,
   type InsightsFleetKpis,
   type InsightsIntelligenceUsage,
   type InsightsProviderCoverage,
@@ -26,8 +28,6 @@ import {
   type InsightsRiskRanking,
   type InsightsRiskRow,
   type InsightsTrendMetric,
-  type DeveloperLeaderboardEntry,
-  type DeveloperLeaderboardResponse,
 } from "../../../../lib/data";
 
 type InsightsTab = "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "agent-compliance-metrics" | "intelligence-usage" | "access-grants" | "provider-coverage";
@@ -149,33 +149,17 @@ function RiskTable({ ranking, noun }: { ranking: InsightsRiskRanking | null; nou
   );
 }
 
-function percent(value: number): string {
-  return `${Math.round(value * 10) / 10}%`;
-}
-
 function compactNumber(value: number): string {
   return new Intl.NumberFormat("en-US", { notation: value >= 10000 ? "compact" : "standard" }).format(value);
 }
 
-function TrendPill({ row }: { row: DeveloperLeaderboardEntry }) {
-  if (!row.trend) return <span className="rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs text-[color:var(--text-tertiary)]">trend unavailable</span>;
-  const tone = row.trend.direction === "up" ? "text-[color:var(--accent-green)]" : row.trend.direction === "down" ? "text-[color:var(--accent-red)]" : "text-[color:var(--text-secondary)]";
+function MiniBars({ values }: { values: number[] }) {
+  const max = Math.max(...values, 1);
   return (
-    <span className={`rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs font-semibold ${tone}`}>
-      {row.trend.direction} {row.trend.compliance_delta > 0 ? "+" : ""}{row.trend.compliance_delta}% compliance · {row.trend.violations_delta > 0 ? "+" : ""}{row.trend.violations_delta} violations
-    </span>
-  );
-}
-
-function Sparkline({ values }: { values?: Array<number | null> }) {
-  const points = values ?? [];
-  return (
-    <div className="flex h-8 items-end gap-1" aria-label="7 day compliance sparkline">
-      {Array.from({ length: 7 }).map((_, index) => {
-        const value = points[index];
-        const height = value === null || value === undefined ? 3 : Math.max(4, Math.round(value / 5));
-        return <span className={`w-2 rounded-full ${value === null || value === undefined ? "bg-[color:var(--bg-border)]" : "bg-[color:var(--accent-primary)]"}`} key={index} style={{ height }} />;
-      })}
+    <div className="flex h-8 items-end gap-1" aria-label="developer compliance volume bars">
+      {values.map((value, index) => (
+        <span className="w-2 rounded-full bg-[color:var(--accent-primary)]" key={`${value}-${index}`} style={{ height: Math.max(4, Math.round((value / max) * 28)) }} />
+      ))}
     </div>
   );
 }
@@ -193,50 +177,63 @@ function DeveloperMetric({ label, value, detail, icon }: { label: string; value:
   );
 }
 
-function DeveloperRow({ row }: { row: DeveloperLeaderboardEntry }) {
-  const riskTotal = row.risk_distribution.red + row.risk_distribution.yellow + row.risk_distribution.green;
+function ItemPills({ empty, items }: { empty: string; items: Array<InsightsAgentComplianceMetricItem | string> }) {
+  if (!items.length) return <span className="text-xs text-[color:var(--text-tertiary)]">{empty}</span>;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {items.slice(0, 6).map((item) => {
+        const key = typeof item === "string" ? item : item.key;
+        const label = typeof item === "string" ? item : `${item.label} (${item.count})`;
+        return <span className="max-w-full break-words rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs text-[color:var(--text-secondary)]" key={key}>{label}</span>;
+      })}
+    </div>
+  );
+}
+
+function DeveloperRow({ row }: { row: InsightsDeveloperTrackRow }) {
+  const riskTone = row.risk_band === "high" ? "text-[color:var(--accent-red)]" : row.risk_band === "medium" ? "text-amber-200" : "text-[color:var(--accent-green)]";
   return (
     <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md bg-[color:var(--accent-primary)]/15 px-2 py-1 text-xs font-semibold text-[color:var(--accent-primary)]">#{row.rank}</span>
-            <h2 className="font-semibold text-[color:var(--text-primary)]">{row.login}</h2>
-            <TrendPill row={row} />
+            <h2 className="font-semibold text-[color:var(--text-primary)]">{row.actor_login}</h2>
+            <span className={`rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs font-semibold ${riskTone}`}>{row.risk_band} risk</span>
           </div>
-          <p className="mt-2 text-sm text-[color:var(--text-secondary)]">Last active {row.last_active ? new Date(row.last_active).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "unknown"}</p>
+          <p className="mt-2 text-sm text-[color:var(--text-secondary)]">Last active {row.last_active_at ? new Date(row.last_active_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "unknown"}</p>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Events</div>
+              <div className="mt-2 font-mono text-lg">{row.events}</div>
+            </div>
+            <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Sessions</div>
-              <div className="mt-2 font-mono text-lg">{row.sessions_count}</div>
+              <div className="mt-2 font-mono text-lg">{row.sessions}</div>
             </div>
             <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Files</div>
-              <div className="mt-2 font-mono text-lg">{row.files_touched}</div>
-            </div>
-            <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Lines</div>
-              <div className="mt-2 font-mono text-lg">{compactNumber(row.lines_changed)}</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Tools</div>
+              <div className="mt-2 font-mono text-lg">{row.tool_calls}</div>
             </div>
             <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Risk</div>
-              <div className="mt-2 font-mono text-lg">{row.avg_risk_score}</div>
+              <div className="mt-2 font-mono text-lg">{row.risk_score}</div>
             </div>
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">PRs opened</div>
-              <div className="mt-2 font-mono text-lg">{row.prs_opened}</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Files</div>
+              <div className="mt-2 font-mono text-lg">{row.file_targets}</div>
             </div>
             <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">PRs merged</div>
-              <div className="mt-2 font-mono text-lg">{row.prs_merged}</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Tokens</div>
+              <div className="mt-2 font-mono text-lg">{compactNumber(row.tokens_total)}</div>
             </div>
             <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">PRs reverted</div>
-              <div className="mt-2 font-mono text-lg">{row.prs_reverted}</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Cost</div>
+              <div className="mt-2 font-mono text-lg">${row.cost_usd.toFixed(4)}</div>
             </div>
           </div>
         </div>
@@ -245,34 +242,30 @@ function DeveloperRow({ row }: { row: DeveloperLeaderboardEntry }) {
           <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Compliance</div>
-                <div className={`mt-2 text-[30px] font-semibold ${row.compliance_pct >= 90 ? "text-[color:var(--accent-green)]" : row.compliance_pct >= 70 ? "text-amber-200" : "text-[color:var(--accent-red)]"}`}>{percent(row.compliance_pct)}</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Policy decisions</div>
+                <div className="mt-2 text-[30px] font-semibold text-[color:var(--text-primary)]">{row.approvals + row.denials}</div>
               </div>
-              <Sparkline values={row.sparkline} />
+              <MiniBars values={[row.approvals, row.denials, row.warnings, row.violations, row.errors]} />
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
               <div>
-                <div className="font-mono text-lg text-[color:var(--text-primary)]">{row.violations_total}</div>
-                <div className="text-xs text-[color:var(--text-tertiary)]">violations</div>
+                <div className="font-mono text-lg text-[color:var(--text-primary)]">{row.approvals}</div>
+                <div className="text-xs text-[color:var(--text-tertiary)]">approvals</div>
               </div>
               <div>
-                <div className="font-mono text-lg text-[color:var(--text-primary)]">{row.warnings_total}</div>
-                <div className="text-xs text-[color:var(--text-tertiary)]">warnings</div>
+                <div className="font-mono text-lg text-[color:var(--text-primary)]">{row.denials}</div>
+                <div className="text-xs text-[color:var(--text-tertiary)]">denials</div>
               </div>
             </div>
           </div>
 
           <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Risk distribution</div>
-            <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-black/40">
-              <div className="bg-[color:var(--accent-red)]" style={{ width: riskTotal ? `${(row.risk_distribution.red / riskTotal) * 100}%` : "0%" }} />
-              <div className="bg-amber-400" style={{ width: riskTotal ? `${(row.risk_distribution.yellow / riskTotal) * 100}%` : "0%" }} />
-              <div className="bg-[color:var(--accent-green)]" style={{ width: riskTotal ? `${(row.risk_distribution.green / riskTotal) * 100}%` : "0%" }} />
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs text-[color:var(--text-secondary)]">
-              <span>red {row.risk_distribution.red}</span>
-              <span>yellow {row.risk_distribution.yellow}</span>
-              <span>green {row.risk_distribution.green}</span>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Exposure</div>
+            <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+              <span>{row.full_access_events} full access</span>
+              <span>{row.autonomous_events} autonomous</span>
+              <span>{row.warnings} warnings</span>
+              <span>{row.errors} errors</span>
             </div>
           </div>
         </div>
@@ -280,16 +273,28 @@ function DeveloperRow({ row }: { row: DeveloperLeaderboardEntry }) {
 
       <div className="mt-5 grid gap-3 lg:grid-cols-3">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Agent runtimes</div>
-          <div className="mt-2 flex flex-wrap gap-2">{row.agent_runtimes.length ? row.agent_runtimes.map((item) => <span className="rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs text-[color:var(--text-secondary)]" key={item}>{item}</span>) : <span className="text-xs text-[color:var(--text-tertiary)]">none</span>}</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Providers</div>
+          <div className="mt-2"><ItemPills empty="none" items={row.providers} /></div>
         </div>
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Skills loaded</div>
-          <div className="mt-2 flex flex-wrap gap-2">{row.skills_loaded.length ? row.skills_loaded.map((item) => <span className="rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs text-[color:var(--text-secondary)]" key={item}>{item}</span>) : <span className="text-xs text-[color:var(--text-tertiary)]">none</span>}</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Models</div>
+          <div className="mt-2"><ItemPills empty="none" items={row.models} /></div>
         </div>
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Top violations</div>
-          <div className="mt-2 flex flex-wrap gap-2">{row.top_violations.length ? row.top_violations.map((item) => <span className="rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs text-[color:var(--text-secondary)]" key={item}>{item}</span>) : <span className="text-xs text-[color:var(--text-tertiary)]">none</span>}</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Top tools</div>
+          <div className="mt-2"><ItemPills empty="none" items={[...row.top_tools, ...row.top_mcp_tools]} /></div>
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Repos</div>
+          <div className="mt-2"><ItemPills empty="none" items={row.repos} /></div>
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Files</div>
+          <div className="mt-2"><ItemPills empty="none" items={row.top_files} /></div>
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Source records</div>
+          <div className="mt-2"><ItemPills empty="none" items={row.source_record_types} /></div>
         </div>
       </div>
     </article>
@@ -298,31 +303,28 @@ function DeveloperRow({ row }: { row: DeveloperLeaderboardEntry }) {
 
 export async function DeveloperTrackView() {
   const { accessToken, org } = await resolveOrgAndToken();
-  const data: DeveloperLeaderboardResponse | null = org ? await getDeveloperLeaderboard(accessToken, org.id, 30, "compliance", true) : null;
+  const data: InsightsDeveloperTrack | null = org ? await getV8DeveloperTrack(accessToken, org.id) : null;
   const developers = data?.developers ?? [];
-  const totalSessions = developers.reduce((total, row) => total + row.sessions_count, 0);
-  const totalPrs = developers.reduce((total, row) => total + row.prs_opened, 0);
-  const totalViolations = developers.reduce((total, row) => total + row.violations_total, 0);
-  const avgCompliance = developers.length ? developers.reduce((total, row) => total + row.compliance_pct, 0) / developers.length : 0;
+  const summary = data?.summary;
   return (
     <PageFrame active="developer-track">
       <section className="grid gap-4 md:grid-cols-4">
-        <DeveloperMetric detail="Developers represented by the compliance API." icon={<UserRoundCheck className="h-4 w-4" />} label="Developers" value={developers.length} />
-        <DeveloperMetric detail="Coding-agent sessions attributed to developers." icon={<Code2 className="h-4 w-4" />} label="Sessions" value={totalSessions} />
-        <DeveloperMetric detail="Opened PRs tracked with merge/revert outcomes." icon={<GitPullRequest className="h-4 w-4" />} label="PRs opened" value={totalPrs} />
-        <DeveloperMetric detail={`${totalViolations} violations across the window.`} icon={<ShieldAlert className="h-4 w-4" />} label="Avg compliance" value={percent(avgCompliance)} />
+        <DeveloperMetric detail="Developers represented by metadata-only compliance telemetry." icon={<UserRoundCheck className="h-4 w-4" />} label="Developers" value={summary?.developers ?? 0} />
+        <DeveloperMetric detail="Provider sessions attributed across coding agents." icon={<Code2 className="h-4 w-4" />} label="Sessions" value={summary?.sessions ?? 0} />
+        <DeveloperMetric detail="Tool and MCP activity captured by provider metadata." icon={<RadioTower className="h-4 w-4" />} label="Tool calls" value={summary?.tool_calls ?? 0} />
+        <DeveloperMetric detail={`${summary?.violations ?? 0} violations, ${summary?.warnings ?? 0} warnings, ${summary?.errors ?? 0} errors.`} icon={<ShieldAlert className="h-4 w-4" />} label="Risk signals" value={(summary?.violations ?? 0) + (summary?.warnings ?? 0) + (summary?.errors ?? 0)} />
       </section>
 
       <section className="rounded-lg border border-[color:var(--accent-primary)]/35 bg-[color:var(--accent-primary)]/10 p-4">
         <p className="text-sm leading-6 text-[color:var(--text-secondary)]">
-          Consolidated from the compliance API with `include_trend=true`: rank, sessions, files, lines, PR lifecycle, runtimes, skills, violations, warnings, compliance, risk distribution, top violations, trend, sparkline, and last activity are all shown here.
+          Consolidated from v8 compliance API metadata: developers, providers, repos, models, sessions, tools, MCP tools, files, policy decisions, access exposure, tokens, cost, latency, warnings, violations, errors, risk, source record types, and last activity are shown without raw prompts, chat, diffs, file content, or tool parameters.
         </p>
       </section>
 
       {!data ? <EmptyState label="Developer compliance metrics unavailable" /> : null}
       {data && !developers.length ? <EmptyState label="No developer compliance rows yet" /> : null}
       <section className="space-y-4">
-        {developers.map((row) => <DeveloperRow key={row.login} row={row} />)}
+        {developers.map((row) => <DeveloperRow key={row.actor_login} row={row} />)}
       </section>
     </PageFrame>
   );

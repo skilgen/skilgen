@@ -299,6 +299,63 @@ class AgentComplianceMetricsResponse(BaseModel):
     retention_states: list[AgentComplianceMetricItem]
 
 
+class DeveloperTrackSummary(BaseModel):
+    developers: int
+    events: int
+    sessions: int
+    providers: int
+    repos: int
+    tool_calls: int
+    file_targets: int
+    violations: int
+    warnings: int
+    errors: int
+    tokens_total: int
+    cost_usd: float
+
+
+class DeveloperTrackRow(BaseModel):
+    actor_login: str
+    rank: int
+    events: int
+    sessions: int
+    providers: list[str]
+    repos: list[str]
+    models: list[str]
+    tool_calls: int
+    mcp_tool_calls: int
+    file_targets: int
+    full_access_events: int
+    autonomous_events: int
+    approvals: int
+    denials: int
+    warnings: int
+    violations: int
+    errors: int
+    tokens_input: int
+    tokens_output: int
+    tokens_total: int
+    cost_usd: float
+    avg_latency_ms: float | None = None
+    risk_score: int
+    risk_band: Literal["low", "medium", "high"]
+    last_active_at: datetime | None = None
+    top_tools: list[AgentComplianceMetricItem]
+    top_mcp_tools: list[AgentComplianceMetricItem]
+    top_files: list[AgentComplianceMetricItem]
+    policy_decisions: list[AgentComplianceMetricItem]
+    source_record_types: list[AgentComplianceMetricItem]
+
+
+class DeveloperTrackResponse(BaseModel):
+    window_days: int
+    generated_at: datetime
+    source: str = "audit_events.metadata"
+    content_retention: Literal["metadata-only"] = "metadata-only"
+    summary: DeveloperTrackSummary
+    developers: list[DeveloperTrackRow]
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
@@ -733,6 +790,14 @@ def _is_agent_compliance_event(event: object) -> bool:
     return str(getattr(event, "event_type", "") or "").lower() in AGENT_COMPLIANCE_EVENT_TYPES
 
 
+def _risk_band(score: int) -> Literal["low", "medium", "high"]:
+    if score >= 70:
+        return "high"
+    if score >= 40:
+        return "medium"
+    return "low"
+
+
 def _empty_breakdown(key: str, label: str) -> dict[str, Any]:
     return {
         "key": key,
@@ -977,6 +1042,212 @@ def _agent_compliance_metrics_from_events(events: list[AuditEvent], window_days:
         approval_statuses=_counter_rows(approval_statuses),
         source_record_types=_counter_rows(source_record_types),
         retention_states=_counter_rows(retention_states),
+    )
+
+
+def _empty_developer_bucket(actor: str) -> dict[str, Any]:
+    return {
+        "actor_login": actor,
+        "events": 0,
+        "sessions": set(),
+        "providers": set(),
+        "repos": set(),
+        "models": set(),
+        "tool_calls": 0,
+        "mcp_tool_calls": 0,
+        "file_targets": set(),
+        "full_access_events": 0,
+        "autonomous_events": 0,
+        "approvals": 0,
+        "denials": 0,
+        "warnings": 0,
+        "violations": 0,
+        "errors": 0,
+        "tokens_input": 0,
+        "tokens_output": 0,
+        "tokens_total": 0,
+        "cost_usd": 0.0,
+        "latencies": [],
+        "risk_score": 0,
+        "last_active_at": None,
+        "top_tools": {},
+        "top_mcp_tools": {},
+        "top_files": {},
+        "policy_decisions": {},
+        "source_record_types": {},
+    }
+
+
+def _developer_track_from_events(events: list[AuditEvent], window_days: int, *, limit: int) -> DeveloperTrackResponse:
+    buckets: dict[str, dict[str, Any]] = {}
+    provider_set: set[str] = set()
+    repo_set: set[str] = set()
+    total_sessions: set[str] = set()
+    totals = {
+        "events": 0,
+        "tool_calls": 0,
+        "file_targets": 0,
+        "violations": 0,
+        "warnings": 0,
+        "errors": 0,
+        "tokens_total": 0,
+    }
+    total_cost = 0.0
+
+    for event in events:
+        if not _is_agent_compliance_event(event):
+            continue
+        metadata = getattr(event, "metadata_json", {}) or {}
+        actor = str(getattr(event, "actor_login", None) or _metadata_value(metadata, "actor_login", "user") or "unknown")
+        provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or str(getattr(event, "resource_type", None) or "unknown")
+        repo_name = str(getattr(event, "repo_name", None) or _metadata_value(metadata, "repo_name", "repo") or "unknown repo")
+        model = _metadata_value(metadata, "model", "model_name", "model_id")
+        tier = _metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier")
+        model_label = f"{model} · {tier}" if model and tier else model or tier
+        session_id = _metadata_value(metadata, "session_id", "agent_session_id", "conversation_id", "thread_id")
+        tools = _metadata_list(metadata, "tool_permissions") or _metadata_list(metadata, "tools")
+        tool_count = _tool_permission_count(metadata)
+        mcp_tools = _metadata_list(metadata, "mcp_tools")
+        file_targets = _metadata_list(metadata, "file_targets")
+        warning_count = _metadata_int(metadata, "warnings", "warning_count")
+        violation_count = len(_metadata_list(metadata, "violations")) + _metadata_int(metadata, "violation_count")
+        error_count = _metadata_int(metadata, "error_count", "errors")
+        input_tokens = _metadata_int(metadata, "tokens_input", "input_tokens", "prompt_tokens")
+        output_tokens = _metadata_int(metadata, "tokens_output", "output_tokens", "completion_tokens")
+        total_tokens = _metadata_int(metadata, "tokens_total", "total_tokens") or input_tokens + output_tokens
+        event_cost = _metadata_float(metadata, "cost_usd", "estimated_cost_usd")
+        latency_ms = _metadata_float(metadata, "latency_ms", "duration_ms")
+        decision = _metadata_value(metadata, "policy_decision", "decision", "outcome")
+        approval = _metadata_value(metadata, "approval_status")
+        source_record_type = _metadata_value(metadata, "source_record_type") or "unknown"
+        risk_score = max(
+            _metadata_int(metadata, "risk_score"),
+            85 if decision and decision.lower() in {"deny", "denied", "block", "blocked", "reject", "rejected"} else 0,
+            80 if _metadata_value(metadata, "access_scope") == "full-access" else 0,
+            70 if violation_count else 0,
+            45 if warning_count else 0,
+            25,
+        )
+        is_full_access = _metadata_bool(metadata, "full_access", "full_access_granted") or _metadata_value(metadata, "access_scope") == "full-access"
+        is_autonomous = _metadata_bool(metadata, "autonomous_access", "autonomous")
+
+        bucket = buckets.setdefault(actor, _empty_developer_bucket(actor))
+        bucket["events"] = int(bucket["events"]) + 1
+        bucket["tool_calls"] = int(bucket["tool_calls"]) + tool_count
+        bucket["mcp_tool_calls"] = int(bucket["mcp_tool_calls"]) + len(mcp_tools)
+        bucket["full_access_events"] = int(bucket["full_access_events"]) + (1 if is_full_access else 0)
+        bucket["autonomous_events"] = int(bucket["autonomous_events"]) + (1 if is_autonomous else 0)
+        bucket["warnings"] = int(bucket["warnings"]) + warning_count
+        bucket["violations"] = int(bucket["violations"]) + violation_count
+        bucket["errors"] = int(bucket["errors"]) + error_count
+        bucket["tokens_input"] = int(bucket["tokens_input"]) + input_tokens
+        bucket["tokens_output"] = int(bucket["tokens_output"]) + output_tokens
+        bucket["tokens_total"] = int(bucket["tokens_total"]) + total_tokens
+        bucket["cost_usd"] = float(bucket["cost_usd"]) + event_cost
+        bucket["risk_score"] = max(int(bucket["risk_score"]), risk_score)
+        if latency_ms:
+            bucket["latencies"].append(latency_ms)
+        created_at = getattr(event, "created_at", None)
+        if isinstance(created_at, datetime):
+            last_active = bucket["last_active_at"]
+            if not isinstance(last_active, datetime) or created_at > last_active:
+                bucket["last_active_at"] = created_at
+        bucket["providers"].add(provider)
+        bucket["repos"].add(repo_name)
+        if model_label:
+            bucket["models"].add(model_label)
+        if session_id:
+            bucket["sessions"].add(session_id)
+            total_sessions.add(session_id)
+        bucket["file_targets"].update(file_targets)
+        for key, items in (("top_tools", tools), ("top_mcp_tools", mcp_tools), ("top_files", file_targets)):
+            counter = bucket[key]
+            for item in items:
+                counter[item] = int(counter.get(item, 0)) + 1
+        for key, value in (("policy_decisions", decision), ("source_record_types", source_record_type)):
+            counter = bucket[key]
+            if value:
+                counter[value] = int(counter.get(value, 0)) + 1
+        if decision and decision.lower() in {"allow", "allowed", "approve", "approved"}:
+            bucket["approvals"] = int(bucket["approvals"]) + 1
+        elif decision and decision.lower() in {"deny", "denied", "block", "blocked", "reject", "rejected"}:
+            bucket["denials"] = int(bucket["denials"]) + 1
+        if approval and approval.lower() in {"approved", "approve", "allowed", "allow"}:
+            bucket["approvals"] = int(bucket["approvals"]) + 1
+        elif approval and approval.lower() in {"denied", "deny", "rejected", "reject", "blocked", "block"}:
+            bucket["denials"] = int(bucket["denials"]) + 1
+
+        provider_set.add(provider)
+        repo_set.add(repo_name)
+        totals["events"] += 1
+        totals["tool_calls"] += tool_count
+        totals["file_targets"] += len(file_targets)
+        totals["violations"] += violation_count
+        totals["warnings"] += warning_count
+        totals["errors"] += error_count
+        totals["tokens_total"] += total_tokens
+        total_cost += event_cost
+
+    rows: list[DeveloperTrackRow] = []
+    sorted_buckets = sorted(
+        buckets.values(),
+        key=lambda item: (-int(item["violations"]), -int(item["risk_score"]), -int(item["events"]), str(item["actor_login"])),
+    )
+    for rank, bucket in enumerate(sorted_buckets[:limit], start=1):
+        latencies = bucket["latencies"]
+        rows.append(
+            DeveloperTrackRow(
+                actor_login=str(bucket["actor_login"]),
+                rank=rank,
+                events=int(bucket["events"]),
+                sessions=len(bucket["sessions"]),
+                providers=sorted(bucket["providers"]),
+                repos=sorted(bucket["repos"]),
+                models=sorted(bucket["models"]),
+                tool_calls=int(bucket["tool_calls"]),
+                mcp_tool_calls=int(bucket["mcp_tool_calls"]),
+                file_targets=len(bucket["file_targets"]),
+                full_access_events=int(bucket["full_access_events"]),
+                autonomous_events=int(bucket["autonomous_events"]),
+                approvals=int(bucket["approvals"]),
+                denials=int(bucket["denials"]),
+                warnings=int(bucket["warnings"]),
+                violations=int(bucket["violations"]),
+                errors=int(bucket["errors"]),
+                tokens_input=int(bucket["tokens_input"]),
+                tokens_output=int(bucket["tokens_output"]),
+                tokens_total=int(bucket["tokens_total"]),
+                cost_usd=round(float(bucket["cost_usd"]), 6),
+                avg_latency_ms=round(sum(latencies) / len(latencies), 2) if latencies else None,
+                risk_score=int(bucket["risk_score"]),
+                risk_band=_risk_band(int(bucket["risk_score"])),
+                last_active_at=bucket["last_active_at"] if isinstance(bucket["last_active_at"], datetime) else None,
+                top_tools=_counter_rows(bucket["top_tools"], limit=6),
+                top_mcp_tools=_counter_rows(bucket["top_mcp_tools"], limit=6),
+                top_files=_counter_rows(bucket["top_files"], limit=6),
+                policy_decisions=_counter_rows(bucket["policy_decisions"], limit=6),
+                source_record_types=_counter_rows(bucket["source_record_types"], limit=6),
+            )
+        )
+
+    return DeveloperTrackResponse(
+        window_days=window_days,
+        generated_at=_utc_now(),
+        summary=DeveloperTrackSummary(
+            developers=len(buckets),
+            events=totals["events"],
+            sessions=len(total_sessions),
+            providers=len(provider_set),
+            repos=len(repo_set),
+            tool_calls=totals["tool_calls"],
+            file_targets=totals["file_targets"],
+            violations=totals["violations"],
+            warnings=totals["warnings"],
+            errors=totals["errors"],
+            tokens_total=totals["tokens_total"],
+            cost_usd=round(total_cost, 6),
+        ),
+        developers=rows,
     )
 
 
@@ -1291,6 +1562,31 @@ async def get_agent_compliance_metrics(
         )
     ).scalars().all()
     return _agent_compliance_metrics_from_events(list(events), window_days)
+
+
+@router.get("/developer-track", response_model=DeveloperTrackResponse)
+async def get_developer_track(
+    org_id: str,
+    window_days: int = Query(default=30, ge=1, le=180),
+    limit: int = Query(default=25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> DeveloperTrackResponse:
+    await _require_v8(org_id, db, current_org_id)
+    cutoff = _utc_now() - timedelta(days=window_days)
+    events = (
+        await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.org_id == org_id,
+                AuditEvent.created_at >= cutoff,
+                AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+            )
+            .order_by(desc(AuditEvent.created_at))
+            .limit(5000)
+        )
+    ).scalars().all()
+    return _developer_track_from_events(list(events), window_days, limit=limit)
 
 
 @router.get("/provider-coverage", response_model=ProviderCoverageResponse)
