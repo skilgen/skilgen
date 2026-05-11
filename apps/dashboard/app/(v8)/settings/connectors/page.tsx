@@ -16,6 +16,23 @@ type Connector = {
   connection_status?: string | null;
 };
 
+type AgentComplianceSyncPlan = {
+  connector_id: string;
+  status: "pending";
+  mode: "dry-run";
+  cursor?: string | null;
+  next_cursor_required: boolean;
+  provider_adapter_required: boolean;
+  pagination_strategy: string;
+  retention_window_days: number;
+  retention_deadline_at: string;
+  content_retention: "metadata-only";
+  source_record_type: "formal-compliance" | "operational-telemetry";
+  ready_for_provider_pull: boolean;
+  blocked_reason: string;
+  next_actions: string[];
+};
+
 type AgentComplianceConnector = Connector & {
   configured: boolean;
   enabled: boolean;
@@ -25,6 +42,7 @@ type AgentComplianceConnector = Connector & {
   last_sync_status?: string | null;
   last_sync_requested_at?: string | null;
   last_sync_mode?: string | null;
+  last_sync_plan?: AgentComplianceSyncPlan | null;
   last_ingested_at?: string | null;
   last_ingested_count: number;
   total_ingested_count: number;
@@ -299,6 +317,7 @@ export default async function ConnectorsSettingsPage() {
     last_sync_status: null,
     last_sync_requested_at: null,
     last_sync_mode: null,
+    last_sync_plan: null,
     last_ingested_at: null,
     last_ingested_count: 0,
     total_ingested_count: 0,
@@ -367,6 +386,23 @@ export default async function ConnectorsSettingsPage() {
               <div className="mt-3 text-[12px] text-[color:var(--text-secondary)]">
                 Sync: {connector.last_sync_status ?? "not started"}{connector.last_sync_mode ? ` · ${connector.last_sync_mode}` : ""} · Retention: {connector.content_retention}
               </div>
+              {connector.last_sync_plan ? (
+                <div className="mt-3 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Sync readiness</span>
+                    <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${connector.last_sync_plan.ready_for_provider_pull ? "bg-[color:var(--accent-green)]/15 text-[color:var(--accent-green)]" : "bg-amber-500/15 text-amber-100"}`}>
+                      {connector.last_sync_plan.ready_for_provider_pull ? "Ready for adapter" : "Setup gap"}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-[color:var(--text-secondary)]">
+                    <span>Pagination: {connector.last_sync_plan.pagination_strategy}</span>
+                    <span>Window: {connector.last_sync_plan.retention_window_days}d</span>
+                    <span>Record: {connector.last_sync_plan.source_record_type}</span>
+                    <span>Cursor: {connector.last_sync_plan.cursor ? "resume" : "first page"}</span>
+                  </div>
+                  <p className="mt-2 max-h-10 overflow-hidden text-[11px] leading-5 text-[color:var(--text-tertiary)]">{connector.last_sync_plan.blocked_reason}</p>
+                </div>
+              ) : null}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-2 py-2">
                   <div className="text-[10px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Last ingest</div>

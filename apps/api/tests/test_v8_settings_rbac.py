@@ -190,12 +190,65 @@ def test_request_agent_compliance_connector_sync_updates_cursor_state(monkeypatc
     )
 
     stored = org.settings["v8_agent_compliance_connectors"]["codex-cli"]
-    codex = next(item for item in response["connectors"] if item["id"] == "codex-cli")
     assert stored["cursor"] == "next-cursor"
     assert stored["last_sync_status"] == "pending"
     assert stored["last_sync_mode"] == "dry-run"
-    assert codex["connected"] is False
+    assert stored["last_sync_plan"]["pagination_strategy"] == "cursor-resume"
+    assert stored["last_sync_plan"]["provider_adapter_required"] is True
+    assert stored["last_sync_plan"]["source_record_type"] == "operational-telemetry"
+    assert response.connector_id == "codex-cli"
+    assert response.cursor == "next-cursor"
+    assert response.next_cursor_required is True
+    assert response.ready_for_provider_pull is True
+    assert response.content_retention == "metadata-only"
     assert db.committed is True
+
+
+def test_request_agent_compliance_connector_sync_marks_formal_compliance_retention(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.request_agent_compliance_connector_sync(
+            "org-1",
+            "openai-compliance",
+            settings_router.AgentComplianceSyncPayload(dry_run=True),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    assert response.source_record_type == "formal-compliance"
+    assert response.retention_window_days == 30
+    assert response.pagination_strategy == "cursor-resume"
+    assert "30-day compliance-log retention window" in " ".join(response.next_actions)
+    assert stored["last_sync_plan"]["content_retention"] == "metadata-only"
 
 
 def test_request_agent_compliance_connector_sync_requires_enabled_connector(monkeypatch) -> None:
