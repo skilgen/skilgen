@@ -4704,27 +4704,6 @@
         ]
       },
       {
-        "path": "packages/db/models/org.py",
-        "kind": "source",
-        "language": "python",
-        "tags": [],
-        "snippet": [
-          "from __future__ import annotations",
-          "from datetime import datetime",
-          "from typing import TYPE_CHECKING",
-          "from sqlalchemy import JSON, BigInteger, String, Text",
-          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
-          "from packages.db.models.base import Base, new_uuid, utcnow",
-          "if TYPE_CHECKING:",
-          "from packages.db.models.digest_config import DigestConfig",
-          "from packages.db.models.repo import Repo",
-          "from packages.db.models.rbac import Role, RoleBinding",
-          "from packages.db.models.source_connection import SourceConnection",
-          "class Org(Base):"
-        ],
-        "related_imports": []
-      },
-      {
         "path": "skilgen/api/service.py",
         "kind": "source",
         "language": "python",
@@ -4786,6 +4765,27 @@
           "from pydantic import BaseModel, Field",
           "from sqlalchemy import desc, func, select, update",
           "from sqlalchemy.ext.asyncio import AsyncSession"
+        ],
+        "related_imports": []
+      },
+      {
+        "path": "packages/db/models/org.py",
+        "kind": "source",
+        "language": "python",
+        "tags": [],
+        "snippet": [
+          "from __future__ import annotations",
+          "from datetime import datetime",
+          "from typing import TYPE_CHECKING",
+          "from sqlalchemy import JSON, BigInteger, String, Text",
+          "from sqlalchemy.orm import Mapped, mapped_column, relationship",
+          "from packages.db.models.base import Base, new_uuid, utcnow",
+          "if TYPE_CHECKING:",
+          "from packages.db.models.digest_config import DigestConfig",
+          "from packages.db.models.repo import Repo",
+          "from packages.db.models.rbac import Role, RoleBinding",
+          "from packages.db.models.source_connection import SourceConnection",
+          "class Org(Base):"
         ],
         "related_imports": []
       },
