@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+import hashlib
+import json
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -77,6 +79,74 @@ class AgentComplianceConnectorPayload(BaseModel):
 class AgentComplianceSyncPayload(BaseModel):
     cursor: str | None = Field(default=None, max_length=512)
     dry_run: bool = True
+
+
+class AgentComplianceEventPayload(BaseModel):
+    provider_event_id: str = Field(min_length=1, max_length=255)
+    event_type: str = Field(default="agent.compliance", max_length=128)
+    actor_login: str | None = Field(default=None, max_length=128)
+    occurred_at: datetime | None = None
+    provider: str | None = Field(default=None, max_length=128)
+    model: str | None = Field(default=None, max_length=128)
+    model_tier: str | None = Field(default=None, max_length=64)
+    intelligence_tier: Literal["very-high", "high", "medium", "low"] | None = None
+    access_scope: str | None = Field(default=None, max_length=128)
+    full_access: bool = False
+    autonomous_access: bool = False
+    tool_permissions: list[str] = Field(default_factory=list)
+    tool_calls: int | None = Field(default=None, ge=0)
+    mcp_tools: list[str] = Field(default_factory=list)
+    repo_id: str | None = Field(default=None, max_length=128)
+    repo_name: str | None = Field(default=None, max_length=255)
+    file_targets: list[str] = Field(default_factory=list)
+    policy_decision: str | None = Field(default=None, max_length=64)
+    approval_status: str | None = Field(default=None, max_length=64)
+    violations: list[str] = Field(default_factory=list)
+    warnings: int | None = Field(default=None, ge=0)
+    tokens_input: int | None = Field(default=None, ge=0)
+    tokens_output: int | None = Field(default=None, ge=0)
+    cost_usd: float | None = Field(default=None, ge=0)
+    latency_ms: int | None = Field(default=None, ge=0)
+    error_count: int | None = Field(default=None, ge=0)
+    session_id: str | None = Field(default=None, max_length=255)
+    source_record_type: Literal["formal-compliance", "operational-telemetry"] = "formal-compliance"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentComplianceIngestPayload(BaseModel):
+    cursor: str | None = Field(default=None, max_length=512)
+    next_cursor: str | None = Field(default=None, max_length=512)
+    events: list[AgentComplianceEventPayload] = Field(default_factory=list, max_length=500)
+
+
+class AgentComplianceIngestResponse(BaseModel):
+    connector_id: str
+    ingested_count: int
+    skipped_count: int
+    next_cursor: str | None = None
+    content_retention: Literal["metadata-only"] = "metadata-only"
+    metrics: dict[str, Any]
+
+
+RAW_CONTENT_KEYS = {
+    "prompt",
+    "prompts",
+    "chat",
+    "chat_content",
+    "messages",
+    "message_content",
+    "file_content",
+    "content",
+    "diff",
+    "patch",
+    "tool_parameters",
+    "tool_args",
+    "arguments",
+    "params",
+    "input",
+    "raw",
+    "raw_event",
+}
 
 
 async def _assert_v8_org(org_id: str, current_org_id: str, db: AsyncSession) -> None:
@@ -162,6 +232,10 @@ def _agent_connector_response(org: Org | None) -> dict[str, object]:
                 "last_sync_status": row.get("last_sync_status") or ("pending" if enabled else None),
                 "last_sync_requested_at": row.get("last_sync_requested_at"),
                 "last_sync_mode": row.get("last_sync_mode"),
+                "last_ingested_at": row.get("last_ingested_at"),
+                "last_ingested_count": int(row.get("last_ingested_count") or 0),
+                "total_ingested_count": int(row.get("total_ingested_count") or 0),
+                "last_provider_event_id": row.get("last_provider_event_id"),
                 "content_retention": row.get("content_retention") or "metadata-only",
                 "updated_at": row.get("updated_at"),
             }
@@ -191,6 +265,121 @@ async def _load_or_create_digest_config(db: AsyncSession, org_id: str) -> Digest
     db.add(config)
     await db.flush()
     return config
+
+
+def _metadata_without_raw_content(metadata: dict[str, Any]) -> dict[str, Any]:
+    clean: dict[str, Any] = {}
+    for key, value in metadata.items():
+        if key.lower() in RAW_CONTENT_KEYS:
+            continue
+        if isinstance(value, dict):
+            clean[key] = _metadata_without_raw_content(value)
+        elif isinstance(value, list):
+            clean[key] = [
+                _metadata_without_raw_content(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            clean[key] = value
+    return clean
+
+
+def _normalized_event_metadata(connector_id: str, event: AgentComplianceEventPayload) -> dict[str, Any]:
+    provider = event.provider or connector_id
+    model_tier = event.intelligence_tier or event.model_tier
+    sanitized_envelope = {
+        "connector_id": connector_id,
+        "provider_event_id": event.provider_event_id,
+        "event_type": event.event_type,
+        "actor_login": event.actor_login,
+        "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+        "provider": provider,
+        "model": event.model,
+        "intelligence_tier": model_tier,
+        "access_scope": event.access_scope,
+        "repo_id": event.repo_id,
+        "repo_name": event.repo_name,
+        "file_targets": event.file_targets,
+        "tool_permissions": event.tool_permissions,
+        "mcp_tools": event.mcp_tools,
+        "policy_decision": event.policy_decision,
+        "approval_status": event.approval_status,
+        "source_record_type": event.source_record_type,
+    }
+    envelope_hash = hashlib.sha256(json.dumps(sanitized_envelope, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    metadata = {
+        **_metadata_without_raw_content(event.metadata),
+        "connector_id": connector_id,
+        "provider": provider,
+        "agent_provider": provider,
+        "provider_event_id": event.provider_event_id,
+        "source_record_type": event.source_record_type,
+        "formal_compliance_record": event.source_record_type == "formal-compliance",
+        "model": event.model,
+        "model_tier": event.model_tier,
+        "intelligence_tier": model_tier,
+        "access_scope": event.access_scope,
+        "full_access": event.full_access or event.access_scope == "full-access",
+        "autonomous_access": event.autonomous_access,
+        "tool_permissions": event.tool_permissions,
+        "tool_calls": event.tool_calls,
+        "mcp_tools": event.mcp_tools,
+        "repo_id": event.repo_id,
+        "repo_name": event.repo_name,
+        "file_targets": event.file_targets,
+        "policy_decision": event.policy_decision,
+        "approval_status": event.approval_status,
+        "violations": event.violations,
+        "warnings": event.warnings,
+        "tokens_input": event.tokens_input,
+        "tokens_output": event.tokens_output,
+        "tokens_total": (event.tokens_input or 0) + (event.tokens_output or 0) if event.tokens_input is not None or event.tokens_output is not None else None,
+        "cost_usd": event.cost_usd,
+        "latency_ms": event.latency_ms,
+        "error_count": event.error_count,
+        "session_id": event.session_id,
+        "source_envelope_hash": envelope_hash,
+        "content_retention": "metadata-only",
+        "redaction_state": "raw-content-dropped",
+    }
+    return {key: value for key, value in metadata.items() if value is not None and value != "" and value != []}
+
+
+def _compliance_event_severity(event: AgentComplianceEventPayload) -> str:
+    if event.error_count or event.violations or event.policy_decision in {"deny", "denied", "block"}:
+        return "critical"
+    if event.full_access or event.autonomous_access or event.access_scope == "full-access" or event.warnings:
+        return "warning"
+    return "info"
+
+
+def _ingest_metrics(events: list[AgentComplianceEventPayload]) -> dict[str, Any]:
+    providers = sorted({event.provider for event in events if event.provider})
+    actors = sorted({event.actor_login for event in events if event.actor_login})
+    models = sorted({event.model for event in events if event.model})
+    tiers: dict[str, int] = {}
+    for event in events:
+        tier = event.intelligence_tier or event.model_tier
+        if tier:
+            tiers[tier] = tiers.get(tier, 0) + 1
+    return {
+        "events": len(events),
+        "providers": providers,
+        "actors": len(actors),
+        "models": models,
+        "intelligence_tiers": tiers,
+        "full_access_events": sum(1 for event in events if event.full_access or event.access_scope == "full-access"),
+        "autonomous_access_events": sum(1 for event in events if event.autonomous_access),
+        "tool_permission_events": sum(len(event.tool_permissions) + (event.tool_calls or 0) + len(event.mcp_tools) for event in events),
+        "file_targets": sum(len(event.file_targets) for event in events),
+        "violations": sum(len(event.violations) for event in events),
+        "warnings": sum(event.warnings or 0 for event in events),
+        "tokens_input": sum(event.tokens_input or 0 for event in events),
+        "tokens_output": sum(event.tokens_output or 0 for event in events),
+        "cost_usd": round(sum(event.cost_usd or 0 for event in events), 6),
+        "latency_ms": sum(event.latency_ms or 0 for event in events),
+        "errors": sum(event.error_count or 0 for event in events),
+    }
 
 
 @router.get("")
@@ -512,6 +701,117 @@ async def request_agent_compliance_connector_sync(
     )
     await db.commit()
     return _agent_connector_response(org)
+
+
+@router.post(
+    "/connectors/{connector_id}/ingest-events",
+    response_model=AgentComplianceIngestResponse,
+    dependencies=[Depends(require_permission("settings.connectors.manage"))],
+)
+async def ingest_agent_compliance_events(
+    org_id: str,
+    connector_id: str,
+    payload: AgentComplianceIngestPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AgentComplianceIngestResponse:
+    await _assert_v8_org(org_id, current_org_id, db)
+    registry_ids = {str(item["id"]) for item in _agent_compliance_registry()}
+    if connector_id not in registry_ids:
+        raise HTTPException(status_code=404, detail="Agent compliance connector not found")
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+
+    settings = dict(org.settings or {})
+    configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+    current = dict(configured.get(connector_id) or {})
+    if not current.get("enabled"):
+        raise HTTPException(status_code=409, detail="Agent compliance connector must be enabled before ingest")
+    if current.get("content_retention") not in {None, "metadata-only"}:
+        raise HTTPException(status_code=400, detail="Only metadata-only ingestion is enabled for this release")
+
+    ingested: list[AgentComplianceEventPayload] = []
+    skipped = 0
+    for event in payload.events:
+        resource_id = f"{connector_id}:{event.provider_event_id}"
+        existing = (
+            await db.execute(
+                select(AuditEvent.id).where(
+                    AuditEvent.org_id == org_id,
+                    AuditEvent.resource_type == "agent_compliance_event",
+                    AuditEvent.resource_id == resource_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            skipped += 1
+            continue
+        metadata = _normalized_event_metadata(connector_id, event)
+        db.add(
+            AuditEvent(
+                org_id=org_id,
+                event_type="agent.compliance",
+                action="ingested",
+                summary=f"Normalized {event.source_record_type.replace('-', ' ')} from {event.provider or connector_id}",
+                actor_login=event.actor_login,
+                repo_id=event.repo_id,
+                repo_name=event.repo_name,
+                resource_type="agent_compliance_event",
+                resource_id=resource_id,
+                severity=_compliance_event_severity(event),
+                metadata_json=metadata,
+                created_at=(event.occurred_at or datetime.now(UTC)).replace(tzinfo=None),
+            )
+        )
+        ingested.append(event)
+
+    now = datetime.now(UTC).isoformat()
+    current.update(
+        {
+            "cursor": payload.next_cursor or payload.cursor or current.get("cursor"),
+            "last_sync_status": "success",
+            "last_sync_mode": "ingest",
+            "last_ingested_at": now,
+            "last_ingested_count": len(ingested),
+            "total_ingested_count": int(current.get("total_ingested_count") or 0) + len(ingested),
+            "last_provider_event_id": ingested[-1].provider_event_id if ingested else current.get("last_provider_event_id"),
+            "content_retention": "metadata-only",
+            "updated_at": now,
+        }
+    )
+    configured[connector_id] = current
+    settings["v8_agent_compliance_connectors"] = configured
+    org.settings = settings
+    flag_modified(org, "settings")
+
+    metrics = _ingest_metrics(ingested)
+    await audit.emit(
+        db,
+        org_id,
+        "settings.agent_compliance_events_ingested",
+        "ingested",
+        f"Ingested {len(ingested)} metadata-only agent compliance events from {connector_id}",
+        actor_login=get_actor_login(request),
+        resource_type="agent_compliance_connector",
+        resource_id=connector_id,
+        metadata={
+            "connector_id": connector_id,
+            "ingested_count": len(ingested),
+            "skipped_count": skipped,
+            "content_retention": "metadata-only",
+            "metrics": metrics,
+        },
+    )
+    await db.commit()
+    return AgentComplianceIngestResponse(
+        connector_id=connector_id,
+        ingested_count=len(ingested),
+        skipped_count=skipped,
+        next_cursor=payload.next_cursor or payload.cursor,
+        metrics=metrics,
+    )
 
 
 @router.get("/admin-audit")

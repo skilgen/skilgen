@@ -25,6 +25,10 @@ type AgentComplianceConnector = Connector & {
   last_sync_status?: string | null;
   last_sync_requested_at?: string | null;
   last_sync_mode?: string | null;
+  last_ingested_at?: string | null;
+  last_ingested_count: number;
+  total_ingested_count: number;
+  last_provider_event_id?: string | null;
   content_retention: "metadata-only" | "tenant-enabled-content";
   updated_at?: string | null;
 };
@@ -295,6 +299,10 @@ export default async function ConnectorsSettingsPage() {
     last_sync_status: null,
     last_sync_requested_at: null,
     last_sync_mode: null,
+    last_ingested_at: null,
+    last_ingested_count: 0,
+    total_ingested_count: 0,
+    last_provider_event_id: null,
     content_retention: "metadata-only" as const,
   }));
   const connected = connectors.filter((connector) => connector.connected).length;
@@ -359,6 +367,19 @@ export default async function ConnectorsSettingsPage() {
               <div className="mt-3 text-[12px] text-[color:var(--text-secondary)]">
                 Sync: {connector.last_sync_status ?? "not started"}{connector.last_sync_mode ? ` · ${connector.last_sync_mode}` : ""} · Retention: {connector.content_retention}
               </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-2 py-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Last ingest</div>
+                  <div className="mt-1 text-[15px] font-semibold text-[color:var(--text-primary)]">{connector.last_ingested_count}</div>
+                </div>
+                <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] px-2 py-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Total events</div>
+                  <div className="mt-1 text-[15px] font-semibold text-[color:var(--accent-primary)]">{connector.total_ingested_count}</div>
+                </div>
+              </div>
+              {connector.last_provider_event_id ? (
+                <p className="mt-2 truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">Last event {connector.last_provider_event_id}</p>
+              ) : null}
               <div className="mt-auto grid gap-2 pt-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                 <form action={configureAgentComplianceConnector}>
                   <input name="connector_id" type="hidden" value={connector.id} />
