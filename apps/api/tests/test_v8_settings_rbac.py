@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import importlib
+import json
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -558,6 +560,77 @@ def test_ingest_agent_compliance_events_normalizes_every_metric_metadata_only(mo
     assert event.metadata_json["safe_metric"] == "kept"
     assert "prompt" not in event.metadata_json
     assert "source_envelope_hash" in event.metadata_json
+
+
+def test_ingest_agent_compliance_events_falls_back_to_request_actor(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "codex-cli": {
+                    "enabled": True,
+                    "source_types": ["agent sessions"],
+                    "scopes": ["audit.read"],
+                    "cursor": None,
+                    "content_retention": "metadata-only",
+                    "total_ingested_count": 0,
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    def token_for(actor: str) -> str:
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode()).decode().rstrip("=")
+        payload = base64.urlsafe_b64encode(json.dumps({"preferred_username": actor}).encode()).decode().rstrip("=")
+        return f"{header}.{payload}.x"
+
+    actor_login = "ravi@example.com"
+    request = Request(
+        {
+            "type": "http",
+            "headers": [(b"authorization", f"Bearer {token_for(actor_login)}".encode())],
+        }
+    )
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.ingest_agent_compliance_events(
+            "org-1",
+            "codex-cli",
+            settings_router.AgentComplianceIngestPayload(
+                cursor=None,
+                next_cursor=None,
+                events=[
+                    settings_router.AgentComplianceEventPayload(
+                        provider_event_id="evt-actor-fallback",
+                        provider="Codex CLI",
+                        actor_login=None,
+                        access_scope="full-access",
+                    )
+                ],
+            ),
+            request,
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    event = next(item for item in db.added if isinstance(item, AuditEvent))
+    assert response.ingested_count == 1
+    assert event.actor_login == actor_login
+    assert event.metadata_json["actor_login"] == actor_login
 
 
 def test_queue_agent_compliance_ingest_job_tracks_cursor_page_state(monkeypatch) -> None:

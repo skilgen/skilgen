@@ -362,14 +362,19 @@ def _metadata_without_raw_content(metadata: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
-def _normalized_event_metadata(connector_id: str, event: AgentComplianceEventPayload) -> dict[str, Any]:
+def _normalized_event_metadata(
+    connector_id: str,
+    event: AgentComplianceEventPayload,
+    actor_login: str | None = None,
+) -> dict[str, Any]:
     provider = event.provider or connector_id
     model_tier = event.intelligence_tier or event.model_tier
+    resolved_actor = event.actor_login or actor_login
     sanitized_envelope = {
         "connector_id": connector_id,
         "provider_event_id": event.provider_event_id,
         "event_type": event.event_type,
-        "actor_login": event.actor_login,
+        "actor_login": resolved_actor,
         "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
         "provider": provider,
         "model": event.model,
@@ -391,6 +396,7 @@ def _normalized_event_metadata(connector_id: str, event: AgentComplianceEventPay
         "provider": provider,
         "agent_provider": provider,
         "provider_event_id": event.provider_event_id,
+        "actor_login": resolved_actor,
         "source_record_type": event.source_record_type,
         "formal_compliance_record": event.source_record_type == "formal-compliance",
         "model": event.model,
@@ -479,6 +485,7 @@ async def _ingest_agent_compliance_payload(
     ingested: list[AgentComplianceEventPayload] = []
     skipped = 0
     for event in payload.events:
+        resolved_actor = event.actor_login or actor_login
         resource_id = f"{connector_id}:{event.provider_event_id}"
         existing = (
             await db.execute(
@@ -492,14 +499,14 @@ async def _ingest_agent_compliance_payload(
         if existing:
             skipped += 1
             continue
-        metadata = _normalized_event_metadata(connector_id, event)
+        metadata = _normalized_event_metadata(connector_id, event, actor_login=actor_login)
         db.add(
             AuditEvent(
                 org_id=org_id,
                 event_type="agent.compliance",
                 action="ingested",
                 summary=f"Normalized {event.source_record_type.replace('-', ' ')} from {event.provider or connector_id}",
-                actor_login=event.actor_login,
+                actor_login=resolved_actor,
                 repo_id=event.repo_id,
                 repo_name=event.repo_name,
                 resource_type="agent_compliance_event",
