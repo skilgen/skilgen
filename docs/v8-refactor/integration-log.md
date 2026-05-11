@@ -352,3 +352,16 @@ Final required verification:
   - UX screenshots captured with a local mock API:
     - `docs/v8-refactor/screenshots/automation-20260511/settings-agent-connector-catalog-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/settings-agent-connector-catalog-mobile.png`
+
+## 2026-05-11 — Skills registry governance evidence slice
+
+- Frontend: the migrated Skill Registry now renders dependent agents and policy bindings for every skill row instead of hiding the governance evidence already returned by `/v8/orgs/{org_id}/skills/registry`.
+- UX: registry summary cards now include distinct dependent-agent and policy-binding counts, and the table keeps governance evidence in a horizontally contained grid so mobile layouts do not force page-level overflow.
+- Verification:
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured with a local mock API:
+    - `docs/v8-refactor/screenshots/automation-20260511/skills-registry-governance-evidence-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/skills-registry-governance-evidence-mobile.png`
