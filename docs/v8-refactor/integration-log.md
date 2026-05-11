@@ -486,3 +486,17 @@ Final required verification:
   - UX screenshots captured from the built Billing page:
     - `docs/v8-refactor/screenshots/automation-20260511/settings-billing-readiness-overview-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/settings-billing-readiness-overview-mobile.png`
+
+## 2026-05-11 — Settings SSO readiness overview slice
+
+- Backend: `/v8/orgs/{org_id}/settings/sso` now requires `settings.sso.read` and derives WorkOS linkage, SAML/OIDC protocol coverage, SCIM provisioning state, readiness, and next actions from existing org/settings fields without changing auth or WorkOS flows.
+- Frontend: the migrated Settings -> SSO page now presents identity readiness, protocol coverage, WorkOS references, and setup actions, with explicit unavailable state when live SSO data cannot be fetched.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> 33 passed.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured from the built SSO page:
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-sso-readiness-overview-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-sso-readiness-overview-mobile.png`

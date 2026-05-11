@@ -274,6 +274,37 @@ def _billing_response(org: Org) -> dict[str, object]:
     }
 
 
+def _sso_response(org: Org) -> dict[str, object]:
+    settings = org.settings if isinstance(org.settings, dict) else {}
+    workos_linked = bool(org.workos_org_id)
+    oidc_enabled = bool(settings.get("oidc_enabled"))
+    scim_enabled = bool(settings.get("scim_enabled"))
+    saml_enabled = workos_linked
+    ready = workos_linked and (saml_enabled or oidc_enabled)
+    next_actions: list[str] = []
+    if not workos_linked:
+        next_actions.append("link_workos_organization")
+    if not saml_enabled and not oidc_enabled:
+        next_actions.append("configure_identity_protocol")
+    if workos_linked and not scim_enabled:
+        next_actions.append("review_scim_provisioning")
+    if not next_actions:
+        next_actions.append("monitor_identity_sync")
+
+    return {
+        "workos_org_id": org.workos_org_id,
+        "saml_enabled": saml_enabled,
+        "oidc_enabled": oidc_enabled,
+        "scim_enabled": scim_enabled,
+        "managed_by": "WorkOS",
+        "ready": ready,
+        "connection_state": "linked" if workos_linked else "not_linked",
+        "protocols_enabled": [protocol for protocol, enabled in (("SAML", saml_enabled), ("OIDC", oidc_enabled)) if enabled],
+        "provisioning_state": "enabled" if scim_enabled else "not_configured",
+        "next_actions": next_actions,
+    }
+
+
 def _agent_compliance_registry() -> list[dict[str, Any]]:
     return [
         item
@@ -840,7 +871,7 @@ async def check_permission(
     return {"allowed": allowed}
 
 
-@router.get("/sso")
+@router.get("/sso", dependencies=[Depends(require_permission("settings.sso.read"))])
 async def get_sso(
     org_id: str,
     db: AsyncSession = Depends(get_db),
@@ -850,14 +881,7 @@ async def get_sso(
     org = await db.get(Org, org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="Org not found")
-    settings = org.settings if isinstance(org.settings, dict) else {}
-    return {
-        "workos_org_id": org.workos_org_id,
-        "saml_enabled": bool(org.workos_org_id),
-        "oidc_enabled": bool(settings.get("oidc_enabled")),
-        "scim_enabled": bool(settings.get("scim_enabled")),
-        "managed_by": "WorkOS",
-    }
+    return _sso_response(org)
 
 
 @router.get("/connectors")

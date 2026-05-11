@@ -102,6 +102,7 @@ def test_v8_settings_router_is_registered() -> None:
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs/{job_id}" in paths
     assert "settings.admin_audit.read" in PERMISSIONS
     assert "settings.billing.read" in PERMISSIONS
+    assert "settings.sso.read" in PERMISSIONS
 
 
 def test_agent_compliance_connector_endpoint_returns_metadata_state(monkeypatch) -> None:
@@ -575,6 +576,54 @@ def test_billing_endpoint_requires_billing_read_permission() -> None:
     app.dependency_overrides[request_flag_cache] = lambda: None
     try:
         response = TestClient(app).get("/v8/orgs/org-1/settings/billing")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "RBAC permission denied"
+
+
+def test_sso_response_adds_readiness_state() -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        workos_org_id="org_workos",
+        settings={"oidc_enabled": True, "scim_enabled": True},
+    )
+
+    payload = settings_router._sso_response(org)
+
+    assert payload["ready"] is True
+    assert payload["connection_state"] == "linked"
+    assert payload["protocols_enabled"] == ["SAML", "OIDC"]
+    assert payload["provisioning_state"] == "enabled"
+    assert payload["next_actions"] == ["monitor_identity_sync"]
+
+
+def test_sso_response_flags_missing_identity_setup() -> None:
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+
+    payload = settings_router._sso_response(org)
+
+    assert payload["ready"] is False
+    assert payload["connection_state"] == "not_linked"
+    assert payload["protocols_enabled"] == []
+    assert payload["provisioning_state"] == "not_configured"
+    assert payload["next_actions"] == ["link_workos_organization", "configure_identity_protocol"]
+
+
+def test_sso_endpoint_requires_sso_read_permission() -> None:
+    async def db_override():
+        yield Db([])
+
+    app.dependency_overrides[get_current_org_id] = lambda: "org-1"
+    app.dependency_overrides[get_current_user] = lambda: {"email": "viewer@example.com"}
+    app.dependency_overrides[get_db] = db_override
+    app.dependency_overrides[request_flag_cache] = lambda: None
+    try:
+        response = TestClient(app).get("/v8/orgs/org-1/settings/sso")
     finally:
         app.dependency_overrides.clear()
 
