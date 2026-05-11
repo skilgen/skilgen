@@ -444,3 +444,17 @@ Final required verification:
   - UX screenshots captured from the built fallback catalog:
     - `docs/v8-refactor/screenshots/automation-20260511/settings-worm-storage-connector-catalog-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/settings-worm-storage-connector-catalog-mobile.png`
+
+## 2026-05-11 — Settings provenance connector catalog slice
+
+- Backend: the v8 Settings connector registry now includes Sigstore, SLSA Attestations, and GitHub Artifact Attestations source types, descriptions, and provenance capabilities for signatures, transparency logs, certificate identity, builder identity, artifact digests, dependency materials, workflow identity, commit SHA, and release evidence.
+- Frontend: the migrated Settings connector fallback catalog now shows all three provenance/signing evidence targets instead of only a sparse Sigstore card.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_settings_rbac.py -q` -> 26 passed.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured from the built fallback catalog:
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-provenance-connector-catalog-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/settings-provenance-connector-catalog-mobile.png`

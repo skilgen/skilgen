@@ -308,8 +308,26 @@ const fallbackConnectors: Connector[] = [
     category: "provenance",
     status: "planned",
     connected: false,
-    description: "Provenance and signing evidence for build attestations, releases, and policy review.",
-    capabilities: ["attestations", "signatures", "release evidence"],
+    description: "Sigstore signing, Rekor transparency-log, and Fulcio certificate evidence for release and skill provenance review.",
+    capabilities: ["signatures", "transparency log", "certificate identity", "release evidence", "policy review"],
+  },
+  {
+    id: "slsa-attestations",
+    label: "SLSA Attestations",
+    category: "provenance",
+    status: "planned",
+    connected: false,
+    description: "SLSA provenance attestations for build builder identity, source revision, artifact digest, dependency materials, and supply-chain policy evidence.",
+    capabilities: ["build provenance", "builder identity", "artifact digest", "dependency materials", "supply-chain policy"],
+  },
+  {
+    id: "github-artifact-attestations",
+    label: "GitHub Artifact Attestations",
+    category: "provenance",
+    status: "planned",
+    connected: false,
+    description: "GitHub artifact attestation evidence for workflow-signed build outputs, repository source, commit SHA, and deployment release review.",
+    capabilities: ["artifact attestations", "workflow identity", "commit SHA", "repository source", "release evidence"],
   },
 ];
 
