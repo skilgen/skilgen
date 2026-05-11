@@ -63,7 +63,7 @@ class Db:
         return self.org
 
 
-def _repo(repo_id: str, name: str, tier: str = "internal"):
+def _repo(repo_id: str, name: str, tier: str | None = "internal"):
     return SimpleNamespace(
         id=repo_id,
         org_id="org_1",
@@ -230,6 +230,16 @@ operations:
   - id: commit-signing
     label: Commit signing enforced
     required_skill_categories: ["security_compliance"]
+    evidence_requirements: ["signed commits"]
+    sla_hours: 24
+  - id: production-data-access
+    label: Production data access
+    required_skill_categories: ["data_governance"]
+    repo_sensitivity_tiers: ["sensitive", "regulated"]
+  - id: policy-controlled-agent-action
+    label: Policy controlled agent action
+    required_skill_categories: ["ai_governance"]
+    repo_sensitivity_tiers: ["internal", "sensitive", "regulated"]
 """.lstrip(),
         encoding="utf-8",
     )
@@ -256,7 +266,12 @@ operations:
     payload = response.json()
     assert payload["product_review_required"] is False
     assert payload["repos"][0]["critical_operations"][0]["operation_id"] == "commit-signing"
+    assert payload["repos"][0]["critical_operations"][0]["sla_hours"] == 24
+    assert "signed commits" in payload["repos"][0]["critical_operations"][0]["evidence_requirements"]
     assert payload["repos"][0]["critical_operations"][0]["skills"][0]["id"] == "skill_1"
+    operation_ids = {operation["operation_id"] for operation in payload["repos"][0]["critical_operations"]}
+    assert "production-data-access" not in operation_ids
+    assert "policy-controlled-agent-action" in operation_ids
 
 
 def test_coverage_sla_falls_back_when_critical_ops_yaml_invalid(monkeypatch, tmp_path) -> None:
@@ -275,6 +290,21 @@ def test_coverage_sla_falls_back_when_critical_ops_yaml_invalid(monkeypatch, tmp
     payload = response.json()
     assert payload["product_review_required"] is True
     assert payload["repos"][0]["critical_operations"][0]["operation_id"] == "critical-operations-placeholder"
+
+
+def test_coverage_sla_defaults_unclassified_repo_to_internal_taxonomy(monkeypatch) -> None:
+    insights._load_critical_ops_config.cache_clear()
+    repo = _repo("repo_1", "unclassified", None)
+    db = Db([Result([repo]), Result([]), Result([])])
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/coverage-sla")
+
+    assert response.status_code == 200
+    payload = response.json()
+    operation_ids = {operation["operation_id"] for operation in payload["repos"][0]["critical_operations"]}
+    assert "commit-signing" in operation_ids
+    assert "policy-controlled-agent-action" in operation_ids
+    assert "production-data-access" not in operation_ids
 
 
 def test_intelligence_usage_rolls_up_metadata_only_compliance_events(monkeypatch) -> None:

@@ -285,10 +285,25 @@ Final required verification:
 - Frontend: Insights -> Developer track now uses the v8 compliance API instead of the legacy `/orgs/{org_id}/developer-leaderboard` endpoint.
 - Privacy: raw prompts, chat content, file content, diffs, raw event bodies, and tool parameters are not returned or displayed.
 - Verification:
-  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_insights.py -q` -> `14 passed`.
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_insights.py -q` -> `15 passed`.
   - `npm --workspace apps/dashboard run type-check` -> passed.
   - `npm --workspace apps/dashboard run lint` -> passed.
   - `npm --workspace apps/dashboard run build` -> passed.
   - UX screenshots captured:
     - `docs/v8-refactor/screenshots/automation-20260511/insights-compliance-developer-track-desktop.png`
     - `docs/v8-refactor/screenshots/automation-20260511/insights-compliance-developer-track-mobile.png`
+
+## 2026-05-11 — Insights coverage SLA critical operations slice
+
+- Backend: `apps/api/api/v8/insights/critical_ops.yaml` now carries Skillayer's default critical-operation taxonomy instead of a product-review placeholder.
+- Taxonomy: defines commit provenance, privileged runtime changes, production data access, dependency/supply-chain changes, and policy-controlled coding-agent actions with required skill categories, sensitivity scope, evidence requirements, and SLA-hour targets.
+- Frontend: Insights -> Coverage SLA displays SLA-hour targets, operation descriptions, and required evidence chips for each in-scope repo operation.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_insights.py -q` -> `14 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+  - UX screenshots captured with a local mock API:
+    - `docs/v8-refactor/screenshots/automation-20260511/coverage-sla-critical-ops-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/coverage-sla-critical-ops-mobile.png`
