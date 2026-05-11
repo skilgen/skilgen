@@ -438,6 +438,23 @@ def test_connector_catalog_covers_required_work_management_sources() -> None:
     assert "cycles" in connectors["linear"]["capabilities"]
 
 
+def test_connector_catalog_covers_required_siem_export_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
+
+    for connector_id in {"splunk", "datadog", "sentinel"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "siem"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert "audit events" in connector["capabilities"]
+        assert {"policy decisions", "policy violations"} & set(connector["capabilities"])
+        assert {"agent activity", "agent actions"} & set(connector["capabilities"])
+
+    assert "HEC exports" in connectors["splunk"]["capabilities"]
+    assert "cloud SIEM exports" in connectors["datadog"]["capabilities"]
+    assert "sentinel exports" in connectors["sentinel"]["capabilities"]
+
+
 def test_request_agent_compliance_connector_sync_requires_enabled_connector(monkeypatch) -> None:
     org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
     db = OrgDb(org)
