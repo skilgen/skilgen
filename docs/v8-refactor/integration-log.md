@@ -4,6 +4,22 @@ Branch: `v8/integration`
 Base: `origin/main` at `8b89630`  
 Scope: PR-2 through PR-7 in one integration PR. PR-8 deprecation is out of scope.
 
+## 2026-05-11 — Audit agent compliance evidence packages
+
+- Backend: evidence packages now include `agent-compliance-summary.json`, manifest-level metadata-only retention, consolidated coding-agent compliance metrics, and explicit raw-content exclusion keys.
+- Backend: agent compliance events written into evidence packages are sanitized so raw prompts, chat content, diffs, file content, and tool arguments are not exported.
+- Frontend: `/audit/evidence-packages` now shows a migrated Skillayer workflow for selecting controls, queueing packages, checking included files, reviewing covered compliance metrics, and confirming excluded raw-content keys.
+- Verification:
+  - `../skilgen-upstream-work/.venv/bin/python -m pytest apps/api/tests/test_v8_audit_reports_exports.py apps/api/tests/test_v8_audit_router_units.py -q` -> `14 passed`.
+  - `npm --workspace apps/dashboard run type-check` -> passed.
+  - `npm --workspace apps/dashboard run lint` -> passed.
+  - `npm --workspace apps/dashboard run build` -> passed.
+  - `git diff --check` -> passed.
+- UX screenshot gate:
+  - Desktop and mobile proof captured with a local mock API after queueing a package:
+    - `docs/v8-refactor/screenshots/automation-20260511/audit-agent-compliance-evidence-packages-desktop.png`
+    - `docs/v8-refactor/screenshots/automation-20260511/audit-agent-compliance-evidence-packages-mobile.png`
+
 ## Subagent assignments
 
 | Surface | Agent branch | Status | Notes |

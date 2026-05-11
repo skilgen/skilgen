@@ -17,6 +17,7 @@ def build_evidence_package_zip(
     chain_root: dict[str, Any] | None,
     policies: list[dict[str, Any]] | None = None,
     skills: list[dict[str, Any]] | None = None,
+    agent_compliance: dict[str, Any] | None = None,
 ) -> bytes:
     generated_at = datetime.now(UTC).isoformat()
     manifest = {
@@ -26,6 +27,8 @@ def build_evidence_package_zip(
         "period": {"start": period_start, "end": period_end},
         "event_count": len(events),
         "chain_root": chain_root,
+        "agent_compliance": agent_compliance or {},
+        "content_retention": "metadata-only",
         "generated_at": generated_at,
         "index_format": "html",
     }
@@ -38,10 +41,13 @@ def build_evidence_package_zip(
 <p>Period: {period_start} to {period_end}</p>
 <p>Events: {len(events)}</p>
 <p>Chain root: {(chain_root or {}).get("root_hash", "unavailable")}</p>
+<p>Agent compliance events: {((agent_compliance or {}).get("summary") or {}).get("events", 0)}</p>
+<p>Retention: metadata-only. Raw prompts, chat content, diffs, file content, and tool parameters are excluded.</p>
 <h2>Contents</h2>
 <ul>
   <li>manifest.json</li>
   <li>events.json</li>
+  <li>agent-compliance-summary.json</li>
   <li>policies.json</li>
   <li>skills.json</li>
   <li>chain-root.json</li>
@@ -54,6 +60,7 @@ def build_evidence_package_zip(
         archive.writestr("index.html", index_html)
         archive.writestr("manifest.json", json.dumps(manifest, sort_keys=True, indent=2, default=str))
         archive.writestr("events.json", json.dumps(events, sort_keys=True, indent=2, default=str))
+        archive.writestr("agent-compliance-summary.json", json.dumps(agent_compliance or {}, sort_keys=True, indent=2, default=str))
         archive.writestr("policies.json", json.dumps(policies or [], sort_keys=True, indent=2, default=str))
         archive.writestr("skills.json", json.dumps(skills or [], sort_keys=True, indent=2, default=str))
         archive.writestr("chain-root.json", json.dumps(chain_root or {}, sort_keys=True, indent=2, default=str))

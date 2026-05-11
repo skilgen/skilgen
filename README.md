@@ -39,6 +39,7 @@ Current feature slices tracked in `FEATURES.md` include:
 - Activity agent compliance sessions that group normalized provider/coding-agent telemetry by session id with tools, files, tokens, cost, policy decisions, and risk while keeping raw content hidden.
 - Consolidated agent compliance metrics for provider, developer, model, repo, session, tool, MCP, file, policy, approval, retention, token, cost, latency, warning, violation, and error rollups.
 - Developer track metrics sourced from the v8 compliance API, showing per-developer provider sessions, repos, models, tools, MCP usage, files, access exposure, policy decisions, tokens, cost, latency, warnings, violations, errors, and risk without raw content.
+- Audit evidence packages with consolidated agent compliance metrics, hash-chain context, package manifests, and explicit metadata-only raw-content exclusions.
 - Provider coverage monitoring for configured compliance connectors, highlighting silent, stale, and 30-day retention-risk sources before provider logs become unrecoverable.
 - v8 Audit APIs for event log, reports, exports, evidence packages, hash-chain verification, and WORM root publishing.
 - v8 Skills APIs and screens for registry, score, drift, provenance, SkillQL, and repos.
