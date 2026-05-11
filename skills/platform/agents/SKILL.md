@@ -5,7 +5,7 @@ domain: platform
 sub_domain: platform-agents
 last_updated: 2026-05-11
 triggered_by: requirements_pipeline
-source_hash: e84cc5de4beaca809083d2d5718f108f355c2bb6292ec08c9063ee79371db2ce
+source_hash: 62b179fa1c51832fd76b316533c2ecc6fa80c151575bfeb27249fb3a3ac90703
 richness_score: 96
 score:
   total: 96
@@ -92,7 +92,7 @@ def _evidence_graph_payload(project_root: Path, evidence_graph: EvidenceGraph) -
 ```
 
 ## Traceability
-- Generated from requirements source hash: `e84cc5de4beaca809083d2d5718f108f355c2bb6292ec08c9063ee79371db2ce`
+- Generated from requirements source hash: `62b179fa1c51832fd76b316533c2ecc6fa80c151575bfeb27249fb3a3ac90703`
 - Domain path: `platform/platform-agents`
 - Read `../../../TRACEABILITY.md` for full requirement-to-output mapping.
 - Use the detected file patterns in this skill before creating new structure.
