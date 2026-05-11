@@ -4,7 +4,7 @@ This file maps requirements and detected code evidence to the generated Skilgen 
 
 ## Requirements Source
 - Source file: `README.md`
-- Source hash: `b4c9e7f22fe4`
+- Source hash: `886c076cfa1f`
 
 ## Intent To Output Mapping
 ### Endpoints

@@ -20,4 +20,4 @@
 - | Skills | The artifact substrate: registry, score, drift, provenance, SkillQL, and repo coverage. | `/skills/registry`, `/skills/score`, `/skills/drift`, `/skills/provenance`, `/skills/skillql`, `/skills/repos` |
 - | Insights | Fleet trends and risk posture: KPIs, risky agents, risky repos, and coverage SLA. | `/insights/fleet-kpis`, `/insights/risky-agents`, `/insights/risky-repos`, `/insights/coverage-sla` |
 - Current feature slices tracked in `FEATURES.md` include:
-- - v8 Skills APIs and screens for registry, score, drift, provenance, SkillQL, and repos.
+- - Metadata-only agent compliance event ingestion for configured provider connectors, including model tier, access grants, tools/MCP, files, policy decisions, tokens, cost, latency, warnings, violations, and error metrics.

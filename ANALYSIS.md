@@ -6516,14 +6516,14 @@
           "docs"
         ],
         "snippet": [
-          "# Skillayer Feature Inventory",
-          "Use this file before starting a feature slice. It tracks the migrated Skillayer v8 product surfaces and the completed automation slices that should not be duplicated.",
+          "# Features",
+          "Search this file before implementing any feature to avoid duplicating work.",
           "| Feature Name | Domain | Location | Description | Status | Last Modified |",
           "| --- | --- | --- | --- | --- | --- |",
-          "| v8 governance shell | frontend | `apps/dashboard/app/(v8)/layout.tsx` | Six-surface Skillayer IA with Activity, Policy, Audit, Skills, Insights, and Settings navigation. | active",
-          "| Activity surface | full-stack | `apps/api/api/v8/activity`, `apps/dashboard/app/(v8)/activity` | Live feed, sessions, replay, and heatmap surfaces for AI agent activity investiga",
-          "| Setup readiness next action | full-stack | `apps/api/api/routes/orgs.py`, `apps/api/tests/test_orgs_api.py`, `apps/dashboard/lib/data.ts`, `apps/dashboard/app/(v8)/activity/Activ",
-          "| Activity investigation filters | full-stack | `apps/api/api/v8/activity/router.py`, `apps/api/tests/test_v8_activity_api.py`, `apps/dashboard/app/(v8)/activity/LiveFeedPanel.tsx`"
+          "| Requirements-driven scan | requirements | `README.md` | Parse the requirements input and generate skills and project docs. | active | current |",
+          "| Project folder analysis | analysis | `skilgen` | Analyze the input folder and generate outputs into that same folder. | active | current |",
+          "| Backend route: skilgen/api/__init__.py | backend | `skilgen/api/__init__.py` | Detected route or handler implementation in the scanned codebase. | active | current |",
+          "| Backend route: skilgen/api/jobs.py | backend | `skilgen/api/jobs.py` | Detected route or handler implementation in the scanned codebase. | active | current |"
         ],
         "related_imports": []
       },
@@ -6577,10 +6577,10 @@
           "This file maps requirements and detected code evidence to the generated Skilgen outputs.",
           "## Requirements Source",
           "- Source file: `README.md`",
-          "- Source hash: `2837441a1025`",
+          "- Source hash: `b4c9e7f22fe4`",
           "## Intent To Output Mapping",
           "### Endpoints",
-          "- Intent: # Export a provider key, or point Skilgen at a private model endpoint below."
+          "- Intent: | Surface | Purpose | Key Routes |"
         ],
         "related_imports": []
       },

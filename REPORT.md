@@ -47,4 +47,4 @@
 ## External Skill Provenance
 - `agentskills-spec` from `https://github.com/agentskills/agentskills.git` at `2d3e01f590f68bee2cb76a3200823e93b2cc9eaa`
 - `anthropic-skills` from `https://github.com/anthropics/skills.git` at `f458cee31a7577a47ba0c9a101976fa599385174`
-- `awesome-copilot` from `https://github.com/github/awesome-copilot.git` at `12d7da51ae6c65f5a9f9803edc68738cfa4348a9`
+- `awesome-copilot` from `https://github.com/github/awesome-copilot.git` at `e07740bdd8e878cde35e3ee23eb2c1ab7afee864`
