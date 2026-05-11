@@ -3,9 +3,9 @@ name: roadmap
 version: 0.6.0
 domain: roadmap
 sub_domain: platform
-last_updated: 2026-05-10
+last_updated: 2026-05-11
 triggered_by: requirements_pipeline
-source_hash: b4c9e7f22fe4e1bc0333928f09a338ca6bd8f64a6ef5403383dcc6824d71e026
+source_hash: 886c076cfa1f7cd9fa02ed8ec9fcbd66dcf1f0562e699ad0370fd4fd5b366899
 richness_score: 83
 score:
   total: 83
@@ -85,7 +85,7 @@ Delivery sequencing domain that keeps phases, next steps, and implementation ord
 ```
 
 ## Traceability
-- Generated from requirements source hash: `b4c9e7f22fe4e1bc0333928f09a338ca6bd8f64a6ef5403383dcc6824d71e026`
+- Generated from requirements source hash: `886c076cfa1f7cd9fa02ed8ec9fcbd66dcf1f0562e699ad0370fd4fd5b366899`
 - Domain path: `roadmap/platform`
 - Read `../../TRACEABILITY.md` for full requirement-to-output mapping.
 - Use the detected file patterns in this skill before creating new structure.
