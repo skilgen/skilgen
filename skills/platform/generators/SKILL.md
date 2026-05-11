@@ -5,7 +5,7 @@ domain: platform
 sub_domain: platform-generators
 last_updated: 2026-05-11
 triggered_by: requirements_pipeline
-source_hash: c171704dd887f8990846851c5a45af9608249e298e246d492cefbbe5c11913a0
+source_hash: b73be97c274511650d24c146e16b15f75faa826eb34d5dacf7f14bfea124c717
 richness_score: 94
 score:
   total: 94
@@ -89,7 +89,7 @@ def _signal_bullets(items: list[str], fallback: str, limit: int = 5) -> list[str
 ```
 
 ## Traceability
-- Generated from requirements source hash: `c171704dd887f8990846851c5a45af9608249e298e246d492cefbbe5c11913a0`
+- Generated from requirements source hash: `b73be97c274511650d24c146e16b15f75faa826eb34d5dacf7f14bfea124c717`
 - Domain path: `platform/platform-generators`
 - Read `../../../TRACEABILITY.md` for full requirement-to-output mapping.
 - Use the detected file patterns in this skill before creating new structure.
