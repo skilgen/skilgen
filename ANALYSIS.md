@@ -6577,7 +6577,7 @@
           "This file maps requirements and detected code evidence to the generated Skilgen outputs.",
           "## Requirements Source",
           "- Source file: `README.md`",
-          "- Source hash: `b73be97c2745`",
+          "- Source hash: `bc60bd486635`",
           "## Intent To Output Mapping",
           "### Endpoints",
           "- Intent: | Surface | Purpose | Key Routes |"
@@ -13623,7 +13623,8 @@
         "env:WARNING"
       ],
       "apps/api/api/v8/insights/critical_ops.yaml": [
-        "env:SLA"
+        "env:MCP",
+        "runtime:docker"
       ],
       "apps/api/api/v8/policy/starter_packs/agent-compliance.yaml": [
         "env:CC6",
