@@ -85,6 +85,26 @@ When PR metadata is present, ingestion resolves it against `pull_requests` for t
 
 Default retention remains metadata-only. Raw prompts, file content, diffs, and tool parameters stay out of the normalized audit event unless a future tenant setting explicitly enables content retention.
 
+## Codex Desktop import helper (local metadata-only)
+
+For local QA or bootstrap demos, Skillayer can ingest Codex Desktop session metadata without storing raw prompts or diffs.
+
+Use `scripts/import_codex_sessions.py` to convert `.codex/sessions/**/*.jsonl` turns into `POST /orgs/{org_id}/agent-runs` payloads that preserve:
+- model + reasoning metadata
+- token/cost estimates (when present)
+- tool permissions, MCP tools, and file targets (sanitized)
+- activity counters (edited files, explored files, searches, lists, commands)
+
+Example:
+
+```bash
+SKILLAYER_API_URL=http://127.0.0.1:8000 \\
+SKILLAYER_ORG_ID=org_skilgen \\
+SKILLAYER_REPO_ID=repo_skilgen \\
+SKILLAYER_API_KEY=sk-local-demo \\
+python scripts/import_codex_sessions.py --project-root .
+```
+
 ## Proposed data additions
 
 Candidate migrations for a follow-up connector-ingestion PR:
