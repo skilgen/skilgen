@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id
@@ -575,9 +576,13 @@ def _evidence_event_payload(row: AuditEvent) -> dict[str, Any]:
 
 
 async def _ensure_chain(db: AsyncSession, org_id: str) -> list[AuditHashChain]:
-    existing_rows = (
-        await db.execute(select(AuditHashChain).where(AuditHashChain.org_id == org_id).order_by(AuditHashChain.sequence))
-    ).scalars().all()
+    try:
+        existing_rows = (
+            await db.execute(select(AuditHashChain).where(AuditHashChain.org_id == org_id).order_by(AuditHashChain.sequence))
+        ).scalars().all()
+    except SQLAlchemyError:
+        await db.rollback()
+        return []
     existing_entries = [
         chain.ChainEntry(
             event_id=row.event_id,
@@ -620,8 +625,16 @@ async def _ensure_chain(db: AsyncSession, org_id: str) -> list[AuditHashChain]:
         else:
             row.merkle_proof = list(entry.merkle_proof)
     if events:
-        await db.commit()
-    return (await db.execute(select(AuditHashChain).where(AuditHashChain.org_id == org_id).order_by(AuditHashChain.sequence))).scalars().all()
+        try:
+            await db.commit()
+        except SQLAlchemyError:
+            await db.rollback()
+            return []
+    try:
+        return (await db.execute(select(AuditHashChain).where(AuditHashChain.org_id == org_id).order_by(AuditHashChain.sequence))).scalars().all()
+    except SQLAlchemyError:
+        await db.rollback()
+        return []
 
 
 def _filters(
@@ -1005,7 +1018,12 @@ async def create_evidence_package(
         result_json=preview,
     )
     db.add(job)
-    await db.commit()
+    try:
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        preview["agent_compliance"]["status"] = "preview"
+        return EvidencePackageResponse(job_id=job.id, status="preview", queued=False, result=preview)
     try:
         from apps.worker.worker import build_evidence_package_task
 

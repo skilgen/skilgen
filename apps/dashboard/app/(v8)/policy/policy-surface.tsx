@@ -268,13 +268,13 @@ async function decideQuarantine(formData: FormData) {
 
 export async function PolicySurface({ tab }: { tab: PolicyTab }) {
   const { org, accessToken } = await loadContext();
-  const [rules, starterPacks, violations, approvals, agentPolicy, quarantine] = await Promise.all([
-    getV8PolicyRules(accessToken, org.id),
-    getV8PolicyStarterPacks(accessToken, org.id),
-    getV8PolicyViolations(accessToken, org.id),
-    getV8PolicyApprovals(accessToken, org.id),
-    getV8AgentCompliancePolicy(accessToken, org.id),
-    getV8PolicyQuarantine(accessToken, org.id),
+  const rules = await getV8PolicyRules(accessToken, org.id);
+  const [starterPacks, violations, approvals, agentPolicy, quarantine] = await Promise.all([
+    tab === "rules" ? getV8PolicyStarterPacks(accessToken, org.id) : Promise.resolve([]),
+    tab === "violations" ? getV8PolicyViolations(accessToken, org.id) : Promise.resolve(null),
+    tab === "approvals" ? getV8PolicyApprovals(accessToken, org.id) : Promise.resolve(null),
+    tab === "agent-events" ? getV8AgentCompliancePolicy(accessToken, org.id) : Promise.resolve(null),
+    tab === "quarantine" ? getV8PolicyQuarantine(accessToken, org.id) : Promise.resolve([]),
   ]);
 
   const violationItems = violations?.items ?? [];
@@ -363,7 +363,7 @@ function RulesTab({
   starterPacks: V8PolicyStarterPack[];
 }) {
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="space-y-5">
       <div className="border border-[color:var(--bg-border)]">
         {rules.length ? (
           <>
@@ -414,11 +414,11 @@ function RulesTab({
             <FileText className="h-4 w-4 text-[color:var(--accent-primary)]" />
             Starter Packs
           </div>
-          <p className="mt-1 text-[12px] leading-5 text-[color:var(--text-secondary)]">Adopt a PRD baseline, inspect the YAML, then tune it as a versioned rule.</p>
+          <p className="mt-1 text-[12px] leading-5 text-[color:var(--text-secondary)]">Starter packs are ready-to-review YAML rules. Apply is disabled in local bootstrap mode until authenticated policy writes are connected.</p>
         </div>
-        <div className="divide-y divide-[color:var(--bg-border)]">
+        <div className="grid gap-px bg-[color:var(--bg-border)] md:grid-cols-2 2xl:grid-cols-3">
           {starterPacks.map((pack) => (
-            <div className="px-4 py-3" key={pack.pack_id}>
+            <div className="bg-[color:var(--bg-base)] px-4 py-3" key={pack.pack_id}>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 text-[13px] font-semibold leading-5 text-[color:var(--text-primary)]">{pack.title}</div>
                 <div className="shrink-0">
@@ -458,7 +458,7 @@ function RulesTab({
                 </form>
               ) : (
                 <button className="mt-3 inline-flex w-full cursor-not-allowed items-center justify-center rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-[12px] font-semibold text-[color:var(--text-secondary)]" disabled type="button">
-                  Sign in to apply
+                  Auth required to save
                 </button>
               )}
             </div>

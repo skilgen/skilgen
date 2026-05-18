@@ -1586,8 +1586,12 @@ export type InsightsIntelligenceTierUsage = {
   provider: string;
   model: string | null;
   intelligence_tier: string;
+  reasoning_mode: string | null;
   events: number;
   users: number;
+  tokens_total: number;
+  cost_usd: number;
+  last_seen_at: string | null;
 };
 
 export type InsightsAccessGrantExposure = {
@@ -1598,6 +1602,7 @@ export type InsightsAccessGrantExposure = {
   full_access_events: number;
   autonomous_events: number;
   tool_permission_events: number;
+  tools: string[];
   last_seen_at: string | null;
 };
 
@@ -1606,8 +1611,54 @@ export type InsightsIntelligenceUsage = {
   generated_at: string;
   source: string;
   content_retention: "metadata-only";
+  tokens_total: number;
+  cost_usd: number;
   tier_usage: InsightsIntelligenceTierUsage[];
   access_grants: InsightsAccessGrantExposure[];
+  peak_usage: Array<{
+    hour: number;
+    events: number;
+    tokens_total: number;
+    cost_usd: number;
+  }>;
+  task_model_usage: Array<{
+    task_type: string;
+    provider: string;
+    model: string | null;
+    intelligence_tier: string | null;
+    events: number;
+    tokens_total: number;
+    cost_usd: number;
+    recommended_model: string | null;
+    recommendation_reason: string | null;
+  }>;
+  pr_push_usage: Array<{
+    id: string;
+    label: string;
+    repo_name: string | null;
+    pr_number: number | null;
+    session_id: string | null;
+    actor_login: string;
+    provider: string;
+    model: string | null;
+    git_url: string | null;
+    commit_sha: string | null;
+    branch: string | null;
+    task_type: string;
+    tokens_total: number;
+    cost_usd: number;
+    recommendation: string | null;
+  }>;
+  recommendations: Array<{
+    id: string;
+    title: string;
+    severity: "low" | "medium" | "high";
+    current_model: string | null;
+    recommended_model: string | null;
+    estimated_token_savings: number;
+    reason: string;
+    evidence: string;
+  }>;
 };
 
 export type InsightsAccessGrants = {
@@ -1740,6 +1791,72 @@ export type InsightsDeveloperTrack = {
   content_retention: "metadata-only";
   summary: InsightsDeveloperTrackSummary;
   developers: InsightsDeveloperTrackRow[];
+};
+
+export type InsightsCodexRunActivityMetrics = {
+  edited_files: number;
+  explored_files: number;
+  searches: number;
+  lists: number;
+  commands: number;
+  tool_calls: number;
+  mcp_tools: number;
+};
+
+export type InsightsCodexRunActivityDetails = {
+  edited_files: string[];
+  explored_files: string[];
+  searches: string[];
+  lists: string[];
+  commands: string[];
+  tools: string[];
+};
+
+export type InsightsCodexRun = {
+  id: string;
+  session_id: string | null;
+  timestamp: string | null;
+  actor_login: string;
+  provider: string;
+  repo_name: string | null;
+  model: string | null;
+  reasoning_tier: string | null;
+  reasoning_mode: string | null;
+  access_scope: string | null;
+  full_access: boolean;
+  outcome: string | null;
+  task_type: string | null;
+  tokens_input: number;
+  tokens_output: number;
+  tokens_total: number;
+  cost_usd: number;
+  activity_metrics: InsightsCodexRunActivityMetrics;
+  activity_details: InsightsCodexRunActivityDetails;
+  tool_permissions: string[];
+  mcp_tools: string[];
+  file_targets: string[];
+  git_url: string | null;
+  replay_url: string | null;
+};
+
+export type InsightsCodexRuns = {
+  window_days: number;
+  generated_at: string;
+  source: string;
+  content_retention: "metadata-only";
+  summary: {
+    runs: number;
+    tokens_total: number;
+    cost_usd: number;
+    edited_files: number;
+    explored_files: number;
+    searches: number;
+    lists: number;
+    commands: number;
+    tool_calls: number;
+    full_access_runs: number;
+  };
+  runs: InsightsCodexRun[];
 };
 
 export type InsightsProviderCoverageRow = {
@@ -2454,6 +2571,10 @@ export async function getV8AgentComplianceMetrics(accessToken: string | null, or
 
 export async function getV8DeveloperTrack(accessToken: string | null, orgId: string): Promise<InsightsDeveloperTrack | null> {
   return apiFetch<InsightsDeveloperTrack>(`/v8/orgs/${orgId}/insights/developer-track`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8CodexRuns(accessToken: string | null, orgId: string): Promise<InsightsCodexRuns | null> {
+  return apiFetch<InsightsCodexRuns>(`/v8/orgs/${orgId}/insights/codex-runs`, { accessToken, cache: "no-store" });
 }
 
 export async function getV8ProviderCoverage(accessToken: string | null, orgId: string): Promise<InsightsProviderCoverage | null> {

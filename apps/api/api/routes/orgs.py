@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func, or_, select, update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id, get_current_org_id_optional
@@ -1230,22 +1230,30 @@ def _score_response(row: object) -> ScoreResponse | None:
 
 
 async def _repo_response(db: AsyncSession, repo: Repo) -> RepoResponse:
-    latest_run = (
-        await db.execute(
-            select(AnalysisRun)
-            .where(AnalysisRun.repo_id == repo.id, AnalysisRun.status == "complete")
-            .order_by(desc(AnalysisRun.created_at))
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    latest_history = (
-        await db.execute(
-            select(ScoreHistory)
-            .where(ScoreHistory.repo_id == repo.id)
-            .order_by(desc(ScoreHistory.recorded_at))
-            .limit(2)
-        )
-    ).scalars().all()
+    latest_run = None
+    try:
+        latest_run = (
+            await db.execute(
+                select(AnalysisRun)
+                .where(AnalysisRun.repo_id == repo.id, AnalysisRun.status == "complete")
+                .order_by(desc(AnalysisRun.created_at))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    except OperationalError:
+        latest_run = None
+    latest_history: list[ScoreHistory] = []
+    try:
+        latest_history = (
+            await db.execute(
+                select(ScoreHistory)
+                .where(ScoreHistory.repo_id == repo.id)
+                .order_by(desc(ScoreHistory.recorded_at))
+                .limit(2)
+            )
+        ).scalars().all()
+    except OperationalError:
+        latest_history = []
     skill_count = (
         await db.execute(select(func.count(Skill.id)).where(Skill.repo_id == repo.id))
     ).scalar_one()
@@ -1256,7 +1264,10 @@ async def _repo_response(db: AsyncSession, repo: Repo) -> RepoResponse:
     display_language = repo.language or "Unknown"
     delta = None
     if len(latest_history) >= 2:
-        delta = int(latest_history[0].score_total - latest_history[1].score_total)
+        first = latest_history[0].score_total
+        second = latest_history[1].score_total
+        if first is not None and second is not None:
+            delta = int(first - second)
     return RepoResponse(
         id=repo.id,
         full_name=repo.full_name,
@@ -1269,7 +1280,7 @@ async def _repo_response(db: AsyncSession, repo: Repo) -> RepoResponse:
         last_analysed_at=repo.last_analysed_at,
         score=_score_response(latest_run or (latest_history[0] if latest_history else None)),
         score_delta=delta,
-        skill_count=int(latest_run.skill_count or 0) if latest_run else int(skill_count or 0),
+        skill_count=int(getattr(latest_run, "skill_count", None) or 0) if latest_run else int(skill_count or 0),
     )
 
 
@@ -1896,15 +1907,16 @@ async def bootstrap_org(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     # TODO: remove before GA. This bootstraps the dashboard while WorkOS org-token mapping is verified.
-    result = await db.execute(select(Org).limit(1))
-    org = result.scalar_one_or_none()
-    if not org:
+    result = await db.execute(select(Org.id, Org.login, Org.name, Org.plan).limit(1))
+    row = result.first()
+    if not row:
         raise HTTPException(status_code=404, detail="No org")
+    org_id, login, name, plan = row
     return {
-        "id": org.id,
-        "login": org.login,
-        "name": org.name,
-        "plan": org.plan,
+        "id": str(org_id),
+        "login": str(login),
+        "name": str(name),
+        "plan": str(plan),
     }
 
 
@@ -1916,7 +1928,13 @@ async def get_org_setup_status(
 ) -> SetupStatusResponse:
     """Return onboarding setup progress for the product loop."""
     _assert_org_scope(org_id, current_org_id)
-    repo_count = int(
+    connected_repo_count = int(
+        (
+            await db.execute(select(func.count(Repo.id)).where(Repo.org_id == org_id))
+        ).scalar()
+        or 0
+    )
+    active_repo_count = int(
         (
             await db.execute(select(func.count(Repo.id)).where(Repo.org_id == org_id, Repo.is_active.is_(True)))
         ).scalar()
@@ -1946,7 +1964,7 @@ async def get_org_setup_status(
         or 0
     )
 
-    has_repos = repo_count > 0
+    has_repos = connected_repo_count > 0 or active_repo_count > 0
     has_skills = skill_count > 0
     has_agent_loads = load_count > 0
     has_high_score_skills = high_score_count > 0
@@ -2065,15 +2083,16 @@ async def get_org_api_key(
     """Return the org API key used by local agents."""
     _assert_org_scope(org_id, current_org_id)
     try:
-        result = await db.execute(select(Org).where(Org.id == org_id))
-        org = result.scalar_one_or_none()
-        if org is None:
+        result = await db.execute(select(Org.api_key).where(Org.id == org_id))
+        row = result.first()
+        if row is None:
             return _error(404, "Org not found", "ORG_NOT_FOUND")
-        if not org.api_key:
-            org.api_key = _generate_org_api_key()
-            await db.flush()
+        api_key = row[0] if isinstance(row, tuple) else getattr(row, "api_key", None)
+        if not api_key:
+            api_key = _generate_org_api_key()
+            await db.execute(update(Org).where(Org.id == org_id).values(api_key=api_key))
             await db.commit()
-        return OrgApiKeyResponse(api_key=org.api_key)
+        return OrgApiKeyResponse(api_key=str(api_key))
     except SQLAlchemyError:
         await _rollback(db, "org api key lookup")
         return _error(400, "Could not load org API key", "ORG_API_KEY_LOOKUP_FAILED")
@@ -2850,13 +2869,26 @@ async def get_org(
     if org is None:
         raise HTTPException(status_code=404, detail="Org not found")
     repo_count = (await db.execute(select(func.count(Repo.id)).where(Repo.org_id == org_id))).scalar_one()
-    avg_score = (
-        await db.execute(
-            select(func.avg(ScoreHistory.score_total))
-            .join(Repo, Repo.id == ScoreHistory.repo_id)
-            .where(Repo.org_id == org_id)
-        )
-    ).scalar_one()
+    avg_score = None
+    try:
+        avg_score = (
+            await db.execute(
+                select(func.avg(ScoreHistory.score_total))
+                .join(Repo, Repo.id == ScoreHistory.repo_id)
+                .where(Repo.org_id == org_id)
+            )
+        ).scalar_one()
+    except OperationalError:
+        try:
+            avg_score = (
+                await db.execute(
+                    select(func.avg(AnalysisRun.score_total))
+                    .join(Repo, Repo.id == AnalysisRun.repo_id)
+                    .where(Repo.org_id == org_id, AnalysisRun.status == "complete")
+                )
+            ).scalar()
+        except OperationalError:
+            avg_score = None
     return OrgResponse(
         id=org.id,
         login=org.login,
@@ -2929,16 +2961,20 @@ async def get_org_stats(
     ).scalars().all()
     active_agents = len({normalize_runtime(runtime) for runtime in agent_runtime_rows if runtime is not None})
 
-    trend_date = func.date(ScoreHistory.recorded_at).label("date")
-    start_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=29)
-    trend_result = await db.execute(
-        select(trend_date, func.avg(ScoreHistory.score_total).label("avg_score"))
-        .join(Repo, ScoreHistory.repo_id == Repo.id)
-        .where(Repo.org_id == org_id, ScoreHistory.recorded_at >= start_at)
-        .group_by(trend_date)
-        .order_by(trend_date)
-    )
-    daily_scores = {str(row.date): round(row.avg_score or 0) for row in trend_result.fetchall()}
+    daily_scores: dict[str, int] = {}
+    try:
+        trend_date = func.date(ScoreHistory.recorded_at).label("date")
+        start_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=29)
+        trend_result = await db.execute(
+            select(trend_date, func.avg(ScoreHistory.score_total).label("avg_score"))
+            .join(Repo, ScoreHistory.repo_id == Repo.id)
+            .where(Repo.org_id == org_id, ScoreHistory.recorded_at >= start_at)
+            .group_by(trend_date)
+            .order_by(trend_date)
+        )
+        daily_scores = {str(row.date): round(row.avg_score or 0) for row in trend_result.fetchall()}
+    except OperationalError:
+        daily_scores = {}
     trend = [{"date": date, "score": daily_scores.get(date, 0)} for date in _last_30_score_dates()]
 
     return {

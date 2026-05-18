@@ -135,11 +135,12 @@ def test_org_stats_counts_active_agent_runtimes_from_skill_usage() -> None:
 
 def test_setup_status_exposes_next_action_guidance() -> None:
     cases = [
-        ((0, 0, 0, 0), 0, "connect_repo", "/skills/repos"),
-        ((1, 0, 0, 0), 25, "generate_skills", "/skills/repos"),
-        ((1, 3, 0, 0), 50, "connect_agent", "/settings/connectors"),
-        ((1, 3, 0, 2), 75, "improve_skills", "/skills/score"),
-        ((1, 3, 1, 2), 100, None, "/activity"),
+        ((0, 0, 0, 0, 0), 0, "connect_repo", "/skills/repos"),
+        ((1, 1, 0, 0, 0), 25, "generate_skills", "/skills/repos"),
+        ((1, 1, 3, 0, 0), 50, "connect_agent", "/settings/connectors"),
+        ((1, 1, 3, 0, 2), 75, "improve_skills", "/skills/score"),
+        ((1, 1, 3, 1, 2), 100, None, "/activity"),
+        ((1, 0, 0, 0, 0), 25, "generate_skills", "/skills/repos"),
     ]
 
     for scalars, percent, next_step_id, action_url in cases:

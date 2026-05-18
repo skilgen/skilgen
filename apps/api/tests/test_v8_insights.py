@@ -114,6 +114,7 @@ def test_insights_router_paths_are_registered() -> None:
     assert "/v8/orgs/{org_id}/insights/intelligence-usage" in paths
     assert "/v8/orgs/{org_id}/insights/access-grants" in paths
     assert "/v8/orgs/{org_id}/insights/agent-compliance-metrics" in paths
+    assert "/v8/orgs/{org_id}/insights/codex-runs" in paths
     assert "/v8/orgs/{org_id}/insights/provider-coverage" in paths
     assert "/v8/orgs/{org_id}/insights/developer-track" in paths
 
@@ -683,6 +684,64 @@ def test_developer_track_rolls_up_metadata_only_agent_work_by_actor(monkeypatch)
     assert ravi["risk_band"] == "high"
     assert ravi["top_tools"][0]["key"] == "apply_patch"
     assert "raw_prompt" not in ravi
+
+
+def test_codex_runs_show_background_activity_metrics(monkeypatch) -> None:
+    events = [
+        SimpleNamespace(
+            id="audit-1",
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="ravi",
+            repo_id="repo_1",
+            repo_name="ravichanduummadisetti/skilgen",
+            resource_type="agent_run",
+            resource_id="turn-1",
+            created_at=NOW,
+            metadata_json={
+                "provider": "Codex Desktop",
+                "model": "gpt-5.5",
+                "reasoning_tier": "medium",
+                "reasoning_mode": "normal",
+                "session_id": "turn-1",
+                "access_scope": "full-access",
+                "full_access": True,
+                "activity_metrics": {"edited_files": 3, "explored_files": 8, "searches": 4, "lists": 2, "commands": 7, "tool_calls": 9, "mcp_tools": 1},
+                "activity_details": {"edited_files": ["apps/api/router.py"], "explored_files": ["apps/api/models.py"], "searches": ["rg TODO apps"], "commands": ["rg TODO apps"], "tools": ["exec_command"]},
+                "tool_permissions": ["exec_command", "apply_patch"],
+                "mcp_tools": ["browser"],
+                "file_targets": ["apps/api/router.py", "apps/dashboard/page.tsx"],
+                "tokens_input": 1000,
+                "tokens_output": 500,
+                "cost_usd": 0.25,
+                "task_type": "coding-agent-session",
+                "outcome": "success",
+                "raw_prompt": "must not be returned",
+            },
+        )
+    ]
+    db = Db([Result(events)])
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/codex-runs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["content_retention"] == "metadata-only"
+    assert payload["summary"]["runs"] == 1
+    assert payload["summary"]["edited_files"] == 3
+    assert payload["summary"]["explored_files"] == 8
+    assert payload["summary"]["searches"] == 4
+    assert payload["summary"]["lists"] == 2
+    assert payload["summary"]["commands"] == 7
+    assert payload["summary"]["tool_calls"] == 9
+    run = payload["runs"][0]
+    assert run["activity_metrics"]["commands"] == 7
+    assert run["activity_details"]["edited_files"] == ["apps/api/router.py"]
+    assert run["activity_details"]["searches"] == ["rg TODO apps"]
+    assert run["full_access"] is True
+    assert run["replay_url"] == "/activity/replay/turn-1?repo=repo_1"
+    assert run["git_url"] is None
+    assert "raw_prompt" not in run
 
 
 def test_provider_coverage_rolls_up_configured_connectors_and_retention_risk(monkeypatch) -> None:

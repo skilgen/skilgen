@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, CircleSlash, Clock3, Code2, KeyRound, RadioTower, ShieldAlert, Sparkles, UserRoundCheck } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, CircleSlash, Clock3, Code2, ExternalLink, KeyRound, RadioTower, ShieldAlert, Sparkles, UserRoundCheck } from "lucide-react";
 
 import {
   getV8AgentComplianceMetrics,
   getBootstrapOrg,
   getMyOrg,
   getV8AccessGrants,
+  getV8CodexRuns,
   getV8CoverageSla,
   getV8DeveloperTrack,
   getV8FleetKpis,
@@ -18,6 +19,8 @@ import {
   type InsightsAgentComplianceMetricBreakdownRow,
   type InsightsAgentComplianceMetricItem,
   type InsightsAgentComplianceMetrics,
+  type InsightsCodexRun,
+  type InsightsCodexRuns,
   type InsightsCoverageSla,
   type InsightsDeveloperTrack,
   type InsightsDeveloperTrackRow,
@@ -30,7 +33,7 @@ import {
   type InsightsTrendMetric,
 } from "../../../../lib/data";
 
-type InsightsTab = "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "agent-compliance-metrics" | "intelligence-usage" | "access-grants" | "provider-coverage";
+type InsightsTab = "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "agent-compliance-metrics" | "codex-runs" | "intelligence-usage" | "access-grants" | "provider-coverage";
 
 const tabs: Array<{ id: InsightsTab; label: string; href: string }> = [
   { id: "fleet-kpis", label: "Fleet KPIs", href: "/insights/fleet-kpis" },
@@ -39,6 +42,7 @@ const tabs: Array<{ id: InsightsTab; label: string; href: string }> = [
   { id: "risky-repos", label: "Risky repos", href: "/insights/risky-repos" },
   { id: "coverage-sla", label: "Coverage SLA", href: "/insights/coverage-sla" },
   { id: "agent-compliance-metrics", label: "Agent metrics", href: "/insights/agent-compliance-metrics" },
+  { id: "codex-runs", label: "Codex runs", href: "/insights/codex-runs" },
   { id: "intelligence-usage", label: "Intelligence usage", href: "/insights/intelligence-usage" },
   { id: "access-grants", label: "Access grants", href: "/insights/access-grants" },
   { id: "provider-coverage", label: "Provider coverage", href: "/insights/provider-coverage" },
@@ -546,16 +550,74 @@ export async function AgentComplianceMetricsView() {
   );
 }
 
+function CodexRunCard({ run }: { run: InsightsCodexRun }) {
+  const metrics = run.activity_metrics;
+  return (
+    <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="font-semibold text-[color:var(--text-primary)]">{run.provider} background flow</h2>
+          <p className="mt-2 text-sm text-[color:var(--text-secondary)]">{run.timestamp ? new Date(run.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "time unknown"} · {run.actor_login} · {run.repo_name ?? "repo unknown"}</p>
+          <p className="mt-2 text-xs text-[color:var(--text-tertiary)]">{run.model ?? "model unknown"}{run.reasoning_tier ? ` · ${run.reasoning_tier}` : ""} · {compactNumber(run.tokens_total)} tokens · ${run.cost_usd.toFixed(2)}</p>
+        </div>
+        {run.replay_url ? <Link className="rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-xs font-semibold text-[color:var(--accent-primary)]" href={run.replay_url}>Replay</Link> : null}
+      </div>
+      <div className="mt-5 grid gap-3 md:grid-cols-6">
+        {[
+          ["Edited", metrics.edited_files],
+          ["Explored", metrics.explored_files],
+          ["Searches", metrics.searches],
+          ["Lists", metrics.lists],
+          ["Commands", metrics.commands],
+          ["Tools", metrics.tool_calls],
+        ].map(([label, value]) => (
+          <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3" key={label}>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">{label}</div>
+            <div className="mt-2 font-mono text-lg text-[color:var(--text-primary)]">{value}</div>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+export async function CodexRunsView() {
+  const { accessToken, org } = await resolveOrgAndToken();
+  const data: InsightsCodexRuns | null = org ? await getV8CodexRuns(accessToken, org.id) : null;
+  const summary = data?.summary;
+  const runs = data?.runs ?? [];
+  return (
+    <PageFrame active="codex-runs">
+      <section className="grid gap-4 md:grid-cols-4">
+        <DeveloperMetric detail="Coding-agent runs captured from metadata-only local/provider telemetry." icon={<Code2 className="h-4 w-4" />} label="Runs" value={summary?.runs ?? 0} />
+        <DeveloperMetric detail={`${summary?.edited_files ?? 0} edited files and ${summary?.explored_files ?? 0} explored files.`} icon={<Sparkles className="h-4 w-4" />} label="File activity" value={(summary?.edited_files ?? 0) + (summary?.explored_files ?? 0)} />
+        <DeveloperMetric detail={`${summary?.searches ?? 0} searches, ${summary?.lists ?? 0} lists, ${summary?.commands ?? 0} shell commands.`} icon={<RadioTower className="h-4 w-4" />} label="Background ops" value={(summary?.searches ?? 0) + (summary?.lists ?? 0) + (summary?.commands ?? 0)} />
+        <DeveloperMetric detail={`${compactNumber(summary?.tokens_total ?? 0)} tokens and $${(summary?.cost_usd ?? 0).toFixed(2)} in this window.`} icon={<KeyRound className="h-4 w-4" />} label="Full access" value={summary?.full_access_runs ?? 0} />
+      </section>
+      {!data ? <EmptyState label="Codex run telemetry unavailable" /> : null}
+      {data && !runs.length ? <EmptyState label="No Codex runs captured yet" /> : null}
+      <section className="space-y-4">
+        {runs.map((run) => <CodexRunCard key={run.id} run={run} />)}
+      </section>
+    </PageFrame>
+  );
+}
+
 export async function IntelligenceUsageView() {
   const { accessToken, org } = await resolveOrgAndToken();
   const data: InsightsIntelligenceUsage | null = org ? await getV8IntelligenceUsage(accessToken, org.id) : null;
   const tierUsage = data?.tier_usage ?? [];
   const accessGrants = data?.access_grants ?? [];
+  const peakUsage = data?.peak_usage ?? [];
+  const taskModelUsage = data?.task_model_usage ?? [];
+  const prPushUsage = data?.pr_push_usage ?? [];
+  const recommendations = data?.recommendations ?? [];
   const totalEvents = tierUsage.reduce((total, row) => total + row.events, 0);
   const exposedActors = new Set(accessGrants.map((row) => row.actor_login)).size;
+  const peak = peakUsage[0];
   return (
     <PageFrame active="intelligence-usage">
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
         <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Model tier events</div>
           <div className="mt-3 text-[28px] font-semibold text-[color:var(--text-primary)]">{totalEvents}</div>
@@ -571,9 +633,124 @@ export async function IntelligenceUsageView() {
           <div className="mt-3 text-[28px] font-semibold text-[color:var(--text-primary)]">Metadata</div>
           <p className="mt-2 text-xs text-[color:var(--text-secondary)]">{data?.source ?? "audit_events.metadata"} · raw content disabled by default.</p>
         </article>
+        <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Tokens</div>
+          <div className="mt-3 text-[28px] font-semibold text-[color:var(--text-primary)]">{compactNumber(data?.tokens_total ?? 0)}</div>
+          <p className="mt-2 text-xs text-[color:var(--text-secondary)]">Total model tokens across coding-agent events.</p>
+        </article>
+        <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Peak usage</div>
+          <div className="mt-3 text-[28px] font-semibold text-[color:var(--text-primary)]">{peak ? `${peak.hour}:00` : "-"}</div>
+          <p className="mt-2 text-xs text-[color:var(--text-secondary)]">{peak ? `${compactNumber(peak.tokens_total)} tokens · ${peak.events} events` : "No hourly usage yet."}</p>
+        </article>
       </section>
 
       {!tierUsage.length && !accessGrants.length ? <IntelligenceUsageEmpty /> : null}
+
+      {recommendations.length ? (
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-[color:var(--accent-primary)]" />
+            <h2 className="text-sm font-semibold text-[color:var(--text-primary)]">Model Routing Recommendations</h2>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {recommendations.map((item) => (
+              <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4" key={item.id}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-[color:var(--text-primary)]">{item.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-[color:var(--text-secondary)]">{item.reason}</p>
+                  </div>
+                  <span className="rounded-md border border-[color:var(--accent-primary)]/40 px-2 py-1 text-xs font-semibold capitalize text-[color:var(--accent-primary)]">{item.severity}</span>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Current</div>
+                    <div className="mt-1 text-sm text-[color:var(--text-primary)]">{item.current_model ?? "unknown"}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Recommend</div>
+                    <div className="mt-1 text-sm text-[color:var(--text-primary)]">{item.recommended_model ?? "review"}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Token savings</div>
+                    <div className="mt-1 text-sm text-[color:var(--text-primary)]">{compactNumber(item.estimated_token_savings)}</div>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs text-[color:var(--text-tertiary)]">{item.evidence}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {taskModelUsage.length ? (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-[color:var(--text-primary)]">Task Type by Model</h2>
+          <div className="overflow-hidden rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
+            <div className="grid grid-cols-[1.2fr_1.2fr_90px_120px_100px_1.5fr] gap-3 bg-black/20 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] max-xl:hidden">
+              <span>Task</span>
+              <span>Model</span>
+              <span>Events</span>
+              <span>Tokens</span>
+              <span>Cost</span>
+              <span>Recommendation</span>
+            </div>
+            {taskModelUsage.map((row) => (
+              <div className="grid gap-3 border-t border-[color:var(--bg-border)] px-4 py-4 text-sm first:border-t-0 xl:grid-cols-[1.2fr_1.2fr_90px_120px_100px_1.5fr]" key={`${row.task_type}-${row.provider}-${row.model}-${row.intelligence_tier}`}>
+                <div className="font-semibold text-[color:var(--text-primary)]">{row.task_type}</div>
+                <div>
+                  <div className="text-[color:var(--text-primary)]">{row.model ?? "unknown model"}</div>
+                  <div className="mt-1 text-xs text-[color:var(--text-tertiary)]">{row.provider} · {row.intelligence_tier ?? "tier unknown"}</div>
+                </div>
+                <div>{row.events}</div>
+                <div>{compactNumber(row.tokens_total)}</div>
+                <div>${row.cost_usd.toFixed(2)}</div>
+                <div className="text-[color:var(--text-secondary)]">{row.recommendation_reason ?? "Current route looks reasonable."}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {prPushUsage.length ? (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-[color:var(--text-primary)]">Tokens by PR / Code Push</h2>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {prPushUsage.map((row) => (
+              <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4" key={row.id}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-[color:var(--text-primary)]">{row.label}</h3>
+                    <p className="mt-1 text-xs text-[color:var(--text-tertiary)]">{row.repo_name ?? "unknown repo"} · {row.actor_login} · {row.task_type}</p>
+                    {row.git_url ? (
+                      <a className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]" href={row.git_url} rel="noreferrer" target="_blank">
+                        Open Git evidence <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : null}
+                  </div>
+                  <span className="rounded-md bg-[color:var(--accent-primary)]/15 px-2 py-1 text-xs font-semibold text-[color:var(--accent-primary)]">{compactNumber(row.tokens_total)} tokens</span>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Model</div>
+                    <div className="mt-1 text-sm text-[color:var(--text-primary)]">{row.model ?? "unknown"}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Cost</div>
+                    <div className="mt-1 text-sm text-[color:var(--text-primary)]">${row.cost_usd.toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Git / run</div>
+                    <div className="mt-1 break-all text-sm text-[color:var(--text-primary)]">{row.pr_number ? `#${row.pr_number}` : row.commit_sha?.slice(0, 12) ?? row.session_id ?? "session"}</div>
+                  </div>
+                </div>
+                {row.recommendation ? <p className="mt-3 text-xs leading-5 text-[color:var(--text-secondary)]">{row.recommendation}</p> : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {tierUsage.length ? (
         <section className="space-y-3">
@@ -583,11 +760,12 @@ export async function IntelligenceUsageView() {
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {tierUsage.map((row) => (
-              <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4" key={`${row.provider}-${row.model}-${row.intelligence_tier}`}>
+              <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4" key={`${row.provider}-${row.model}-${row.intelligence_tier}-${row.reasoning_mode}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="font-semibold text-[color:var(--text-primary)]">{row.provider}</h3>
                     <p className="mt-1 text-xs text-[color:var(--text-secondary)]">{row.model ?? "model unknown"}</p>
+                    <p className="mt-1 text-xs text-[color:var(--text-tertiary)]">{row.reasoning_mode ?? "normal"} mode{row.last_seen_at ? ` · last ${new Date(row.last_seen_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""}</p>
                   </div>
                   <span className="rounded-full bg-[color:var(--accent-primary)]/15 px-2 py-1 text-xs font-semibold text-[color:var(--accent-primary)]">{row.intelligence_tier}</span>
                 </div>
@@ -599,6 +777,14 @@ export async function IntelligenceUsageView() {
                   <div>
                     <div className="text-[22px] font-semibold text-[color:var(--text-primary)]">{row.users}</div>
                     <div className="text-xs text-[color:var(--text-tertiary)]">users</div>
+                  </div>
+                  <div>
+                    <div className="text-[22px] font-semibold text-[color:var(--text-primary)]">{compactNumber(row.tokens_total)}</div>
+                    <div className="text-xs text-[color:var(--text-tertiary)]">tokens</div>
+                  </div>
+                  <div>
+                    <div className="text-[22px] font-semibold text-[color:var(--text-primary)]">${row.cost_usd.toFixed(2)}</div>
+                    <div className="text-xs text-[color:var(--text-tertiary)]">est. cost</div>
                   </div>
                 </div>
               </article>
@@ -614,15 +800,16 @@ export async function IntelligenceUsageView() {
             <h2 className="text-sm font-semibold text-[color:var(--text-primary)]">Access Grant Exposure</h2>
           </div>
           <div className="overflow-hidden rounded-lg border border-[color:var(--bg-border)]">
-            <div className="grid grid-cols-[1fr_1fr_1fr_120px_120px] gap-3 bg-black/20 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] max-md:hidden">
+            <div className="grid grid-cols-[1fr_1fr_1fr_120px_120px_1.4fr] gap-3 bg-black/20 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] max-md:hidden">
               <span>Actor</span>
               <span>Provider</span>
               <span>Scope</span>
               <span>Full</span>
               <span>Tools</span>
+              <span>Top tools</span>
             </div>
             {accessGrants.map((row) => (
-              <div className="grid gap-3 border-t border-[color:var(--bg-border)] px-4 py-4 text-sm first:border-t-0 md:grid-cols-[1fr_1fr_1fr_120px_120px]" key={`${row.actor_login}-${row.provider}-${row.repo_name}-${row.access_scope}`}>
+              <div className="grid gap-3 border-t border-[color:var(--bg-border)] px-4 py-4 text-sm first:border-t-0 md:grid-cols-[1fr_1fr_1fr_120px_120px_1.4fr]" key={`${row.actor_login}-${row.provider}-${row.repo_name}-${row.access_scope}`}>
                 <div>
                   <div className="font-semibold text-[color:var(--text-primary)]">{row.actor_login}</div>
                   <div className="mt-1 text-xs text-[color:var(--text-tertiary)]">{row.repo_name ?? "repo unknown"}</div>
@@ -642,6 +829,11 @@ export async function IntelligenceUsageView() {
                 <div className="flex items-center justify-between gap-3 font-semibold text-[color:var(--accent-primary)] md:block">
                   <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] md:hidden">Tool permissions</span>
                   <span>{row.tool_permission_events}</span>
+                </div>
+                <div className="flex flex-wrap justify-end gap-1 md:justify-start">
+                  {(row.tools ?? []).slice(0, 4).map((tool) => (
+                    <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5 text-[11px] text-[color:var(--text-secondary)]" key={`${row.actor_login}-${row.provider}-${tool}`}>{tool}</span>
+                  ))}
                 </div>
               </div>
             ))}
@@ -696,16 +888,17 @@ export async function AccessGrantsView() {
 
       {grants.length ? (
         <section className="overflow-hidden rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">
-          <div className="grid grid-cols-[1.2fr_1fr_1fr_120px_120px_150px] gap-3 bg-black/20 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] max-lg:hidden">
+            <div className="grid grid-cols-[1.2fr_1fr_1fr_100px_100px_1.4fr_150px] gap-3 bg-black/20 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] max-lg:hidden">
             <span>Actor</span>
             <span>Provider</span>
             <span>Scope</span>
             <span>Full</span>
             <span>Tools</span>
+            <span>Tool evidence</span>
             <span>Last seen</span>
           </div>
           {grants.map((row) => (
-            <div className="grid gap-3 border-t border-[color:var(--bg-border)] px-4 py-4 text-sm first:border-t-0 lg:grid-cols-[1.2fr_1fr_1fr_120px_120px_150px]" key={`${row.actor_login}-${row.provider}-${row.repo_name}-${row.access_scope}`}>
+            <div className="grid gap-3 border-t border-[color:var(--bg-border)] px-4 py-4 text-sm first:border-t-0 lg:grid-cols-[1.2fr_1fr_1fr_100px_100px_1.4fr_150px]" key={`${row.actor_login}-${row.provider}-${row.repo_name}-${row.access_scope}`}>
               <div>
                 <div className="font-semibold text-[color:var(--text-primary)]">{row.actor_login}</div>
                 <div className="mt-1 text-xs text-[color:var(--text-tertiary)]">{row.repo_name ?? "repo unknown"}</div>
@@ -725,6 +918,11 @@ export async function AccessGrantsView() {
               <div className="flex items-center justify-between gap-3 font-semibold text-[color:var(--accent-primary)] lg:block">
                 <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Tool permissions</span>
                 <span>{row.tool_permission_events}</span>
+              </div>
+              <div className="flex flex-wrap justify-end gap-1 lg:justify-start">
+                {(row.tools ?? []).slice(0, 5).map((tool) => (
+                  <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5 text-[11px] text-[color:var(--text-secondary)]" key={`${row.actor_login}-${row.provider}-${tool}`}>{tool}</span>
+                ))}
               </div>
               <div className="flex items-center justify-between gap-3 text-[color:var(--text-secondary)] lg:block">
                 <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Last seen</span>

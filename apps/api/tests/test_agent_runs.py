@@ -36,6 +36,8 @@ class Db:
         self.rolled_back = False
 
     async def execute(self, statement):
+        if not self.results:
+            return Result(None)
         return self.results.pop(0)
 
     def add(self, item):
@@ -49,7 +51,7 @@ class Db:
 
 
 def _repo():
-    return SimpleNamespace(id="repo_1", org_id="org_1", full_name="acme/api", name="api", is_active=True)
+    return SimpleNamespace(id="repo_1", org_id="org_1", full_name="acme/api", name="api", is_active=True, last_analysed_at=None)
 
 
 def _client(db: Db) -> TestClient:
@@ -61,7 +63,8 @@ def _client(db: Db) -> TestClient:
 
 
 def test_agent_run_ingest_creates_session_from_http_payload() -> None:
-    db = Db([Result(_repo()), Result(None)])
+    repo = _repo()
+    db = Db([Result(repo), Result(None)])
     client = _client(db)
     response = client.post(
         "/orgs/org_1/agent-runs",
@@ -77,6 +80,8 @@ def test_agent_run_ingest_creates_session_from_http_payload() -> None:
                 "intelligence_tier": "very-high",
                 "access_scope": "full-access",
                 "full_access": True,
+                "activity_metrics": {"edited_files": 1, "explored_files": 4, "searches": 2, "lists": 1, "commands": 5, "tool_calls": 6},
+                "activity_details": {"edited_files": ["apps/api/routes/review.py"], "searches": ["rg TODO apps"], "commands": ["rg TODO apps"], "tools": ["shell"]},
                 "tool_calls": [{"name": "shell", "parameters": {"command": "cat secret.txt"}, "content": "raw tool payload"}],
             },
             "outcome": "success",
@@ -94,6 +99,7 @@ def test_agent_run_ingest_creates_session_from_http_payload() -> None:
     assert session.produced_file_hashes == {"apps/api/routes/review.py": "abc"}
     assert session.files_touched == ["apps/api/routes/review.py"]
     assert "+hello" in session.code_produced
+    assert repo.last_analysed_at is not None
     audit = db.added[1]
     assert isinstance(audit, AuditEvent)
     assert audit.event_type == "agent.compliance"
@@ -106,11 +112,71 @@ def test_agent_run_ingest_creates_session_from_http_payload() -> None:
     assert audit.metadata_json["content_retention"] == "metadata-only"
     assert audit.metadata_json["redaction_state"] == "raw-content-dropped"
     assert audit.metadata_json["tool_permissions"] == ["Write", "shell"]
+    assert audit.metadata_json["activity_metrics"]["edited_files"] == 1
+    assert audit.metadata_json["activity_metrics"]["explored_files"] == 4
+    assert audit.metadata_json["activity_metrics"]["searches"] == 2
+    assert audit.metadata_json["activity_metrics"]["lists"] == 1
+    assert audit.metadata_json["activity_metrics"]["commands"] == 5
+    assert audit.metadata_json["activity_metrics"]["tool_calls"] == 6
+    assert audit.metadata_json["activity_details"]["edited_files"] == ["apps/api/routes/review.py"]
+    assert audit.metadata_json["activity_details"]["searches"] == ["rg TODO apps"]
+    assert audit.metadata_json["edited_files"] == 1
+    assert audit.metadata_json["commands"] == 5
     assert "source_envelope_hash" in audit.metadata_json
     assert "diff" not in audit.metadata_json
     assert "content" not in audit.metadata_json
     assert "secret.txt" not in str(audit.metadata_json)
     assert "raw tool payload" not in str(audit.metadata_json)
+
+
+def test_agent_run_ingest_preserves_intelligence_and_pr_metadata() -> None:
+    pr = SimpleNamespace(id="pr_128", repo_id="repo_1", github_pr_number=128, title="Activity intelligence layer", head_sha="abc123")
+    db = Db([Result(_repo()), Result(pr), Result(None)])
+    client = _client(db)
+    response = client.post(
+        "/orgs/org_1/agent-runs",
+        json={
+            "spec_version": "0",
+            "session_id": "codex-run-pr-128",
+            "agent": {"vendor": "OpenAI", "product": "Codex"},
+            "repo_id": "repo_1",
+            "code_artifacts": [{"file_path": "apps/api/api/v8/insights/router.py", "tool": "apply_patch", "after_hash": "abc"}],
+            "metadata": {
+                "model": "gpt-5.2-high",
+                "intelligence_tier": "high",
+                "task_type": "test and verification",
+                "tokens_input": 12000,
+                "tokens_output": 3000,
+                "cost_usd": "1.25",
+                "latency_ms": 2400,
+                "pr_number": 128,
+                "head_sha": "abc123",
+                "branch": "feature/intelligence-layer",
+                "policy_decision": "require_approval",
+                "approval_status": "pending",
+                "mcp_tools": ["browser"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    audit = db.added[1]
+    assert audit.metadata_json["session_id"] == "codex-run-pr-128"
+    assert audit.metadata_json["task_type"] == "test and verification"
+    assert audit.metadata_json["tokens_input"] == 12000
+    assert audit.metadata_json["tokens_output"] == 3000
+    assert audit.metadata_json["tokens_total"] == 15000
+    assert audit.metadata_json["cost_usd"] == 1.25
+    assert audit.metadata_json["latency_ms"] == 2400.0
+    assert audit.metadata_json["pr_id"] == "pr_128"
+    assert audit.metadata_json["pr_number"] == 128
+    assert audit.metadata_json["pr_title"] == "Activity intelligence layer"
+    assert audit.metadata_json["head_sha"] == "abc123"
+    assert audit.metadata_json["branch"] == "feature/intelligence-layer"
+    assert audit.metadata_json["policy_decision"] == "require_approval"
+    assert audit.metadata_json["approval_status"] == "pending"
+    assert audit.metadata_json["file_targets"] == ["apps/api/api/v8/insights/router.py"]
+    assert audit.metadata_json["mcp_tools"] == ["browser"]
 
 
 def test_agent_run_ingest_derives_after_hash_from_artifact_content() -> None:
@@ -174,6 +240,41 @@ def test_agent_run_ingest_updates_existing_session_idempotently() -> None:
     assert session.skills_loaded == ["auth", "security"]
     assert session.closed_at == datetime(2026, 4, 27, 10, 15, 0)
     assert session.produced_file_hashes["src/auth.py"] == "def"
+
+
+def test_agent_run_ingest_updates_existing_audit_event_idempotently() -> None:
+    repo = _repo()
+    existing_audit = AuditEvent(
+        id="audit_1",
+        org_id="org_1",
+        event_type="agent.compliance",
+        action="ingested",
+        summary="old",
+        repo_id="repo_1",
+        repo_name="acme/api",
+        resource_type="agent_run",
+        resource_id="codex-run-1",
+        metadata_json={"model": "old"},
+        severity="info",
+    )
+    db = Db([Result(repo), Result(None), Result(existing_audit)])
+    client = _client(db)
+    response = client.post(
+        "/orgs/org_1/agent-runs",
+        json={
+            "spec_version": "0",
+            "session_id": "codex-run-1",
+            "agent": {"vendor": "OpenAI", "product": "Codex Desktop", "runtime": "codex_cli"},
+            "repo_id": "repo_1",
+            "metadata": {"model": "gpt-5.5", "tokens_total": 42},
+        },
+    )
+
+    assert response.status_code == 200
+    assert len([item for item in db.added if isinstance(item, AuditEvent)]) == 0
+    assert existing_audit.metadata_json["model"] == "gpt-5.5"
+    assert existing_audit.metadata_json["tokens_total"] == 42
+    assert repo.last_analysed_at is not None
 
 
 def test_agent_run_requires_repo_scope() -> None:

@@ -43,6 +43,8 @@ class Db:
         return self.org
 
     async def execute(self, statement: object) -> Result:
+        if not self.results:
+            return Result(rows=[])
         return self.results.pop(0)
 
 
@@ -112,6 +114,39 @@ def test_feed_contract_returns_v8_view_model() -> None:
     assert payload["events"][0]["repo_sensitivity_tier"] == "confidential"
     assert payload["events"][0]["trigger"]["label"] == "PAY-4421"
     assert payload["filters"] == {"hours": 24, "risk_band": "low"}
+
+
+def test_feed_includes_agent_sessions_when_skill_load_events_are_absent() -> None:
+    session = SimpleNamespace(
+        id="sess_db",
+        repo_id="repo_1",
+        session_id="sess_ext",
+        org_id="org_1",
+        agent_runtime="codex",
+        engineer_login="ravi",
+        created_at=datetime(2026, 5, 5, 2, 0, 0),
+        session_start=datetime(2026, 5, 5, 2, 0, 0),
+        files_touched=["apps/dashboard/app/page.tsx"],
+        produced_artifacts=[{"tool": "Write", "file_path": "apps/dashboard/app/page.tsx"}],
+        code_produced=None,
+        skills_loaded=[],
+        skill_paths_loaded=[],
+        task_description="Fix activity feed",
+        notes=None,
+        outcome="success",
+    )
+    repo = SimpleNamespace(id="repo_1", org_id="org_1", name="dashboard", full_name="acme/dashboard", sensitivity_tier="internal")
+    client = _client(Db([Result(rows=[]), Result(rows=[session]), Result(rows=[repo]), Result(rows=[])]))
+
+    response = client.get("/v8/orgs/org_1/activity/feed?hours=24")
+
+    assert response.status_code == 200
+    event = response.json()["events"][0]
+    assert event["id"] == "session:sess_db"
+    assert event["repo"] == "acme/dashboard"
+    assert event["agent_provider"] == "codex"
+    assert event["action_class"] == "write"
+    assert event["session_db_id"] == "sess_db"
 
 
 def test_feed_contract_echoes_shareable_investigation_filters() -> None:

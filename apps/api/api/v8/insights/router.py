@@ -183,8 +183,12 @@ class IntelligenceTierUsage(BaseModel):
     provider: str
     model: str | None = None
     intelligence_tier: str
+    reasoning_mode: str | None = None
     events: int
     users: int
+    tokens_total: int = 0
+    cost_usd: float = 0.0
+    last_seen_at: datetime | None = None
 
 
 class AccessGrantExposure(BaseModel):
@@ -195,7 +199,56 @@ class AccessGrantExposure(BaseModel):
     full_access_events: int
     autonomous_events: int
     tool_permission_events: int
+    tools: list[str] = Field(default_factory=list)
     last_seen_at: datetime | None = None
+
+
+class IntelligencePeakUsage(BaseModel):
+    hour: int
+    events: int
+    tokens_total: int
+    cost_usd: float
+
+
+class IntelligenceTaskModelUsage(BaseModel):
+    task_type: str
+    provider: str
+    model: str | None = None
+    intelligence_tier: str | None = None
+    events: int
+    tokens_total: int
+    cost_usd: float
+    recommended_model: str | None = None
+    recommendation_reason: str | None = None
+
+
+class IntelligencePrPushUsage(BaseModel):
+    id: str
+    label: str
+    repo_name: str | None = None
+    pr_number: int | None = None
+    session_id: str | None = None
+    actor_login: str
+    provider: str
+    model: str | None = None
+    git_url: str | None = None
+    commit_sha: str | None = None
+    branch: str | None = None
+    task_type: str
+    tokens_total: int
+    cost_usd: float
+    recommendation: str | None = None
+
+
+class IntelligenceRecommendation(BaseModel):
+    id: str
+    title: str
+    severity: Literal["low", "medium", "high"]
+    current_model: str | None = None
+    recommended_model: str | None = None
+    estimated_token_savings: int = 0
+    reason: str
+    evidence: str
 
 
 class IntelligenceUsageResponse(BaseModel):
@@ -203,8 +256,14 @@ class IntelligenceUsageResponse(BaseModel):
     generated_at: datetime
     source: str = "audit_events.metadata"
     content_retention: Literal["metadata-only"] = "metadata-only"
+    tokens_total: int = 0
+    cost_usd: float = 0.0
     tier_usage: list[IntelligenceTierUsage]
     access_grants: list[AccessGrantExposure]
+    peak_usage: list[IntelligencePeakUsage] = []
+    task_model_usage: list[IntelligenceTaskModelUsage] = []
+    pr_push_usage: list[IntelligencePrPushUsage] = []
+    recommendations: list[IntelligenceRecommendation] = []
 
 
 class AccessGrantsResponse(BaseModel):
@@ -364,6 +423,74 @@ class DeveloperTrackResponse(BaseModel):
     content_retention: Literal["metadata-only"] = "metadata-only"
     summary: DeveloperTrackSummary
     developers: list[DeveloperTrackRow]
+
+
+class CodexRunActivityMetrics(BaseModel):
+    edited_files: int = 0
+    explored_files: int = 0
+    searches: int = 0
+    lists: int = 0
+    commands: int = 0
+    tool_calls: int = 0
+    mcp_tools: int = 0
+
+
+class CodexRunActivityDetails(BaseModel):
+    edited_files: list[str] = Field(default_factory=list)
+    explored_files: list[str] = Field(default_factory=list)
+    searches: list[str] = Field(default_factory=list)
+    lists: list[str] = Field(default_factory=list)
+    commands: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+
+
+class CodexRunInsight(BaseModel):
+    id: str
+    session_id: str | None = None
+    timestamp: datetime | None = None
+    actor_login: str
+    provider: str
+    repo_name: str | None = None
+    model: str | None = None
+    reasoning_tier: str | None = None
+    reasoning_mode: str | None = None
+    access_scope: str | None = None
+    full_access: bool = False
+    outcome: str | None = None
+    task_type: str | None = None
+    tokens_input: int = 0
+    tokens_output: int = 0
+    tokens_total: int = 0
+    cost_usd: float = 0.0
+    activity_metrics: CodexRunActivityMetrics
+    activity_details: CodexRunActivityDetails
+    tool_permissions: list[str] = Field(default_factory=list)
+    mcp_tools: list[str] = Field(default_factory=list)
+    file_targets: list[str] = Field(default_factory=list)
+    git_url: str | None = None
+    replay_url: str | None = None
+
+
+class CodexRunInsightsSummary(BaseModel):
+    runs: int
+    tokens_total: int
+    cost_usd: float
+    edited_files: int
+    explored_files: int
+    searches: int
+    lists: int
+    commands: int
+    tool_calls: int
+    full_access_runs: int
+
+
+class CodexRunInsightsResponse(BaseModel):
+    window_days: int
+    generated_at: datetime
+    source: str = "audit_events.metadata"
+    content_retention: Literal["metadata-only"] = "metadata-only"
+    summary: CodexRunInsightsSummary
+    runs: list[CodexRunInsight]
 
 
 def _utc_now() -> datetime:
@@ -851,6 +978,63 @@ def _metadata_list(metadata: object, key: str) -> list[str]:
     return []
 
 
+def _metadata_tools(metadata: object) -> list[str]:
+    tools = set(_metadata_list(metadata, "tool_permissions") + _metadata_list(metadata, "tools") + _metadata_list(metadata, "tool_calls") + _metadata_list(metadata, "mcp_tools"))
+    return sorted(tool for tool in tools if tool)
+
+
+ACTIVITY_METRIC_KEYS = ("edited_files", "explored_files", "searches", "lists", "commands", "tool_calls", "mcp_tools")
+ACTIVITY_DETAIL_KEYS = ("edited_files", "explored_files", "searches", "lists", "commands", "tools")
+
+
+def _activity_metrics_from_metadata(metadata: object) -> dict[str, int]:
+    raw = metadata.get("activity_metrics") if isinstance(metadata, dict) else None
+    raw_metrics = raw if isinstance(raw, dict) else {}
+    metrics: dict[str, int] = {}
+    for key in ACTIVITY_METRIC_KEYS:
+        value = raw_metrics.get(key)
+        if isinstance(value, bool):
+            value = None
+        if isinstance(value, int | float):
+            metrics[key] = int(value)
+        elif isinstance(value, str) and value.strip():
+            try:
+                metrics[key] = int(float(value))
+            except ValueError:
+                metrics[key] = _metadata_int(metadata, key)
+        else:
+            metrics[key] = _metadata_int(metadata, key)
+    return metrics
+
+
+def _activity_details_from_metadata(metadata: object) -> dict[str, list[str]]:
+    raw = metadata.get("activity_details") if isinstance(metadata, dict) else None
+    raw_details = raw if isinstance(raw, dict) else {}
+    details: dict[str, list[str]] = {}
+    for key in ACTIVITY_DETAIL_KEYS:
+        value = raw_details.get(key)
+        if isinstance(value, list):
+            details[key] = [str(item) for item in value if item not in {None, ""}]
+        else:
+            details[key] = _metadata_list(metadata, key)
+    return details
+
+
+def _git_url_from_metadata(metadata: object, repo_name: str | None) -> str | None:
+    explicit = _metadata_value(metadata, "git_url", "github_url", "html_url", "pr_url", "pull_request_url", "commit_url")
+    if explicit:
+        return explicit
+    if not repo_name or "/" not in repo_name:
+        return None
+    pr_number = _metadata_int(metadata, "pr_number", "pull_request_number")
+    if pr_number:
+        return f"https://github.com/{repo_name}/pull/{pr_number}"
+    sha = _metadata_value(metadata, "commit_sha", "head_sha", "sha")
+    if sha:
+        return f"https://github.com/{repo_name}/commit/{sha}"
+    return None
+
+
 def _counter_rows(counter: dict[str, int], *, limit: int = 12) -> list[AgentComplianceMetricItem]:
     rows = sorted(counter.items(), key=lambda item: (-item[1], item[0]))[:limit]
     return [AgentComplianceMetricItem(key=key, label=key, count=count) for key, count in rows]
@@ -1322,8 +1506,13 @@ def _developer_track_from_events(events: list[AuditEvent], window_days: int, *, 
 
 
 def _intelligence_usage_from_events(events: list[AuditEvent], window_days: int) -> IntelligenceUsageResponse:
-    tier_buckets: dict[tuple[str, str | None, str], dict[str, object]] = {}
+    tier_buckets: dict[tuple[str, str | None, str, str | None], dict[str, object]] = {}
     access_buckets: dict[tuple[str, str, str | None, str], dict[str, object]] = {}
+    task_buckets: dict[tuple[str, str, str | None, str | None], dict[str, object]] = {}
+    pr_buckets: dict[str, dict[str, object]] = {}
+    peak_buckets: dict[int, dict[str, float | int]] = {}
+    total_tokens = 0
+    total_cost = 0.0
     for event in events:
         if not _is_agent_compliance_event(event):
             continue
@@ -1331,19 +1520,75 @@ def _intelligence_usage_from_events(events: list[AuditEvent], window_days: int) 
         provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or str(getattr(event, "resource_type", None) or getattr(event, "event_type", "unknown")).split(".")[0]
         model = _metadata_value(metadata, "model", "model_name", "model_id")
         tier = _metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier")
+        reasoning_mode = _metadata_value(metadata, "reasoning_mode")
         actor = str(getattr(event, "actor_login", None) or _metadata_value(metadata, "actor_login", "user") or "unknown")
+        input_tokens = _metadata_int(metadata, "tokens_input", "input_tokens", "prompt_tokens")
+        output_tokens = _metadata_int(metadata, "tokens_output", "output_tokens", "completion_tokens")
+        event_tokens = _metadata_int(metadata, "tokens_total", "total_tokens") or input_tokens + output_tokens
+        event_cost = _metadata_float(metadata, "cost_usd", "estimated_cost_usd")
+        task_type = _task_type_from_metadata(metadata)
+        total_tokens += event_tokens
+        total_cost += event_cost
+        created_at = getattr(event, "created_at", None)
+        if isinstance(created_at, datetime):
+            peak = peak_buckets.setdefault(created_at.hour, {"events": 0, "tokens_total": 0, "cost_usd": 0.0})
+            peak["events"] = int(peak["events"]) + 1
+            peak["tokens_total"] = int(peak["tokens_total"]) + event_tokens
+            peak["cost_usd"] = float(peak["cost_usd"]) + event_cost
         if tier:
-            key = (provider, model, tier)
-            bucket = tier_buckets.setdefault(key, {"events": 0, "users": set()})
+            key = (provider, model, tier, reasoning_mode)
+            bucket = tier_buckets.setdefault(key, {"events": 0, "users": set(), "tokens_total": 0, "cost_usd": 0.0, "last_seen_at": None})
             bucket["events"] = int(bucket["events"]) + 1
+            bucket["tokens_total"] = int(bucket["tokens_total"]) + event_tokens
+            bucket["cost_usd"] = float(bucket["cost_usd"]) + event_cost
+            if isinstance(created_at, datetime):
+                last_seen_at = bucket["last_seen_at"]
+                if not isinstance(last_seen_at, datetime) or created_at > last_seen_at:
+                    bucket["last_seen_at"] = created_at
             users = bucket["users"]
             if isinstance(users, set):
                 users.add(actor)
+
+        task_key = (task_type, provider, model, tier)
+        task_bucket = task_buckets.setdefault(task_key, {"events": 0, "tokens_total": 0, "cost_usd": 0.0})
+        task_bucket["events"] = int(task_bucket["events"]) + 1
+        task_bucket["tokens_total"] = int(task_bucket["tokens_total"]) + event_tokens
+        task_bucket["cost_usd"] = float(task_bucket["cost_usd"]) + event_cost
+
+        pr_id = _metadata_value(metadata, "pr_id", "pull_request_id", "pr_number", "pull_request_number", "commit_sha", "code_push_id", "session_id", "agent_session_id")
+        if pr_id:
+            repo_name_for_pr = str(getattr(event, "repo_name", None) or _metadata_value(metadata, "repo_name", "repo") or "") or None
+            pr_key = str(pr_id)
+            git_url = _git_url_from_metadata(metadata, repo_name_for_pr)
+            pr_bucket = pr_buckets.setdefault(
+                pr_key,
+                {
+                    "id": pr_key,
+                    "label": _metadata_value(metadata, "pr_title", "pull_request_title", "commit_message") or (f"PR #{_metadata_int(metadata, 'pr_number', 'pull_request_number')}" if _metadata_int(metadata, "pr_number", "pull_request_number") else f"Run/code push {pr_key}"),
+                    "repo_name": repo_name_for_pr,
+                    "pr_number": _metadata_int(metadata, "pr_number", "pull_request_number") or None,
+                    "session_id": _metadata_value(metadata, "session_id", "agent_session_id"),
+                    "actor_login": actor,
+                    "provider": provider,
+                    "model": model,
+                    "git_url": git_url,
+                    "commit_sha": _metadata_value(metadata, "commit_sha", "head_sha", "sha"),
+                    "branch": _metadata_value(metadata, "branch", "head_branch", "source_branch"),
+                    "task_type": task_type,
+                    "tokens_total": 0,
+                    "cost_usd": 0.0,
+                },
+            )
+            if git_url and not pr_bucket.get("git_url"):
+                pr_bucket["git_url"] = git_url
+            pr_bucket["tokens_total"] = int(pr_bucket["tokens_total"]) + event_tokens
+            pr_bucket["cost_usd"] = float(pr_bucket["cost_usd"]) + event_cost
 
         access_scope = _metadata_value(metadata, "access_scope", "permission_scope", "grant_scope")
         is_full_access = _metadata_bool(metadata, "full_access", "full_access_granted")
         is_autonomous = _metadata_bool(metadata, "autonomous_access", "autonomous")
         tool_events = _tool_permission_count(metadata)
+        tools = _metadata_tools(metadata)
         if access_scope or is_full_access or is_autonomous or tool_events:
             scope = access_scope or ("full-access" if is_full_access else "tool-permission")
             repo_name = str(getattr(event, "repo_name", None) or _metadata_value(metadata, "repo_name", "repo") or "") or None
@@ -1354,6 +1599,7 @@ def _intelligence_usage_from_events(events: list[AuditEvent], window_days: int) 
                     "full_access_events": 0,
                     "autonomous_events": 0,
                     "tool_permission_events": 0,
+                    "tools": set(),
                     "last_seen_at": None,
                 },
             )
@@ -1362,16 +1608,67 @@ def _intelligence_usage_from_events(events: list[AuditEvent], window_days: int) 
             if is_autonomous:
                 bucket["autonomous_events"] = int(bucket["autonomous_events"]) + 1
             bucket["tool_permission_events"] = int(bucket["tool_permission_events"]) + tool_events
-            created_at = getattr(event, "created_at", None)
+            tool_set = bucket["tools"]
+            if isinstance(tool_set, set):
+                tool_set.update(tools)
             if isinstance(created_at, datetime):
                 last_seen_at = bucket["last_seen_at"]
                 if not isinstance(last_seen_at, datetime) or created_at > last_seen_at:
                     bucket["last_seen_at"] = created_at
 
     tier_usage = [
-        IntelligenceTierUsage(provider=provider, model=model, intelligence_tier=tier, events=int(values["events"]), users=len(values["users"]) if isinstance(values["users"], set) else 0)
-        for (provider, model, tier), values in tier_buckets.items()
+        IntelligenceTierUsage(
+            provider=provider,
+            model=model,
+            intelligence_tier=tier,
+            reasoning_mode=reasoning_mode,
+            events=int(values["events"]),
+            users=len(values["users"]) if isinstance(values["users"], set) else 0,
+            tokens_total=int(values["tokens_total"]),
+            cost_usd=round(float(values["cost_usd"]), 6),
+            last_seen_at=values["last_seen_at"] if isinstance(values["last_seen_at"], datetime) else None,
+        )
+        for (provider, model, tier, reasoning_mode), values in tier_buckets.items()
     ]
+    task_model_usage = [
+        IntelligenceTaskModelUsage(
+            task_type=task_type,
+            provider=provider,
+            model=model,
+            intelligence_tier=tier,
+            events=int(values["events"]),
+            tokens_total=int(values["tokens_total"]),
+            cost_usd=round(float(values["cost_usd"]), 6),
+            recommended_model=_recommended_model_for_task(task_type, model, tier),
+            recommendation_reason=_recommendation_reason_for_task(task_type, model, tier),
+        )
+        for (task_type, provider, model, tier), values in task_buckets.items()
+    ]
+    pr_push_usage = [
+        IntelligencePrPushUsage(
+            id=str(values["id"]),
+            label=str(values["label"]),
+            repo_name=values["repo_name"] if isinstance(values["repo_name"], str) else None,
+            pr_number=values["pr_number"] if isinstance(values["pr_number"], int) else None,
+            session_id=values["session_id"] if isinstance(values["session_id"], str) else None,
+            actor_login=str(values["actor_login"]),
+            provider=str(values["provider"]),
+            model=values["model"] if isinstance(values["model"], str) else None,
+            git_url=values["git_url"] if isinstance(values.get("git_url"), str) else None,
+            commit_sha=values["commit_sha"] if isinstance(values.get("commit_sha"), str) else None,
+            branch=values["branch"] if isinstance(values.get("branch"), str) else None,
+            task_type=str(values["task_type"]),
+            tokens_total=int(values["tokens_total"]),
+            cost_usd=round(float(values["cost_usd"]), 6),
+            recommendation=_recommendation_reason_for_task(str(values["task_type"]), values["model"] if isinstance(values["model"], str) else None, None),
+        )
+        for values in pr_buckets.values()
+    ]
+    peak_usage = [
+        IntelligencePeakUsage(hour=hour, events=int(values["events"]), tokens_total=int(values["tokens_total"]), cost_usd=round(float(values["cost_usd"]), 6))
+        for hour, values in peak_buckets.items()
+    ]
+    recommendations = _intelligence_recommendations(task_model_usage, pr_push_usage)
     access_grants = [
         AccessGrantExposure(
             actor_login=actor,
@@ -1381,13 +1678,108 @@ def _intelligence_usage_from_events(events: list[AuditEvent], window_days: int) 
             full_access_events=int(values["full_access_events"]),
             autonomous_events=int(values["autonomous_events"]),
             tool_permission_events=int(values["tool_permission_events"]),
+            tools=sorted(values["tools"])[:8] if isinstance(values.get("tools"), set) else [],
             last_seen_at=values["last_seen_at"] if isinstance(values["last_seen_at"], datetime) else None,
         )
         for (actor, provider, repo_name, scope), values in access_buckets.items()
     ]
     tier_usage.sort(key=lambda item: (-item.events, item.provider, item.intelligence_tier))
+    task_model_usage.sort(key=lambda item: (-item.tokens_total, item.task_type, item.model or ""))
+    pr_push_usage.sort(key=lambda item: (-item.tokens_total, item.label))
+    peak_usage.sort(key=lambda item: (-item.tokens_total, item.hour))
     access_grants.sort(key=lambda item: (-(item.full_access_events + item.autonomous_events + item.tool_permission_events), item.actor_login, item.provider))
-    return IntelligenceUsageResponse(window_days=window_days, generated_at=_utc_now(), tier_usage=tier_usage, access_grants=access_grants)
+    return IntelligenceUsageResponse(
+        window_days=window_days,
+        generated_at=_utc_now(),
+        tokens_total=total_tokens,
+        cost_usd=round(total_cost, 6),
+        tier_usage=tier_usage,
+        access_grants=access_grants,
+        peak_usage=peak_usage[:8],
+        task_model_usage=task_model_usage[:12],
+        pr_push_usage=pr_push_usage[:12],
+        recommendations=recommendations,
+    )
+
+
+def _task_type_from_metadata(metadata: object) -> str:
+    task = _metadata_value(metadata, "task_type", "task", "workflow_type", "intent")
+    if task:
+        return task.replace("_", " ").strip().lower()
+    action = (_metadata_value(metadata, "action_class") or "").lower()
+    files = " ".join(_metadata_list(metadata, "file_targets") + _metadata_list(metadata, "files") + _metadata_list(metadata, "file_scope")).lower()
+    if "test" in files or "pytest" in files or "playwright" in files:
+        return "test and verification"
+    if "docs" in files or ".md" in files:
+        return "documentation"
+    if "refactor" in files:
+        return "refactor"
+    if action in {"read", "search"}:
+        return "code search"
+    if action in {"exec", "shell_exec"}:
+        return "tool execution"
+    return "code change"
+
+
+def _recommended_model_for_task(task_type: str, model: str | None, tier: str | None) -> str | None:
+    normalized = task_type.lower()
+    current = (model or "").lower()
+    high_tier = (tier or "").lower() in {"high", "very-high", "xhigh"} or any(marker in current for marker in ("opus", "gpt-5", "high"))
+    if not high_tier:
+        return None
+    if normalized in {"documentation", "code search", "test and verification"}:
+        return "fast reasoning model"
+    if normalized in {"refactor", "tool execution"}:
+        return "balanced coding model"
+    return None
+
+
+def _recommendation_reason_for_task(task_type: str, model: str | None, tier: str | None) -> str | None:
+    recommended = _recommended_model_for_task(task_type, model, tier)
+    if not recommended:
+        return None
+    if task_type in {"documentation", "code search"}:
+        return "Low-complexity task used a high-reasoning model; default to a fast model unless risk signals appear."
+    if task_type == "test and verification":
+        return "Verification is usually tool-bound; reserve expensive reasoning for failures or ambiguous regressions."
+    return "Task can start on a balanced coding model and escalate only when policy, architecture, or failing tests require it."
+
+
+def _intelligence_recommendations(task_rows: list[IntelligenceTaskModelUsage], pr_rows: list[IntelligencePrPushUsage]) -> list[IntelligenceRecommendation]:
+    recommendations: list[IntelligenceRecommendation] = []
+    for row in task_rows:
+        if not row.recommended_model:
+            continue
+        savings = max(0, int(row.tokens_total * 0.45))
+        recommendations.append(
+            IntelligenceRecommendation(
+                id=f"task:{row.task_type}:{row.model or 'unknown'}",
+                title=f"Route {row.task_type} to {row.recommended_model}",
+                severity="high" if savings >= 50000 else "medium",
+                current_model=row.model,
+                recommended_model=row.recommended_model,
+                estimated_token_savings=savings,
+                reason=row.recommendation_reason or "Model tier appears higher than task complexity.",
+                evidence=f"{row.events} events used {row.tokens_total:,} tokens for {row.task_type}.",
+            )
+        )
+    for row in pr_rows:
+        if row.tokens_total < 50000 or not row.recommendation:
+            continue
+        recommendations.append(
+            IntelligenceRecommendation(
+                id=f"push:{row.id}",
+                title=f"Review model default for {row.label}",
+                severity="medium",
+                current_model=row.model,
+                recommended_model="fast or balanced model",
+                estimated_token_savings=int(row.tokens_total * 0.35),
+                reason=row.recommendation,
+                evidence=f"{row.tokens_total:,} tokens on {row.task_type} in {row.repo_name or 'unknown repo'}.",
+            )
+        )
+    recommendations.sort(key=lambda item: (-item.estimated_token_savings, item.title))
+    return recommendations[:8]
 
 
 def _agent_connector_registry() -> list[dict[str, Any]]:
@@ -1665,6 +2057,103 @@ async def get_developer_track(
         )
     ).scalars().all()
     return _developer_track_from_events(list(events), window_days, limit=limit)
+
+
+@router.get("/codex-runs", response_model=CodexRunInsightsResponse)
+async def get_codex_run_insights(
+    org_id: str,
+    window_days: int = Query(default=7, ge=1, le=180),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> CodexRunInsightsResponse:
+    await _require_v8(org_id, db, current_org_id)
+    cutoff = _utc_now() - timedelta(days=window_days)
+    events = (
+        await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.org_id == org_id,
+                AuditEvent.created_at >= cutoff,
+                AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+            )
+            .order_by(desc(AuditEvent.created_at))
+            .limit(limit)
+        )
+    ).scalars().all()
+
+    summary = {
+        "runs": 0,
+        "tokens_total": 0,
+        "cost_usd": 0.0,
+        "edited_files": 0,
+        "explored_files": 0,
+        "searches": 0,
+        "lists": 0,
+        "commands": 0,
+        "tool_calls": 0,
+        "full_access_runs": 0,
+    }
+    runs: list[CodexRunInsight] = []
+    for event in events:
+        metadata = getattr(event, "metadata_json", {}) or {}
+        provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or str(getattr(event, "resource_type", None) or "unknown")
+        repo_name = str(getattr(event, "repo_name", None) or _metadata_value(metadata, "repo_name", "repo") or "") or None
+        input_tokens = _metadata_int(metadata, "tokens_input", "input_tokens", "prompt_tokens")
+        output_tokens = _metadata_int(metadata, "tokens_output", "output_tokens", "completion_tokens")
+        total_tokens = _metadata_int(metadata, "tokens_total", "total_tokens") or input_tokens + output_tokens
+        cost_usd = _metadata_float(metadata, "cost_usd", "estimated_cost_usd")
+        metrics = _activity_metrics_from_metadata(metadata)
+        details = _activity_details_from_metadata(metadata)
+        full_access = _metadata_bool(metadata, "full_access", "full_access_granted") or _metadata_value(metadata, "access_scope") == "full-access"
+        session_id = _metadata_value(metadata, "session_id", "agent_session_id", "thread_id") or getattr(event, "resource_id", None)
+
+        summary["runs"] += 1
+        summary["tokens_total"] += total_tokens
+        summary["cost_usd"] += cost_usd
+        summary["edited_files"] += metrics["edited_files"]
+        summary["explored_files"] += metrics["explored_files"]
+        summary["searches"] += metrics["searches"]
+        summary["lists"] += metrics["lists"]
+        summary["commands"] += metrics["commands"]
+        summary["tool_calls"] += metrics["tool_calls"]
+        summary["full_access_runs"] += 1 if full_access else 0
+
+        runs.append(
+            CodexRunInsight(
+                id=str(getattr(event, "id", "")),
+                session_id=session_id,
+                timestamp=getattr(event, "created_at", None),
+                actor_login=str(getattr(event, "actor_login", None) or _metadata_value(metadata, "actor_login", "user") or "unknown"),
+                provider=provider,
+                repo_name=repo_name,
+                model=_metadata_value(metadata, "model", "model_name", "model_id"),
+                reasoning_tier=_metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier", "reasoning_effort"),
+                reasoning_mode=_metadata_value(metadata, "reasoning_mode"),
+                access_scope=_metadata_value(metadata, "access_scope", "permission_scope", "grant_scope"),
+                full_access=full_access,
+                outcome=_metadata_value(metadata, "outcome", "approval_status", "policy_decision"),
+                task_type=_metadata_value(metadata, "task_type", "task", "workflow_type", "intent"),
+                tokens_input=input_tokens,
+                tokens_output=output_tokens,
+                tokens_total=total_tokens,
+                cost_usd=round(cost_usd, 6),
+                activity_metrics=CodexRunActivityMetrics(**metrics),
+                activity_details=CodexRunActivityDetails(**details),
+                tool_permissions=_metadata_list(metadata, "tool_permissions"),
+                mcp_tools=_metadata_list(metadata, "mcp_tools"),
+                file_targets=_metadata_list(metadata, "file_targets"),
+                git_url=_git_url_from_metadata(metadata, repo_name),
+                replay_url=f"/activity/replay/{session_id}?repo={getattr(event, 'repo_id', '')}" if session_id else None,
+            )
+        )
+
+    return CodexRunInsightsResponse(
+        window_days=window_days,
+        generated_at=_utc_now(),
+        summary=CodexRunInsightsSummary(**{**summary, "cost_usd": round(float(summary["cost_usd"]), 6)}),
+        runs=runs,
+    )
 
 
 @router.get("/provider-coverage", response_model=ProviderCoverageResponse)

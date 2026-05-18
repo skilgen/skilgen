@@ -4,6 +4,25 @@ import { withAuth } from "@workos-inc/authkit-nextjs";
 
 import { API_URL, getBootstrapOrg, getMyOrg, getOrgApiKey, getOrgRepos, getOrgSetupStatus, type Org, type Repo, type SetupStatus } from "../../../lib/data";
 
+export type ActivityMetrics = {
+  edited_files?: number;
+  explored_files?: number;
+  searches?: number;
+  lists?: number;
+  commands?: number;
+  tool_calls?: number;
+  mcp_tools?: number;
+};
+
+export type ActivityDetails = {
+  edited_files?: string[];
+  explored_files?: string[];
+  searches?: string[];
+  lists?: string[];
+  commands?: string[];
+  tools?: string[];
+};
+
 export type ActivityEvent = {
   id: string;
   timestamp: string | null;
@@ -24,6 +43,14 @@ export type ActivityEvent = {
   trigger: { label: string; url: string | null } | null;
   risk_score: number;
   risk_band: "low" | "medium" | "high";
+  risk_reasons?: string[];
+  tokens_total?: number;
+  cost_usd?: number;
+  model?: string | null;
+  intelligence_tier?: string | null;
+  activity_metrics?: ActivityMetrics;
+  activity_details?: ActivityDetails;
+  replay_url?: string;
   session_id: string;
   session_db_id: string | null;
 };
@@ -89,6 +116,14 @@ export type ActivitySession = {
   trigger: { label: string; url: string | null } | null;
   risk_score: number;
   risk_band: "low" | "medium" | "high";
+  risk_reasons?: string[];
+  tokens_total?: number;
+  cost_usd?: number;
+  model?: string | null;
+  intelligence_tier?: string | null;
+  mcp_tools?: string[];
+  activity_metrics?: ActivityMetrics;
+  activity_details?: ActivityDetails;
   replay_url: string;
 };
 
@@ -117,8 +152,32 @@ export type HeatmapCell = {
   repo_name: string;
   hour: number;
   action_count: number;
+  messages?: number;
+  sessions?: number;
+  tokens_total?: number;
+  cost_usd?: number;
+  active_days?: number;
+  favorite_model?: string | null;
   deny_rate: number | null;
   risk_band: "low" | "medium" | "high";
+};
+
+export type HeatmapModel = {
+  platform: string;
+  model: string;
+  tokens_total: number;
+  cost_usd: number;
+  sessions: number;
+  messages: number;
+};
+
+export type HeatmapTrend = {
+  platform: string;
+  date: string;
+  sessions: number;
+  messages: number;
+  tokens_total: number;
+  cost_usd: number;
 };
 
 export type ActivityContext = {
@@ -192,13 +251,13 @@ export async function getActivitySessions(accessToken: string, orgId: string, pa
   return activityFetch<{ sessions: ActivitySession[]; total: number; rollup: ActivityRollup }>(accessToken, `/v8/orgs/${orgId}/activity/sessions${query ? `?${query}` : ""}`);
 }
 
-export async function getActivityReplay(accessToken: string, orgId: string, repoId: string, sessionId: string): Promise<{ session: ActivitySession; timeline: ReplayStep[]; export_html: string } | null> {
-  return activityFetch<{ session: ActivitySession; timeline: ReplayStep[]; export_html: string }>(accessToken, `/v8/orgs/${orgId}/repos/${repoId}/activity/sessions/${sessionId}/replay`);
+export async function getActivityReplay(accessToken: string, orgId: string, repoId: string, sessionId: string): Promise<{ session: ActivitySession; timeline: ReplayStep[]; export_html: string; compliance_events: ActivityComplianceEvent[] } | null> {
+  return activityFetch<{ session: ActivitySession; timeline: ReplayStep[]; export_html: string; compliance_events: ActivityComplianceEvent[] }>(accessToken, `/v8/orgs/${orgId}/repos/${repoId}/activity/sessions/${sessionId}/replay`);
 }
 
-export async function getActivityHeatmap(accessToken: string, orgId: string, repoId: string, params: URLSearchParams): Promise<{ cells: HeatmapCell[]; max_action_count: number; hours: number } | null> {
+export async function getActivityHeatmap(accessToken: string, orgId: string, repoId: string, params: URLSearchParams): Promise<{ cells: HeatmapCell[]; models?: HeatmapModel[]; trend?: HeatmapTrend[]; max_action_count: number; hours: number; group_by?: string; summary?: { sessions: number; messages: number; tokens_total: number; cost_usd: number; active_days: number; peak_hour: number | null; favorite_model: string | null; platforms: number } } | null> {
   const query = params.toString();
-  return activityFetch<{ cells: HeatmapCell[]; max_action_count: number; hours: number }>(accessToken, `/v8/orgs/${orgId}/repos/${repoId}/activity/heatmap${query ? `?${query}` : ""}`);
+  return activityFetch<{ cells: HeatmapCell[]; models?: HeatmapModel[]; trend?: HeatmapTrend[]; max_action_count: number; hours: number; group_by?: string; summary?: { sessions: number; messages: number; tokens_total: number; cost_usd: number; active_days: number; peak_hour: number | null; favorite_model: string | null; platforms: number } }>(accessToken, `/v8/orgs/${orgId}/repos/${repoId}/activity/heatmap${query ? `?${query}` : ""}`);
 }
 
 export async function getActivityRepos(accessToken: string, orgId: string): Promise<Repo[]> {

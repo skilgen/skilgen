@@ -98,6 +98,39 @@ def risk_score(
     return max(0, min(100, base + sensitivity + scope + signature + outcome_penalty))
 
 
+def normalized_outcome(outcome: str | None, ended: object | None = None) -> str:
+    value = str(outcome or "").strip().lower()
+    if value in {"success", "succeeded", "completed", "complete", "allowed"}:
+        return "success"
+    if value in {"failed", "error", "errored"}:
+        return "failed"
+    if value in {"denied", "blocked"}:
+        return value
+    if value in {"running", "in_progress", "in-progress"}:
+        return "in_progress"
+    return "in_progress" if ended is None else "unknown"
+
+
+def risk_reasons(
+    action_class: str,
+    sensitivity_tier: str,
+    file_scope: Iterable[str] = (),
+    signature_status: str = "verified",
+    outcome: str = "allowed",
+) -> list[str]:
+    files = {path for path in file_scope if path}
+    reasons = [f"{action_class} activity"]
+    if sensitivity_tier != "public":
+        reasons.append(f"{sensitivity_tier} repository")
+    if files:
+        reasons.append(f"{len(files)} file target{'s' if len(files) != 1 else ''}")
+    if signature_status not in {"verified", "none"}:
+        reasons.append(f"{signature_status} skill context")
+    if outcome in {"denied", "blocked", "failed"}:
+        reasons.append(f"{outcome} outcome")
+    return reasons
+
+
 def risk_band(score: int) -> RiskBand:
     if score >= 70:
         return "high"
@@ -111,7 +144,8 @@ def feed_event_view(event: object, repo: object | None, skill: object | None, se
     action_class = action_class_for_event(event)
     sensitivity = repo_sensitivity_tier(repo)
     signature = skill_signature_status(skill)
-    score = risk_score(action_class, sensitivity, files, signature)
+    outcome = "allowed"
+    score = risk_score(action_class, sensitivity, files, signature, outcome)
     loaded_at = getattr(event, "loaded_at", None)
     skill_name = getattr(skill, "domain", None) or getattr(skill, "skill_path", None) or "Unknown skill"
     repo_name = getattr(repo, "full_name", None) or getattr(repo, "name", None) or "Unknown repo"
@@ -132,16 +166,75 @@ def feed_event_view(event: object, repo: object | None, skill: object | None, se
         "action": "loaded skill context",
         "action_class": action_class,
         "file_scope": files or ["repo context"],
-        "outcome": "allowed",
+        "outcome": outcome,
         "trigger": linked_external_ticket(getattr(session, "task_description", None), getattr(session, "notes", None)),
         "risk_score": score,
         "risk_band": risk_band(score),
+        "risk_reasons": risk_reasons(action_class, sensitivity, files, signature, outcome),
         "session_id": str(getattr(event, "session_id", "")),
         "session_db_id": str(getattr(session, "id", "")) if session is not None else None,
     }
 
 
-def session_view(session: object, repo: object | None, skills: dict[str, object] | None = None) -> dict[str, Any]:
+def session_feed_event_view(session: object, repo: object | None, skills: dict[str, object] | None = None, compliance: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Project an agent session into the live feed so activity is visible before skill-load telemetry exists."""
+    skill_map = skills or {}
+    loaded = list(getattr(session, "skills_loaded", None) or getattr(session, "skill_paths_loaded", None) or [])
+    resolved_skills = [skill_map[item] for item in loaded if item in skill_map]
+    signature_statuses = [skill_signature_status(skill) for skill in resolved_skills]
+    files = list(getattr(session, "files_touched", []) or [])
+    artifacts = list(getattr(session, "produced_artifacts", []) or [])
+    produced_code = bool(getattr(session, "code_produced", None))
+    action_class = "write" if files or artifacts or produced_code else "read"
+    sensitivity = repo_sensitivity_tier(repo)
+    signature = "verified" if signature_statuses and all(status == "verified" for status in signature_statuses) else signature_statuses[0] if signature_statuses else "none"
+    ended = getattr(session, "session_end", None) or getattr(session, "closed_at", None)
+    outcome = normalized_outcome(str(getattr(session, "outcome", None) or ""), ended)
+    score = risk_score(action_class, sensitivity, files, signature, outcome)
+    activity_at = getattr(session, "last_artifact_at", None) or getattr(session, "session_start", None) or getattr(session, "created_at", None)
+    repo_name = getattr(repo, "full_name", None) or getattr(repo, "name", None) or "Unknown repo"
+    session_id = str(getattr(session, "session_id", "") or getattr(session, "id", ""))
+    session_db_id = str(getattr(session, "id", ""))
+    skill_label = (
+        f"{len(loaded)} skills loaded"
+        if len(loaded) != 1
+        else str(loaded[0])
+    ) if loaded else "No skill loads recorded"
+    return {
+        "id": f"session:{session_db_id or session_id}",
+        "timestamp": isoformat(activity_at),
+        "ts": isoformat(activity_at),
+        "agent": agent_label(getattr(session, "agent_runtime", None)),
+        "agent_provider": str(getattr(session, "agent_runtime", "unknown")),
+        "user": getattr(session, "engineer_login", None) or "unknown",
+        "repo_id": str(getattr(session, "repo_id", "")),
+        "repo": repo_name,
+        "repo_name": repo_name,
+        "repo_sensitivity_tier": sensitivity,
+        "skill_id": str(loaded[0]) if loaded else "",
+        "skill": f"Agent session - {skill_label}",
+        "skill_signature_status": signature,
+        "action": "agent session updated repository" if action_class == "write" else "agent session opened repository context",
+        "action_class": action_class,
+        "file_scope": files or ["repo context"],
+        "outcome": outcome,
+        "trigger": linked_external_ticket(getattr(session, "task_description", None), getattr(session, "notes", None)),
+        "risk_score": score,
+        "risk_band": risk_band(score),
+        "risk_reasons": risk_reasons(action_class, sensitivity, files, signature, outcome),
+        "tokens_total": int((compliance or {}).get("tokens_total") or 0),
+        "cost_usd": float((compliance or {}).get("cost_usd") or 0.0),
+        "model": (compliance or {}).get("model"),
+        "intelligence_tier": (compliance or {}).get("intelligence_tier"),
+        "activity_metrics": dict((compliance or {}).get("activity_metrics") or {}),
+        "activity_details": dict((compliance or {}).get("activity_details") or {}),
+        "replay_url": f"/activity/replay/{session_db_id or session_id}?repo={getattr(session, 'repo_id', '')}",
+        "session_id": session_id,
+        "session_db_id": session_db_id or None,
+    }
+
+
+def session_view(session: object, repo: object | None, skills: dict[str, object] | None = None, compliance: dict[str, Any] | None = None) -> dict[str, Any]:
     skill_map = skills or {}
     loaded = list(getattr(session, "skills_loaded", None) or getattr(session, "skill_paths_loaded", None) or [])
     resolved_skills = [skill_map[item] for item in loaded if item in skill_map]
@@ -150,9 +243,10 @@ def session_view(session: object, repo: object | None, skills: dict[str, object]
     sensitivity = repo_sensitivity_tier(repo)
     action_class = "write" if files or getattr(session, "produced_artifacts", None) else "read"
     signature = "verified" if all(status == "verified" for status in signature_statuses) else signature_statuses[0]
-    score = risk_score(action_class, sensitivity, files, signature, str(getattr(session, "outcome", None) or "allowed"))
-    started = getattr(session, "session_start", None) or getattr(session, "created_at", None)
     ended = getattr(session, "session_end", None) or getattr(session, "closed_at", None)
+    outcome = normalized_outcome(str(getattr(session, "outcome", None) or ""), ended)
+    score = risk_score(action_class, sensitivity, files, signature, outcome)
+    started = getattr(session, "session_start", None) or getattr(session, "created_at", None)
     return {
         "id": str(getattr(session, "id", "")),
         "session_id": str(getattr(session, "session_id", "")),
@@ -168,10 +262,18 @@ def session_view(session: object, repo: object | None, skills: dict[str, object]
         "files_touched": files,
         "skills_loaded": loaded,
         "skill_signature_statuses": signature_statuses,
-        "outcome": getattr(session, "outcome", None) or "unknown",
+        "outcome": outcome,
         "trigger": linked_external_ticket(getattr(session, "task_description", None), getattr(session, "notes", None)),
         "risk_score": score,
         "risk_band": risk_band(score),
+        "risk_reasons": risk_reasons(action_class, sensitivity, files, signature, outcome),
+        "tokens_total": int((compliance or {}).get("tokens_total") or 0),
+        "cost_usd": float((compliance or {}).get("cost_usd") or 0.0),
+        "model": (compliance or {}).get("model"),
+        "intelligence_tier": (compliance or {}).get("intelligence_tier"),
+        "mcp_tools": list((compliance or {}).get("mcp_tools") or []),
+        "activity_metrics": dict((compliance or {}).get("activity_metrics") or {}),
+        "activity_details": dict((compliance or {}).get("activity_details") or {}),
         "replay_url": f"/activity/replay/{getattr(session, 'id', '')}?repo={getattr(session, 'repo_id', '')}",
     }
 

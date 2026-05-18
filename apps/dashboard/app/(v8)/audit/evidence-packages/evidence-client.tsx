@@ -3,7 +3,13 @@
 import { Archive, CheckCircle2, FileKey2, PackagePlus, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 
-const CLIENT_API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
+function clientApiUrl() {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname)) {
+    return "http://127.0.0.1:8000";
+  }
+  return "https://api.skillayer.com";
+}
 
 type EvidenceResult = {
   control?: string;
@@ -84,7 +90,7 @@ export function EvidencePackagesClient({ accessToken, orgId }: { accessToken: st
     const start = new Date(now);
     start.setDate(now.getDate() - days);
     try {
-      const response = await fetch(`${CLIENT_API_URL}/v8/orgs/${orgId}/audit/evidence-packages`, {
+      const response = await fetch(`${clientApiUrl()}/v8/orgs/${orgId}/audit/evidence-packages`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

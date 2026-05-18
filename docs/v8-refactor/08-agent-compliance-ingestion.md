@@ -65,6 +65,26 @@ The ingest endpoint accepts batches with provider event id, actor, provider, mod
 
 Provider coverage compares tenant connector metadata with recent normalized audit events. It reports active, silent, stale, and retention-risk providers so operators can catch connector gaps before 30-day provider log retention windows make compliance evidence unrecoverable.
 
+## Real metadata contract
+
+Skillayer must not infer coding-agent usage from dashboard seed rows. The source of truth is normalized metadata from compliance APIs, provider telemetry, and local coding-agent hooks, joined with the existing GitHub integration when a PR number, PR id, branch, commit sha, or head sha is present.
+
+`POST /orgs/{org_id}/agent-runs` now preserves the metadata needed by Activity and Insights:
+
+| Field group | Source fields |
+| --- | --- |
+| Provider/runtime | `provider`, `agent_provider`, `source_provider`, agent vendor/product, runtime label |
+| Model tier | `model`, `model_name`, `model_id`, `intelligence_tier`, `model_tier`, `reasoning_tier` |
+| Work type | `task_type`, `task`, `workflow_type`, `intent` |
+| Usage | `tokens_input`, `input_tokens`, `prompt_tokens`, `tokens_output`, `output_tokens`, `completion_tokens`, `tokens_total`, `total_tokens`, `cost_usd`, `estimated_cost_usd`, `latency_ms`, `duration_ms` |
+| PR context | `pr_number`, `pull_request_number`, `pr_id`, `pull_request_id`, `pr_title`, `pull_request_title`, `head_sha`, `commit_sha`, `sha`, `branch`, `head_branch` |
+| Access and policy | `access_scope`, `permission_scope`, `grant_scope`, `full_access`, `full_access_granted`, `autonomous_access`, `autonomous`, `policy_decision`, `decision`, `approval_status` |
+| Tools and files | sanitized artifact tool names, `mcp_tools`, artifact file paths, `file_targets`, `files`, `file_scope` |
+
+When PR metadata is present, ingestion resolves it against `pull_requests` for the tenant repo and stores `pr_id`, `pr_number`, `pr_title`, `head_sha`, and `branch` on the `agent.compliance` audit event. This lets the UI answer questions like "which model/reasoning tier pushed this PR?", "how many tokens did this PR consume?", and "which task types are spending high-reasoning tokens?" without relying on dummy Cursor/Codex sample rows.
+
+Default retention remains metadata-only. Raw prompts, file content, diffs, and tool parameters stay out of the normalized audit event unless a future tenant setting explicitly enables content retention.
+
 ## Proposed data additions
 
 Candidate migrations for a follow-up connector-ingestion PR:

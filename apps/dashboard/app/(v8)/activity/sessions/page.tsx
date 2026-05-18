@@ -17,6 +17,18 @@ function riskClass(band: ActivitySession["risk_band"]): string {
   return "border-[color:var(--accent-green)]/40 text-[color:var(--accent-green)]";
 }
 
+function compactNumber(value: number | null | undefined): string {
+  const safe = Number(value ?? 0);
+  if (safe >= 1_000_000) return `${(safe / 1_000_000).toFixed(safe >= 10_000_000 ? 0 : 1)}M`;
+  if (safe >= 1_000) return `${(safe / 1_000).toFixed(safe >= 10_000 ? 0 : 1)}K`;
+  return String(safe);
+}
+
+function formatMoney(value: number | null | undefined): string {
+  const safe = Number(value ?? 0);
+  return safe > 0 ? `$${safe.toFixed(safe >= 1 ? 2 : 4)}` : "$0.00";
+}
+
 export default async function ActivitySessionsPage({ searchParams }: { searchParams?: PageSearchParams }) {
   const params = await normalizeSearchParams(searchParams);
   const context = await loadActivityContext();
@@ -67,6 +79,8 @@ export default async function ActivitySessionsPage({ searchParams }: { searchPar
                   <div className="text-xs text-[color:var(--text-tertiary)]">{formatTime(session.started_at)}</div>
                   <h2 className="mt-1 text-lg font-semibold text-[color:var(--text-primary)]">{session.agent} - {session.repo_name}</h2>
                   <p className="mt-2 text-sm text-[color:var(--text-secondary)]">{session.user} - {session.files_touched.length} files - {session.skills_loaded.length} skills</p>
+                  <p className="mt-1 text-xs text-[color:var(--text-tertiary)]">{session.model ?? "model unknown"}{session.intelligence_tier ? ` · ${session.intelligence_tier}` : ""} · {compactNumber(session.tokens_total)} tokens · {formatMoney(session.cost_usd)}</p>
+                  {session.risk_reasons?.length ? <p className="mt-1 text-xs text-[color:var(--text-tertiary)]">Risk: {session.risk_reasons.slice(0, 4).join(" · ")}</p> : null}
                 </div>
                 <span className={`rounded-md border px-2 py-1 text-xs font-semibold capitalize ${riskClass(session.risk_band)}`}>{session.risk_band} {session.risk_score}</span>
               </div>
@@ -76,7 +90,7 @@ export default async function ActivitySessionsPage({ searchParams }: { searchPar
                     <span className="rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs text-[color:var(--text-secondary)]" key={skill}>{skill}</span>
                   ))}
                 </div>
-                <Link className="text-sm font-semibold text-[color:var(--accent-primary)]" href={`/activity/replay/${session.id}?repo=${session.repo_id}`}>Replay</Link>
+                <Link className="text-sm font-semibold text-[color:var(--accent-primary)]" href={session.replay_url}>Replay</Link>
               </div>
             </article>
           ))

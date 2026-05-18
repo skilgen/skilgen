@@ -19,6 +19,31 @@ function riskClass(band: ActivityEvent["risk_band"]): string {
   return "border-[color:var(--accent-green)]/40 bg-[color:var(--accent-green)]/10 text-[color:var(--accent-green)]";
 }
 
+function compactNumber(value: number | null | undefined): string {
+  const safe = Number(value ?? 0);
+  if (safe >= 1_000_000) return `${(safe / 1_000_000).toFixed(safe >= 10_000_000 ? 0 : 1)}M`;
+  if (safe >= 1_000) return `${(safe / 1_000).toFixed(safe >= 10_000 ? 0 : 1)}K`;
+  return String(safe);
+}
+
+function formatMoney(value: number | null | undefined): string {
+  const safe = Number(value ?? 0);
+  return safe > 0 ? `$${safe.toFixed(safe >= 1 ? 2 : 4)}` : "$0.00";
+}
+
+function activitySummary(event: ActivityEvent): string | null {
+  const metrics = event.activity_metrics;
+  if (!metrics) return null;
+  const parts = [
+    [`edited ${metrics.edited_files ?? 0} files`, metrics.edited_files],
+    [`explored ${metrics.explored_files ?? 0}`, metrics.explored_files],
+    [`${metrics.searches ?? 0} searches`, metrics.searches],
+    [`${metrics.lists ?? 0} lists`, metrics.lists],
+    [`ran ${metrics.commands ?? 0} commands`, metrics.commands],
+  ];
+  return parts.some(([, value]) => Number(value ?? 0) > 0) ? parts.map(([label]) => label).join(" · ") : null;
+}
+
 const filterLabels: Record<string, string> = {
   hours: "Window",
   agent_provider: "Provider",
@@ -162,33 +187,49 @@ export function LiveFeedPanel({
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-[color:var(--bg-border)]">
-        <div className="grid min-w-[980px] grid-cols-[132px_minmax(180px,1fr)_minmax(210px,1fr)_120px_130px_120px] bg-[color:var(--bg-surface)] px-4 py-3 text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">
+        <div className="grid min-w-[1180px] grid-cols-[132px_minmax(170px,1fr)_minmax(260px,1.2fr)_120px_150px_160px_110px] bg-[color:var(--bg-surface)] px-4 py-3 text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">
           <span>Time</span>
           <span>Agent</span>
           <span>Scope</span>
           <span>Action</span>
           <span>Outcome</span>
           <span>Risk</span>
+          <span>Replay</span>
         </div>
         {rows.length ? (
           rows.map((event) => (
-            <article className="grid min-w-[980px] grid-cols-[132px_minmax(180px,1fr)_minmax(210px,1fr)_120px_130px_120px] gap-3 border-t border-[color:var(--bg-border)] px-4 py-3 text-sm" key={event.id}>
+            <article className="grid min-w-[1180px] grid-cols-[132px_minmax(170px,1fr)_minmax(260px,1.2fr)_120px_150px_160px_110px] gap-3 border-t border-[color:var(--bg-border)] px-4 py-3 text-sm" key={event.id}>
               <span className="text-[color:var(--text-secondary)]">{formatTime(event.timestamp)}</span>
               <span>
                 <b className="block text-[color:var(--text-primary)]">{event.agent}</b>
                 <span className="text-[color:var(--text-tertiary)]">{event.user}</span>
+                {event.model ? <span className="mt-1 block text-xs text-[color:var(--text-secondary)]">{event.model}{event.intelligence_tier ? ` · ${event.intelligence_tier}` : ""}</span> : null}
               </span>
               <span>
                 <b className="block text-[color:var(--text-primary)]">{event.repo}</b>
                 <span className="text-[color:var(--text-secondary)]">{event.skill}</span>
                 <span className="mt-1 block text-xs capitalize text-[color:var(--text-tertiary)]">{event.repo_sensitivity_tier} tier</span>
+                {event.tokens_total ? <span className="mt-1 block text-xs text-[color:var(--accent-primary)]">{compactNumber(event.tokens_total)} tokens · {formatMoney(event.cost_usd)}</span> : null}
+                {activitySummary(event) ? <span className="mt-1 block text-xs text-[color:var(--text-tertiary)]">{activitySummary(event)}</span> : null}
               </span>
               <span className="capitalize text-[color:var(--text-secondary)]">{event.action_class}</span>
               <span>
-                <b className="block capitalize text-[color:var(--text-secondary)]">{event.outcome}</b>
+                <b className="block capitalize text-[color:var(--text-secondary)]">{event.outcome.replaceAll("_", " ")}</b>
                 {event.trigger ? <span className="text-xs text-[color:var(--text-tertiary)]">{event.trigger.label}</span> : null}
               </span>
-              <span className={`h-fit rounded-md border px-2 py-1 text-xs font-semibold capitalize ${riskClass(event.risk_band)}`}>{event.risk_band} {event.risk_score}</span>
+              <span>
+                <span className={`inline-flex h-fit rounded-md border px-2 py-1 text-xs font-semibold capitalize ${riskClass(event.risk_band)}`}>{event.risk_band} {event.risk_score}</span>
+                {event.risk_reasons?.length ? <span className="mt-1 block text-xs leading-4 text-[color:var(--text-tertiary)]">{event.risk_reasons.slice(0, 3).join(" · ")}</span> : null}
+              </span>
+              <span>
+                {event.replay_url ? (
+                  <Link className="text-sm font-semibold text-[color:var(--accent-primary)]" href={event.replay_url}>Open</Link>
+                ) : event.session_db_id ? (
+                  <Link className="text-sm font-semibold text-[color:var(--accent-primary)]" href={`/activity/replay/${event.session_db_id}?repo=${event.repo_id}`}>Open</Link>
+                ) : (
+                  <span className="text-xs text-[color:var(--text-tertiary)]">No replay</span>
+                )}
+              </span>
             </article>
           ))
         ) : (

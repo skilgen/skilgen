@@ -2,9 +2,7 @@ import Link from "next/link";
 
 const tabs = [
   { href: "/activity/live-feed", label: "Live feed" },
-  { href: "/activity/compliance-events", label: "Compliance events" },
-  { href: "/activity/compliance-sessions", label: "Agent sessions" },
-  { href: "/activity/sessions", label: "Sessions" },
+  { href: "/activity/sessions", label: "Runs" },
   { href: "/activity/replay", label: "Replay" },
   { href: "/activity/heatmap", label: "Heatmap" },
 ] as const;

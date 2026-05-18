@@ -18,6 +18,11 @@ def _database_url_and_connect_args() -> tuple[str, dict[str, object]]:
         database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
     elif database_url.startswith("postgresql://"):
         database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("sqlite:") and not database_url.startswith("sqlite+aiosqlite:"):
+        # Allow local development using a plain SQLite URL while keeping Alembic migrations
+        # compatible (they expect a synchronous sqlite:// URL). At runtime we upgrade the driver
+        # to async via aiosqlite.
+        database_url = database_url.replace("sqlite:", "sqlite+aiosqlite:", 1)
     connect_args: dict[str, object] = {}
     if "neon.tech" in database_url or "ssl" in database_url:
         ssl_context = ssl.create_default_context()
@@ -25,6 +30,8 @@ def _database_url_and_connect_args() -> tuple[str, dict[str, object]]:
         ssl_context.verify_mode = ssl.CERT_NONE
         connect_args = {"ssl": ssl_context}
         database_url = database_url.split("?")[0]
+    if database_url.startswith("sqlite+aiosqlite:"):
+        connect_args = {**connect_args, "check_same_thread": False}
     return database_url, connect_args
 
 

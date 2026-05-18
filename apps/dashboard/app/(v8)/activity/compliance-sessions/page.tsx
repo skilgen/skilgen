@@ -9,6 +9,16 @@ function riskClass(band: ActivityComplianceSession["risk_band"]): string {
   return "text-[color:var(--accent-green)]";
 }
 
+function compactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}K`;
+  return String(value);
+}
+
+function formatMoney(value: number): string {
+  return value > 0 ? `$${value.toFixed(value >= 1 ? 2 : 4)}` : "$0.00";
+}
+
 export default async function ActivityComplianceSessionsPage({ searchParams }: { searchParams?: PageSearchParams }) {
   const context = await loadActivityContext();
   const params = await normalizeSearchParams(searchParams);
@@ -59,8 +69,8 @@ export default async function ActivityComplianceSessionsPage({ searchParams }: {
                 <span>{session.duration_minutes ?? 0}m</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-[12px] text-[color:var(--text-secondary)]">
-                <span>{session.tokens_input + session.tokens_output} tokens</span>
-                <span>${session.cost_usd.toFixed(4)}</span>
+                <span>{compactNumber(session.tokens_input + session.tokens_output)} tokens</span>
+                <span>{formatMoney(session.cost_usd)}</span>
                 <span>{session.errors} errors</span>
                 <span>{Object.keys(session.policy_decisions).length} decisions</span>
               </div>

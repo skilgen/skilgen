@@ -1,6 +1,24 @@
 import { getV8AuditLog } from "../../../../lib/data";
 import { loadAuditOrg } from "../common";
 
+function metadataText(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key];
+  return typeof value === "string" && value ? value : null;
+}
+
+function metadataNumber(metadata: Record<string, unknown>, key: string): number | null {
+  const value = metadata[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  return null;
+}
+
+function metadataList(metadata: Record<string, unknown>, key: string): string[] {
+  const value = metadata[key];
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
+  return [];
+}
+
 export default async function AuditEventLogPage() {
   const { accessToken, orgId } = await loadAuditOrg();
   const audit = orgId ? await getV8AuditLog(accessToken, orgId, new URLSearchParams({ limit: "50" })) : null;
@@ -31,8 +49,20 @@ export default async function AuditEventLogPage() {
               <td className="px-3 py-3">{event.actor_login ?? "system"}</td>
               <td className="px-3 py-3">{event.repo_name ?? event.repo_id ?? "-"}</td>
               <td className="px-3 py-3 capitalize">{event.severity}</td>
-              <td className="px-3 py-3 font-mono text-[11px] text-[color:var(--text-secondary)]">{event.chain ? event.chain.root_hash.slice(0, 12) : "pending"}</td>
-              <td className="max-w-[420px] truncate px-3 py-3">{event.summary}</td>
+              <td className="px-3 py-3 font-mono text-[11px] text-[color:var(--text-secondary)]">{event.chain ? `#${event.chain.sequence} ${event.chain.root_hash.slice(0, 12)}` : "not chained yet"}</td>
+              <td className="max-w-[520px] px-3 py-3">
+                <div className="font-medium text-[color:var(--text-primary)]">{event.summary}</div>
+                <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-[color:var(--text-secondary)]">
+                  {metadataText(event.metadata, "model") ? <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5">{metadataText(event.metadata, "model")}</span> : null}
+                  {metadataText(event.metadata, "reasoning_tier") ? <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5">reasoning {metadataText(event.metadata, "reasoning_tier")}</span> : null}
+                  {metadataText(event.metadata, "access_scope") ? <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5">{metadataText(event.metadata, "access_scope")}</span> : null}
+                  {metadataNumber(event.metadata, "tokens_total") ? <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5">{metadataNumber(event.metadata, "tokens_total")?.toLocaleString()} tokens</span> : null}
+                  {metadataNumber(event.metadata, "cost_usd") ? <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5">est. ${metadataNumber(event.metadata, "cost_usd")?.toFixed(2)}</span> : null}
+                  {metadataList(event.metadata, "tool_permissions").slice(0, 4).map((tool) => (
+                    <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5" key={`${event.id}-${tool}`}>{tool}</span>
+                  ))}
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>

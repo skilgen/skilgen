@@ -17,6 +17,7 @@ from apps.api.api.v8.activity.view_model import (
     feed_event_view,
     risk_band,
     session_view,
+    session_feed_event_view,
     standalone_replay_html,
     replay_timeline,
 )
@@ -38,6 +39,21 @@ AGENT_COMPLIANCE_EVENT_TYPES = {
     "coding_agent.compliance",
     "coding_agent.telemetry",
 }
+
+
+def _estimated_cost_usd(model: str | None, input_tokens: int, output_tokens: int) -> float:
+    if input_tokens <= 0 and output_tokens <= 0:
+        return 0.0
+    normalized = str(model or "").lower()
+    if "mini" in normalized or "haiku" in normalized or "fast" in normalized:
+        input_rate, output_rate = 0.25, 1.25
+    elif "opus" in normalized:
+        input_rate, output_rate = 15.0, 75.0
+    elif "sonnet" in normalized or "claude" in normalized:
+        input_rate, output_rate = 3.0, 15.0
+    else:
+        input_rate, output_rate = 1.25, 10.0
+    return round((input_tokens / 1_000_000) * input_rate + (output_tokens / 1_000_000) * output_rate, 6)
 
 
 async def _require_v8(org_id: str, current_org_id: str | None, db: AsyncSession) -> None:
@@ -154,6 +170,187 @@ def _metadata_value(metadata: object, *keys: str) -> str | None:
     return None
 
 
+def _metadata_int(metadata: object, *keys: str) -> int:
+    if not isinstance(metadata, dict):
+        return 0
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str) and value.strip():
+            try:
+                return int(float(value))
+            except ValueError:
+                continue
+    return 0
+
+
+def _metadata_float(metadata: object, *keys: str) -> float:
+    if not isinstance(metadata, dict):
+        return 0.0
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int | float):
+            return float(value)
+        if isinstance(value, str) and value.strip():
+            try:
+                return float(value)
+            except ValueError:
+                continue
+    return 0.0
+
+
+def _metadata_list(metadata: object, *keys: str) -> list[str]:
+    if not isinstance(metadata, dict):
+        return []
+    values: list[str] = []
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, list):
+            values.extend(str(item) for item in value if item not in {None, ""})
+        elif isinstance(value, str) and value.strip():
+            values.append(value.strip())
+    return values
+
+
+ACTIVITY_METRIC_KEYS = ("edited_files", "explored_files", "searches", "lists", "commands", "tool_calls", "mcp_tools")
+ACTIVITY_DETAIL_KEYS = ("edited_files", "explored_files", "searches", "lists", "commands", "tools")
+
+
+def _activity_metrics_from_metadata(metadata: object) -> dict[str, int]:
+    raw = metadata.get("activity_metrics") if isinstance(metadata, dict) else None
+    raw_metrics = raw if isinstance(raw, dict) else {}
+    metrics: dict[str, int] = {}
+    for key in ACTIVITY_METRIC_KEYS:
+        value = raw_metrics.get(key)
+        if isinstance(value, bool):
+            value = None
+        if isinstance(value, int | float):
+            metrics[key] = int(value)
+        elif isinstance(value, str) and value.strip():
+            try:
+                metrics[key] = int(float(value))
+            except ValueError:
+                metrics[key] = _metadata_int(metadata, key)
+        else:
+            metrics[key] = _metadata_int(metadata, key)
+    return metrics
+
+
+def _activity_details_from_metadata(metadata: object) -> dict[str, list[str]]:
+    raw = metadata.get("activity_details") if isinstance(metadata, dict) else None
+    raw_details = raw if isinstance(raw, dict) else {}
+    details: dict[str, list[str]] = {}
+    for key in ACTIVITY_DETAIL_KEYS:
+        value = raw_details.get(key)
+        if isinstance(value, list):
+            details[key] = [str(item) for item in value if item not in {None, ""}]
+        else:
+            details[key] = _metadata_list(metadata, key)
+    return details
+
+
+def _event_metric_payload(event: AuditEvent) -> dict[str, Any]:
+    metadata = event.metadata_json or {}
+    input_tokens = _metadata_int(metadata, "tokens_input", "input_tokens", "prompt_tokens")
+    output_tokens = _metadata_int(metadata, "tokens_output", "output_tokens", "completion_tokens")
+    tokens_total = _metadata_int(metadata, "tokens_total", "total_tokens") or input_tokens + output_tokens
+    model = _metadata_value(metadata, "model", "model_name", "model_id")
+    explicit_cost = _metadata_float(metadata, "cost_usd", "estimated_cost_usd")
+    cost_usd = explicit_cost if explicit_cost > 0 else _estimated_cost_usd(model, input_tokens, output_tokens)
+    return {
+        "model": model,
+        "intelligence_tier": _metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier"),
+        "tokens_input": input_tokens,
+        "tokens_output": output_tokens,
+        "tokens_total": tokens_total,
+        "cost_usd": cost_usd,
+        "cost_source": _metadata_value(metadata, "cost_source") or ("metadata" if explicit_cost > 0 else "estimated_from_model_tokens"),
+        "mcp_tools": _metadata_list(metadata, "mcp_tools"),
+        "activity_metrics": _activity_metrics_from_metadata(metadata),
+        "activity_details": _activity_details_from_metadata(metadata),
+    }
+
+
+async def _compliance_metrics_by_session(db: AsyncSession, org_id: str, session_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+    ids = {session_id for session_id in session_ids if session_id}
+    if not ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.org_id == org_id,
+                AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+                AuditEvent.resource_id.in_(ids),
+            )
+            .order_by(AuditEvent.created_at)
+        )
+    ).scalars().all()
+    mapped: dict[str, dict[str, Any]] = {}
+    for event in rows:
+        if not hasattr(event, "metadata_json"):
+            continue
+        metadata = event.metadata_json or {}
+        key = _metadata_value(metadata, "session_id", "agent_session_id", "conversation_id", "thread_id") or event.resource_id
+        if not key:
+            continue
+        metrics = _event_metric_payload(event)
+        bucket = mapped.setdefault(
+            str(key),
+            {"tokens_total": 0, "cost_usd": 0.0, "mcp_tools": set(), "models": Counter(), "model": None, "intelligence_tier": None, "activity_metrics": {metric: 0 for metric in ACTIVITY_METRIC_KEYS}, "activity_details": {detail: [] for detail in ACTIVITY_DETAIL_KEYS}},
+        )
+        bucket["tokens_total"] = int(bucket["tokens_total"]) + int(metrics["tokens_total"])
+        bucket["cost_usd"] = float(bucket["cost_usd"]) + float(metrics["cost_usd"])
+        bucket["mcp_tools"].update(metrics["mcp_tools"])
+        activity_metrics = metrics.get("activity_metrics")
+        if isinstance(activity_metrics, dict):
+            for metric in ACTIVITY_METRIC_KEYS:
+                bucket["activity_metrics"][metric] = int(bucket["activity_metrics"].get(metric) or 0) + int(activity_metrics.get(metric) or 0)
+        activity_details = metrics.get("activity_details")
+        if isinstance(activity_details, dict):
+            for detail in ACTIVITY_DETAIL_KEYS:
+                target = bucket["activity_details"].setdefault(detail, [])
+                if isinstance(target, list):
+                    for item in activity_details.get(detail) or []:
+                        if item not in target:
+                            target.append(item)
+        if metrics["model"]:
+            bucket["models"][str(metrics["model"])] += 1
+        if metrics["intelligence_tier"]:
+            bucket["intelligence_tier"] = metrics["intelligence_tier"]
+    for bucket in mapped.values():
+        bucket["model"] = bucket["models"].most_common(1)[0][0] if bucket["models"] else bucket["model"]
+        bucket["mcp_tools"] = sorted(bucket["mcp_tools"])
+        bucket["cost_usd"] = round(float(bucket["cost_usd"]), 6)
+        del bucket["models"]
+    return mapped
+
+
+def _agent_platform_label(value: str) -> str:
+    normalized = value.strip().lower().replace("_", "-")
+    labels = {
+        "codex": "Codex",
+        "codex-cli": "Codex",
+        "openai-codex": "Codex",
+        "claude-code": "Claude Code",
+        "claude": "Claude Code",
+        "anthropic": "Claude Code",
+        "cursor": "Cursor",
+        "windsurf": "Windsurf",
+        "openai": "OpenAI",
+    }
+    if normalized in labels:
+        return labels[normalized]
+    return value.replace("_", " ").replace("-", " ").strip().title() or "Unknown"
+
+
 def _compliance_activity_item(event: AuditEvent) -> dict[str, Any]:
     metadata = event.metadata_json or {}
     provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or event.resource_type or event.event_type
@@ -195,7 +392,7 @@ def _compliance_sessions(events: Iterable[AuditEvent]) -> list[dict[str, Any]]:
         access_scope = _metadata_value(metadata, "access_scope", "permission_scope", "grant_scope")
         intelligence_tier = _metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier")
         model = _metadata_value(metadata, "model", "model_name", "model_id")
-        source_record_type = _metadata_value(metadata, "source_record_type")
+        source_record_types = _metadata_list(metadata, "source_record_types", "source_record_type")
         risk = 80 if str(event.severity or "").lower() == "critical" or access_scope == "full-access" else 55 if str(event.severity or "").lower() == "warning" or access_scope else 25
         row = grouped.setdefault(
             session_id,
@@ -229,7 +426,7 @@ def _compliance_sessions(events: Iterable[AuditEvent]) -> list[dict[str, Any]]:
             row["last_event_at"] = max(row["last_event_at"], event.created_at) if row["last_event_at"] else event.created_at
         if access_scope:
             row["access_scopes"].add(access_scope)
-        if source_record_type:
+        for source_record_type in source_record_types:
             row["source_record_types"].add(source_record_type)
         policy_decision = _metadata_value(metadata, "policy_decision", "decision", "outcome")
         if policy_decision:
@@ -239,9 +436,10 @@ def _compliance_sessions(events: Iterable[AuditEvent]) -> list[dict[str, Any]]:
             raw = metadata.get(key) if isinstance(metadata, dict) else []
             if isinstance(raw, list):
                 row[target].update(str(item) for item in raw if item not in {None, ""})
-        row["tokens_input"] += int(metadata.get("tokens_input") or 0) if isinstance(metadata, dict) else 0
-        row["tokens_output"] += int(metadata.get("tokens_output") or 0) if isinstance(metadata, dict) else 0
-        row["cost_usd"] += float(metadata.get("cost_usd") or 0) if isinstance(metadata, dict) else 0.0
+        metrics = _event_metric_payload(event)
+        row["tokens_input"] += int(metrics["tokens_input"])
+        row["tokens_output"] += int(metrics["tokens_output"])
+        row["cost_usd"] += float(metrics["cost_usd"])
         row["errors"] += int(metadata.get("error_count") or 0) if isinstance(metadata, dict) else 0
 
     items: list[dict[str, Any]] = []
@@ -322,7 +520,32 @@ async def _feed_items(
         if len(events) < page_size:
             break
         offset += page_size
-    return items[:limit]
+
+    session_activity_at = func.coalesce(AgentSession.last_artifact_at, AgentSession.session_start, AgentSession.created_at)
+    session_statement = select(AgentSession).where(
+        AgentSession.org_id == org_id,
+        session_activity_at >= cutoff,
+    )
+    if repo_id:
+        session_statement = session_statement.where(AgentSession.repo_id == repo_id)
+    if active_filters.get("agent_provider"):
+        session_statement = session_statement.where(AgentSession.agent_runtime == active_filters["agent_provider"])
+    sessions = (
+        await db.execute(session_statement.order_by(desc(session_activity_at)).limit(limit * 2))
+    ).scalars().all()
+    if sessions:
+        repos = await _repos_by_id(db, [session.repo_id for session in sessions])
+        skills = await _session_skill_map(db, sessions)
+        existing_sessions = {str(item.get("session_db_id") or "") for item in items if item.get("session_db_id")}
+        compliance = await _compliance_metrics_by_session(db, org_id, [session.session_id for session in sessions])
+        session_items = [
+            session_feed_event_view(session, repos.get(session.repo_id), skills, compliance.get(str(session.session_id)))
+            for session in sessions
+            if str(session.id) not in existing_sessions
+        ]
+        items.extend(item for item in session_items if _matches_filters(item, active_filters))
+
+    return sorted(items, key=lambda item: str(item.get("timestamp") or ""), reverse=True)[:limit]
 
 
 @router.get("/activity/feed")
@@ -566,7 +789,8 @@ async def activity_sessions(
     sessions = (await db.execute(statement.order_by(desc(AgentSession.created_at)).limit(limit).offset(offset))).scalars().all()
     repos = await _repos_by_id(db, [session.repo_id for session in sessions])
     skills = await _session_skill_map(db, sessions)
-    items = [session_view(session, repos.get(session.repo_id), skills) for session in sessions]
+    compliance = await _compliance_metrics_by_session(db, org_id, [session.session_id for session in sessions])
+    items = [session_view(session, repos.get(session.repo_id), skills, compliance.get(str(session.session_id))) for session in sessions]
     if risk_band_filter:
         items = [item for item in items if item["risk_band"] == risk_band_filter]
     return {"sessions": items, "total": total, "rollup": _rollup(items)}
@@ -582,7 +806,8 @@ async def activity_sessions_rollup(
     sessions = (await db.execute(select(AgentSession).where(AgentSession.org_id == org_id).order_by(desc(AgentSession.created_at)).limit(500))).scalars().all()
     repos = await _repos_by_id(db, [session.repo_id for session in sessions])
     skills = await _session_skill_map(db, sessions)
-    items = [session_view(session, repos.get(session.repo_id), skills) for session in sessions]
+    compliance = await _compliance_metrics_by_session(db, org_id, [session.session_id for session in sessions])
+    items = [session_view(session, repos.get(session.repo_id), skills, compliance.get(str(session.session_id))) for session in sessions]
     return _rollup(items)
 
 
@@ -606,7 +831,8 @@ async def activity_session_detail(
         raise HTTPException(status_code=404, detail="Session not found")
     repo = await _repo_in_org(db, org_id, session.repo_id)
     skills = await _session_skill_map(db, [session])
-    return {"session": session_view(session, repo, skills)}
+    compliance = await _compliance_metrics_by_session(db, org_id, [session.session_id])
+    return {"session": session_view(session, repo, skills, compliance.get(str(session.session_id)))}
 
 
 @router.get("/repos/{repo_id}/activity/sessions/{session_id}/replay")
@@ -629,9 +855,29 @@ async def activity_replay(
     ).scalar_one_or_none()
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    payload = session_view(session, repo, await _session_skill_map(db, [session]))
+    compliance = await _compliance_metrics_by_session(db, org_id, [session.session_id])
+    compliance_events = (
+        await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.org_id == org_id,
+                AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+                or_(
+                    AuditEvent.resource_id == session.session_id,
+                    AuditEvent.resource_id == session.id,
+                ),
+            )
+            .order_by(AuditEvent.created_at)
+        )
+    ).scalars().all()
+    payload = session_view(session, repo, await _session_skill_map(db, [session]), compliance.get(str(session.session_id)))
     timeline = replay_timeline(session, repo)
-    return {"session": payload, "timeline": timeline, "export_html": standalone_replay_html(payload, timeline)}
+    return {
+        "session": payload,
+        "timeline": timeline,
+        "export_html": standalone_replay_html(payload, timeline),
+        "compliance_events": [_compliance_activity_item(event) for event in compliance_events],
+    }
 
 
 @router.get("/repos/{repo_id}/activity/heatmap")
@@ -647,6 +893,194 @@ async def activity_heatmap(
     if repo_id not in {"all", "_all"}:
         await _repo_in_org(db, org_id, repo_id)
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
+    if repo_id in {"all", "_all"}:
+        trend_days = max(1, min(90, round(hours / 24)))
+        today = datetime.now(UTC).replace(tzinfo=None).date()
+        trend_labels = [(today - timedelta(days=offset)).isoformat() for offset in range(trend_days - 1, -1, -1)]
+        trend_label_set = set(trend_labels)
+        session_rows = (
+            await db.execute(
+                select(AgentSession).where(
+                    AgentSession.org_id == org_id,
+                    or_(AgentSession.session_start >= cutoff, AgentSession.created_at >= cutoff),
+                )
+            )
+        ).scalars().all()
+        event_rows = (
+            await db.execute(
+                select(AuditEvent)
+                .where(
+                    AuditEvent.org_id == org_id,
+                    AuditEvent.event_type.in_(AGENT_COMPLIANCE_EVENT_TYPES),
+                    AuditEvent.created_at >= cutoff,
+                )
+                .order_by(AuditEvent.created_at)
+            )
+        ).scalars().all()
+        platform_buckets: dict[str, dict[str, Any]] = {}
+        model_buckets: dict[tuple[str, str], dict[str, Any]] = {}
+        model_counts: Counter[str] = Counter()
+
+        def bucket_for(platform: str) -> dict[str, Any]:
+            label = _agent_platform_label(platform)
+            key = label.lower().replace(" ", "-")
+            return platform_buckets.setdefault(
+                key,
+                {
+                    "repo_id": key,
+                    "repo_name": label,
+                    "cells": defaultdict(lambda: {"action_count": 0, "messages": 0, "tokens_total": 0, "cost_usd": 0.0, "sessions": set(), "models": Counter(), "days": set()}),
+                    "sessions": set(),
+                    "messages": 0,
+                    "tokens_total": 0,
+                    "cost_usd": 0.0,
+                    "days": set(),
+                    "models": Counter(),
+                    "trend": {day: {"sessions": set(), "messages": 0, "tokens_total": 0, "cost_usd": 0.0} for day in trend_labels},
+                },
+            )
+
+        for session in session_rows:
+            when = session.session_start or session.created_at
+            if not when:
+                continue
+            platform = str(session.agent_runtime or "unknown")
+            bucket = bucket_for(platform)
+            session_key = str(session.session_id or session.id)
+            messages = int(session.raw_message_count or 0)
+            cell = bucket["cells"][int(when.hour)]
+            cell["action_count"] += 1
+            cell["messages"] += messages
+            cell["sessions"].add(session_key)
+            cell["days"].add(when.date().isoformat())
+            bucket["sessions"].add(session_key)
+            bucket["messages"] += messages
+            day_label = when.date().isoformat()
+            bucket["days"].add(day_label)
+            if day_label in trend_label_set:
+                trend = bucket["trend"][day_label]
+                trend["sessions"].add(session_key)
+                trend["messages"] += messages
+
+        for event in event_rows:
+            when = event.created_at
+            if not when:
+                continue
+            metadata = event.metadata_json or {}
+            provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or str(event.resource_type or "unknown")
+            source_record_types = [item.lower() for item in _metadata_list(metadata, "source_record_types", "source_record_type")]
+            if provider.lower() == "openai" and any("codex" in item for item in source_record_types):
+                provider = "codex"
+            model = _metadata_value(metadata, "model", "model_name", "model_id")
+            session_key = _metadata_value(metadata, "session_id", "agent_session_id", "conversation_id", "thread_id") or event.resource_id or event.id
+            metrics = _event_metric_payload(event)
+            tokens_total = int(metrics["tokens_total"])
+            cost_usd = float(metrics["cost_usd"])
+            messages = _metadata_int(metadata, "message_count", "messages", "raw_message_count") or 1
+            bucket = bucket_for(provider)
+            cell = bucket["cells"][int(when.hour)]
+            cell["action_count"] += 1
+            cell["messages"] += messages
+            cell["tokens_total"] += tokens_total
+            cell["cost_usd"] += cost_usd
+            cell["sessions"].add(session_key)
+            cell["days"].add(when.date().isoformat())
+            bucket["sessions"].add(session_key)
+            bucket["messages"] += messages
+            bucket["tokens_total"] += tokens_total
+            bucket["cost_usd"] += cost_usd
+            day_label = when.date().isoformat()
+            bucket["days"].add(day_label)
+            if day_label in trend_label_set:
+                trend = bucket["trend"][day_label]
+                trend["sessions"].add(session_key)
+                trend["messages"] += messages
+                trend["tokens_total"] += tokens_total
+                trend["cost_usd"] += cost_usd
+            if model:
+                bucket["models"][model] += 1
+                cell["models"][model] += 1
+                model_counts[model] += 1
+                model_key = (bucket["repo_name"], model)
+                model_bucket = model_buckets.setdefault(
+                    model_key,
+                    {"platform": bucket["repo_name"], "model": model, "tokens_total": 0, "cost_usd": 0.0, "sessions": set(), "messages": 0},
+                )
+                model_bucket["tokens_total"] += tokens_total
+                model_bucket["cost_usd"] += cost_usd
+                model_bucket["sessions"].add(session_key)
+                model_bucket["messages"] += messages
+
+        cells: list[dict[str, Any]] = []
+        for bucket in platform_buckets.values():
+            favorite_model = bucket["models"].most_common(1)[0][0] if bucket["models"] else None
+            for hour, cell in bucket["cells"].items():
+                actions = int(cell["action_count"])
+                cells.append(
+                    {
+                        "repo_id": bucket["repo_id"],
+                        "repo_name": bucket["repo_name"],
+                        "hour": int(hour),
+                        "action_count": actions,
+                        "messages": int(cell["messages"]),
+                        "sessions": len(cell["sessions"]),
+                        "tokens_total": int(cell["tokens_total"]),
+                        "cost_usd": round(float(cell["cost_usd"]), 6),
+                        "active_days": len(cell["days"]),
+                        "favorite_model": cell["models"].most_common(1)[0][0] if cell["models"] else favorite_model,
+                        "deny_rate": 0.0 if include_deny_rate else None,
+                        "risk_band": risk_band(min(100, actions * 5)),
+                    }
+                )
+        max_count = max([cell["action_count"] for cell in cells], default=0)
+        peak = max(cells, key=lambda cell: (cell["tokens_total"], cell["action_count"]), default=None)
+        total_sessions = len({session for bucket in platform_buckets.values() for session in bucket["sessions"]})
+        active_trend_days = {
+            day
+            for bucket in platform_buckets.values()
+            for day, values in bucket["trend"].items()
+            if len(values["sessions"]) or int(values["messages"]) or int(values["tokens_total"])
+        }
+        return {
+            "repo_id": repo_id,
+            "hours": hours,
+            "max_action_count": max_count,
+            "group_by": "platform",
+            "summary": {
+                "sessions": total_sessions,
+                "messages": sum(int(bucket["messages"]) for bucket in platform_buckets.values()),
+                "tokens_total": sum(int(bucket["tokens_total"]) for bucket in platform_buckets.values()),
+                "cost_usd": round(sum(float(bucket["cost_usd"]) for bucket in platform_buckets.values()), 6),
+                "active_days": len(active_trend_days),
+                "peak_hour": int(peak["hour"]) if peak else None,
+                "favorite_model": model_counts.most_common(1)[0][0] if model_counts else None,
+                "platforms": len(platform_buckets),
+            },
+            "models": [
+                {
+                    "platform": str(values["platform"]),
+                    "model": str(values["model"]),
+                    "tokens_total": int(values["tokens_total"]),
+                    "cost_usd": round(float(values["cost_usd"]), 6),
+                    "sessions": len(values["sessions"]),
+                    "messages": int(values["messages"]),
+                }
+                for values in sorted(model_buckets.values(), key=lambda item: (-int(item["tokens_total"]), str(item["platform"]), str(item["model"])))
+            ],
+            "trend": [
+                {
+                    "platform": str(bucket["repo_name"]),
+                    "date": day,
+                    "sessions": len(values["sessions"]),
+                    "messages": int(values["messages"]),
+                    "tokens_total": int(values["tokens_total"]),
+                    "cost_usd": round(float(values["cost_usd"]), 6),
+                }
+                for bucket in sorted(platform_buckets.values(), key=lambda item: str(item["repo_name"]))
+                for day, values in bucket["trend"].items()
+            ],
+            "cells": cells,
+        }
     statement = (
         select(
             Repo.id.label("repo_id"),

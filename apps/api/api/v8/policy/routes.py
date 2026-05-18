@@ -7,6 +7,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -156,7 +157,7 @@ async def list_rules(
     current_org_id: str = Depends(get_current_org_id),
 ) -> list[PolicyRuleResponse]:
     await _ensure_v8(org_id, current_org_id, db)
-    rows = (await db.execute(select(OrgPolicy).where(OrgPolicy.org_id == org_id).order_by(desc(OrgPolicy.created_at)))).scalars().all()
+    rows = await _load_policy_rows(org_id, db, enabled_only=False, newest_first=True)
     violations = await _policy_violation_counts(org_id, db)
     return [_policy_response(row, violations.get(row.id, 0)) for row in rows]
 
@@ -382,13 +383,17 @@ async def list_quarantine(
     current_org_id: str = Depends(get_current_org_id),
 ) -> list[QuarantineItem]:
     await _ensure_v8(org_id, current_org_id, db)
-    rows = (
-        await db.execute(
-            select(SkillRegistryEntry)
-            .where(SkillRegistryEntry.org_id == org_id)
-            .order_by(desc(SkillRegistryEntry.updated_at))
-        )
-    ).scalars().all()
+    try:
+        rows = (
+            await db.execute(
+                select(SkillRegistryEntry)
+                .where(SkillRegistryEntry.org_id == org_id)
+                .order_by(desc(SkillRegistryEntry.updated_at))
+            )
+        ).scalars().all()
+    except SQLAlchemyError:
+        await db.rollback()
+        return []
     items: list[QuarantineItem] = []
     for row in rows:
         tags = {str(tag) for tag in (row.tags or [])}
@@ -455,13 +460,25 @@ def _parse_mutation(payload: PolicyRuleMutation) -> tuple[PolicyRule, str]:
 
 
 async def _load_enabled_rules(org_id: str, db: AsyncSession) -> list[OrgPolicy]:
-    return (
-        await db.execute(
-            select(OrgPolicy)
-            .where(OrgPolicy.org_id == org_id, OrgPolicy.enabled.is_(True))
-            .order_by(OrgPolicy.created_at)
-        )
-    ).scalars().all()
+    return await _load_policy_rows(org_id, db, enabled_only=True, newest_first=False)
+
+
+async def _load_policy_rows(
+    org_id: str,
+    db: AsyncSession,
+    *,
+    enabled_only: bool,
+    newest_first: bool,
+) -> list[OrgPolicy]:
+    statement = select(OrgPolicy).where(OrgPolicy.org_id == org_id)
+    if enabled_only:
+        statement = statement.where(OrgPolicy.enabled.is_(True))
+    statement = statement.order_by(desc(OrgPolicy.created_at) if newest_first else OrgPolicy.created_at)
+    try:
+        return list((await db.execute(statement)).scalars().all())
+    except SQLAlchemyError:
+        await db.rollback()
+        return []
 
 
 async def _policy_violation_counts(org_id: str, db: AsyncSession) -> dict[str, int]:
@@ -477,10 +494,15 @@ async def _violations(
     *,
     approval_decisions: dict[str, dict[str, object]] | None = None,
 ) -> list[ViolationResponse]:
-    rows = {row.id: row for row in (await db.execute(select(OrgPolicy).where(OrgPolicy.org_id == org_id))).scalars().all()}
+    rows = {row.id: row for row in await _load_policy_rows(org_id, db, enabled_only=False, newest_first=False)}
     now = datetime.utcnow()
     items: list[ViolationResponse] = []
-    for index, violation in enumerate(await evaluate_policies(org_id, db)):
+    try:
+        evaluated = await evaluate_policies(org_id, db)
+    except SQLAlchemyError:
+        await db.rollback()
+        evaluated = []
+    for index, violation in enumerate(evaluated):
         row = rows.get(violation.policy_id)
         decision = _canonical_decision(getattr(row, "decision", "log_only") if row else "log_only")
         if decision not in FLAGGED_DECISIONS:

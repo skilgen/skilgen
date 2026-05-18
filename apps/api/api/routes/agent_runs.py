@@ -8,11 +8,12 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AuditEvent, Repo
+from packages.db.models import AgentSession, AuditEvent, PullRequest, Repo
 
 
 router = APIRouter(prefix="/orgs", tags=["agent-runs"])
@@ -127,6 +128,51 @@ def _metadata_bool(metadata: dict[str, Any], *keys: str) -> bool:
     return False
 
 
+def _metadata_int(metadata: dict[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str) and value.strip():
+            try:
+                return int(float(value))
+            except ValueError:
+                continue
+    return None
+
+
+def _metadata_float(metadata: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int | float):
+            return float(value)
+        if isinstance(value, str) and value.strip():
+            try:
+                return float(value)
+            except ValueError:
+                continue
+    return None
+
+
+def _metadata_list(metadata: dict[str, Any], *keys: str) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, list):
+            values.extend(str(item) for item in value if item not in {None, ""})
+        elif isinstance(value, dict):
+            values.extend(str(item) for item in value.keys())
+        elif isinstance(value, str) and value.strip():
+            values.append(value.strip())
+    return sorted(dict.fromkeys(values))
+
+
 def _safe_tool_label(value: object) -> str | None:
     if isinstance(value, str):
         return value.strip() or None
@@ -156,6 +202,88 @@ def _tool_names(artifacts: list[dict[str, Any]], metadata: dict[str, Any]) -> li
     return sorted(dict.fromkeys(names))
 
 
+def _activity_metrics(metadata: dict[str, Any], artifacts: list[dict[str, Any]], tool_permissions: list[str]) -> dict[str, int]:
+    raw = metadata.get("activity_metrics")
+    raw_metrics = raw if isinstance(raw, dict) else {}
+
+    def metric(name: str, *fallback_keys: str, fallback: int = 0) -> int:
+        value = raw_metrics.get(name)
+        if isinstance(value, bool):
+            value = None
+        if isinstance(value, int | float):
+            return int(value)
+        if isinstance(value, str) and value.strip():
+            try:
+                return int(float(value))
+            except ValueError:
+                pass
+        direct = _metadata_int(metadata, name, *fallback_keys)
+        return int(direct if direct is not None else fallback)
+
+    return {
+        "edited_files": metric("edited_files", fallback=len([item for item in artifacts if item.get("file_path")])),
+        "explored_files": metric("explored_files"),
+        "searches": metric("searches", "search_count"),
+        "lists": metric("lists", "list_count"),
+        "commands": metric("commands", "command_count"),
+        "tool_calls": metric("tool_calls", "tool_call_count", fallback=len(tool_permissions)),
+        "mcp_tools": metric("mcp_tools", "mcp_tool_count", fallback=len(_metadata_list(metadata, "mcp_tools"))),
+    }
+
+
+def _activity_details(metadata: dict[str, Any], artifacts: list[dict[str, Any]], tool_permissions: list[str]) -> dict[str, list[str]]:
+    raw = metadata.get("activity_details")
+    raw_details = raw if isinstance(raw, dict) else {}
+
+    def detail(name: str, fallback: list[str] | None = None) -> list[str]:
+        value = raw_details.get(name)
+        if isinstance(value, list):
+            return sorted(dict.fromkeys(str(item) for item in value if item not in {None, ""}))
+        return sorted(dict.fromkeys(fallback or []))
+
+    return {
+        "edited_files": detail("edited_files", [str(item.get("file_path")) for item in artifacts if item.get("file_path")]),
+        "explored_files": detail("explored_files"),
+        "searches": detail("searches"),
+        "lists": detail("lists"),
+        "commands": detail("commands"),
+        "tools": detail("tools", tool_permissions),
+    }
+
+
+async def _resolve_pr_context(db: AsyncSession, repo: Repo, metadata: dict[str, Any]) -> dict[str, Any]:
+    pr_number = _metadata_int(metadata, "pr_number", "pull_request_number")
+    pr_id = _metadata_string(metadata, "pr_id", "pull_request_id")
+    head_sha = _metadata_string(metadata, "head_sha", "commit_sha", "sha")
+    row = None
+    try:
+        if pr_number is not None:
+            row = (
+                await db.execute(select(PullRequest).where(PullRequest.repo_id == repo.id, PullRequest.github_pr_number == pr_number).limit(1))
+            ).scalar_one_or_none()
+        if row is None and pr_id:
+            row = (await db.execute(select(PullRequest).where(PullRequest.repo_id == repo.id, PullRequest.id == pr_id).limit(1))).scalar_one_or_none()
+        if row is None and head_sha:
+            row = (await db.execute(select(PullRequest).where(PullRequest.repo_id == repo.id, PullRequest.head_sha == head_sha).limit(1))).scalar_one_or_none()
+    except OperationalError:
+        row = None
+    if row is None:
+        return {
+            "pr_id": pr_id,
+            "pr_number": pr_number,
+            "pr_title": _metadata_string(metadata, "pr_title", "pull_request_title"),
+            "head_sha": head_sha,
+            "branch": _metadata_string(metadata, "branch", "head_branch"),
+        }
+    return {
+        "pr_id": row.id,
+        "pr_number": row.github_pr_number,
+        "pr_title": row.title,
+        "head_sha": row.head_sha,
+        "branch": _metadata_string(metadata, "branch", "head_branch"),
+    }
+
+
 def _sanitized_agent_run_envelope(payload: AgentRunPayload, artifacts: list[dict[str, Any]], repo: Repo, session_key: str, runtime: str) -> dict[str, Any]:
     return {
         "spec_version": payload.spec_version,
@@ -182,24 +310,51 @@ def _sanitized_agent_run_envelope(payload: AgentRunPayload, artifacts: list[dict
     }
 
 
-def _agent_compliance_audit_event(org_id: str, payload: AgentRunPayload, repo: Repo, session_key: str, runtime: str, artifacts: list[dict[str, Any]]) -> AuditEvent:
+def _agent_compliance_audit_event(org_id: str, payload: AgentRunPayload, repo: Repo, session_key: str, runtime: str, artifacts: list[dict[str, Any]], pr_context: dict[str, Any] | None = None) -> AuditEvent:
     metadata = dict(payload.metadata or {})
     sanitized_envelope = _sanitized_agent_run_envelope(payload, artifacts, repo, session_key, runtime)
     envelope_hash = hashlib.sha256(json.dumps(sanitized_envelope, sort_keys=True, default=str).encode("utf-8")).hexdigest()
     provider = _metadata_string(metadata, "provider", "agent_provider", "source_provider") or f"{payload.agent.vendor} {payload.agent.product}".strip()
     access_scope = _metadata_string(metadata, "access_scope", "permission_scope", "grant_scope") or ("full-access" if _metadata_bool(metadata, "full_access", "full_access_granted") else "unspecified")
     tool_permissions = _tool_names(artifacts, metadata)
+    file_targets = sorted(dict.fromkeys([str(item.get("file_path")) for item in artifacts if item.get("file_path")] + _metadata_list(metadata, "file_targets", "files", "file_scope")))
+    activity_metrics = _activity_metrics(metadata, artifacts, tool_permissions)
+    activity_details = _activity_details(metadata, artifacts, tool_permissions)
+    input_tokens = _metadata_int(metadata, "tokens_input", "input_tokens", "prompt_tokens")
+    output_tokens = _metadata_int(metadata, "tokens_output", "output_tokens", "completion_tokens")
+    total_tokens = _metadata_int(metadata, "tokens_total", "total_tokens") or ((input_tokens or 0) + (output_tokens or 0) or None)
+    pr_context = {key: value for key, value in (pr_context or {}).items() if value not in {None, ""}}
     compliance_metadata: dict[str, Any] = {
         "provider": provider,
         "agent_provider": provider,
         "agent_runtime": runtime,
         "model": _metadata_string(metadata, "model", "model_name", "model_id"),
         "intelligence_tier": _metadata_string(metadata, "intelligence_tier", "model_tier", "reasoning_tier"),
+        "task_type": _metadata_string(metadata, "task_type", "task", "workflow_type", "intent"),
         "access_scope": access_scope,
         "full_access": _metadata_bool(metadata, "full_access", "full_access_granted") or access_scope == "full-access",
         "autonomous_access": _metadata_bool(metadata, "autonomous_access", "autonomous"),
         "tool_permissions": tool_permissions,
+        "mcp_tools": _metadata_list(metadata, "mcp_tools"),
+        "file_targets": file_targets,
+        "activity_metrics": activity_metrics,
+        "activity_details": activity_details,
+        "edited_files": activity_metrics["edited_files"],
+        "explored_files": activity_metrics["explored_files"],
+        "searches": activity_metrics["searches"],
+        "lists": activity_metrics["lists"],
+        "commands": activity_metrics["commands"],
         "repo_name": repo.full_name or repo.name,
+        "session_id": session_key,
+        "tokens_input": input_tokens,
+        "tokens_output": output_tokens,
+        "tokens_total": total_tokens,
+        "cost_usd": _metadata_float(metadata, "cost_usd", "estimated_cost_usd"),
+        "latency_ms": _metadata_float(metadata, "latency_ms", "duration_ms"),
+        "policy_decision": _metadata_string(metadata, "policy_decision", "decision"),
+        "approval_status": _metadata_string(metadata, "approval_status"),
+        "source_record_types": _metadata_list(metadata, "source_record_types", "source_record_type"),
+        **pr_context,
         "source_envelope_hash": envelope_hash,
         "provider_event_id": session_key,
         "formal_compliance_record": False,
@@ -265,8 +420,21 @@ async def ingest_agent_run(
     code_text = _code_text(payload, artifacts)
 
     try:
+        pr_context = await _resolve_pr_context(db, repo, payload.metadata or {})
         session = (
             await db.execute(select(AgentSession).where(AgentSession.repo_id == repo.id, AgentSession.session_id == session_key))
+        ).scalar_one_or_none()
+        existing_audit = (
+            await db.execute(
+                select(AuditEvent)
+                .where(
+                    AuditEvent.org_id == org_id,
+                    AuditEvent.event_type == "agent.compliance",
+                    AuditEvent.resource_type == "agent_run",
+                    AuditEvent.resource_id == session_key,
+                )
+                .limit(1)
+            )
         ).scalar_one_or_none()
         status = "updated"
         if session is None:
@@ -278,11 +446,16 @@ async def ingest_agent_run(
                 engineer_login=payload.user.login if payload.user else None,
                 session_start=started_at,
                 extraction_status="pending",
+                created_at=started_at,
             )
             db.add(session)
             status = "created"
 
         session.agent_runtime = runtime
+        if session.created_at is None or session.created_at > started_at:
+            session.created_at = started_at
+        if session.session_start is None or session.session_start > started_at:
+            session.session_start = started_at
         session.session_end = ended_at or session.session_end
         session.closed_at = ended_at or session.closed_at
         session.outcome = payload.outcome or session.outcome
@@ -302,7 +475,20 @@ async def ingest_agent_run(
         session.files_touched = touched
         if code_text:
             session.code_produced = f"{session.code_produced}\n\n{code_text}".strip() if session.code_produced else code_text
-        db.add(_agent_compliance_audit_event(org_id, payload, repo, session_key, runtime, artifacts))
+        repo.last_analysed_at = max(filter(None, [repo.last_analysed_at, ended_at, started_at]), default=started_at)
+        audit_event = _agent_compliance_audit_event(org_id, payload, repo, session_key, runtime, artifacts, pr_context)
+        audit_event.created_at = ended_at or started_at
+        if existing_audit is None:
+            db.add(audit_event)
+        else:
+            existing_audit.action = audit_event.action
+            existing_audit.summary = audit_event.summary
+            existing_audit.actor_login = audit_event.actor_login
+            existing_audit.repo_id = audit_event.repo_id
+            existing_audit.repo_name = audit_event.repo_name
+            existing_audit.severity = audit_event.severity
+            existing_audit.metadata_json = audit_event.metadata_json
+            existing_audit.created_at = audit_event.created_at
         await db.commit()
     except HTTPException:
         raise

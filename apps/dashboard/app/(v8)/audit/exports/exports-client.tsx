@@ -3,7 +3,13 @@
 import { Download } from "lucide-react";
 import { useState } from "react";
 
-const CLIENT_API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
+function clientApiUrl() {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname)) {
+    return "http://127.0.0.1:8000";
+  }
+  return "https://api.skillayer.com";
+}
 
 const formats = ["csv", "json", "splunk_hec", "datadog_cloud_siem", "sumo_logic", "microsoft_sentinel", "raw_ndjson_s3"];
 
@@ -23,7 +29,7 @@ export function AuditExportsClient({ accessToken, orgId }: { accessToken: string
 
   async function runExport() {
     setBusy(true);
-    const response = await fetch(`${CLIENT_API_URL}/v8/orgs/${orgId}/audit/exports`, {
+    const response = await fetch(`${clientApiUrl()}/v8/orgs/${orgId}/audit/exports`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
