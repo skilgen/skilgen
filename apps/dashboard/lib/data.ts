@@ -2574,7 +2574,7 @@ export async function getV8DeveloperTrack(accessToken: string | null, orgId: str
 }
 
 export async function getV8CodexRuns(accessToken: string | null, orgId: string): Promise<InsightsCodexRuns | null> {
-  return apiFetch<InsightsCodexRuns>(`/v8/orgs/${orgId}/insights/codex-runs`, { accessToken, cache: "no-store" });
+  return apiFetch<InsightsCodexRuns>(`/v8/orgs/${orgId}/insights/agent-runs`, { accessToken, cache: "no-store" });
 }
 
 export async function getV8ProviderCoverage(accessToken: string | null, orgId: string): Promise<InsightsProviderCoverage | null> {

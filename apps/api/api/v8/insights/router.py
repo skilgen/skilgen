@@ -2059,6 +2059,7 @@ async def get_developer_track(
     return _developer_track_from_events(list(events), window_days, limit=limit)
 
 
+@router.get("/agent-runs", response_model=CodexRunInsightsResponse)
 @router.get("/codex-runs", response_model=CodexRunInsightsResponse)
 async def get_codex_run_insights(
     org_id: str,

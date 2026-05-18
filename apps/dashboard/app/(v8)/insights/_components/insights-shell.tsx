@@ -33,7 +33,7 @@ import {
   type InsightsTrendMetric,
 } from "../../../../lib/data";
 
-type InsightsTab = "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "agent-compliance-metrics" | "codex-runs" | "intelligence-usage" | "access-grants" | "provider-coverage";
+type InsightsTab = "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "agent-compliance-metrics" | "agent-runs" | "codex-runs" | "intelligence-usage" | "access-grants" | "provider-coverage";
 
 const tabs: Array<{ id: InsightsTab; label: string; href: string }> = [
   { id: "fleet-kpis", label: "Fleet KPIs", href: "/insights/fleet-kpis" },
@@ -42,7 +42,7 @@ const tabs: Array<{ id: InsightsTab; label: string; href: string }> = [
   { id: "risky-repos", label: "Risky repos", href: "/insights/risky-repos" },
   { id: "coverage-sla", label: "Coverage SLA", href: "/insights/coverage-sla" },
   { id: "agent-compliance-metrics", label: "Agent metrics", href: "/insights/agent-compliance-metrics" },
-  { id: "codex-runs", label: "Codex runs", href: "/insights/codex-runs" },
+  { id: "agent-runs", label: "Agent runs", href: "/insights/agent-runs" },
   { id: "intelligence-usage", label: "Intelligence usage", href: "/insights/intelligence-usage" },
   { id: "access-grants", label: "Access grants", href: "/insights/access-grants" },
   { id: "provider-coverage", label: "Provider coverage", href: "/insights/provider-coverage" },
@@ -587,15 +587,15 @@ export async function CodexRunsView() {
   const summary = data?.summary;
   const runs = data?.runs ?? [];
   return (
-    <PageFrame active="codex-runs">
+    <PageFrame active="agent-runs">
       <section className="grid gap-4 md:grid-cols-4">
         <DeveloperMetric detail="Coding-agent runs captured from metadata-only local/provider telemetry." icon={<Code2 className="h-4 w-4" />} label="Runs" value={summary?.runs ?? 0} />
         <DeveloperMetric detail={`${summary?.edited_files ?? 0} edited files and ${summary?.explored_files ?? 0} explored files.`} icon={<Sparkles className="h-4 w-4" />} label="File activity" value={(summary?.edited_files ?? 0) + (summary?.explored_files ?? 0)} />
         <DeveloperMetric detail={`${summary?.searches ?? 0} searches, ${summary?.lists ?? 0} lists, ${summary?.commands ?? 0} shell commands.`} icon={<RadioTower className="h-4 w-4" />} label="Background ops" value={(summary?.searches ?? 0) + (summary?.lists ?? 0) + (summary?.commands ?? 0)} />
         <DeveloperMetric detail={`${compactNumber(summary?.tokens_total ?? 0)} tokens and $${(summary?.cost_usd ?? 0).toFixed(2)} in this window.`} icon={<KeyRound className="h-4 w-4" />} label="Full access" value={summary?.full_access_runs ?? 0} />
       </section>
-      {!data ? <EmptyState label="Codex run telemetry unavailable" /> : null}
-      {data && !runs.length ? <EmptyState label="No Codex runs captured yet" /> : null}
+      {!data ? <EmptyState label="Agent run telemetry unavailable" /> : null}
+      {data && !runs.length ? <EmptyState label="No coding-agent runs captured yet" /> : null}
       <section className="space-y-4">
         {runs.map((run) => <CodexRunCard key={run.id} run={run} />)}
       </section>

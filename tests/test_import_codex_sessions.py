@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.import_codex_sessions import build_agent_run_payloads
+from scripts.import_codex_sessions import build_agent_run_payloads, build_claude_agent_run_payloads
 
 
 class CodexSessionImporterTests(unittest.TestCase):
@@ -63,6 +63,68 @@ class CodexSessionImporterTests(unittest.TestCase):
         self.assertIn("rg TODO apps", payload["metadata"]["activity_details"]["searches"])
         self.assertNotIn("please edit secret file", json.dumps(payload))
         self.assertNotIn("+raw code", json.dumps(payload))
+
+    def test_build_claude_agent_run_payloads_matches_background_metrics_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            claude_home = root / ".claude"
+            project = claude_home / "projects" / "-tmp-skilgen-work"
+            project.mkdir(parents=True)
+            source = project / "claude-session.jsonl"
+            records = [
+                {
+                    "type": "user",
+                    "sessionId": "claude-session",
+                    "cwd": str(root),
+                    "permissionMode": "bypassPermissions",
+                    "timestamp": "2026-05-18T03:00:00Z",
+                    "message": {"role": "user", "content": [{"type": "text", "text": "raw request must not leak"}]},
+                },
+                {
+                    "type": "assistant",
+                    "sessionId": "claude-session",
+                    "cwd": str(root),
+                    "permissionMode": "bypassPermissions",
+                    "timestamp": "2026-05-18T03:00:01Z",
+                    "message": {
+                        "role": "assistant",
+                        "model": "claude-sonnet-4-5-20250929",
+                        "usage": {"input_tokens": 10, "cache_creation_input_tokens": 20, "cache_read_input_tokens": 30, "output_tokens": 5, "speed": "standard"},
+                        "content": [
+                            {"type": "tool_use", "name": "Read", "input": {"file_path": str(root / "apps/api.py")}},
+                            {"type": "tool_use", "name": "Grep", "input": {"pattern": "TODO", "path": "apps"}},
+                            {"type": "tool_use", "name": "Glob", "input": {"pattern": "**/*.py", "path": "apps"}},
+                            {"type": "tool_use", "name": "Bash", "input": {"command": "rg TODO apps"}},
+                            {"type": "tool_use", "name": "Edit", "input": {"file_path": str(root / "apps/api.py"), "old_string": "secret", "new_string": "raw code"}},
+                        ],
+                    },
+                },
+            ]
+            source.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+
+            payloads = build_claude_agent_run_payloads(claude_home=claude_home, project_root=root, repo_id="repo_1")
+
+        self.assertEqual(len(payloads), 1)
+        payload = payloads[0]
+        self.assertEqual(payload["agent"]["runtime"], "claude_code")
+        self.assertEqual(payload["metadata"]["provider"], "Claude Code")
+        self.assertEqual(payload["metadata"]["model"], "claude-sonnet-4-5-20250929")
+        self.assertEqual(payload["metadata"]["tokens_input"], 60)
+        self.assertEqual(payload["metadata"]["tokens_output"], 5)
+        self.assertEqual(payload["metadata"]["tokens_total"], 65)
+        self.assertEqual(payload["metadata"]["access_scope"], "full-access")
+        self.assertEqual(payload["metadata"]["activity_metrics"]["edited_files"], 1)
+        self.assertEqual(payload["metadata"]["activity_metrics"]["explored_files"], 1)
+        self.assertEqual(payload["metadata"]["activity_metrics"]["searches"], 2)
+        self.assertEqual(payload["metadata"]["activity_metrics"]["lists"], 1)
+        self.assertEqual(payload["metadata"]["activity_metrics"]["commands"], 1)
+        self.assertEqual(payload["metadata"]["activity_metrics"]["tool_calls"], 5)
+        self.assertEqual(payload["metadata"]["activity_details"]["edited_files"], ["apps/api.py"])
+        self.assertEqual(payload["metadata"]["activity_details"]["explored_files"], ["apps/api.py"])
+        self.assertIn("Grep TODO apps", payload["metadata"]["activity_details"]["searches"])
+        self.assertIn("rg TODO apps", payload["metadata"]["activity_details"]["commands"])
+        self.assertNotIn("raw request must not leak", json.dumps(payload))
+        self.assertNotIn("raw code", json.dumps(payload))
 
 
 if __name__ == "__main__":

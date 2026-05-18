@@ -44,6 +44,13 @@ def _session_files(codex_home: Path) -> list[Path]:
     return sorted(sessions.glob("**/*.jsonl"))
 
 
+def _claude_session_files(claude_home: Path) -> list[Path]:
+    projects = claude_home / "projects"
+    if not projects.exists():
+        return []
+    return sorted(projects.glob("**/*.jsonl"))
+
+
 def _relative_path(path: str, project_root: Path) -> str:
     candidate = Path(path)
     try:
@@ -60,6 +67,13 @@ def _belongs_to_project(turn: dict[str, Any], project_root: Path) -> bool:
             return True
         except (OSError, ValueError):
             pass
+        root_name = project_root.resolve().name
+        if root_name and root_name in Path(cwd).parts:
+            return True
+        # Local Claude Code worktrees often live beside the dashboard checkout
+        # with a sibling folder name such as skilgen-upstream-work.
+        if project_root.resolve().parent.name and project_root.resolve().parent.name in Path(cwd).parts:
+            return True
     for path in (turn.get("file_targets") or {}).keys():
         candidate = Path(str(path))
         if not candidate.is_absolute():
@@ -116,6 +130,12 @@ def _new_turn(turn_id: str, session_meta: dict[str, Any], thread_name: str, sour
     }
 
 
+def _new_claude_turn(session_id: str, source_file: Path) -> dict[str, Any]:
+    turn = _new_turn(f"claude-{session_id}-{source_file.stem}", {"id": session_id}, "Claude Code session", source_file)
+    turn["thread_id"] = session_id
+    return turn
+
+
 def _reasoning_mode(effort: object, model: object) -> str:
     normalized = str(effort or "").strip().lower()
     model_name = str(model or "").strip().lower()
@@ -141,6 +161,11 @@ def _access_scope(turn: dict[str, Any]) -> tuple[str, bool]:
     sandbox_type = sandbox.get("type") if isinstance(sandbox, dict) else str(sandbox or "")
     if str(sandbox_type).lower() == "danger-full-access":
         return "full-access", True
+    permission = str(turn.get("permission_profile") or "").strip().lower()
+    if permission in {"bypasspermissions", "bypass-permissions", "full-access", "danger-full-access"}:
+        return "full-access", True
+    if permission in {"acceptedits", "accept-edits"}:
+        return "workspace-write", False
     if turn.get("file_targets"):
         return "workspace-write", False
     if _tool_permissions(turn):
@@ -158,6 +183,20 @@ def _record_tokens(turn: dict[str, Any], payload: dict[str, Any]) -> None:
     turn["tokens_input"] += int(last.get("input_tokens") or 0)
     turn["tokens_output"] += int(last.get("output_tokens") or 0)
     turn["tokens_total"] += int(last.get("total_tokens") or 0)
+
+
+def _record_claude_usage(turn: dict[str, Any], usage: object) -> None:
+    if not isinstance(usage, dict):
+        return
+    input_tokens = int(usage.get("input_tokens") or 0)
+    cache_creation = int(usage.get("cache_creation_input_tokens") or 0)
+    cache_read = int(usage.get("cache_read_input_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or 0)
+    turn["tokens_input"] += input_tokens + cache_creation + cache_read
+    turn["tokens_output"] += output_tokens
+    turn["tokens_total"] += input_tokens + cache_creation + cache_read + output_tokens
+    if usage.get("speed") and not turn.get("reasoning_effort"):
+        turn["reasoning_effort"] = str(usage.get("speed"))
 
 
 def _estimated_cost_usd(model: str | None, input_tokens: int, output_tokens: int) -> float | None:
@@ -197,6 +236,38 @@ def _record_patch_files(turn: dict[str, Any], payload: dict[str, Any], project_r
     details = turn.get("activity_details")
     if isinstance(details, dict):
         details["edited_files"] = sorted((turn.get("file_targets") or {}).keys())
+
+
+def _record_edited_file(turn: dict[str, Any], file_path: object, tool: str, project_root: Path) -> None:
+    if not isinstance(file_path, str) or not file_path:
+        return
+    relative = _relative_path(file_path, project_root)
+    digest_input = f"{tool}:{relative}".encode("utf-8")
+    turn["file_targets"][relative] = {
+        "file_path": relative,
+        "tool": tool,
+        "after_hash": hashlib.sha256(digest_input).hexdigest(),
+    }
+    metrics = turn.get("activity_metrics")
+    if isinstance(metrics, dict):
+        metrics["edited_files"] = len(turn.get("file_targets") or {})
+    details = turn.get("activity_details")
+    if isinstance(details, dict):
+        details["edited_files"] = sorted((turn.get("file_targets") or {}).keys())
+
+
+def _record_explored_file(turn: dict[str, Any], file_path: object, project_root: Path) -> None:
+    if not isinstance(file_path, str) or not file_path:
+        return
+    explored = turn.get("explored_file_paths")
+    if isinstance(explored, set):
+        explored.add(_relative_path(file_path, project_root))
+    metrics = turn.get("activity_metrics")
+    if isinstance(metrics, dict):
+        metrics["explored_files"] = len(explored or [])
+    details = turn.get("activity_details")
+    if isinstance(details, dict):
+        details["explored_files"] = sorted(explored or [])
 
 
 def _redact_command(command: str) -> str:
@@ -296,7 +367,19 @@ def _record_tool_call(turn: dict[str, Any], payload: dict[str, Any]) -> None:
         metrics["mcp_tools"] = len(turn.get("mcp_tools") or [])
 
 
-def _turn_payload(turn: dict[str, Any], *, repo_id: str | None, repo_full_name: str | None) -> dict[str, Any] | None:
+def _turn_payload(
+    turn: dict[str, Any],
+    *,
+    repo_id: str | None,
+    repo_full_name: str | None,
+    provider: str = "Codex",
+    agent_provider: str = "Codex Desktop",
+    source_provider: str = "codex_desktop",
+    source_record_type: str = "codex_desktop_jsonl",
+    agent_vendor: str = "OpenAI",
+    agent_product: str = "Codex Desktop",
+    agent_runtime: str = "codex_cli",
+) -> dict[str, Any] | None:
     if not turn.get("started_at"):
         return None
     tool_permissions = _tool_permissions(turn)
@@ -304,14 +387,17 @@ def _turn_payload(turn: dict[str, Any], *, repo_id: str | None, repo_full_name: 
     reasoning_effort = turn.get("reasoning_effort")
     reasoning_mode = _reasoning_mode(reasoning_effort, turn.get("model"))
     metadata = {
-        "provider": "Codex",
-        "agent_provider": "Codex Desktop",
-        "source_provider": "codex_desktop",
-        "source_record_types": ["codex_desktop_jsonl"],
+        "provider": provider,
+        "agent_provider": agent_provider,
+        "source_provider": source_provider,
+        "source_record_types": [source_record_type],
         "codex_thread_id": turn.get("thread_id"),
         "codex_turn_id": turn.get("turn_id"),
         "codex_thread_name": turn.get("thread_name"),
         "codex_session_file": turn.get("source_file"),
+        "provider_session_id": turn.get("thread_id"),
+        "provider_run_id": turn.get("turn_id"),
+        "provider_session_file": turn.get("source_file"),
         "cwd": turn.get("cwd"),
         "model": turn.get("model"),
         "reasoning_tier": reasoning_effort,
@@ -348,10 +434,10 @@ def _turn_payload(turn: dict[str, Any], *, repo_id: str | None, repo_full_name: 
     payload: dict[str, Any] = {
         "spec_version": "0",
         "session_id": str(turn["turn_id"]),
-        "agent": {"vendor": "OpenAI", "product": "Codex Desktop", "runtime": "codex_cli"},
+        "agent": {"vendor": agent_vendor, "product": agent_product, "runtime": agent_runtime},
         "repo_id": repo_id,
         "repo": {"full_name": repo_full_name} if repo_full_name else None,
-        "user": {"login": os.getenv("USER") or "local-codex"},
+        "user": {"login": os.getenv("USER") or f"local-{agent_runtime}"},
         "started_at": turn["started_at"],
         "ended_at": turn.get("ended_at"),
         "code_artifacts": list((turn.get("file_targets") or {}).values()),
@@ -430,6 +516,111 @@ def build_agent_run_payloads(
     return payloads
 
 
+def _claude_tool_summary(name: str, tool_input: dict[str, Any]) -> str:
+    if name == "Bash":
+        return _redact_command(str(tool_input.get("command") or ""))
+    if name in {"Read", "Edit", "Write", "MultiEdit"}:
+        return str(tool_input.get("file_path") or tool_input.get("path") or "")
+    if name == "NotebookEdit":
+        return str(tool_input.get("notebook_path") or tool_input.get("file_path") or "")
+    if name in {"Grep", "Glob", "LS"}:
+        bits = [str(tool_input.get(key) or "") for key in ("pattern", "path", "glob") if tool_input.get(key)]
+        return " ".join([name, *bits]).strip()
+    return name
+
+
+def _record_claude_tool(turn: dict[str, Any], name: str, tool_input: object, project_root: Path) -> None:
+    payload = {"name": name, "namespace": name if name.startswith("mcp__") else ""}
+    _record_tool_call(turn, payload)
+    tool_input = tool_input if isinstance(tool_input, dict) else {}
+    metrics = turn.get("activity_metrics")
+    if not isinstance(metrics, dict):
+        return
+
+    if name == "Bash":
+        command = str(tool_input.get("command") or "")
+        _record_command_metrics(turn, {"arguments": {"cmd": command}}, project_root)
+        return
+    if name == "Read":
+        _record_explored_file(turn, tool_input.get("file_path"), project_root)
+        return
+    if name in {"Edit", "Write", "MultiEdit"}:
+        _record_edited_file(turn, tool_input.get("file_path") or tool_input.get("path"), name, project_root)
+        return
+    if name == "NotebookEdit":
+        _record_edited_file(turn, tool_input.get("notebook_path") or tool_input.get("file_path"), name, project_root)
+        return
+    if name == "Grep":
+        metrics["searches"] = int(metrics.get("searches") or 0) + 1
+        _append_detail(turn, "searches", _claude_tool_summary(name, tool_input))
+        return
+    if name in {"Glob", "LS"}:
+        metrics["lists"] = int(metrics.get("lists") or 0) + 1
+        _append_detail(turn, "lists", _claude_tool_summary(name, tool_input))
+
+
+def build_claude_agent_run_payloads(
+    *,
+    claude_home: Path,
+    project_root: Path,
+    repo_id: str | None = None,
+    repo_full_name: str | None = None,
+) -> list[dict[str, Any]]:
+    project_root = project_root.resolve()
+    payloads: list[dict[str, Any]] = []
+    for source_file in _claude_session_files(claude_home):
+        current: dict[str, Any] | None = None
+        for line in source_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+            record = _safe_json(line)
+            if not record:
+                continue
+            session_id = str(record.get("sessionId") or source_file.stem)
+            if current is None:
+                current = _new_claude_turn(session_id, source_file)
+            timestamp = _parse_timestamp(record.get("timestamp"))
+            if timestamp:
+                current["started_at"] = current.get("started_at") or timestamp
+                current["ended_at"] = timestamp
+            current["cwd"] = record.get("cwd") or current.get("cwd")
+            current["permission_profile"] = record.get("permissionMode") or current.get("permission_profile")
+            message = record.get("message") if isinstance(record.get("message"), dict) else {}
+            if record.get("type") in {"user", "assistant"}:
+                current["messages"] += 1
+            if record.get("type") == "assistant":
+                current["agent_messages"] += 1
+                current["model"] = message.get("model") or current.get("model")
+                _record_claude_usage(current, message.get("usage"))
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for item in content:
+                if not isinstance(item, dict) or item.get("type") != "tool_use":
+                    continue
+                name = str(item.get("name") or "")
+                if name:
+                    _record_claude_tool(current, name, item.get("input"), project_root)
+        if current:
+            built = (
+                _turn_payload(
+                    current,
+                    repo_id=repo_id,
+                    repo_full_name=repo_full_name,
+                    provider="Claude Code",
+                    agent_provider="Claude Code",
+                    source_provider="claude_code",
+                    source_record_type="claude_code_jsonl",
+                    agent_vendor="Anthropic",
+                    agent_product="Claude Code",
+                    agent_runtime="claude_code",
+                )
+                if _belongs_to_project(current, project_root)
+                else None
+            )
+            if built:
+                payloads.append(built)
+    return payloads
+
+
 def post_payload(api_url: str, org_id: str, payload: dict[str, Any], token: str | None = None) -> dict[str, Any]:
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if token:
@@ -445,8 +636,10 @@ def post_payload(api_url: str, org_id: str, payload: dict[str, Any], token: str 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Import local Codex Desktop session metadata into Skillayer AgentRun telemetry.")
+    parser = argparse.ArgumentParser(description="Import local coding-agent session metadata into Skillayer AgentRun telemetry.")
     parser.add_argument("--codex-home", default=str(Path.home() / ".codex"))
+    parser.add_argument("--claude-home", default=str(Path.home() / ".claude"))
+    parser.add_argument("--providers", default=os.getenv("SKILLAYER_AGENT_IMPORT_PROVIDERS", "codex,claude"), help="Comma-separated providers: codex, claude, or all.")
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--api-url", default=os.getenv("SKILLAYER_API_URL", "http://127.0.0.1:8000"))
     parser.add_argument("--org-id", default=os.getenv("SKILLAYER_ORG_ID", "org_skilgen"))
@@ -456,12 +649,28 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    payloads = build_agent_run_payloads(
-        codex_home=Path(args.codex_home).expanduser(),
-        project_root=Path(args.project_root),
-        repo_id=args.repo_id,
-        repo_full_name=args.repo_full_name,
-    )
+    providers = {item.strip().lower() for item in str(args.providers).split(",") if item.strip()}
+    if "all" in providers:
+        providers = {"codex", "claude"}
+    payloads: list[dict[str, Any]] = []
+    if "codex" in providers:
+        payloads.extend(
+            build_agent_run_payloads(
+                codex_home=Path(args.codex_home).expanduser(),
+                project_root=Path(args.project_root),
+                repo_id=args.repo_id,
+                repo_full_name=args.repo_full_name,
+            )
+        )
+    if "claude" in providers or "claude_code" in providers or "claude-code" in providers:
+        payloads.extend(
+            build_claude_agent_run_payloads(
+                claude_home=Path(args.claude_home).expanduser(),
+                project_root=Path(args.project_root),
+                repo_id=args.repo_id,
+                repo_full_name=args.repo_full_name,
+            )
+        )
     posted = 0
     failed = 0
     for payload in payloads:
