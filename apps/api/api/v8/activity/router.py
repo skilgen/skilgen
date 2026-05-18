@@ -267,6 +267,7 @@ def _event_metric_payload(event: AuditEvent) -> dict[str, Any]:
     return {
         "model": model,
         "intelligence_tier": _metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier"),
+        "access_scope": _metadata_value(metadata, "access_scope", "permission_scope", "grant_scope"),
         "tokens_input": input_tokens,
         "tokens_output": output_tokens,
         "tokens_total": tokens_total,
@@ -304,7 +305,17 @@ async def _compliance_metrics_by_session(db: AsyncSession, org_id: str, session_
         metrics = _event_metric_payload(event)
         bucket = mapped.setdefault(
             str(key),
-            {"tokens_total": 0, "cost_usd": 0.0, "mcp_tools": set(), "models": Counter(), "model": None, "intelligence_tier": None, "activity_metrics": {metric: 0 for metric in ACTIVITY_METRIC_KEYS}, "activity_details": {detail: [] for detail in ACTIVITY_DETAIL_KEYS}},
+            {
+                "tokens_total": 0,
+                "cost_usd": 0.0,
+                "mcp_tools": set(),
+                "models": Counter(),
+                "model": None,
+                "intelligence_tier": None,
+                "access_scopes": set(),
+                "activity_metrics": {metric: 0 for metric in ACTIVITY_METRIC_KEYS},
+                "activity_details": {detail: [] for detail in ACTIVITY_DETAIL_KEYS},
+            },
         )
         bucket["tokens_total"] = int(bucket["tokens_total"]) + int(metrics["tokens_total"])
         bucket["cost_usd"] = float(bucket["cost_usd"]) + float(metrics["cost_usd"])
@@ -325,11 +336,15 @@ async def _compliance_metrics_by_session(db: AsyncSession, org_id: str, session_
             bucket["models"][str(metrics["model"])] += 1
         if metrics["intelligence_tier"]:
             bucket["intelligence_tier"] = metrics["intelligence_tier"]
+        if metrics["access_scope"]:
+            bucket["access_scopes"].add(str(metrics["access_scope"]))
     for bucket in mapped.values():
         bucket["model"] = bucket["models"].most_common(1)[0][0] if bucket["models"] else bucket["model"]
         bucket["mcp_tools"] = sorted(bucket["mcp_tools"])
+        bucket["access_scope"] = sorted(bucket["access_scopes"])[0] if bucket["access_scopes"] else None
         bucket["cost_usd"] = round(float(bucket["cost_usd"]), 6)
         del bucket["models"]
+        del bucket["access_scopes"]
     return mapped
 
 

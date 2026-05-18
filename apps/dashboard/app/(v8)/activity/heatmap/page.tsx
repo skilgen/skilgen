@@ -95,6 +95,7 @@ export default async function ActivityHeatmapPage({ searchParams }: { searchPara
           <option value="24">24 hours</option>
           <option value="168">7 days</option>
           <option value="720">30 days</option>
+          <option value="2160">All</option>
         </select>
         <select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={includeDenyRate} name="include_deny_rate">
           <option value="false">Volume</option>
@@ -118,7 +119,7 @@ export default async function ActivityHeatmapPage({ searchParams }: { searchPara
         {view === "models" ? (
           <ModelBars models={models} total={models.reduce((sum, model) => sum + model.tokens_total, 0)} />
         ) : isPlatformView && trend.length ? (
-          <TrendGrid trend={trend} />
+          <TrendGrid hours={selectedHours} trend={trend} />
         ) : (
         <div className="grid min-w-[980px] gap-1" style={{ gridTemplateColumns: "180px repeat(24, minmax(30px, 1fr))" }}>
           <div />
@@ -154,9 +155,11 @@ export default async function ActivityHeatmapPage({ searchParams }: { searchPara
   );
 }
 
-function TrendGrid({ trend }: { trend: HeatmapTrend[] }) {
+function TrendGrid({ hours, trend }: { hours: string; trend: HeatmapTrend[] }) {
   const platforms = [...new Set(trend.map((item) => item.platform))];
-  const dates = [...new Set(trend.map((item) => item.date))];
+  const allDates = [...new Set(trend.map((item) => item.date))];
+  const activeDates = allDates.filter((date) => trend.some((item) => item.date === date && (item.tokens_total > 0 || item.sessions > 0 || item.messages > 0)));
+  const dates = hours === "2160" && activeDates.length ? activeDates : allDates;
   const byCell = new Map(trend.map((item) => [`${item.platform}:${item.date}`, item]));
   const maxTokens = Math.max(...trend.map((item) => item.tokens_total), 1);
   return (

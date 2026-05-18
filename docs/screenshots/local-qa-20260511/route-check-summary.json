@@ -1,0 +1,102 @@
+{
+  "checked_at": "2026-05-12T02:50:30.276Z",
+  "org": "Skilgen",
+  "repo": "ravichanduummadisetti/skilgen",
+  "seed_data": {
+    "org": "org_skilgen",
+    "repo": "repo_skilgen",
+    "session": "sess_skilgen_codex_1"
+  },
+  "routes": [
+    {
+      "name": "activity-home",
+      "route": "/activity",
+      "url": "http://127.0.0.1:4325/activity",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/activity-home.png"
+    },
+    {
+      "name": "activity-live-feed",
+      "route": "/activity/live-feed",
+      "url": "http://127.0.0.1:4325/activity/live-feed",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/activity-live-feed.png"
+    },
+    {
+      "name": "activity-compliance-events",
+      "route": "/activity/compliance-events",
+      "url": "http://127.0.0.1:4325/activity/compliance-events",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/activity-compliance-events.png"
+    },
+    {
+      "name": "activity-compliance-sessions",
+      "route": "/activity/compliance-sessions",
+      "url": "http://127.0.0.1:4325/activity/compliance-sessions",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/activity-compliance-sessions.png"
+    },
+    {
+      "name": "activity-sessions",
+      "route": "/activity/sessions",
+      "url": "http://127.0.0.1:4325/activity/sessions",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/activity-sessions.png"
+    },
+    {
+      "name": "activity-replay-index",
+      "route": "/activity/replay",
+      "url": "http://127.0.0.1:4325/activity/replay",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/activity-replay-index.png"
+    },
+    {
+      "name": "activity-replay-detail",
+      "route": "/activity/replay/sess_skilgen_codex_1?repo=repo_skilgen",
+      "url": "http://127.0.0.1:4325/activity/replay/sess_skilgen_codex_1?repo=repo_skilgen",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/activity-replay-detail.png"
+    },
+    {
+      "name": "activity-heatmap",
+      "route": "/activity/heatmap",
+      "url": "http://127.0.0.1:4325/activity/heatmap",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/activity-heatmap.png"
+    },
+    {
+      "name": "skills-repos",
+      "route": "/skills/repos",
+      "url": "http://127.0.0.1:4325/skills/repos",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/skills-repos.png"
+    }
+  ]
+}

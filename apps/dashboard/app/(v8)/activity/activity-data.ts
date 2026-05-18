@@ -48,6 +48,7 @@ export type ActivityEvent = {
   cost_usd?: number;
   model?: string | null;
   intelligence_tier?: string | null;
+  access_scope?: string | null;
   activity_metrics?: ActivityMetrics;
   activity_details?: ActivityDetails;
   replay_url?: string;
@@ -121,6 +122,7 @@ export type ActivitySession = {
   cost_usd?: number;
   model?: string | null;
   intelligence_tier?: string | null;
+  access_scope?: string | null;
   mcp_tools?: string[];
   activity_metrics?: ActivityMetrics;
   activity_details?: ActivityDetails;

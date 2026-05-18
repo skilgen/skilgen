@@ -90,10 +90,10 @@ export function ReplayClient({ complianceEvents = [], exportHtml, session, timel
         </div>
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
           <DetailPanel id="activity-edited" title="Edited files" items={editedFiles} empty="No edited files captured for this run." />
-          <DetailPanel id="activity-explored" title="Explored files" items={exploredFiles} empty="No explored file paths captured for this run." />
-          <DetailPanel id="activity-searches" title="Searches" items={searches} empty="No search commands captured for this run." />
-          <DetailPanel id="activity-commands" title="Commands" items={commands} empty="No shell commands captured for this run." />
-          <DetailPanel id="activity-tools" title="Tools" items={tools} empty="No tool calls captured for this run." />
+          <DetailPanel expectedCount={metrics.explored_files ?? 0} id="activity-explored" title="Explored files" items={exploredFiles} empty="No explored file paths captured for this run." />
+          <DetailPanel expectedCount={metrics.searches ?? 0} id="activity-searches" title="Searches" items={searches} empty="No search commands captured for this run." />
+          <DetailPanel expectedCount={metrics.commands ?? 0} id="activity-commands" title="Commands" items={commands} empty="No shell commands captured for this run." />
+          <DetailPanel expectedCount={metrics.tool_calls ?? 0} id="activity-tools" title="Tools" items={tools} empty="No tool calls captured for this run." />
         </div>
       </article>
 
@@ -171,12 +171,13 @@ function Metric({ href, label, value }: { href?: string; label: string; value: n
   );
 }
 
-function DetailPanel({ empty, id, items, title }: { empty: string; id: string; items: string[]; title: string }) {
+function DetailPanel({ empty, expectedCount, id, items, title }: { empty: string; expectedCount?: number; id: string; items: string[]; title: string }) {
+  const count = Math.max(items.length, Number(expectedCount ?? 0));
   return (
     <section className="scroll-mt-24 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-4" id={id}>
       <div className="flex items-center justify-between gap-3">
         <h4 className="font-semibold text-[color:var(--text-primary)]">{title}</h4>
-        <span className="rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs font-semibold text-[color:var(--text-secondary)]">{items.length}</span>
+        <span className="rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs font-semibold text-[color:var(--text-secondary)]">{count}</span>
       </div>
       {items.length ? (
         <div className="mt-3 max-h-64 space-y-2 overflow-auto pr-1">
@@ -187,7 +188,7 @@ function DetailPanel({ empty, id, items, title }: { empty: string; id: string; i
           ))}
         </div>
       ) : (
-        <p className="mt-3 text-sm text-[color:var(--text-secondary)]">{empty}</p>
+        <p className="mt-3 text-sm text-[color:var(--text-secondary)]">{count > 0 ? `${count} event${count === 1 ? "" : "s"} counted, but this provider record did not include item-level details.` : empty}</p>
       )}
     </section>
   );
