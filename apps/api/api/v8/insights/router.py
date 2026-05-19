@@ -301,6 +301,66 @@ class ProviderCoverageResponse(BaseModel):
     rows: list[ProviderCoverageRow]
 
 
+class CodingPlatformOverviewRow(BaseModel):
+    provider: str
+    events: int
+    sessions: int
+    users: int
+    repos: int
+    models: list[str]
+    top_model: str | None = None
+    tokens_total: int
+    cost_usd: float
+    provider_reported_cost_usd: float = 0.0
+    skillayer_estimated_cost_usd: float = 0.0
+    unknown_cost_usd: float = 0.0
+    full_access_events: int = 0
+    autonomous_events: int = 0
+    tool_calls: int = 0
+    mcp_tool_calls: int = 0
+    edited_files: int = 0
+    explored_files: int = 0
+    searches: int = 0
+    commands: int = 0
+    risk_signals: int = 0
+    last_seen_at: datetime | None = None
+
+
+class CodingPlatformInsight(BaseModel):
+    title: str
+    detail: str
+    severity: Literal["low", "medium", "high"] = "low"
+
+
+class CodingPlatformOverviewSummary(BaseModel):
+    events: int
+    sessions: int
+    providers: int
+    users: int
+    repos: int
+    tokens_total: int
+    cost_usd: float
+    provider_reported_cost_usd: float = 0.0
+    skillayer_estimated_cost_usd: float = 0.0
+    unknown_cost_usd: float = 0.0
+    full_access_events: int = 0
+    autonomous_events: int = 0
+    tool_calls: int = 0
+    risk_signals: int = 0
+    top_provider: str | None = None
+    top_model: str | None = None
+
+
+class CodingPlatformOverviewResponse(BaseModel):
+    window_days: int
+    generated_at: datetime
+    source: str = "audit_events.metadata"
+    content_retention: Literal["metadata-only"] = "metadata-only"
+    summary: CodingPlatformOverviewSummary
+    platforms: list[CodingPlatformOverviewRow]
+    insights: list[CodingPlatformInsight]
+
+
 class AgentComplianceMetricSummary(BaseModel):
     events: int
     users: int
@@ -978,6 +1038,19 @@ def _metadata_list(metadata: object, key: str) -> list[str]:
     return []
 
 
+def _cost_bucket(metadata: object) -> Literal["provider_reported", "skillayer_estimated", "unknown"]:
+    source = str(_metadata_value(metadata, "cost_source", "usage_cost_source") or "").strip().lower()
+    if not source:
+        return "unknown"
+    if "provider" in source and "reported" in source:
+        return "provider_reported"
+    if "compliance" in source or "billing" in source:
+        return "provider_reported"
+    if "estimated" in source or "skillayer" in source or "model_tokens" in source or "token_usage" in source:
+        return "skillayer_estimated"
+    return "unknown"
+
+
 def _metadata_tools(metadata: object) -> list[str]:
     tools = set(_metadata_list(metadata, "tool_permissions") + _metadata_list(metadata, "tools") + _metadata_list(metadata, "tool_calls") + _metadata_list(metadata, "mcp_tools"))
     return sorted(tool for tool in tools if tool)
@@ -1042,6 +1115,184 @@ def _counter_rows(counter: dict[str, int], *, limit: int = 12) -> list[AgentComp
 
 def _is_agent_compliance_event(event: object) -> bool:
     return str(getattr(event, "event_type", "") or "").lower() in AGENT_COMPLIANCE_EVENT_TYPES
+
+
+def _empty_platform_bucket(provider: str) -> dict[str, Any]:
+    return {
+        "provider": provider,
+        "events": 0,
+        "sessions": set(),
+        "users": set(),
+        "repos": set(),
+        "models": {},
+        "tokens_total": 0,
+        "cost_usd": 0.0,
+        "provider_reported_cost_usd": 0.0,
+        "skillayer_estimated_cost_usd": 0.0,
+        "unknown_cost_usd": 0.0,
+        "full_access_events": 0,
+        "autonomous_events": 0,
+        "tool_calls": 0,
+        "mcp_tool_calls": 0,
+        "edited_files": 0,
+        "explored_files": 0,
+        "searches": 0,
+        "commands": 0,
+        "risk_signals": 0,
+        "last_seen_at": None,
+    }
+
+
+def _coding_platform_overview_from_events(events: list[AuditEvent], window_days: int) -> CodingPlatformOverviewResponse:
+    buckets: dict[str, dict[str, Any]] = {}
+    all_sessions: set[str] = set()
+    all_users: set[str] = set()
+    all_repos: set[str] = set()
+    model_totals: dict[str, int] = {}
+    summary = {
+        "events": 0,
+        "tokens_total": 0,
+        "cost_usd": 0.0,
+        "provider_reported_cost_usd": 0.0,
+        "skillayer_estimated_cost_usd": 0.0,
+        "unknown_cost_usd": 0.0,
+        "full_access_events": 0,
+        "autonomous_events": 0,
+        "tool_calls": 0,
+        "risk_signals": 0,
+    }
+
+    for event in events:
+        if not _is_agent_compliance_event(event):
+            continue
+        metadata = getattr(event, "metadata_json", {}) or {}
+        provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or str(getattr(event, "resource_type", None) or "unknown")
+        bucket = buckets.setdefault(provider, _empty_platform_bucket(provider))
+        actor = str(getattr(event, "actor_login", None) or _metadata_value(metadata, "actor_login", "user", "engineer_login") or "unknown")
+        repo = str(getattr(event, "repo_name", None) or _metadata_value(metadata, "repo_name", "repo", "repository") or "unknown repo")
+        session_id = _metadata_value(metadata, "session_id", "agent_session_id", "thread_id", "provider_session_id") or str(getattr(event, "resource_id", "") or "")
+        model = _metadata_value(metadata, "model", "model_name", "model_id") or "unknown model"
+        input_tokens = _metadata_int(metadata, "tokens_input", "input_tokens", "prompt_tokens")
+        output_tokens = _metadata_int(metadata, "tokens_output", "output_tokens", "completion_tokens")
+        tokens_total = _metadata_int(metadata, "tokens_total", "total_tokens") or input_tokens + output_tokens
+        cost_usd = _metadata_float(metadata, "cost_usd", "estimated_cost_usd")
+        cost_bucket = _cost_bucket(metadata)
+        metrics = _activity_metrics_from_metadata(metadata)
+        full_access = _metadata_bool(metadata, "full_access", "full_access_granted") or _metadata_value(metadata, "access_scope") == "full-access"
+        autonomous = _metadata_bool(metadata, "autonomous_access", "autonomous")
+        warnings = _metadata_int(metadata, "warnings", "warning_count")
+        violations = len(_metadata_list(metadata, "violations")) + _metadata_int(metadata, "violation_count")
+        errors = _metadata_int(metadata, "error_count", "errors")
+        denials = 1 if str(_metadata_value(metadata, "policy_decision", "approval_status") or "").lower() in {"deny", "denied", "block", "blocked", "reject", "rejected"} else 0
+        risk_signals = warnings + violations + errors + denials
+        tool_calls = metrics["tool_calls"] or _tool_permission_count(metadata)
+        mcp_tool_calls = metrics["mcp_tools"] or len(_metadata_list(metadata, "mcp_tools"))
+        when = getattr(event, "created_at", None)
+
+        bucket["events"] = int(bucket["events"]) + 1
+        if session_id:
+            bucket["sessions"].add(session_id)
+            all_sessions.add(session_id)
+        bucket["users"].add(actor)
+        bucket["repos"].add(repo)
+        all_users.add(actor)
+        all_repos.add(repo)
+        bucket["models"][model] = int(bucket["models"].get(model, 0)) + tokens_total
+        model_totals[model] = int(model_totals.get(model, 0)) + tokens_total
+        bucket["tokens_total"] = int(bucket["tokens_total"]) + tokens_total
+        bucket["cost_usd"] = float(bucket["cost_usd"]) + cost_usd
+        bucket[f"{cost_bucket}_cost_usd"] = float(bucket[f"{cost_bucket}_cost_usd"]) + cost_usd
+        bucket["full_access_events"] = int(bucket["full_access_events"]) + (1 if full_access else 0)
+        bucket["autonomous_events"] = int(bucket["autonomous_events"]) + (1 if autonomous else 0)
+        bucket["tool_calls"] = int(bucket["tool_calls"]) + tool_calls
+        bucket["mcp_tool_calls"] = int(bucket["mcp_tool_calls"]) + mcp_tool_calls
+        bucket["edited_files"] = int(bucket["edited_files"]) + metrics["edited_files"]
+        bucket["explored_files"] = int(bucket["explored_files"]) + metrics["explored_files"]
+        bucket["searches"] = int(bucket["searches"]) + metrics["searches"]
+        bucket["commands"] = int(bucket["commands"]) + metrics["commands"]
+        bucket["risk_signals"] = int(bucket["risk_signals"]) + risk_signals
+        if isinstance(when, datetime) and (bucket["last_seen_at"] is None or when > bucket["last_seen_at"]):
+            bucket["last_seen_at"] = when
+
+        summary["events"] += 1
+        summary["tokens_total"] += tokens_total
+        summary["cost_usd"] += cost_usd
+        summary[f"{cost_bucket}_cost_usd"] += cost_usd
+        summary["full_access_events"] += 1 if full_access else 0
+        summary["autonomous_events"] += 1 if autonomous else 0
+        summary["tool_calls"] += tool_calls
+        summary["risk_signals"] += risk_signals
+
+    rows: list[CodingPlatformOverviewRow] = []
+    for bucket in buckets.values():
+        model_counts = bucket["models"] if isinstance(bucket["models"], dict) else {}
+        top_model = max(model_counts.items(), key=lambda item: item[1])[0] if model_counts else None
+        rows.append(
+            CodingPlatformOverviewRow(
+                provider=str(bucket["provider"]),
+                events=int(bucket["events"]),
+                sessions=len(bucket["sessions"]),
+                users=len(bucket["users"]),
+                repos=len(bucket["repos"]),
+                models=sorted(str(model) for model in model_counts.keys()),
+                top_model=top_model,
+                tokens_total=int(bucket["tokens_total"]),
+                cost_usd=round(float(bucket["cost_usd"]), 6),
+                provider_reported_cost_usd=round(float(bucket["provider_reported_cost_usd"]), 6),
+                skillayer_estimated_cost_usd=round(float(bucket["skillayer_estimated_cost_usd"]), 6),
+                unknown_cost_usd=round(float(bucket["unknown_cost_usd"]), 6),
+                full_access_events=int(bucket["full_access_events"]),
+                autonomous_events=int(bucket["autonomous_events"]),
+                tool_calls=int(bucket["tool_calls"]),
+                mcp_tool_calls=int(bucket["mcp_tool_calls"]),
+                edited_files=int(bucket["edited_files"]),
+                explored_files=int(bucket["explored_files"]),
+                searches=int(bucket["searches"]),
+                commands=int(bucket["commands"]),
+                risk_signals=int(bucket["risk_signals"]),
+                last_seen_at=bucket["last_seen_at"],
+            )
+        )
+    rows.sort(key=lambda row: (-row.cost_usd, -row.tokens_total, row.provider))
+
+    top_provider = rows[0].provider if rows else None
+    top_model = max(model_totals.items(), key=lambda item: item[1])[0] if model_totals else None
+    insights: list[CodingPlatformInsight] = []
+    if rows:
+        insights.append(CodingPlatformInsight(title="Highest spend platform", detail=f"{rows[0].provider} accounts for ${rows[0].cost_usd:.2f} and {rows[0].tokens_total:,} tokens in this window.", severity="medium" if len(rows) > 1 else "low"))
+    if summary["skillayer_estimated_cost_usd"] > 0:
+        insights.append(CodingPlatformInsight(title="Cost provenance", detail=f"${summary['skillayer_estimated_cost_usd']:.2f} is Skillayer-estimated from provider token metadata; ${summary['provider_reported_cost_usd']:.2f} is provider-reported.", severity="medium"))
+    risky_platforms = [row for row in rows if row.full_access_events or row.risk_signals]
+    if risky_platforms:
+        row = max(risky_platforms, key=lambda item: (item.full_access_events + item.risk_signals, item.cost_usd))
+        insights.append(CodingPlatformInsight(title="Governance attention", detail=f"{row.provider} has {row.full_access_events} full-access events and {row.risk_signals} risk signals.", severity="high" if row.full_access_events else "medium"))
+    if top_model:
+        insights.append(CodingPlatformInsight(title="Favorite model", detail=f"{top_model} is the largest token consumer across coding platforms.", severity="low"))
+
+    return CodingPlatformOverviewResponse(
+        window_days=window_days,
+        generated_at=_utc_now(),
+        summary=CodingPlatformOverviewSummary(
+            events=summary["events"],
+            sessions=len(all_sessions),
+            providers=len(rows),
+            users=len(all_users),
+            repos=len(all_repos),
+            tokens_total=summary["tokens_total"],
+            cost_usd=round(float(summary["cost_usd"]), 6),
+            provider_reported_cost_usd=round(float(summary["provider_reported_cost_usd"]), 6),
+            skillayer_estimated_cost_usd=round(float(summary["skillayer_estimated_cost_usd"]), 6),
+            unknown_cost_usd=round(float(summary["unknown_cost_usd"]), 6),
+            full_access_events=summary["full_access_events"],
+            autonomous_events=summary["autonomous_events"],
+            tool_calls=summary["tool_calls"],
+            risk_signals=summary["risk_signals"],
+            top_provider=top_provider,
+            top_model=top_model,
+        ),
+        platforms=rows,
+        insights=insights,
+    )
 
 
 def _risk_band(score: int) -> Literal["low", "medium", "high"]:
@@ -2032,6 +2283,30 @@ async def get_agent_compliance_metrics(
         )
     ).scalars().all()
     return _agent_compliance_metrics_from_events(list(events), window_days)
+
+
+@router.get("/overview", response_model=CodingPlatformOverviewResponse)
+async def get_coding_platform_overview(
+    org_id: str,
+    window_days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> CodingPlatformOverviewResponse:
+    await _require_v8(org_id, db, current_org_id)
+    cutoff = _utc_now() - timedelta(days=window_days)
+    events = (
+        await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.org_id == org_id,
+                AuditEvent.created_at >= cutoff,
+                AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+            )
+            .order_by(desc(AuditEvent.created_at))
+            .limit(5000)
+        )
+    ).scalars().all()
+    return _coding_platform_overview_from_events(list(events), window_days)
 
 
 @router.get("/developer-track", response_model=DeveloperTrackResponse)

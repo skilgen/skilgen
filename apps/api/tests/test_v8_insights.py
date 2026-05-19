@@ -107,6 +107,7 @@ def test_insights_router_paths_are_registered() -> None:
     app.include_router(insights_router)
     paths = {route.path for route in app.routes}
 
+    assert "/v8/orgs/{org_id}/insights/overview" in paths
     assert "/v8/orgs/{org_id}/insights/fleet-kpis" in paths
     assert "/v8/orgs/{org_id}/insights/risky-agents" in paths
     assert "/v8/orgs/{org_id}/insights/risky-repos" in paths
@@ -585,6 +586,68 @@ def test_agent_compliance_metrics_consolidates_all_ingested_metadata(monkeypatch
         {"key": "deny", "label": "deny", "count": 1},
     ]
     assert {"key": "formal-compliance", "label": "formal-compliance", "count": 1} in payload["source_record_types"]
+
+
+def test_overview_compares_coding_platforms_and_cost_provenance(monkeypatch) -> None:
+    events = [
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.compliance",
+            actor_login="ravi",
+            repo_name="ravichanduummadisetti/skilgen",
+            resource_type="agent_run",
+            created_at=NOW,
+            metadata_json={
+                "provider": "Codex",
+                "model": "gpt-5.5",
+                "session_id": "codex-1",
+                "access_scope": "full-access",
+                "full_access": True,
+                "activity_metrics": {"edited_files": 2, "explored_files": 4, "searches": 1, "commands": 3, "tool_calls": 5},
+                "tokens_total": 2_000_000,
+                "cost_usd": 12.5,
+                "cost_source": "estimated_from_provider_token_usage",
+                "warnings": 1,
+            },
+        ),
+        SimpleNamespace(
+            org_id="org_1",
+            event_type="agent.telemetry",
+            actor_login="maya",
+            repo_name="ravichanduummadisetti/skilgen",
+            resource_type="claude_code",
+            created_at=NOW - timedelta(minutes=5),
+            metadata_json={
+                "provider": "Claude Code",
+                "model": "claude-opus-4-7",
+                "session_id": "claude-1",
+                "activity_metrics": {"explored_files": 3, "commands": 2, "tool_calls": 4},
+                "mcp_tools": ["github:create_pr"],
+                "tokens_total": 1_000_000,
+                "cost_usd": 9.25,
+                "cost_source": "provider_reported",
+            },
+        ),
+    ]
+    db = Db([Result(events)])
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["content_retention"] == "metadata-only"
+    assert payload["summary"]["providers"] == 2
+    assert payload["summary"]["sessions"] == 2
+    assert payload["summary"]["tokens_total"] == 3_000_000
+    assert payload["summary"]["cost_usd"] == 21.75
+    assert payload["summary"]["provider_reported_cost_usd"] == 9.25
+    assert payload["summary"]["skillayer_estimated_cost_usd"] == 12.5
+    assert payload["summary"]["top_provider"] == "Codex"
+    rows = {row["provider"]: row for row in payload["platforms"]}
+    assert rows["Codex"]["full_access_events"] == 1
+    assert rows["Codex"]["risk_signals"] == 1
+    assert rows["Claude Code"]["mcp_tool_calls"] == 1
+    assert any(item["title"] == "Cost provenance" for item in payload["insights"])
 
 
 def test_developer_track_rolls_up_metadata_only_agent_work_by_actor(monkeypatch) -> None:

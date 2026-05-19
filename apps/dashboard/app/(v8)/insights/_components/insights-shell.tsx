@@ -12,6 +12,7 @@ import {
   getV8DeveloperTrack,
   getV8FleetKpis,
   getV8IntelligenceUsage,
+  getV8PlatformOverview,
   getV8ProviderCoverage,
   getV8RiskyAgents,
   getV8RiskyRepos,
@@ -26,6 +27,8 @@ import {
   type InsightsDeveloperTrackRow,
   type InsightsFleetKpis,
   type InsightsIntelligenceUsage,
+  type InsightsPlatformOverview,
+  type InsightsPlatformOverviewRow,
   type InsightsProviderCoverage,
   type InsightsProviderCoverageRow,
   type InsightsRiskRanking,
@@ -33,9 +36,10 @@ import {
   type InsightsTrendMetric,
 } from "../../../../lib/data";
 
-type InsightsTab = "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "agent-compliance-metrics" | "agent-runs" | "codex-runs" | "intelligence-usage" | "access-grants" | "provider-coverage";
+type InsightsTab = "overview" | "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "agent-compliance-metrics" | "agent-runs" | "codex-runs" | "intelligence-usage" | "access-grants" | "provider-coverage";
 
 const tabs: Array<{ id: InsightsTab; label: string; href: string }> = [
+  { id: "overview", label: "Overview", href: "/insights" },
   { id: "fleet-kpis", label: "Fleet KPIs", href: "/insights/fleet-kpis" },
   { id: "developer-track", label: "Developer track", href: "/insights/developer-track" },
   { id: "risky-agents", label: "Risky agents", href: "/insights/risky-agents" },
@@ -82,7 +86,7 @@ function PageFrame({ active, children }: { active: InsightsTab; children: React.
       <header>
         <div className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Skillayer v8</div>
         <h1 className="mt-2 text-2xl font-semibold text-[color:var(--text-primary)]">Insights</h1>
-        <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Fleet risk trends, ranked governance attention, and coverage depth.</p>
+        <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Cross-platform coding-agent spend, usage, risk, and provider coverage.</p>
       </header>
       <TabNav active={active} />
       {children}
@@ -157,6 +161,10 @@ function compactNumber(value: number): string {
   return new Intl.NumberFormat("en-US", { notation: value >= 10000 ? "compact" : "standard" }).format(value);
 }
 
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: value >= 1000 ? 0 : 2 }).format(value);
+}
+
 function MiniBars({ values }: { values: number[] }) {
   const max = Math.max(...values, 1);
   return (
@@ -165,6 +173,62 @@ function MiniBars({ values }: { values: number[] }) {
         <span className="w-2 rounded-full bg-[color:var(--accent-primary)]" key={`${value}-${index}`} style={{ height: Math.max(4, Math.round((value / max) * 28)) }} />
       ))}
     </div>
+  );
+}
+
+function OverviewStat({ label, value, detail, icon }: { label: string; value: string | number; detail: string; icon: React.ReactNode }) {
+  return (
+    <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">{label}</div>
+        <div className="text-[color:var(--accent-primary)]">{icon}</div>
+      </div>
+      <div className="mt-3 text-[28px] font-semibold text-[color:var(--text-primary)]">{value}</div>
+      <p className="mt-2 text-xs leading-5 text-[color:var(--text-secondary)]">{detail}</p>
+    </article>
+  );
+}
+
+function PlatformSpendRow({ row, totalCost }: { row: InsightsPlatformOverviewRow; totalCost: number }) {
+  const percent = totalCost > 0 ? Math.round((row.cost_usd / totalCost) * 100) : 0;
+  return (
+    <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-semibold text-[color:var(--text-primary)]">{row.provider}</h2>
+            <span className="rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs text-[color:var(--text-secondary)]">{row.sessions} sessions</span>
+            <span className="rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs text-[color:var(--text-secondary)]">{row.users} users</span>
+          </div>
+          <p className="mt-2 text-sm text-[color:var(--text-secondary)]">
+            {compactNumber(row.tokens_total)} tokens across {row.models.length} model{row.models.length === 1 ? "" : "s"}{row.top_model ? `; top model ${row.top_model}` : ""}.
+          </p>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-black/40">
+            <div className="h-full rounded-full bg-[color:var(--accent-primary)]" style={{ width: `${Math.max(4, percent)}%` }} />
+          </div>
+          <div className="mt-3 grid gap-2 text-xs text-[color:var(--text-secondary)] sm:grid-cols-3">
+            <span>{row.edited_files} edited · {row.explored_files} explored</span>
+            <span>{row.searches} searches · {row.commands} commands</span>
+            <span>{row.tool_calls} tools · {row.mcp_tool_calls} MCP</span>
+          </div>
+        </div>
+        <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Spend</div>
+              <div className="mt-2 text-2xl font-semibold text-[color:var(--text-primary)]">{formatMoney(row.cost_usd)}</div>
+            </div>
+            <span className="rounded-md bg-[color:var(--accent-primary)]/15 px-2 py-1 text-xs font-semibold text-[color:var(--accent-primary)]">{percent}%</span>
+          </div>
+          <div className="mt-3 space-y-1 text-xs text-[color:var(--text-secondary)]">
+            <div>Provider reported: {formatMoney(row.provider_reported_cost_usd)}</div>
+            <div>Skillayer estimated: {formatMoney(row.skillayer_estimated_cost_usd)}</div>
+            {row.unknown_cost_usd ? <div>Unknown source: {formatMoney(row.unknown_cost_usd)}</div> : null}
+            <div>Full access: {row.full_access_events} · risk signals: {row.risk_signals}</div>
+          </div>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -302,6 +366,62 @@ function DeveloperRow({ row }: { row: InsightsDeveloperTrackRow }) {
         </div>
       </div>
     </article>
+  );
+}
+
+export async function OverviewView() {
+  const { accessToken, org } = await resolveOrgAndToken();
+  const data: InsightsPlatformOverview | null = org ? await getV8PlatformOverview(accessToken, org.id) : null;
+  const summary = data?.summary;
+  const platforms = data?.platforms ?? [];
+  return (
+    <PageFrame active="overview">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <OverviewStat detail={`${summary?.providers ?? 0} platforms and ${summary?.users ?? 0} developers represented.`} icon={<RadioTower className="h-4 w-4" />} label="Coding platforms" value={summary?.providers ?? 0} />
+        <OverviewStat detail={`${compactNumber(summary?.tokens_total ?? 0)} tokens from ${summary?.sessions ?? 0} sessions.`} icon={<Sparkles className="h-4 w-4" />} label="Total tokens" value={compactNumber(summary?.tokens_total ?? 0)} />
+        <OverviewStat detail={`${formatMoney(summary?.provider_reported_cost_usd ?? 0)} provider reported · ${formatMoney(summary?.skillayer_estimated_cost_usd ?? 0)} Skillayer estimated.`} icon={<KeyRound className="h-4 w-4" />} label="Total spend" value={formatMoney(summary?.cost_usd ?? 0)} />
+        <OverviewStat detail={`${summary?.full_access_events ?? 0} full-access events and ${summary?.risk_signals ?? 0} risk signals.`} icon={<ShieldAlert className="h-4 w-4" />} label="Governance signals" value={(summary?.full_access_events ?? 0) + (summary?.risk_signals ?? 0)} />
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.8fr)]">
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold text-[color:var(--text-primary)]">Platform spend and activity</h2>
+            <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Compare Codex, Claude Code, and other coding platforms by spend, tokens, files, tools, and risk.</p>
+          </div>
+          {!data ? <EmptyState label="Coding platform overview unavailable" /> : null}
+          {data && !platforms.length ? <EmptyState label="No coding platform telemetry yet" /> : null}
+          {platforms.map((row) => <PlatformSpendRow key={row.provider} row={row} totalCost={summary?.cost_usd ?? 0} />)}
+        </div>
+
+        <aside className="space-y-4">
+          <section className="rounded-lg border border-[color:var(--accent-primary)]/35 bg-[color:var(--accent-primary)]/10 p-4">
+            <h2 className="font-semibold text-[color:var(--text-primary)]">Cost source</h2>
+            <p className="mt-2 text-sm leading-6 text-[color:var(--text-secondary)]">
+              Spend is split by provenance so provider-reported billing data is not mixed up with Skillayer estimates from token metadata.
+            </p>
+            <div className="mt-4 space-y-2 text-sm text-[color:var(--text-secondary)]">
+              <div className="flex justify-between gap-3"><span>Provider reported</span><span className="font-semibold text-[color:var(--text-primary)]">{formatMoney(summary?.provider_reported_cost_usd ?? 0)}</span></div>
+              <div className="flex justify-between gap-3"><span>Skillayer estimated</span><span className="font-semibold text-[color:var(--text-primary)]">{formatMoney(summary?.skillayer_estimated_cost_usd ?? 0)}</span></div>
+              <div className="flex justify-between gap-3"><span>Unknown source</span><span className="font-semibold text-[color:var(--text-primary)]">{formatMoney(summary?.unknown_cost_usd ?? 0)}</span></div>
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+            <h2 className="font-semibold text-[color:var(--text-primary)]">What is happening</h2>
+            <div className="mt-4 space-y-3">
+              {(data?.insights ?? []).map((insight) => (
+                <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3" key={insight.title}>
+                  <div className={`text-sm font-semibold ${insight.severity === "high" ? "text-[color:var(--accent-red)]" : insight.severity === "medium" ? "text-amber-200" : "text-[color:var(--text-primary)]"}`}>{insight.title}</div>
+                  <p className="mt-1 text-xs leading-5 text-[color:var(--text-secondary)]">{insight.detail}</p>
+                </div>
+              ))}
+              {data && !data.insights.length ? <p className="text-sm text-[color:var(--text-secondary)]">No platform insight yet.</p> : null}
+            </div>
+          </section>
+        </aside>
+      </section>
+    </PageFrame>
   );
 }
 

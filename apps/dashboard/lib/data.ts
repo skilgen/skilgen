@@ -1736,6 +1736,62 @@ export type InsightsAgentComplianceMetrics = {
   retention_states: InsightsAgentComplianceMetricItem[];
 };
 
+export type InsightsPlatformOverviewRow = {
+  provider: string;
+  events: number;
+  sessions: number;
+  users: number;
+  repos: number;
+  models: string[];
+  top_model: string | null;
+  tokens_total: number;
+  cost_usd: number;
+  provider_reported_cost_usd: number;
+  skillayer_estimated_cost_usd: number;
+  unknown_cost_usd: number;
+  full_access_events: number;
+  autonomous_events: number;
+  tool_calls: number;
+  mcp_tool_calls: number;
+  edited_files: number;
+  explored_files: number;
+  searches: number;
+  commands: number;
+  risk_signals: number;
+  last_seen_at: string | null;
+};
+
+export type InsightsPlatformOverview = {
+  window_days: number;
+  generated_at: string;
+  source: string;
+  content_retention: "metadata-only";
+  summary: {
+    events: number;
+    sessions: number;
+    providers: number;
+    users: number;
+    repos: number;
+    tokens_total: number;
+    cost_usd: number;
+    provider_reported_cost_usd: number;
+    skillayer_estimated_cost_usd: number;
+    unknown_cost_usd: number;
+    full_access_events: number;
+    autonomous_events: number;
+    tool_calls: number;
+    risk_signals: number;
+    top_provider: string | null;
+    top_model: string | null;
+  };
+  platforms: InsightsPlatformOverviewRow[];
+  insights: Array<{
+    title: string;
+    detail: string;
+    severity: "low" | "medium" | "high";
+  }>;
+};
+
 export type InsightsDeveloperTrackSummary = {
   developers: number;
   events: number;
@@ -2567,6 +2623,10 @@ export async function getV8AccessGrants(accessToken: string | null, orgId: strin
 
 export async function getV8AgentComplianceMetrics(accessToken: string | null, orgId: string): Promise<InsightsAgentComplianceMetrics | null> {
   return apiFetch<InsightsAgentComplianceMetrics>(`/v8/orgs/${orgId}/insights/agent-compliance-metrics`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8PlatformOverview(accessToken: string | null, orgId: string): Promise<InsightsPlatformOverview | null> {
+  return apiFetch<InsightsPlatformOverview>(`/v8/orgs/${orgId}/insights/overview`, { accessToken, cache: "no-store" });
 }
 
 export async function getV8DeveloperTrack(accessToken: string | null, orgId: string): Promise<InsightsDeveloperTrack | null> {
