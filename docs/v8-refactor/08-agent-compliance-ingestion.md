@@ -123,3 +123,17 @@ Raw prompts, chat content, file content, and tool parameters must be tenant-conf
 - For OpenAI logs, implement continuous pulls because the public help article states a 30-day logs retention window.
 - For Claude Cowork, use OTel ingestion and label it operational telemetry, not formal audit compliance, unless Anthropic changes that contract.
 - All connector setup and sync actions require `settings.connectors.manage`; audit reads require `audit.read`; insights rollups require `insights.read`.
+
+## Enterprise roadmap cross-reference
+
+See `docs/v8-refactor/09-enterprise-provider-ingestion-roadmap.md` for the ordered enterprise build plan:
+
+1. Enterprise connector credential model.
+2. OpenAI Compliance adapter.
+3. Anthropic Compliance adapter.
+4. Background cursor sync worker.
+5. Identity mapping table.
+6. GitHub enrichment for provider events.
+7. Connector setup UI with test/sync/coverage status.
+
+Usage and cost values must expose provenance everywhere they appear. Provider-reported cost from compliance/usage APIs is not the same thing as Skillayer-estimated cost calculated from token counts. UI, API, audit evidence, and PR validation notes must label the source explicitly.

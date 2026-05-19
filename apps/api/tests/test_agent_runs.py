@@ -147,7 +147,12 @@ def test_agent_run_ingest_preserves_intelligence_and_pr_metadata() -> None:
                 "task_type": "test and verification",
                 "tokens_input": 12000,
                 "tokens_output": 3000,
+                "tokens_cached_input": 4000,
+                "tokens_reasoning_output": 700,
+                "token_source": "codex_jsonl_last_token_usage",
                 "cost_usd": "1.25",
+                "cost_source": "estimated_from_provider_token_usage",
+                "cost_estimate": True,
                 "latency_ms": 2400,
                 "pr_number": 128,
                 "head_sha": "abc123",
@@ -166,7 +171,12 @@ def test_agent_run_ingest_preserves_intelligence_and_pr_metadata() -> None:
     assert audit.metadata_json["tokens_input"] == 12000
     assert audit.metadata_json["tokens_output"] == 3000
     assert audit.metadata_json["tokens_total"] == 15000
+    assert audit.metadata_json["tokens_cached_input"] == 4000
+    assert audit.metadata_json["tokens_reasoning_output"] == 700
+    assert audit.metadata_json["token_source"] == "codex_jsonl_last_token_usage"
     assert audit.metadata_json["cost_usd"] == 1.25
+    assert audit.metadata_json["cost_source"] == "estimated_from_provider_token_usage"
+    assert audit.metadata_json["cost_estimate"] is True
     assert audit.metadata_json["latency_ms"] == 2400.0
     assert audit.metadata_json["pr_id"] == "pr_128"
     assert audit.metadata_json["pr_number"] == 128

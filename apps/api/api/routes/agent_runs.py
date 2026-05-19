@@ -323,6 +323,7 @@ def _agent_compliance_audit_event(org_id: str, payload: AgentRunPayload, repo: R
     input_tokens = _metadata_int(metadata, "tokens_input", "input_tokens", "prompt_tokens")
     output_tokens = _metadata_int(metadata, "tokens_output", "output_tokens", "completion_tokens")
     total_tokens = _metadata_int(metadata, "tokens_total", "total_tokens") or ((input_tokens or 0) + (output_tokens or 0) or None)
+    cost_usd = _metadata_float(metadata, "cost_usd", "estimated_cost_usd")
     pr_context = {key: value for key, value in (pr_context or {}).items() if value not in {None, ""}}
     compliance_metadata: dict[str, Any] = {
         "provider": provider,
@@ -349,7 +350,17 @@ def _agent_compliance_audit_event(org_id: str, payload: AgentRunPayload, repo: R
         "tokens_input": input_tokens,
         "tokens_output": output_tokens,
         "tokens_total": total_tokens,
-        "cost_usd": _metadata_float(metadata, "cost_usd", "estimated_cost_usd"),
+        "tokens_cached_input": _metadata_int(metadata, "tokens_cached_input", "cached_input_tokens"),
+        "tokens_reasoning_output": _metadata_int(metadata, "tokens_reasoning_output", "reasoning_output_tokens"),
+        "tokens_base_input": _metadata_int(metadata, "tokens_base_input", "base_input_tokens"),
+        "tokens_cache_creation_input": _metadata_int(metadata, "tokens_cache_creation_input", "cache_creation_input_tokens"),
+        "tokens_cache_creation_5m_input": _metadata_int(metadata, "tokens_cache_creation_5m_input", "cache_creation_5m_input_tokens"),
+        "tokens_cache_creation_1h_input": _metadata_int(metadata, "tokens_cache_creation_1h_input", "cache_creation_1h_input_tokens"),
+        "tokens_cache_read_input": _metadata_int(metadata, "tokens_cache_read_input", "cache_read_input_tokens"),
+        "token_source": _metadata_string(metadata, "token_source", "tokens_source"),
+        "cost_usd": cost_usd,
+        "cost_source": _metadata_string(metadata, "cost_source") or ("ingested_cost_usd" if cost_usd is not None else None),
+        "cost_estimate": _metadata_bool(metadata, "cost_estimate", "is_cost_estimate"),
         "latency_ms": _metadata_float(metadata, "latency_ms", "duration_ms"),
         "policy_decision": _metadata_string(metadata, "policy_decision", "decision"),
         "approval_status": _metadata_string(metadata, "approval_status"),

@@ -38,7 +38,22 @@ class CodexSessionImporterTests(unittest.TestCase):
                         "changes": {str(root / "apps/api.py"): {"type": "update", "unified_diff": "+raw code"}},
                     },
                 },
-                {"timestamp": "2026-05-17T04:01:05Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"last_token_usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}}}},
+                {
+                    "timestamp": "2026-05-17T04:01:05Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 10,
+                                "cached_input_tokens": 4,
+                                "output_tokens": 5,
+                                "reasoning_output_tokens": 2,
+                                "total_tokens": 15,
+                            }
+                        },
+                    },
+                },
                 {"timestamp": "2026-05-17T04:02:00Z", "type": "event_msg", "payload": {"type": "task_complete", "turn_id": "turn_1"}},
             ]
             source.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
@@ -51,6 +66,11 @@ class CodexSessionImporterTests(unittest.TestCase):
         self.assertEqual(payload["repo_id"], "repo_1")
         self.assertEqual(payload["metadata"]["model"], "gpt-5.5")
         self.assertEqual(payload["metadata"]["tokens_total"], 15)
+        self.assertEqual(payload["metadata"]["tokens_cached_input"], 4)
+        self.assertEqual(payload["metadata"]["tokens_reasoning_output"], 2)
+        self.assertEqual(payload["metadata"]["token_source"], "codex_jsonl_last_token_usage")
+        self.assertEqual(payload["metadata"]["cost_source"], "estimated_from_provider_token_usage")
+        self.assertTrue(payload["metadata"]["cost_estimate"])
         self.assertEqual(payload["metadata"]["file_targets"], ["apps/api.py"])
         self.assertEqual(payload["metadata"]["activity_metrics"]["edited_files"], 1)
         self.assertEqual(payload["metadata"]["activity_metrics"]["explored_files"], 1)
@@ -89,7 +109,14 @@ class CodexSessionImporterTests(unittest.TestCase):
                     "message": {
                         "role": "assistant",
                         "model": "claude-sonnet-4-5-20250929",
-                        "usage": {"input_tokens": 10, "cache_creation_input_tokens": 20, "cache_read_input_tokens": 30, "output_tokens": 5, "speed": "standard"},
+                        "usage": {
+                            "input_tokens": 10,
+                            "cache_creation_input_tokens": 20,
+                            "cache_creation": {"ephemeral_5m_input_tokens": 12, "ephemeral_1h_input_tokens": 8},
+                            "cache_read_input_tokens": 30,
+                            "output_tokens": 5,
+                            "speed": "standard",
+                        },
                         "content": [
                             {"type": "tool_use", "name": "Read", "input": {"file_path": str(root / "apps/api.py")}},
                             {"type": "tool_use", "name": "Grep", "input": {"pattern": "TODO", "path": "apps"}},
@@ -112,6 +139,14 @@ class CodexSessionImporterTests(unittest.TestCase):
         self.assertEqual(payload["metadata"]["tokens_input"], 60)
         self.assertEqual(payload["metadata"]["tokens_output"], 5)
         self.assertEqual(payload["metadata"]["tokens_total"], 65)
+        self.assertEqual(payload["metadata"]["tokens_base_input"], 10)
+        self.assertEqual(payload["metadata"]["tokens_cache_creation_input"], 20)
+        self.assertEqual(payload["metadata"]["tokens_cache_creation_5m_input"], 12)
+        self.assertEqual(payload["metadata"]["tokens_cache_creation_1h_input"], 8)
+        self.assertEqual(payload["metadata"]["tokens_cache_read_input"], 30)
+        self.assertEqual(payload["metadata"]["token_source"], "claude_code_jsonl_message_usage")
+        self.assertEqual(payload["metadata"]["cost_source"], "estimated_from_provider_token_usage")
+        self.assertTrue(payload["metadata"]["cost_estimate"])
         self.assertEqual(payload["metadata"]["access_scope"], "full-access")
         self.assertEqual(payload["metadata"]["activity_metrics"]["edited_files"], 1)
         self.assertEqual(payload["metadata"]["activity_metrics"]["explored_files"], 1)

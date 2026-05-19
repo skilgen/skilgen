@@ -126,6 +126,14 @@ def _new_turn(turn_id: str, session_meta: dict[str, Any], thread_name: str, sour
         "tokens_input": 0,
         "tokens_output": 0,
         "tokens_total": 0,
+        "tokens_cached_input": 0,
+        "tokens_reasoning_output": 0,
+        "tokens_base_input": 0,
+        "tokens_cache_creation_input": 0,
+        "tokens_cache_creation_5m_input": 0,
+        "tokens_cache_creation_1h_input": 0,
+        "tokens_cache_read_input": 0,
+        "token_source": None,
         "cost_usd": None,
     }
 
@@ -183,6 +191,9 @@ def _record_tokens(turn: dict[str, Any], payload: dict[str, Any]) -> None:
     turn["tokens_input"] += int(last.get("input_tokens") or 0)
     turn["tokens_output"] += int(last.get("output_tokens") or 0)
     turn["tokens_total"] += int(last.get("total_tokens") or 0)
+    turn["tokens_cached_input"] += int(last.get("cached_input_tokens") or 0)
+    turn["tokens_reasoning_output"] += int(last.get("reasoning_output_tokens") or 0)
+    turn["token_source"] = "codex_jsonl_last_token_usage"
 
 
 def _record_claude_usage(turn: dict[str, Any], usage: object) -> None:
@@ -192,27 +203,84 @@ def _record_claude_usage(turn: dict[str, Any], usage: object) -> None:
     cache_creation = int(usage.get("cache_creation_input_tokens") or 0)
     cache_read = int(usage.get("cache_read_input_tokens") or 0)
     output_tokens = int(usage.get("output_tokens") or 0)
+    cache_creation_detail = usage.get("cache_creation") if isinstance(usage.get("cache_creation"), dict) else {}
+    cache_creation_5m = int(cache_creation_detail.get("ephemeral_5m_input_tokens") or 0)
+    cache_creation_1h = int(cache_creation_detail.get("ephemeral_1h_input_tokens") or 0)
     turn["tokens_input"] += input_tokens + cache_creation + cache_read
     turn["tokens_output"] += output_tokens
     turn["tokens_total"] += input_tokens + cache_creation + cache_read + output_tokens
+    turn["tokens_base_input"] += input_tokens
+    turn["tokens_cache_creation_input"] += cache_creation
+    turn["tokens_cache_creation_5m_input"] += cache_creation_5m
+    turn["tokens_cache_creation_1h_input"] += cache_creation_1h
+    turn["tokens_cache_read_input"] += cache_read
+    turn["token_source"] = "claude_code_jsonl_message_usage"
     if usage.get("speed") and not turn.get("reasoning_effort"):
         turn["reasoning_effort"] = str(usage.get("speed"))
 
 
-def _estimated_cost_usd(model: str | None, input_tokens: int, output_tokens: int) -> float | None:
-    if input_tokens <= 0 and output_tokens <= 0:
+def _openai_rates(model: str) -> tuple[float, float, float]:
+    normalized = model.lower()
+    if "gpt-5.5" in normalized:
+        return (5.0, 0.5, 30.0)
+    if "gpt-5.4-mini" in normalized or "gpt-5.4 mini" in normalized:
+        return (0.75, 0.075, 4.5)
+    if "gpt-5.4" in normalized:
+        return (2.5, 0.25, 15.0)
+    if "mini" in normalized or "fast" in normalized:
+        return (0.25, 0.025, 1.25)
+    return (1.25, 0.125, 10.0)
+
+
+def _claude_base_rates(model: str) -> tuple[float, float]:
+    normalized = model.lower()
+    if "haiku-4-5" in normalized or "haiku 4.5" in normalized:
+        return (1.0, 5.0)
+    if "sonnet" in normalized:
+        return (3.0, 15.0)
+    if "opus-4-7" in normalized or "opus-4-6" in normalized or "opus-4-5" in normalized or "opus 4.7" in normalized or "opus 4.6" in normalized or "opus 4.5" in normalized:
+        return (5.0, 25.0)
+    if "opus" in normalized:
+        return (15.0, 75.0)
+    return (3.0, 15.0)
+
+
+def _estimated_cost_usd(
+    model: str | None,
+    input_tokens: int,
+    output_tokens: int,
+    *,
+    provider: str | None = None,
+    cached_input_tokens: int = 0,
+    cache_creation_input_tokens: int = 0,
+    cache_creation_5m_input_tokens: int = 0,
+    cache_creation_1h_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
+    base_input_tokens: int = 0,
+) -> float | None:
+    if input_tokens <= 0 and output_tokens <= 0 and cache_creation_input_tokens <= 0 and cache_read_input_tokens <= 0:
         return None
     normalized = str(model or "").lower()
-    per_million: tuple[float, float]
-    if "mini" in normalized or "haiku" in normalized or "fast" in normalized:
-        per_million = (0.25, 1.25)
-    elif "opus" in normalized:
-        per_million = (15.0, 75.0)
-    elif "sonnet" in normalized or "claude" in normalized:
-        per_million = (3.0, 15.0)
-    else:
-        per_million = (1.25, 10.0)
-    return round((input_tokens / 1_000_000) * per_million[0] + (output_tokens / 1_000_000) * per_million[1], 6)
+    provider_key = str(provider or "").lower()
+    if "claude" in provider_key or "claude" in normalized:
+        input_rate, output_rate = _claude_base_rates(normalized)
+        cache_5m = cache_creation_5m_input_tokens
+        cache_1h = cache_creation_1h_input_tokens
+        unattributed_cache_creation = max(0, cache_creation_input_tokens - cache_5m - cache_1h)
+        billable_base_input = base_input_tokens if base_input_tokens > 0 else max(0, input_tokens - cache_creation_input_tokens - cache_read_input_tokens)
+        return round(
+            (billable_base_input / 1_000_000) * input_rate
+            + (cache_5m / 1_000_000) * (input_rate * 1.25)
+            + (cache_1h / 1_000_000) * (input_rate * 2.0)
+            + (unattributed_cache_creation / 1_000_000) * (input_rate * 1.25)
+            + (cache_read_input_tokens / 1_000_000) * (input_rate * 0.1)
+            + (output_tokens / 1_000_000) * output_rate,
+            6,
+        )
+    input_rate, cached_input_rate, output_rate = _openai_rates(normalized)
+    cached = max(0, cached_input_tokens)
+    uncached_input = max(0, input_tokens - cached)
+    return round((uncached_input / 1_000_000) * input_rate + (cached / 1_000_000) * cached_input_rate + (output_tokens / 1_000_000) * output_rate, 6)
 
 
 def _record_patch_files(turn: dict[str, Any], payload: dict[str, Any], project_root: Path) -> None:
@@ -386,6 +454,18 @@ def _turn_payload(
     access_scope, full_access = _access_scope(turn)
     reasoning_effort = turn.get("reasoning_effort")
     reasoning_mode = _reasoning_mode(reasoning_effort, turn.get("model"))
+    cost_usd = _estimated_cost_usd(
+        str(turn.get("model") or ""),
+        int(turn.get("tokens_input") or 0),
+        int(turn.get("tokens_output") or 0),
+        provider=provider,
+        cached_input_tokens=int(turn.get("tokens_cached_input") or 0),
+        cache_creation_input_tokens=int(turn.get("tokens_cache_creation_input") or 0),
+        cache_creation_5m_input_tokens=int(turn.get("tokens_cache_creation_5m_input") or 0),
+        cache_creation_1h_input_tokens=int(turn.get("tokens_cache_creation_1h_input") or 0),
+        cache_read_input_tokens=int(turn.get("tokens_cache_read_input") or 0),
+        base_input_tokens=int(turn.get("tokens_base_input") or 0),
+    )
     metadata = {
         "provider": provider,
         "agent_provider": agent_provider,
@@ -425,8 +505,17 @@ def _turn_payload(
         "tokens_input": int(turn.get("tokens_input") or 0),
         "tokens_output": int(turn.get("tokens_output") or 0),
         "tokens_total": int(turn.get("tokens_total") or 0),
-        "cost_usd": _estimated_cost_usd(str(turn.get("model") or ""), int(turn.get("tokens_input") or 0), int(turn.get("tokens_output") or 0)),
-        "cost_source": "estimated_from_model_tokens",
+        "tokens_cached_input": int(turn.get("tokens_cached_input") or 0),
+        "tokens_reasoning_output": int(turn.get("tokens_reasoning_output") or 0),
+        "tokens_base_input": int(turn.get("tokens_base_input") or 0),
+        "tokens_cache_creation_input": int(turn.get("tokens_cache_creation_input") or 0),
+        "tokens_cache_creation_5m_input": int(turn.get("tokens_cache_creation_5m_input") or 0),
+        "tokens_cache_creation_1h_input": int(turn.get("tokens_cache_creation_1h_input") or 0),
+        "tokens_cache_read_input": int(turn.get("tokens_cache_read_input") or 0),
+        "token_source": turn.get("token_source"),
+        "cost_usd": cost_usd,
+        "cost_source": "estimated_from_provider_token_usage" if cost_usd is not None else None,
+        "cost_estimate": cost_usd is not None,
         "content_retention": "metadata-only",
         "redaction_state": "raw-content-dropped",
     }
