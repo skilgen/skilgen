@@ -99,7 +99,12 @@ class OrgDb:
     async def execute(self, _stmt: object) -> Result:
         compiled = str(_stmt.compile(compile_kwargs={"literal_binds": True}))
         if "source_connections" in compiled:
-            return Result([(connection, None) for connection in [*self.connections, *[item for item in self.added if isinstance(item, SourceConnection)]]])
+            rows = [*self.connections, *[item for item in self.added if isinstance(item, SourceConnection)]]
+            for connection in list(rows):
+                if connection.source_type and f"'{connection.source_type}'" in compiled:
+                    rows = [item for item in rows if item.source_type == connection.source_type]
+                    break
+            return Result([(connection, None) for connection in rows])
         if "FROM repos" in compiled:
             rows = self.repos
             if "repos.id =" in compiled:
@@ -181,8 +186,77 @@ def test_agent_compliance_connector_endpoint_returns_metadata_state(monkeypatch)
     codex = next(item for item in payload["connectors"] if item["id"] == "codex-cli")
     assert payload["content_retention_default"] == "metadata-only"
     assert payload["configured_count"] == 1
+    assert payload["enterprise_setup"]["setup_complete"] is False
+    assert any(gap["id"] == "github-app" for gap in payload["enterprise_setup"]["coverage_gaps"])
     assert codex["enabled"] is True
     assert codex["content_retention"] == "metadata-only"
+
+
+def test_agent_compliance_connector_endpoint_returns_enterprise_setup_complete(monkeypatch) -> None:
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={
+        "v8_agent_compliance_connectors": {
+            "openai-compliance": {
+                "enabled": True,
+                "source_types": ["audit logs"],
+                "scopes": ["audit.read"],
+                "last_sync_status": "success",
+                "last_success_at": "2026-05-19T06:00:00+00:00",
+                "content_retention": "metadata-only",
+            },
+            "anthropic-compliance": {
+                "enabled": True,
+                "source_types": ["audit logs"],
+                "scopes": ["audit.read"],
+                "last_sync_status": "success",
+                "last_success_at": "2026-05-19T06:05:00+00:00",
+                "content_retention": "metadata-only",
+            },
+        }
+    })
+    now = datetime(2026, 5, 19, 6, 0, 0)
+    connections = [
+        SourceConnection(org_id="org-1", source_type="github", status="connected", encrypted_params="{}", last_tested_at=now, last_connected_at=now),
+        SourceConnection(
+            org_id="org-1",
+            source_type=settings_router._agent_connection_source_type("openai-compliance"),
+            status="configured",
+            encrypted_params="{}",
+            last_tested_at=now,
+            last_connected_at=now,
+            params_hint={"credential_kind": "api_token"},
+        ),
+        SourceConnection(
+            org_id="org-1",
+            source_type=settings_router._agent_connection_source_type("anthropic-compliance"),
+            status="configured",
+            encrypted_params="{}",
+            last_tested_at=now,
+            last_connected_at=now,
+            params_hint={"credential_kind": "api_token"},
+        ),
+    ]
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def db_override():
+        yield OrgDb(org, connections=connections)
+
+    app.dependency_overrides[get_current_org_id] = lambda: "org-1"
+    app.dependency_overrides[get_db] = db_override
+    app.dependency_overrides[request_flag_cache] = lambda: None
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    try:
+        response = TestClient(app).get("/v8/orgs/org-1/settings/connectors/agent-compliance")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    setup = response.json()["enterprise_setup"]
+    assert setup["setup_complete"] is True
+    assert setup["github_connected"] is True
+    assert setup["coverage_gaps"] == []
+    assert [step["status"] for step in setup["steps"]] == ["complete", "complete", "complete", "complete", "complete", "complete"]
 
 
 def test_admin_audit_returns_operator_rollups(monkeypatch) -> None:

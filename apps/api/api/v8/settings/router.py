@@ -595,12 +595,17 @@ def _agent_sync_contract(connector_id: str, connector: dict[str, Any], row: dict
 async def _agent_connector_response(db: AsyncSession, org: Org | None) -> dict[str, object]:
     configured = _agent_connector_settings(org)
     credential_connections: dict[str, SourceConnection] = {}
+    source_connections: list[SourceConnection] = []
     if org is not None:
         configured, credential_connections, changed = await _migrate_legacy_agent_credentials(db, org, configured)
         if changed:
             flush = getattr(db, "flush", None)
             if flush is not None:
                 await flush()
+        try:
+            source_connections = (await db.execute(select(SourceConnection).where(SourceConnection.org_id == org.id))).scalars().all()
+        except SQLAlchemyError:
+            source_connections = []
     connectors: list[dict[str, object]] = []
     for item in _agent_compliance_registry():
         connector_id = str(item["id"])
@@ -651,7 +656,123 @@ async def _agent_connector_response(db: AsyncSession, org: Org | None) -> dict[s
         "content_retention_default": "metadata-only",
         "configured_count": sum(1 for item in connectors if item["configured"]),
         "enabled_count": sum(1 for item in connectors if item["enabled"]),
+        "enterprise_setup": _enterprise_setup_response(org, connectors, source_connections),
         "connectors": connectors,
+    }
+
+
+def _enterprise_setup_response(org: Org | None, connectors: list[dict[str, object]], source_connections: list[SourceConnection]) -> dict[str, object]:
+    by_id = {str(item.get("id")): item for item in connectors}
+    openai = by_id.get("openai-compliance") or {}
+    anthropic = by_id.get("anthropic-compliance") or {}
+    normalized_connections = [item[0] if isinstance(item, tuple) else item for item in source_connections]
+    github_connected = any(connection.source_type == "github" and connection.status in {"connected", "configured", "active"} for connection in normalized_connections)
+    if not github_connected:
+        settings = dict(getattr(org, "settings", None) or {}) if org else {}
+        github_connected = bool(settings.get("github_app_installed") or settings.get("github_connected") or settings.get("github_installation_id"))
+
+    def provider_configured(connector: dict[str, object]) -> bool:
+        return bool(connector.get("enabled")) and connector.get("credential_state") in {"encrypted", "legacy-migrated"}
+
+    def provider_tested(connector: dict[str, object]) -> bool:
+        return provider_configured(connector) and bool(connector.get("last_tested_at"))
+
+    def provider_synced(connector: dict[str, object]) -> bool:
+        return provider_configured(connector) and (connector.get("last_sync_status") == "success" or bool(connector.get("last_success_at")))
+
+    providers_configured = provider_configured(openai) and provider_configured(anthropic)
+    providers_tested = provider_tested(openai) and provider_tested(anthropic)
+    providers_synced = provider_synced(openai) and provider_synced(anthropic)
+
+    provider_gaps = []
+    for connector_id, connector in (("openai-compliance", openai), ("anthropic-compliance", anthropic)):
+        if not connector:
+            provider_gaps.append(f"{connector_id}: connector catalog missing")
+        elif connector.get("credential_state") not in {"encrypted", "legacy-migrated"}:
+            provider_gaps.append(f"{connector.get('label', connector_id)}: encrypted credential missing")
+        elif not connector.get("last_tested_at"):
+            provider_gaps.append(f"{connector.get('label', connector_id)}: credential test not run")
+        elif not provider_synced(connector):
+            provider_gaps.append(f"{connector.get('label', connector_id)}: provider sync not successful yet")
+
+    coverage_gaps: list[dict[str, object]] = []
+    if not github_connected:
+        coverage_gaps.append(
+            {
+                "id": "github-app",
+                "label": "GitHub App is not connected",
+                "severity": "high",
+                "next_action": "Install the GitHub App so provider runs can join to repos, PRs, commits, and branches.",
+            }
+        )
+    for index, gap in enumerate(provider_gaps):
+        coverage_gaps.append(
+            {
+                "id": f"provider-{index}",
+                "label": gap,
+                "severity": "medium",
+                "next_action": "Connect credentials, test them, then start provider sync.",
+            }
+        )
+
+    steps = [
+        {
+            "id": "install-github-app",
+            "label": "Install GitHub App",
+            "status": "complete" if github_connected else "blocked",
+            "detail": "Required for repo, PR, commit, and branch enrichment.",
+            "next_action": "Install GitHub App" if not github_connected else "Monitor GitHub enrichment",
+        },
+        {
+            "id": "connect-openai",
+            "label": "Connect OpenAI",
+            "status": "complete" if provider_configured(openai) else "blocked",
+            "detail": "Store encrypted OpenAI Compliance API credentials.",
+            "next_action": "Connect OpenAI" if not provider_configured(openai) else "Test OpenAI credentials",
+        },
+        {
+            "id": "connect-anthropic",
+            "label": "Connect Anthropic",
+            "status": "complete" if provider_configured(anthropic) else "blocked",
+            "detail": "Store encrypted Anthropic Compliance API credentials.",
+            "next_action": "Connect Anthropic" if not provider_configured(anthropic) else "Test Anthropic credentials",
+        },
+        {
+            "id": "test-connections",
+            "label": "Test connections",
+            "status": "complete" if providers_tested else ("pending" if providers_configured else "blocked"),
+            "detail": "Credential tests prove Skillayer can reach the provider vault entry.",
+            "next_action": (
+                "Monitor credential health"
+                if providers_tested
+                else ("Test connection" if providers_configured else "Connect provider credentials")
+            ),
+        },
+        {
+            "id": "start-sync",
+            "label": "Start sync",
+            "status": "complete" if providers_synced else ("pending" if providers_tested else "blocked"),
+            "detail": "Provider sync pulls metadata-only compliance records with cursors.",
+            "next_action": (
+                "Monitor sync freshness"
+                if providers_synced
+                else ("Start sync" if providers_tested else "Finish credential tests")
+            ),
+        },
+        {
+            "id": "review-coverage",
+            "label": "Review coverage gaps",
+            "status": "complete" if not coverage_gaps else "pending",
+            "detail": "Coverage gaps explain what is still missing before automatic developer rollups are trustworthy.",
+            "next_action": "Review coverage gaps" if coverage_gaps else "Monitor connector health",
+        },
+    ]
+    return {
+        "setup_complete": all(step["status"] == "complete" for step in steps),
+        "github_connected": github_connected,
+        "required_provider_ids": ["openai-compliance", "anthropic-compliance"],
+        "steps": steps,
+        "coverage_gaps": coverage_gaps,
     }
 
 

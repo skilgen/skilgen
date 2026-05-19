@@ -89,6 +89,24 @@ type AgentCompliancePayload = {
   content_retention_default: "metadata-only";
   configured_count: number;
   enabled_count: number;
+  enterprise_setup?: {
+    setup_complete: boolean;
+    github_connected: boolean;
+    required_provider_ids: string[];
+    steps: Array<{
+      id: string;
+      label: string;
+      status: "complete" | "pending" | "blocked" | string;
+      detail: string;
+      next_action: string;
+    }>;
+    coverage_gaps: Array<{
+      id: string;
+      label: string;
+      severity: "low" | "medium" | "high" | string;
+      next_action: string;
+    }>;
+  };
   connectors: AgentComplianceConnector[];
 };
 
@@ -475,6 +493,12 @@ function statusClass(connector: Connector) {
   return "bg-[color:var(--bg-base)] text-[color:var(--text-tertiary)]";
 }
 
+function setupStepClass(status: string) {
+  if (status === "complete") return "border-[color:var(--accent-green)]/40 bg-[color:var(--accent-green)]/10 text-[color:var(--accent-green)]";
+  if (status === "pending") return "border-[color:var(--accent-primary)]/40 bg-[color:var(--accent-primary)]/10 text-[color:var(--accent-primary)]";
+  return "border-amber-500/40 bg-amber-500/10 text-amber-100";
+}
+
 async function configureAgentComplianceConnector(formData: FormData) {
   "use server";
 
@@ -648,6 +672,7 @@ export default async function ConnectorsSettingsPage() {
   const connected = connectors.filter((connector) => connector.connected).length;
   const categories = new Set(connectors.map((connector) => connector.category));
   const available = connectors.filter((connector) => connector.status === "available").length;
+  const enterpriseSetup = agentCompliance?.enterprise_setup;
   const sections = categoryOrder
     .map((category) => ({
       category,
@@ -685,6 +710,46 @@ export default async function ConnectorsSettingsPage() {
             </div>
           </div>
         </div>
+        {enterpriseSetup ? (
+          <div className="border-b border-[color:var(--bg-border)] p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h3 className="text-[14px] font-semibold text-[color:var(--text-primary)]">Enterprise setup path</h3>
+                <p className="mt-1 max-w-4xl text-[12px] leading-6 text-[color:var(--text-secondary)]">
+                  Connect GitHub and provider compliance APIs, test credentials, start cursor sync, then review coverage gaps before trusting automatic developer rollups.
+                </p>
+              </div>
+              <span className={`inline-flex h-8 w-fit items-center rounded-md px-3 text-[12px] font-semibold ${enterpriseSetup.setup_complete ? "bg-[color:var(--accent-green)]/15 text-[color:var(--accent-green)]" : "bg-amber-500/15 text-amber-100"}`}>
+                {enterpriseSetup.setup_complete ? "Setup complete" : `${enterpriseSetup.coverage_gaps.length} coverage gaps`}
+              </span>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {enterpriseSetup.steps.map((step) => (
+                <article className={`rounded-md border p-3 ${setupStepClass(step.status)}`} key={step.id}>
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-[13px] font-semibold">{step.label}</h4>
+                    <span className="rounded-full bg-black/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide">{step.status}</span>
+                  </div>
+                  <p className="mt-2 text-[12px] leading-5 text-[color:var(--text-secondary)]">{step.detail}</p>
+                  <p className="mt-2 text-[11px] font-semibold text-[color:var(--text-primary)]">Next: {step.next_action}</p>
+                </article>
+              ))}
+            </div>
+            {enterpriseSetup.coverage_gaps.length ? (
+              <div className="mt-4 rounded-md border border-amber-500/35 bg-amber-500/10 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-amber-100">Coverage gaps</div>
+                <div className="mt-2 grid gap-2">
+                  {enterpriseSetup.coverage_gaps.map((gap) => (
+                    <div className="flex flex-col gap-1 rounded-md border border-amber-500/20 bg-black/10 p-2 text-[12px] sm:flex-row sm:items-center sm:justify-between" key={gap.id}>
+                      <span className="font-semibold text-[color:var(--text-primary)]">{gap.label}</span>
+                      <span className="text-[color:var(--text-secondary)]">{gap.next_action}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div className="grid gap-3 p-4 lg:grid-cols-3">
           {agentConnectors.map((connector) => (
             <article className="flex min-h-[190px] flex-col rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3" key={`agent-${connector.id}`}>
