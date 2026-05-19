@@ -17,6 +17,7 @@ from apps.api.api.routes import digest as legacy_digest
 from apps.api.api.services import audit
 from apps.api.api.services.audit import get_actor_login
 from apps.api.api.v8.flags import is_v8, request_flag_cache
+from apps.api.api.v8.settings.anthropic_compliance_adapter import pull_anthropic_compliance_events
 from apps.api.api.v8.settings.connectors_registry import connector_registry
 from apps.api.api.v8.settings.openai_compliance_adapter import pull_openai_compliance_events
 from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, require_permission
@@ -1368,14 +1369,19 @@ async def request_agent_compliance_connector_sync(
     cursor = payload.cursor or str(current.get("cursor") or "") or None
     sync_plan = _agent_sync_contract(connector_id, connector, current, cursor)
     credential_connection = credential_connections.get(connector_id) or await _agent_credential_connection(db, org_id, connector_id)
-    if not payload.dry_run and connector_id != "openai-compliance":
-        raise HTTPException(status_code=400, detail="Live provider sync is currently implemented for OpenAI Compliance only")
-    if not payload.dry_run and connector_id == "openai-compliance":
-        adapter_result = pull_openai_compliance_events(
-            _decrypt_agent_credentials(credential_connection),
-            cursor=cursor,
-            dry_run=False,
-        )
+    live_provider_adapters = {"openai-compliance", "anthropic-compliance"}
+    if not payload.dry_run and connector_id not in live_provider_adapters:
+        raise HTTPException(status_code=400, detail="Live provider sync is currently implemented for OpenAI and Anthropic Compliance only")
+    if not payload.dry_run and connector_id in live_provider_adapters:
+        credentials = _decrypt_agent_credentials(credential_connection)
+        if connector_id == "anthropic-compliance":
+            adapter_result = pull_anthropic_compliance_events(credentials, cursor=cursor, dry_run=False)
+            provider_label = "Anthropic Compliance"
+            token_source = "anthropic_compliance_api"
+        else:
+            adapter_result = pull_openai_compliance_events(credentials, cursor=cursor, dry_run=False)
+            provider_label = "OpenAI Compliance"
+            token_source = "openai_compliance_api"
         sync_plan.update(
             {
                 "status": adapter_result.status,
@@ -1454,9 +1460,9 @@ async def request_agent_compliance_connector_sync(
         await audit.emit(
             db,
             org_id,
-            "settings.openai_compliance_connector_sync_completed",
+            f"settings.{connector_id.replace('-', '_')}_connector_sync_completed",
             "synced" if adapter_result.status == "success" else "blocked",
-            f"OpenAI Compliance connector sync {adapter_result.status}",
+            f"{provider_label} connector sync {adapter_result.status}",
             actor_login=get_actor_login(request),
             resource_type="agent_compliance_connector",
             resource_id=connector_id,
@@ -1468,7 +1474,7 @@ async def request_agent_compliance_connector_sync(
                 "next_cursor": sync_plan.get("next_cursor"),
                 "ingested_count": sync_plan.get("ingested_count", 0),
                 "cost_source": "provider_reported" if adapter_result.status == "success" else "unknown",
-                "token_source": "openai_compliance_api" if adapter_result.status == "success" else "unknown",
+                "token_source": token_source if adapter_result.status == "success" else "unknown",
                 "content_retention": "metadata-only",
                 "blocked_reason": adapter_result.blocked_reason,
             },
