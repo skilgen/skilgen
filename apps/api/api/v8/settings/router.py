@@ -200,6 +200,16 @@ class AgentComplianceIngestJobResponse(BaseModel):
     content_retention: Literal["metadata-only"] = "metadata-only"
 
 
+class AgentComplianceSyncJobResponse(BaseModel):
+    job_id: str
+    connector_id: str
+    status: str
+    queued: bool
+    cursor: str | None = None
+    next_sync_at: str | None = None
+    content_retention: Literal["metadata-only"] = "metadata-only"
+
+
 class AgentComplianceIngestJobStatusResponse(BaseModel):
     job_id: str
     connector_id: str
@@ -625,6 +635,10 @@ async def _agent_connector_response(db: AsyncSession, org: Org | None) -> dict[s
                 "last_sync_requested_at": row.get("last_sync_requested_at"),
                 "last_sync_mode": row.get("last_sync_mode"),
                 "last_sync_plan": sync_plan,
+                "last_provider_sync_job": row.get("last_provider_sync_job") if isinstance(row.get("last_provider_sync_job"), dict) else None,
+                "next_sync_at": row.get("next_sync_at"),
+                "last_success_at": row.get("last_success_at"),
+                "last_failure_at": row.get("last_failure_at"),
                 "last_ingested_at": row.get("last_ingested_at"),
                 "last_ingested_count": int(row.get("last_ingested_count") or 0),
                 "total_ingested_count": int(row.get("total_ingested_count") or 0),
@@ -1006,6 +1020,202 @@ async def _run_agent_compliance_ingest_job(
                     "error": str(exc),
                     "content_retention": "metadata-only",
                 }
+                await db.commit()
+
+
+def _provider_sync_adapter(connector_id: str, credentials: dict[str, Any], cursor: str | None):
+    if connector_id == "anthropic-compliance":
+        return pull_anthropic_compliance_events(credentials, cursor=cursor, dry_run=False), "Anthropic Compliance", "anthropic_compliance_api"
+    if connector_id == "openai-compliance":
+        return pull_openai_compliance_events(credentials, cursor=cursor, dry_run=False), "OpenAI Compliance", "openai_compliance_api"
+    raise HTTPException(status_code=400, detail="Live provider sync is currently implemented for OpenAI and Anthropic Compliance only")
+
+
+async def _run_agent_compliance_provider_sync_job(
+    job_id: str,
+    org_id: str,
+    connector_id: str,
+    actor_login: str | None,
+) -> None:
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as db:
+        job = await db.get(Job, job_id)
+        org = await db.get(Org, org_id)
+        if job is None or org is None:
+            return
+        job.status = "running"
+        result = dict(job.result_json or {})
+        result["started_at"] = datetime.now(UTC).isoformat()
+        job.result_json = result
+        await db.commit()
+        try:
+            settings = dict(org.settings or {})
+            configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+            current = dict(configured.get(connector_id) or {})
+            if not current.get("enabled"):
+                raise RuntimeError("Agent compliance connector must be enabled before sync")
+            credential_connection = await _agent_credential_connection(db, org_id, connector_id)
+            cursor = str(current.get("cursor") or "") or None
+            adapter_result, provider_label, token_source = _provider_sync_adapter(
+                connector_id,
+                _decrypt_agent_credentials(credential_connection),
+                cursor,
+            )
+            connector = next((item for item in _agent_compliance_registry() if item.get("id") == connector_id), {})
+            sync_plan = _agent_sync_contract(connector_id, connector, current, cursor)
+            sync_plan.update(
+                {
+                    "status": adapter_result.status,
+                    "mode": adapter_result.mode,
+                    "cursor": cursor,
+                    "next_cursor": adapter_result.next_cursor,
+                    "provider_adapter_required": adapter_result.provider_adapter_required,
+                    "ready_for_provider_pull": adapter_result.status == "success",
+                    "blocked_reason": adapter_result.blocked_reason or "",
+                    "next_actions": adapter_result.next_actions,
+                    "ingested_count": 0,
+                    "skipped_count": 0,
+                    "metrics": {},
+                }
+            )
+            now = datetime.now(UTC).isoformat()
+            if adapter_result.status == "success":
+                response = await _ingest_agent_compliance_payload(
+                    db,
+                    org,
+                    connector_id,
+                    AgentComplianceIngestPayload(
+                        cursor=cursor,
+                        next_cursor=adapter_result.next_cursor,
+                        events=[AgentComplianceEventPayload.model_validate(event) for event in adapter_result.events],
+                    ),
+                    actor_login,
+                )
+                settings = dict(org.settings or {})
+                configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+                current = dict(configured.get(connector_id) or {})
+                sync_plan.update(
+                    {
+                        "next_cursor": response.next_cursor,
+                        "ingested_count": response.ingested_count,
+                        "skipped_count": response.skipped_count,
+                        "metrics": response.metrics,
+                    }
+                )
+                current.update(
+                    {
+                        "cursor": response.next_cursor or cursor,
+                        "last_sync_status": "success",
+                        "last_sync_mode": adapter_result.mode,
+                        "last_sync_plan": sync_plan,
+                        "last_provider_sync_job": {
+                            "job_id": job.id,
+                            "status": "completed",
+                            "cursor": cursor,
+                            "next_cursor": response.next_cursor,
+                            "ingested_count": response.ingested_count,
+                            "skipped_count": response.skipped_count,
+                            "content_retention": "metadata-only",
+                            "completed_at": now,
+                            "next_sync_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+                        },
+                        "last_success_at": now,
+                        "last_failure_at": None,
+                        "last_error": None,
+                        "next_sync_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+                        "updated_at": now,
+                    }
+                )
+                job.status = "completed"
+            else:
+                current.update(
+                    {
+                        "last_sync_status": "failed",
+                        "last_sync_mode": adapter_result.mode,
+                        "last_sync_plan": sync_plan,
+                        "last_provider_sync_job": {
+                            "job_id": job.id,
+                            "status": "failed",
+                            "cursor": cursor,
+                            "content_retention": "metadata-only",
+                            "failed_at": now,
+                            "blocked_reason": adapter_result.blocked_reason,
+                            "next_sync_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+                        },
+                        "last_failure_at": now,
+                        "last_error": adapter_result.blocked_reason,
+                        "next_sync_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+                        "updated_at": now,
+                    }
+                )
+                job.status = "failed"
+            configured[connector_id] = current
+            settings["v8_agent_compliance_connectors"] = configured
+            org.settings = settings
+            flag_modified(org, "settings")
+            job.result_json = {
+                **result,
+                "completed_at": datetime.now(UTC).isoformat(),
+                "connector_id": connector_id,
+                "status": adapter_result.status,
+                "mode": adapter_result.mode,
+                "cursor": cursor,
+                "next_cursor": sync_plan.get("next_cursor"),
+                "ingested_count": sync_plan.get("ingested_count", 0),
+                "skipped_count": sync_plan.get("skipped_count", 0),
+                "metrics": sync_plan.get("metrics", {}),
+                "cost_source": "provider_reported" if adapter_result.status == "success" else "unknown",
+                "token_source": token_source if adapter_result.status == "success" else "unknown",
+                "blocked_reason": adapter_result.blocked_reason,
+                "content_retention": "metadata-only",
+            }
+            await audit.emit(
+                db,
+                org_id,
+                f"settings.{connector_id.replace('-', '_')}_provider_sync_job_completed",
+                "synced" if adapter_result.status == "success" else "blocked",
+                f"{provider_label} provider sync job {adapter_result.status}",
+                actor_login=actor_login,
+                resource_type="agent_compliance_connector",
+                resource_id=connector_id,
+                metadata=job.result_json,
+            )
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            job = await db.get(Job, job_id)
+            org = await db.get(Org, org_id)
+            if job is not None:
+                job.status = "failed"
+                result = dict(job.result_json or result)
+                result.update({"failed_at": datetime.now(UTC).isoformat(), "error": str(exc), "content_retention": "metadata-only"})
+                job.result_json = result
+                if org is not None:
+                    settings = dict(org.settings or {})
+                    configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+                    current = dict(configured.get(connector_id) or {})
+                    current.update(
+                        {
+                            "last_sync_status": "failed",
+                            "last_sync_mode": "provider-sync-job",
+                            "last_provider_sync_job": {
+                                "job_id": job.id,
+                                "status": "failed",
+                                "content_retention": "metadata-only",
+                                "failed_at": result["failed_at"],
+                                "error": str(exc),
+                                "next_sync_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+                            },
+                            "last_failure_at": result["failed_at"],
+                            "last_error": str(exc),
+                            "next_sync_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+                            "updated_at": result["failed_at"],
+                        }
+                    )
+                    configured[connector_id] = current
+                    settings["v8_agent_compliance_connectors"] = configured
+                    org.settings = settings
+                    flag_modified(org, "settings")
                 await db.commit()
 
 
@@ -1649,6 +1859,123 @@ async def queue_agent_compliance_ingest_job(
         cursor=payload.cursor,
         next_cursor=payload.next_cursor,
         event_count=len(payload.events),
+    )
+
+
+@router.post(
+    "/connectors/{connector_id}/sync-jobs",
+    response_model=AgentComplianceSyncJobResponse,
+    dependencies=[Depends(require_permission("settings.connectors.manage"))],
+)
+async def queue_agent_compliance_provider_sync_job(
+    org_id: str,
+    connector_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AgentComplianceSyncJobResponse:
+    await _assert_v8_org(org_id, current_org_id, db)
+    if connector_id not in {"openai-compliance", "anthropic-compliance"}:
+        raise HTTPException(status_code=400, detail="Provider sync jobs are currently implemented for OpenAI and Anthropic Compliance only")
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    settings = dict(org.settings or {})
+    configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+    current = dict(configured.get(connector_id) or {})
+    if not current.get("enabled"):
+        raise HTTPException(status_code=409, detail="Agent compliance connector must be enabled before sync")
+    now = datetime.now(UTC)
+    next_sync_at = (now + timedelta(minutes=15)).isoformat()
+    job = Job(
+        id=new_uuid(),
+        org_id=org_id,
+        type="agent_compliance.provider_sync",
+        status="queued",
+        result_json={
+            "connector_id": connector_id,
+            "cursor": current.get("cursor"),
+            "content_retention": "metadata-only",
+            "pagination_strategy": "cursor-resume",
+            "queued_at": now.isoformat(),
+            "next_sync_at": next_sync_at,
+        },
+    )
+    db.add(job)
+    current.update(
+        {
+            "last_sync_status": "queued",
+            "last_sync_mode": "provider-sync-job",
+            "last_sync_requested_at": now.isoformat(),
+            "next_sync_at": next_sync_at,
+            "last_provider_sync_job": {
+                "job_id": job.id,
+                "status": job.status,
+                "cursor": current.get("cursor"),
+                "content_retention": "metadata-only",
+                "queued_at": now.isoformat(),
+                "next_sync_at": next_sync_at,
+            },
+            "updated_at": now.isoformat(),
+        }
+    )
+    configured[connector_id] = current
+    settings["v8_agent_compliance_connectors"] = configured
+    org.settings = settings
+    flag_modified(org, "settings")
+    await audit.emit(
+        db,
+        org_id,
+        "settings.agent_compliance_provider_sync_job_queued",
+        "queued",
+        f"Queued provider sync job for {connector_id}",
+        actor_login=get_actor_login(request),
+        resource_type="agent_compliance_connector",
+        resource_id=connector_id,
+        metadata={
+            "job_id": job.id,
+            "connector_id": connector_id,
+            "cursor_supplied": bool(current.get("cursor")),
+            "content_retention": "metadata-only",
+            "pagination_strategy": "cursor-resume",
+            "next_sync_at": next_sync_at,
+        },
+    )
+    await db.commit()
+    background_tasks.add_task(_run_agent_compliance_provider_sync_job, job.id, org_id, connector_id, get_actor_login(request))
+    return AgentComplianceSyncJobResponse(
+        job_id=job.id,
+        connector_id=connector_id,
+        status=job.status,
+        queued=True,
+        cursor=str(current.get("cursor")) if current.get("cursor") else None,
+        next_sync_at=next_sync_at,
+    )
+
+
+@router.get(
+    "/connectors/{connector_id}/sync-jobs/{job_id}",
+    response_model=AgentComplianceIngestJobStatusResponse,
+)
+async def get_agent_compliance_provider_sync_job(
+    org_id: str,
+    connector_id: str,
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AgentComplianceIngestJobStatusResponse:
+    await _assert_v8_org(org_id, current_org_id, db)
+    job = await db.get(Job, job_id)
+    result = job.result_json if job is not None and isinstance(job.result_json, dict) else {}
+    if job is None or job.org_id != org_id or job.type != "agent_compliance.provider_sync" or result.get("connector_id") != connector_id:
+        raise HTTPException(status_code=404, detail="Agent compliance provider sync job not found")
+    return AgentComplianceIngestJobStatusResponse(
+        job_id=job.id,
+        connector_id=connector_id,
+        status=job.status,
+        result=result,
+        created_at=job.created_at,
     )
 
 

@@ -115,6 +115,8 @@ def test_v8_settings_router_is_registered() -> None:
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-events" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs/{job_id}" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/sync-jobs" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/sync-jobs/{job_id}" in paths
     assert "settings.admin_audit.read" in PERMISSIONS
     assert "settings.billing.read" in PERMISSIONS
     assert "settings.notifications.read" in PERMISSIONS
@@ -1509,6 +1511,102 @@ def test_agent_compliance_ingest_job_status_is_connector_scoped(monkeypatch) -> 
     assert response.job_id == "job-1"
     assert response.status == "completed"
     assert response.result["ingested_count"] == 3
+
+
+def test_queue_agent_compliance_provider_sync_job_tracks_schedule_state(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "anthropic-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "cursor": "anthropic-cursor-1",
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+    background_tasks = BackgroundTasks()
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.queue_agent_compliance_provider_sync_job(
+            "org-1",
+            "anthropic-compliance",
+            Request({"type": "http", "headers": []}),
+            background_tasks,
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    job = next(item for item in db.added if isinstance(item, Job))
+    stored = org.settings["v8_agent_compliance_connectors"]["anthropic-compliance"]
+    assert response.queued is True
+    assert response.cursor == "anthropic-cursor-1"
+    assert response.next_sync_at
+    assert job.type == "agent_compliance.provider_sync"
+    assert job.status == "queued"
+    assert job.result_json["pagination_strategy"] == "cursor-resume"
+    assert job.result_json["content_retention"] == "metadata-only"
+    assert stored["last_sync_status"] == "queued"
+    assert stored["last_sync_mode"] == "provider-sync-job"
+    assert stored["next_sync_at"]
+    assert stored["last_provider_sync_job"]["job_id"] == job.id
+
+
+def test_agent_compliance_provider_sync_job_status_is_connector_scoped(monkeypatch) -> None:
+    job = Job(
+        id="job-sync-1",
+        org_id="org-1",
+        type="agent_compliance.provider_sync",
+        status="completed",
+        result_json={
+            "connector_id": "anthropic-compliance",
+            "ingested_count": 2,
+            "content_retention": "metadata-only",
+        },
+        created_at=datetime(2026, 5, 11, 8, 30, 0),
+    )
+
+    class JobDb:
+        async def get(self, model: object, row_id: str) -> object | None:
+            assert model is Job
+            assert row_id == "job-sync-1"
+            return job
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+
+    response = asyncio.run(
+        settings_router.get_agent_compliance_provider_sync_job(
+            "org-1",
+            "anthropic-compliance",
+            "job-sync-1",
+            db=JobDb(),
+            current_org_id="org-1",
+        )
+    )
+
+    assert response.job_id == "job-sync-1"
+    assert response.status == "completed"
+    assert response.result["ingested_count"] == 2
 
 
 def test_scope_expression_positive_for_payments_repo() -> None:

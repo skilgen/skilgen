@@ -50,6 +50,24 @@ type AgentComplianceConnector = Connector & {
   last_sync_requested_at?: string | null;
   last_sync_mode?: string | null;
   last_sync_plan?: AgentComplianceSyncPlan | null;
+  last_provider_sync_job?: {
+    job_id: string;
+    status: string;
+    cursor?: string | null;
+    next_cursor?: string | null;
+    ingested_count?: number | null;
+    skipped_count?: number | null;
+    content_retention: "metadata-only";
+    queued_at?: string | null;
+    completed_at?: string | null;
+    failed_at?: string | null;
+    blocked_reason?: string | null;
+    error?: string | null;
+    next_sync_at?: string | null;
+  } | null;
+  next_sync_at?: string | null;
+  last_success_at?: string | null;
+  last_failure_at?: string | null;
   last_ingest_job?: {
     job_id: string;
     status: string;
@@ -519,6 +537,28 @@ async function requestAgentComplianceSync(formData: FormData) {
   }
 }
 
+async function queueAgentComplianceProviderSync(formData: FormData) {
+  "use server";
+
+  const connectorId = String(formData.get("connector_id") ?? "");
+  if (!connectorId) return;
+  const { accessToken, org } = await loadSettingsContext();
+  if (!accessToken) return;
+
+  const response = await fetch(`${API_URL}/v8/orgs/${org.id}/settings/connectors/${encodeURIComponent(connectorId)}/sync-jobs`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  if (response.ok) {
+    revalidatePath("/settings/connectors");
+  }
+}
+
 async function testAgentComplianceCredentials(formData: FormData) {
   "use server";
 
@@ -587,6 +627,10 @@ export default async function ConnectorsSettingsPage() {
     last_sync_requested_at: null,
     last_sync_mode: null,
     last_sync_plan: null,
+    last_provider_sync_job: null,
+    next_sync_at: null,
+    last_success_at: null,
+    last_failure_at: null,
     credential_state: "missing" as const,
     credential_kind: null,
     credential_hint: {},
@@ -616,7 +660,7 @@ export default async function ConnectorsSettingsPage() {
     <SettingsShell active="Connectors">
       <div className="grid gap-4 md:grid-cols-3">
         <Metric label="Registry entries" value={connectors.length} sub="Data-driven connector catalog" />
-        <Metric label="Connected" value={connected} sub="Backed by existing source connections" />
+        <Metric label="Catalog connected" value={connected} sub="Source catalog state only" />
         <Metric label="Available now" value={available} sub={`${categories.size} categories in the Skillayer catalog`} />
       </div>
 
@@ -663,6 +707,13 @@ export default async function ConnectorsSettingsPage() {
               <div className="mt-3 text-[12px] text-[color:var(--text-secondary)]">
                 Sync: {connector.last_sync_status ?? "not started"}{connector.last_sync_mode ? ` · ${connector.last_sync_mode}` : ""} · Retention: {connector.content_retention}
               </div>
+              {(connector.last_success_at || connector.last_failure_at || connector.next_sync_at) ? (
+                <div className="mt-2 grid gap-1 text-[11px] leading-5 text-[color:var(--text-tertiary)]">
+                  {connector.last_success_at ? <span>Last success: {new Date(connector.last_success_at).toLocaleString()}</span> : null}
+                  {connector.last_failure_at ? <span className="text-[color:var(--accent-red)]">Last failure: {new Date(connector.last_failure_at).toLocaleString()}</span> : null}
+                  {connector.next_sync_at ? <span>Next sync window: {new Date(connector.next_sync_at).toLocaleString()}</span> : null}
+                </div>
+              ) : null}
               <div className="mt-3 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Credential vault</span>
@@ -725,6 +776,24 @@ export default async function ConnectorsSettingsPage() {
                   <p className="mt-2 truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">{connector.last_ingest_job.job_id}</p>
                 </div>
               ) : null}
+              {connector.last_provider_sync_job ? (
+                <div className="mt-3 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Provider sync job</span>
+                    <span className="rounded-full bg-[color:var(--accent-primary)]/15 px-2 py-1 text-[11px] font-semibold text-[color:var(--accent-primary)]">{connector.last_provider_sync_job.status}</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-[color:var(--text-secondary)]">
+                    <span>Retention: {connector.last_provider_sync_job.content_retention}</span>
+                    <span>Cursor: {connector.last_provider_sync_job.cursor ? "resume" : "first page"}</span>
+                    <span>Events: {connector.last_provider_sync_job.ingested_count ?? 0}</span>
+                    <span>Next: {connector.last_provider_sync_job.next_sync_at ? "scheduled" : "pending"}</span>
+                  </div>
+                  {connector.last_provider_sync_job.blocked_reason || connector.last_provider_sync_job.error ? (
+                    <p className="mt-2 text-[11px] leading-5 text-[color:var(--accent-red)]">{connector.last_provider_sync_job.blocked_reason ?? connector.last_provider_sync_job.error}</p>
+                  ) : null}
+                  <p className="mt-2 truncate font-mono text-[11px] text-[color:var(--text-tertiary)]">{connector.last_provider_sync_job.job_id}</p>
+                </div>
+              ) : null}
               <div className="mt-auto grid gap-2 pt-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                 <form action={configureAgentComplianceConnector}>
                   <input name="connector_id" type="hidden" value={connector.id} />
@@ -747,6 +816,16 @@ export default async function ConnectorsSettingsPage() {
                     type="submit"
                   >
                     {connector.enabled ? "Request sync" : "Sync gated"}
+                  </button>
+                </form>
+                <form action={queueAgentComplianceProviderSync}>
+                  <input name="connector_id" type="hidden" value={connector.id} />
+                  <button
+                    className="inline-flex h-9 w-full items-center justify-center rounded-md bg-[color:var(--accent-primary)] px-3 text-[12px] font-semibold text-[color:var(--bg-base)] disabled:cursor-not-allowed disabled:bg-[color:var(--bg-surface)] disabled:text-[color:var(--text-tertiary)]"
+                    disabled={!accessToken || !connector.enabled || connector.credential_state === "missing" || !["openai-compliance", "anthropic-compliance"].includes(connector.id)}
+                    type="submit"
+                  >
+                    {connector.credential_state === "missing" ? "Credentials gated" : ["openai-compliance", "anthropic-compliance"].includes(connector.id) ? "Start provider sync" : "Adapter pending"}
                   </button>
                 </form>
                 <form action={testAgentComplianceCredentials}>
