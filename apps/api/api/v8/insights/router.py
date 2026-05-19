@@ -18,7 +18,7 @@ from apps.api.api.auth import get_current_org_id
 from apps.api.api.v8.flags import is_v8, request_flag_cache
 from packages.db.database import get_db
 from apps.api.api.v8.settings.connectors_registry import connector_registry
-from packages.db.models import AgentSession, AuditEvent, Org, OrgPolicy, PRAttribution, PullRequest, Repo, Skill, SkillMemoryStub, SkillRegistryEntry, SkillUsageEvent
+from packages.db.models import AgentSession, AuditEvent, Org, OrgPolicy, PRAttribution, ProviderIdentityMapping, PullRequest, Repo, Skill, SkillMemoryStub, SkillRegistryEntry, SkillUsageEvent
 
 
 router = APIRouter(
@@ -299,6 +299,45 @@ class ProviderCoverageResponse(BaseModel):
     generated_at: datetime
     content_retention: Literal["metadata-only"] = "metadata-only"
     rows: list[ProviderCoverageRow]
+
+
+class IdentityMappingRow(BaseModel):
+    provider: str
+    provider_user_id: str | None = None
+    provider_actor_login: str
+    canonical_user_id: str | None = None
+    canonical_email: str | None = None
+    display_name: str | None = None
+    github_login: str | None = None
+    sso_subject: str | None = None
+    local_identity: str | None = None
+    match_status: Literal["matched", "unmatched", "ambiguous"]
+    confidence: float
+    match_method: str
+    events: int
+    sessions: int
+    repos: list[str]
+    models: list[str]
+    last_seen_at: datetime | None = None
+    action: str
+
+
+class IdentityMappingSummary(BaseModel):
+    provider_identities: int
+    matched: int
+    unmatched: int
+    ambiguous: int
+    providers: int
+    events: int
+
+
+class IdentityMappingResponse(BaseModel):
+    window_days: int
+    generated_at: datetime
+    source: str = "provider_identity_mappings + audit_events.metadata"
+    content_retention: Literal["metadata-only"] = "metadata-only"
+    summary: IdentityMappingSummary
+    rows: list[IdentityMappingRow]
 
 
 class CodingPlatformOverviewRow(BaseModel):
@@ -961,6 +1000,174 @@ def _metadata_value(metadata: object, *keys: str) -> str | None:
         if value not in {None, ""}:
             return str(value)
     return None
+
+
+def _normalize_identity_value(value: str | None) -> str | None:
+    normalized = str(value or "").strip().lower()
+    return normalized or None
+
+
+def _identity_mapping_keys(mapping: ProviderIdentityMapping) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    provider = _normalize_identity_value(mapping.provider) or "unknown"
+    for key_name, value in (
+        ("provider_user_id", mapping.provider_user_id),
+        ("provider_actor_login", mapping.provider_actor_login),
+        ("canonical_email", mapping.canonical_email),
+        ("github_login", mapping.github_login),
+        ("sso_subject", mapping.sso_subject),
+        ("local_identity", mapping.local_identity),
+    ):
+        normalized = _normalize_identity_value(value)
+        if normalized:
+            keys.add((provider, f"{key_name}:{normalized}"))
+            keys.add(("*", f"{key_name}:{normalized}"))
+    return keys
+
+
+def _event_identity_keys(event: AuditEvent, metadata: object) -> tuple[str, str | None, str, set[tuple[str, str]], str | None, str | None, str | None]:
+    provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or str(getattr(event, "resource_type", None) or "unknown")
+    actor = str(getattr(event, "actor_login", None) or _metadata_value(metadata, "actor_login", "user", "engineer_login") or "unknown")
+    provider_user_id = _metadata_value(metadata, "provider_user_id", "provider_actor_id", "user_id", "account_id")
+    email = _metadata_value(metadata, "email", "user_email", "actor_email") or (actor if "@" in actor else None)
+    github_login = _metadata_value(metadata, "github_login", "github_user", "author_login")
+    sso_subject = _metadata_value(metadata, "sso_subject", "sso_user_id", "subject")
+    local_identity = _metadata_value(metadata, "local_identity", "local_user", "machine_user") or (actor if actor and "@" not in actor and actor != "unknown" else None)
+    provider_key = _normalize_identity_value(provider) or "unknown"
+    keys: set[tuple[str, str]] = set()
+    for key_name, value in (
+        ("provider_user_id", provider_user_id),
+        ("provider_actor_login", actor),
+        ("canonical_email", email),
+        ("github_login", github_login),
+        ("sso_subject", sso_subject),
+        ("local_identity", local_identity),
+    ):
+        normalized = _normalize_identity_value(value)
+        if normalized:
+            keys.add((provider_key, f"{key_name}:{normalized}"))
+            keys.add(("*", f"{key_name}:{normalized}"))
+    return provider, provider_user_id, actor, keys, email, github_login, sso_subject
+
+
+def _identity_mapping_from_events(events: list[AuditEvent], mappings: list[ProviderIdentityMapping], window_days: int) -> IdentityMappingResponse:
+    mapping_index: dict[tuple[str, str], list[ProviderIdentityMapping]] = defaultdict(list)
+    for mapping in mappings:
+        for key in _identity_mapping_keys(mapping):
+            mapping_index[key].append(mapping)
+
+    buckets: dict[tuple[str, str | None, str], dict[str, Any]] = {}
+    for event in events:
+        metadata = getattr(event, "metadata_json", {}) or {}
+        provider, provider_user_id, actor, keys, email, github_login, sso_subject = _event_identity_keys(event, metadata)
+        bucket_key = (provider, provider_user_id, actor)
+        bucket = buckets.setdefault(
+            bucket_key,
+            {
+                "provider": provider,
+                "provider_user_id": provider_user_id,
+                "provider_actor_login": actor,
+                "email": email,
+                "github_login": github_login,
+                "sso_subject": sso_subject,
+                "local_identity": _metadata_value(metadata, "local_identity", "local_user", "machine_user"),
+                "events": 0,
+                "sessions": set(),
+                "repos": set(),
+                "models": set(),
+                "last_seen_at": None,
+                "matches": [],
+                "identity_keys": set(),
+            },
+        )
+        bucket["events"] += 1
+        if session_id := _metadata_value(metadata, "session_id", "agent_session_id", "thread_id", "provider_session_id"):
+            bucket["sessions"].add(session_id)
+        if repo := str(getattr(event, "repo_name", None) or _metadata_value(metadata, "repo_name", "repo") or ""):
+            bucket["repos"].add(repo)
+        if model := _metadata_value(metadata, "model", "model_name", "model_id"):
+            bucket["models"].add(model)
+        created_at = getattr(event, "created_at", None)
+        if created_at and (bucket["last_seen_at"] is None or created_at > bucket["last_seen_at"]):
+            bucket["last_seen_at"] = created_at
+        bucket["identity_keys"].update(keys)
+
+    rows: list[IdentityMappingRow] = []
+    for bucket in buckets.values():
+        matched: dict[str, ProviderIdentityMapping] = {}
+        for key in bucket["identity_keys"]:
+            for mapping in mapping_index.get(key, []):
+                matched[mapping.id] = mapping
+        if len(matched) > 1:
+            status: Literal["matched", "unmatched", "ambiguous"] = "ambiguous"
+            confidence = 0.0
+            method = "multiple_identity_mappings"
+            canonical_user_id = canonical_email = display_name = github_login = sso_subject = local_identity = None
+            action = "Resolve duplicate identity mappings before using this actor for governance rollups."
+        elif len(matched) == 1:
+            mapping = next(iter(matched.values()))
+            status = "matched"
+            confidence = round(float(mapping.confidence or 1.0), 2)
+            method = mapping.match_method
+            canonical_user_id = mapping.canonical_user_id
+            canonical_email = mapping.canonical_email
+            display_name = mapping.display_name
+            github_login = mapping.github_login or bucket["github_login"]
+            sso_subject = mapping.sso_subject or bucket["sso_subject"]
+            local_identity = mapping.local_identity or bucket["local_identity"]
+            action = "No action needed; provider identity is mapped to a canonical developer."
+        elif bucket["email"]:
+            status = "matched"
+            confidence = 0.9
+            method = "email_auto_match"
+            canonical_user_id = str(bucket["email"]).lower()
+            canonical_email = str(bucket["email"]).lower()
+            display_name = None
+            github_login = bucket["github_login"]
+            sso_subject = bucket["sso_subject"]
+            local_identity = bucket["local_identity"]
+            action = "Review optional mapping if this email should merge with an SSO or GitHub identity."
+        else:
+            status = "unmatched"
+            confidence = 0.0
+            method = "unmatched"
+            canonical_user_id = canonical_email = display_name = None
+            github_login = bucket["github_login"]
+            sso_subject = bucket["sso_subject"]
+            local_identity = bucket["local_identity"]
+            action = "Map this provider user to email, GitHub login, SSO subject, or local coding-agent identity."
+        rows.append(
+            IdentityMappingRow(
+                provider=str(bucket["provider"]),
+                provider_user_id=bucket["provider_user_id"],
+                provider_actor_login=str(bucket["provider_actor_login"]),
+                canonical_user_id=canonical_user_id,
+                canonical_email=canonical_email,
+                display_name=display_name,
+                github_login=github_login,
+                sso_subject=sso_subject,
+                local_identity=local_identity,
+                match_status=status,
+                confidence=confidence,
+                match_method=method,
+                events=int(bucket["events"]),
+                sessions=len(bucket["sessions"]),
+                repos=sorted(bucket["repos"]),
+                models=sorted(bucket["models"]),
+                last_seen_at=bucket["last_seen_at"],
+                action=action,
+            )
+        )
+    rows.sort(key=lambda row: ({"ambiguous": 0, "unmatched": 1, "matched": 2}[row.match_status], -row.events, row.provider, row.provider_actor_login))
+    summary = IdentityMappingSummary(
+        provider_identities=len(rows),
+        matched=sum(1 for row in rows if row.match_status == "matched"),
+        unmatched=sum(1 for row in rows if row.match_status == "unmatched"),
+        ambiguous=sum(1 for row in rows if row.match_status == "ambiguous"),
+        providers=len({row.provider for row in rows}),
+        events=sum(row.events for row in rows),
+    )
+    return IdentityMappingResponse(window_days=window_days, generated_at=_utc_now(), summary=summary, rows=rows)
 
 
 def _metadata_bool(metadata: object, *keys: str) -> bool:
@@ -2332,6 +2539,38 @@ async def get_developer_track(
         )
     ).scalars().all()
     return _developer_track_from_events(list(events), window_days, limit=limit)
+
+
+@router.get("/identity-mapping", response_model=IdentityMappingResponse)
+async def get_identity_mapping(
+    org_id: str,
+    window_days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> IdentityMappingResponse:
+    await _require_v8(org_id, db, current_org_id)
+    cutoff = _utc_now() - timedelta(days=window_days)
+    mappings = (
+        await db.execute(
+            select(ProviderIdentityMapping).where(
+                ProviderIdentityMapping.org_id == org_id,
+                ProviderIdentityMapping.status.in_(["mapped", "verified", "auto"]),
+            )
+        )
+    ).scalars().all()
+    events = (
+        await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.org_id == org_id,
+                AuditEvent.created_at >= cutoff,
+                AuditEvent.event_type.in_(sorted(AGENT_COMPLIANCE_EVENT_TYPES)),
+            )
+            .order_by(desc(AuditEvent.created_at))
+            .limit(5000)
+        )
+    ).scalars().all()
+    return _identity_mapping_from_events(list(events), list(mappings), window_days)
 
 
 @router.get("/agent-runs", response_model=CodexRunInsightsResponse)

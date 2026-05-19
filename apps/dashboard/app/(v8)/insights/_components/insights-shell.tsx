@@ -11,6 +11,7 @@ import {
   getV8CoverageSla,
   getV8DeveloperTrack,
   getV8FleetKpis,
+  getV8IdentityMapping,
   getV8IntelligenceUsage,
   getV8PlatformOverview,
   getV8ProviderCoverage,
@@ -26,6 +27,8 @@ import {
   type InsightsDeveloperTrack,
   type InsightsDeveloperTrackRow,
   type InsightsFleetKpis,
+  type InsightsIdentityMapping,
+  type InsightsIdentityMappingRow,
   type InsightsIntelligenceUsage,
   type InsightsPlatformOverview,
   type InsightsPlatformOverviewRow,
@@ -36,12 +39,13 @@ import {
   type InsightsTrendMetric,
 } from "../../../../lib/data";
 
-type InsightsTab = "overview" | "fleet-kpis" | "developer-track" | "risky-agents" | "risky-repos" | "coverage-sla" | "agent-compliance-metrics" | "agent-runs" | "codex-runs" | "intelligence-usage" | "access-grants" | "provider-coverage";
+type InsightsTab = "overview" | "fleet-kpis" | "developer-track" | "identity-mapping" | "risky-agents" | "risky-repos" | "coverage-sla" | "agent-compliance-metrics" | "agent-runs" | "codex-runs" | "intelligence-usage" | "access-grants" | "provider-coverage";
 
 const tabs: Array<{ id: InsightsTab; label: string; href: string }> = [
   { id: "overview", label: "Overview", href: "/insights" },
   { id: "fleet-kpis", label: "Fleet KPIs", href: "/insights/fleet-kpis" },
   { id: "developer-track", label: "Developer track", href: "/insights/developer-track" },
+  { id: "identity-mapping", label: "Identity mapping", href: "/insights/identity-mapping" },
   { id: "risky-agents", label: "Risky agents", href: "/insights/risky-agents" },
   { id: "risky-repos", label: "Risky repos", href: "/insights/risky-repos" },
   { id: "coverage-sla", label: "Coverage SLA", href: "/insights/coverage-sla" },
@@ -449,6 +453,90 @@ export async function DeveloperTrackView() {
       {data && !developers.length ? <EmptyState label="No developer compliance rows yet" /> : null}
       <section className="space-y-4">
         {developers.map((row) => <DeveloperRow key={row.actor_login} row={row} />)}
+      </section>
+    </PageFrame>
+  );
+}
+
+function identityStatusClass(status: InsightsIdentityMappingRow["match_status"]) {
+  if (status === "matched") return "bg-[color:var(--accent-green)]/15 text-[color:var(--accent-green)]";
+  if (status === "ambiguous") return "bg-red-500/15 text-red-200";
+  return "bg-amber-500/15 text-amber-100";
+}
+
+function IdentityRow({ row }: { row: InsightsIdentityMappingRow }) {
+  return (
+    <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-semibold text-[color:var(--text-primary)]">{row.display_name ?? row.canonical_email ?? row.provider_actor_login}</h2>
+            <span className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase ${identityStatusClass(row.match_status)}`}>{row.match_status}</span>
+          </div>
+          <p className="mt-1 text-sm text-[color:var(--text-secondary)]">{row.provider} · {row.provider_actor_login} · {row.match_method} · {Math.round(row.confidence * 100)}% confidence</p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+          <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2">
+            <div className="font-semibold text-[color:var(--text-primary)]">{row.events}</div>
+            <div className="text-[color:var(--text-tertiary)]">events</div>
+          </div>
+          <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2">
+            <div className="font-semibold text-[color:var(--text-primary)]">{row.sessions}</div>
+            <div className="text-[color:var(--text-tertiary)]">sessions</div>
+          </div>
+          <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2">
+            <div className="font-semibold text-[color:var(--text-primary)]">{row.repos.length}</div>
+            <div className="text-[color:var(--text-tertiary)]">repos</div>
+          </div>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Canonical</div>
+          <p className="mt-1 text-[color:var(--text-primary)]">{row.canonical_user_id ?? "not mapped"}</p>
+          <p className="mt-1 text-xs text-[color:var(--text-secondary)]">{row.canonical_email ?? "email unknown"}</p>
+        </div>
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Identity evidence</div>
+          <p className="mt-1 text-[color:var(--text-primary)]">{row.github_login ? `GitHub ${row.github_login}` : row.sso_subject ? "SSO subject present" : row.local_identity ? `Local ${row.local_identity}` : "provider actor only"}</p>
+          <p className="mt-1 truncate text-xs text-[color:var(--text-secondary)]">{row.provider_user_id ?? "provider user id missing"}</p>
+        </div>
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Admin action</div>
+          <p className="mt-1 text-[color:var(--text-primary)]">{row.action}</p>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {row.models.slice(0, 4).map((model) => <span className="rounded-md border border-[color:var(--bg-border)] px-2 py-1 text-xs text-[color:var(--text-secondary)]" key={`${row.provider}-${row.provider_actor_login}-${model}`}>{model}</span>)}
+        {row.repos.slice(0, 4).map((repo) => <span className="rounded-md bg-[color:var(--accent-primary)]/10 px-2 py-1 text-xs font-semibold text-[color:var(--accent-primary)]" key={`${row.provider}-${row.provider_actor_login}-${repo}`}>{repo}</span>)}
+      </div>
+    </article>
+  );
+}
+
+export async function IdentityMappingView() {
+  const { accessToken, org } = await resolveOrgAndToken();
+  const data: InsightsIdentityMapping | null = org ? await getV8IdentityMapping(accessToken, org.id) : null;
+  const rows = data?.rows ?? [];
+  return (
+    <PageFrame active="identity-mapping">
+      <section className="grid gap-4 md:grid-cols-4">
+        <DeveloperMetric detail="Provider identities observed in metadata-only coding-agent telemetry." icon={<UserRoundCheck className="h-4 w-4" />} label="Provider IDs" value={data?.summary.provider_identities ?? 0} />
+        <DeveloperMetric detail="Deterministically mapped by admin mapping table or email evidence." icon={<CheckCircle2 className="h-4 w-4" />} label="Matched" value={data?.summary.matched ?? 0} />
+        <DeveloperMetric detail="Need admin mapping to merge provider/local identities correctly." icon={<AlertTriangle className="h-4 w-4" />} label="Unmatched" value={data?.summary.unmatched ?? 0} />
+        <DeveloperMetric detail="Multiple mappings matched the same provider identity and need cleanup." icon={<ShieldAlert className="h-4 w-4" />} label="Ambiguous" value={data?.summary.ambiguous ?? 0} />
+      </section>
+
+      <section className="rounded-lg border border-[color:var(--accent-primary)]/35 bg-[color:var(--accent-primary)]/10 p-4">
+        <p className="text-sm leading-6 text-[color:var(--text-secondary)]">
+          Identity mapping prevents Codex, Claude, Cursor, GitHub, SSO, and local machine identities from being counted as different people. Matched rows are safe for developer rollups; unmatched and ambiguous rows are admin action items.
+        </p>
+      </section>
+
+      {!data ? <EmptyState label="Identity mapping unavailable" /> : null}
+      {data && !rows.length ? <EmptyState label="No provider identities observed yet" /> : null}
+      <section className="space-y-4">
+        {rows.map((row) => <IdentityRow key={`${row.provider}-${row.provider_user_id ?? row.provider_actor_login}`} row={row} />)}
       </section>
     </PageFrame>
   );

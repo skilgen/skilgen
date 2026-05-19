@@ -22,6 +22,7 @@ from packages.db.models.org_policy import OrgPolicy
 from packages.db.models.pr_review import PRReview, PRReviewFinding
 from packages.db.models.pr_attribution import PRAttribution
 from packages.db.models.pr_comment import PRComment
+from packages.db.models.provider_identity_mapping import ProviderIdentityMapping
 from packages.db.models.pull_request import Commit, PullRequest
 from packages.db.models.repo import Repo
 from packages.db.models.registry_skill import RegistrySkill
@@ -63,6 +64,7 @@ __all__ = [
     "PRReviewFinding",
     "PRAttribution",
     "PRComment",
+    "ProviderIdentityMapping",
     "PullRequest",
     "Commit",
     "Repo",

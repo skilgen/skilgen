@@ -1849,6 +1849,43 @@ export type InsightsDeveloperTrack = {
   developers: InsightsDeveloperTrackRow[];
 };
 
+export type InsightsIdentityMappingRow = {
+  provider: string;
+  provider_user_id: string | null;
+  provider_actor_login: string;
+  canonical_user_id: string | null;
+  canonical_email: string | null;
+  display_name: string | null;
+  github_login: string | null;
+  sso_subject: string | null;
+  local_identity: string | null;
+  match_status: "matched" | "unmatched" | "ambiguous";
+  confidence: number;
+  match_method: string;
+  events: number;
+  sessions: number;
+  repos: string[];
+  models: string[];
+  last_seen_at: string | null;
+  action: string;
+};
+
+export type InsightsIdentityMapping = {
+  window_days: number;
+  generated_at: string;
+  source: string;
+  content_retention: "metadata-only";
+  summary: {
+    provider_identities: number;
+    matched: number;
+    unmatched: number;
+    ambiguous: number;
+    providers: number;
+    events: number;
+  };
+  rows: InsightsIdentityMappingRow[];
+};
+
 export type InsightsCodexRunActivityMetrics = {
   edited_files: number;
   explored_files: number;
@@ -2631,6 +2668,10 @@ export async function getV8PlatformOverview(accessToken: string | null, orgId: s
 
 export async function getV8DeveloperTrack(accessToken: string | null, orgId: string): Promise<InsightsDeveloperTrack | null> {
   return apiFetch<InsightsDeveloperTrack>(`/v8/orgs/${orgId}/insights/developer-track`, { accessToken, cache: "no-store" });
+}
+
+export async function getV8IdentityMapping(accessToken: string | null, orgId: string): Promise<InsightsIdentityMapping | null> {
+  return apiFetch<InsightsIdentityMapping>(`/v8/orgs/${orgId}/insights/identity-mapping`, { accessToken, cache: "no-store" });
 }
 
 export async function getV8CodexRuns(accessToken: string | null, orgId: string): Promise<InsightsCodexRuns | null> {

@@ -14,11 +14,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from apps.api.api.auth import get_current_org_id
 from apps.api.api.v8.insights import router as insights_router
 from packages.db.database import get_db
-from packages.db.models import PRAttribution, PullRequest
+from packages.db.models import AuditEvent, PRAttribution, ProviderIdentityMapping, PullRequest
 
 
 insights = importlib.import_module("apps.api.api.v8.insights.router")
 migration = importlib.import_module("apps.api.alembic.versions.20260505_0006_v8_insights_risk_views")
+identity_migration = importlib.import_module("apps.api.alembic.versions.20260519_0001_provider_identity_mappings")
 
 NOW = datetime(2026, 5, 4, 12, 0, 0)
 
@@ -118,6 +119,7 @@ def test_insights_router_paths_are_registered() -> None:
     assert "/v8/orgs/{org_id}/insights/codex-runs" in paths
     assert "/v8/orgs/{org_id}/insights/provider-coverage" in paths
     assert "/v8/orgs/{org_id}/insights/developer-track" in paths
+    assert "/v8/orgs/{org_id}/insights/identity-mapping" in paths
 
 
 def test_insights_routes_404_when_ia_v8_disabled(monkeypatch) -> None:
@@ -201,6 +203,102 @@ def test_quarantine_kpi_uses_registry_publisher_ownership() -> None:
     assert "skill_registry_entries.publisher_org_id = 'org_1'" in compiled
 
 
+def _identity_event(
+    actor: str,
+    provider: str = "Anthropic Compliance API",
+    *,
+    provider_user_id: str | None = None,
+    github_login: str | None = None,
+    session_id: str = "sess-1",
+) -> AuditEvent:
+    event = AuditEvent(
+        id=f"evt-{actor}-{provider_user_id or 'none'}",
+        org_id="org_1",
+        event_type="agent.compliance",
+        actor_login=actor,
+        action="ingested",
+        summary="Normalized formal compliance record",
+        resource_type="agent_compliance_event",
+        resource_id=f"{provider}:{provider_user_id or actor}",
+        metadata_json={
+            "provider": provider,
+            "provider_user_id": provider_user_id,
+            "actor_login": actor,
+            "github_login": github_login,
+            "session_id": session_id,
+            "model": "claude-opus-4-7",
+            "repo_name": "ravichanduummadisetti/skilgen",
+        },
+        created_at=NOW,
+    )
+    event.repo_name = "ravichanduummadisetti/skilgen"
+    return event
+
+
+def test_identity_mapping_matches_email_and_surfaces_unmatched_provider_users(monkeypatch) -> None:
+    db = Db(
+        [
+            Result([]),
+            Result([
+                _identity_event("ravi@skillayer.com", provider_user_id="anthropic-user-1", github_login="ravichanduummadisetti"),
+                _identity_event("workstation-ravi", provider="Claude Code", session_id="local-1"),
+            ]),
+        ]
+    )
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/identity-mapping")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["matched"] == 1
+    assert payload["summary"]["unmatched"] == 1
+    matched = next(row for row in payload["rows"] if row["match_status"] == "matched")
+    unmatched = next(row for row in payload["rows"] if row["match_status"] == "unmatched")
+    assert matched["canonical_email"] == "ravi@skillayer.com"
+    assert matched["match_method"] == "email_auto_match"
+    assert unmatched["provider_actor_login"] == "workstation-ravi"
+    assert "Map this provider user" in unmatched["action"]
+
+
+def test_identity_mapping_flags_ambiguous_provider_identity(monkeypatch) -> None:
+    mapping_a = ProviderIdentityMapping(
+        id="map-1",
+        org_id="org_1",
+        provider="Anthropic Compliance API",
+        canonical_user_id="user-ravi",
+        canonical_email="ravi@skillayer.com",
+        provider_user_id="anthropic-user-1",
+        confidence=1.0,
+        match_method="admin",
+        status="mapped",
+    )
+    mapping_b = ProviderIdentityMapping(
+        id="map-2",
+        org_id="org_1",
+        provider="Anthropic Compliance API",
+        canonical_user_id="user-ravi-alt",
+        canonical_email="ravi@skillayer.com",
+        provider_user_id="anthropic-user-alt",
+        confidence=0.8,
+        match_method="imported",
+        status="mapped",
+    )
+    db = Db(
+        [
+            Result([mapping_a, mapping_b]),
+            Result([_identity_event("ravi@skillayer.com", provider_user_id="anthropic-user-1")]),
+        ]
+    )
+
+    response = _client(db, monkeypatch).get("/v8/orgs/org_1/insights/identity-mapping")
+
+    assert response.status_code == 200
+    row = response.json()["rows"][0]
+    assert row["match_status"] == "ambiguous"
+    assert row["match_method"] == "multiple_identity_mappings"
+    assert "Resolve duplicate identity mappings" in row["action"]
+
+
 def test_risky_agent_fallback_sorts_by_prd_formula(monkeypatch) -> None:
     db = Db(
         [
@@ -247,6 +345,22 @@ def test_risky_views_migration_upgrade_and_downgrade(monkeypatch) -> None:
         views = {row[0] for row in connection.execute(sa.text("SELECT name FROM sqlite_master WHERE type='view'")).all()}
         assert "v8_insights_risky_agents" not in views
         assert "v8_insights_risky_repos" not in views
+
+
+def test_provider_identity_mapping_migration_upgrade_and_downgrade(monkeypatch) -> None:
+    engine = sa.create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(sa.text("CREATE TABLE orgs (id TEXT PRIMARY KEY)"))
+        context = MigrationContext.configure(connection)
+        monkeypatch.setattr(identity_migration, "op", Operations(context))
+
+        identity_migration.upgrade()
+        tables = {row[0] for row in connection.execute(sa.text("SELECT name FROM sqlite_master WHERE type='table'")).all()}
+        assert "provider_identity_mappings" in tables
+
+        identity_migration.downgrade()
+        tables = {row[0] for row in connection.execute(sa.text("SELECT name FROM sqlite_master WHERE type='table'")).all()}
+        assert "provider_identity_mappings" not in tables
 
 
 def test_one_million_event_fixture_limitation_is_documented() -> None:
