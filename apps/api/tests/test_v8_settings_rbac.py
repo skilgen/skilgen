@@ -677,6 +677,127 @@ def test_request_agent_compliance_connector_sync_marks_formal_compliance_retenti
     assert stored["last_sync_plan"]["content_retention"] == "metadata-only"
 
 
+def test_openai_compliance_sync_ingests_seeded_provider_reported_events(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "cursor": "old-cursor",
+                    "content_retention": "metadata-only",
+                    "total_ingested_count": 0,
+                }
+            }
+        },
+    )
+    connection = SourceConnection(
+        org_id="org-1",
+        source_type=settings_router._agent_connection_source_type("openai-compliance"),
+        encrypted_params=settings_router._encrypt_agent_credentials(
+            {"api_key": "sk-seeded", "mock_openai_compliance_fixture": True}
+        ),
+        params_hint={"api_key_hint": "...eded", "credential_kind": "api_token"},
+        status="configured",
+    )
+    db = OrgDb(org, connections=[connection])
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.request_agent_compliance_connector_sync(
+            "org-1",
+            "openai-compliance",
+            settings_router.AgentComplianceSyncPayload(cursor="old-cursor", dry_run=False),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    events = [item for item in db.added if isinstance(item, AuditEvent)]
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    assert response.status == "success"
+    assert response.mode == "fixture"
+    assert response.ingested_count == 2
+    assert response.metrics["tokens_input"] == 1470000
+    assert response.metrics["cost_usd"] == 3.61
+    assert stored["last_sync_status"] == "success"
+    assert stored["last_sync_mode"] == "fixture"
+    assert stored["last_error"] is None
+    assert stored["last_sync_plan"]["provider_adapter_required"] is False
+    assert len(events) == 2
+    assert events[0].event_type == "agent.compliance"
+    assert events[0].metadata_json["provider"] == "OpenAI Compliance Platform"
+    assert events[0].metadata_json["cost_source"] == "provider_reported"
+    assert events[0].metadata_json["token_source"] == "openai_compliance_api"
+    assert events[0].metadata_json["content_retention"] == "metadata-only"
+    assert "prompt" not in events[0].metadata_json
+    assert db.committed is True
+
+
+def test_openai_compliance_sync_reports_missing_credentials(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.request_agent_compliance_connector_sync(
+            "org-1",
+            "openai-compliance",
+            settings_router.AgentComplianceSyncPayload(dry_run=False),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    assert response.status == "failed"
+    assert response.mode == "provider-pull"
+    assert response.ingested_count == 0
+    assert response.blocked_reason == "Missing OpenAI Compliance API credential."
+    assert "Store an encrypted OpenAI Compliance API key" in " ".join(response.next_actions)
+    assert stored["last_sync_status"] == "failed"
+    assert stored["last_error"] == "Missing OpenAI Compliance API credential."
+    assert db.committed is True
+
+
 def test_agent_compliance_catalog_covers_required_coding_agent_sources() -> None:
     connectors = {str(item["id"]): item for item in settings_router._agent_compliance_registry()}
 

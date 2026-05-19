@@ -18,6 +18,7 @@ from apps.api.api.services import audit
 from apps.api.api.services.audit import get_actor_login
 from apps.api.api.v8.flags import is_v8, request_flag_cache
 from apps.api.api.v8.settings.connectors_registry import connector_registry
+from apps.api.api.v8.settings.openai_compliance_adapter import pull_openai_compliance_events
 from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, require_permission
 from packages.db.database import get_db, get_sessionmaker
 from packages.db.llm_key import decrypt_key, encrypt_key, key_hint
@@ -111,9 +112,10 @@ class AgentComplianceSyncPayload(BaseModel):
 
 class AgentComplianceSyncResponse(BaseModel):
     connector_id: str
-    status: Literal["pending"]
-    mode: Literal["dry-run"]
+    status: Literal["pending", "success", "failed"]
+    mode: Literal["dry-run", "provider-pull", "fixture"]
     cursor: str | None = None
+    next_cursor: str | None = None
     next_cursor_required: bool
     provider_adapter_required: bool = True
     pagination_strategy: str
@@ -124,6 +126,9 @@ class AgentComplianceSyncResponse(BaseModel):
     ready_for_provider_pull: bool
     blocked_reason: str
     next_actions: list[str]
+    ingested_count: int = 0
+    skipped_count: int = 0
+    metrics: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentComplianceEventPayload(BaseModel):
@@ -1356,8 +1361,6 @@ async def request_agent_compliance_connector_sync(
     current = dict(configured.get(connector_id) or {})
     if not current.get("enabled"):
         raise HTTPException(status_code=409, detail="Agent compliance connector must be enabled before sync")
-    if not payload.dry_run:
-        raise HTTPException(status_code=400, detail="Agent compliance sync readiness only supports dry-run requests")
     connector = next((item for item in _agent_compliance_registry() if item.get("id") == connector_id), None)
     if connector is None:
         raise HTTPException(status_code=404, detail="Agent compliance connector not found")
@@ -1365,6 +1368,113 @@ async def request_agent_compliance_connector_sync(
     cursor = payload.cursor or str(current.get("cursor") or "") or None
     sync_plan = _agent_sync_contract(connector_id, connector, current, cursor)
     credential_connection = credential_connections.get(connector_id) or await _agent_credential_connection(db, org_id, connector_id)
+    if not payload.dry_run and connector_id != "openai-compliance":
+        raise HTTPException(status_code=400, detail="Live provider sync is currently implemented for OpenAI Compliance only")
+    if not payload.dry_run and connector_id == "openai-compliance":
+        adapter_result = pull_openai_compliance_events(
+            _decrypt_agent_credentials(credential_connection),
+            cursor=cursor,
+            dry_run=False,
+        )
+        sync_plan.update(
+            {
+                "status": adapter_result.status,
+                "mode": adapter_result.mode,
+                "cursor": cursor,
+                "next_cursor": adapter_result.next_cursor,
+                "provider_adapter_required": adapter_result.provider_adapter_required,
+                "ready_for_provider_pull": adapter_result.status == "success",
+                "blocked_reason": adapter_result.blocked_reason or "",
+                "next_actions": adapter_result.next_actions,
+                "ingested_count": 0,
+                "skipped_count": 0,
+                "metrics": {},
+            }
+        )
+        if adapter_result.status == "success":
+            ingest_response = await _ingest_agent_compliance_payload(
+                db,
+                org,
+                connector_id,
+                AgentComplianceIngestPayload(
+                    cursor=cursor,
+                    next_cursor=adapter_result.next_cursor,
+                    events=[AgentComplianceEventPayload.model_validate(event) for event in adapter_result.events],
+                ),
+                get_actor_login(request),
+            )
+            settings = dict(org.settings or {})
+            configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+            current = dict(configured.get(connector_id) or {})
+            now = datetime.now(UTC).isoformat()
+            current.update(
+                {
+                    "cursor": ingest_response.next_cursor or cursor,
+                    "last_sync_status": "success",
+                    "last_sync_requested_at": now,
+                    "last_sync_mode": adapter_result.mode,
+                    "last_sync_plan": sync_plan,
+                    "last_success_at": now,
+                    "last_failure_at": None,
+                    "last_error": None,
+                    "credential_state": "encrypted" if credential_connection is not None else "missing",
+                    "updated_at": now,
+                }
+            )
+            configured[connector_id] = current
+            settings["v8_agent_compliance_connectors"] = configured
+            org.settings = settings
+            flag_modified(org, "settings")
+            sync_plan.update(
+                {
+                    "next_cursor": ingest_response.next_cursor,
+                    "ingested_count": ingest_response.ingested_count,
+                    "skipped_count": ingest_response.skipped_count,
+                    "metrics": ingest_response.metrics,
+                }
+            )
+        else:
+            current.update(
+                {
+                    "cursor": cursor,
+                    "last_sync_status": "failed",
+                    "last_sync_requested_at": now,
+                    "last_sync_mode": adapter_result.mode,
+                    "last_sync_plan": sync_plan,
+                    "last_failure_at": now,
+                    "last_error": adapter_result.blocked_reason,
+                    "credential_state": "encrypted" if credential_connection is not None else "missing",
+                    "updated_at": now,
+                }
+            )
+            configured[connector_id] = current
+            settings["v8_agent_compliance_connectors"] = configured
+            org.settings = settings
+            flag_modified(org, "settings")
+        await audit.emit(
+            db,
+            org_id,
+            "settings.openai_compliance_connector_sync_completed",
+            "synced" if adapter_result.status == "success" else "blocked",
+            f"OpenAI Compliance connector sync {adapter_result.status}",
+            actor_login=get_actor_login(request),
+            resource_type="agent_compliance_connector",
+            resource_id=connector_id,
+            metadata={
+                "connector_id": connector_id,
+                "status": adapter_result.status,
+                "mode": adapter_result.mode,
+                "cursor_supplied": bool(payload.cursor),
+                "next_cursor": sync_plan.get("next_cursor"),
+                "ingested_count": sync_plan.get("ingested_count", 0),
+                "cost_source": "provider_reported" if adapter_result.status == "success" else "unknown",
+                "token_source": "openai_compliance_api" if adapter_result.status == "success" else "unknown",
+                "content_retention": "metadata-only",
+                "blocked_reason": adapter_result.blocked_reason,
+            },
+        )
+        await db.commit()
+        return AgentComplianceSyncResponse.model_validate(sync_plan)
     current.update(
         {
             "cursor": cursor,
