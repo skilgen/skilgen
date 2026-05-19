@@ -19,7 +19,8 @@ from apps.api.api.auth import get_current_org_id, get_current_user
 from apps.api.api.v8.flags import request_flag_cache
 from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, matches_scope_expression, permission_matches
 from packages.db.database import get_db
-from packages.db.models import AuditEvent, Job, Org
+from packages.db.llm_key import decrypt_key
+from packages.db.models import AuditEvent, DigestConfig, Job, Org, SourceConnection
 
 
 rbac_migration = importlib.import_module("apps.api.alembic.versions.20260505_0002_settings_rbac")
@@ -34,7 +35,10 @@ class Result:
         return self._rows
 
     def scalar_one_or_none(self) -> object | None:
-        return self._rows[0][0] if self._rows else None
+        if not self._rows:
+            return None
+        first = self._rows[0]
+        return first[0] if isinstance(first, tuple) else first
 
     def scalars(self):
         return self
@@ -69,10 +73,12 @@ class EventDb:
 
 
 class OrgDb:
-    def __init__(self, org: Org) -> None:
+    def __init__(self, org: Org, connections: list[SourceConnection] | None = None) -> None:
         self.org = org
+        self.connections = list(connections or [])
         self.committed = False
         self.added: list[object] = []
+        self.flushed = False
 
     async def get(self, model: object, row_id: str) -> Org | None:
         assert model is Org
@@ -83,7 +89,13 @@ class OrgDb:
         self.added.append(item)
 
     async def execute(self, _stmt: object) -> Result:
+        compiled = str(_stmt)
+        if "source_connections" in compiled:
+            return Result([(connection, None) for connection in [*self.connections, *[item for item in self.added if isinstance(item, SourceConnection)]]])
         return Result([])
+
+    async def flush(self) -> None:
+        self.flushed = True
 
     async def commit(self) -> None:
         self.committed = True
@@ -94,14 +106,18 @@ def test_v8_settings_router_is_registered() -> None:
 
     assert "/v8/orgs/{org_id}/settings/rbac" in paths
     assert "/v8/orgs/{org_id}/settings/notifications/digest" in paths
+    assert "/v8/orgs/{org_id}/settings/notifications/digest/preview" in paths
+    assert "/v8/orgs/{org_id}/settings/notifications/digest/send-now" in paths
     assert "/v8/orgs/{org_id}/settings/admin-audit" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/agent-compliance" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/sync" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/credentials/test" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-events" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs/{job_id}" in paths
     assert "settings.admin_audit.read" in PERMISSIONS
     assert "settings.billing.read" in PERMISSIONS
+    assert "settings.notifications.read" in PERMISSIONS
     assert "settings.sso.read" in PERMISSIONS
 
 
@@ -243,6 +259,164 @@ def test_admin_audit_exposes_truncated_rollup_metadata() -> None:
     assert payload["rollup"] == {"source_events": 5000, "limit": 5000, "truncated": True}
 
 
+def test_notifications_digest_preview_and_send_now_wrap_legacy(monkeypatch) -> None:
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def preview(org_id: str, _db: object, config: object | None = None) -> dict:
+        assert org_id == "org-1"
+        if config is not None:
+            assert getattr(config, "title") == "Custom digest"
+        return {"week": "2026-W20", "recipients": ["security@example.com"], "html": "<html>preview</html>"}
+
+    async def send(payload: dict, recipient: str) -> dict:
+        assert payload["week"] == "2026-W20"
+        return {"sent": False, "to": recipient, "preview": payload["html"]}
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.legacy_digest, "_preview", preview)
+    monkeypatch.setattr(settings_router.legacy_digest, "_send_payload", send)
+
+    db = OrgDb(Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={}))
+    preview_payload = asyncio.run(
+        settings_router.preview_notifications_digest(
+            "org-1",
+            settings_router.DigestPreviewPayload(
+                config=settings_router.DigestConfigPayload(
+                    title="Custom digest",
+                    subject="Subject",
+                    frequency="weekly",
+                    recipients=[],
+                    widgets=[],
+                    layout={},
+                )
+            ),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+    assert preview_payload["week"] == "2026-W20"
+
+    send_payload = asyncio.run(
+        settings_router.send_notifications_digest_now(
+            "org-1",
+            settings_router.DigestSendNowPayload(recipient_email="owner@example.com", config=None),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+    assert send_payload["sent"] is False
+    assert send_payload["to"] == "owner@example.com"
+
+
+def test_get_notifications_digest_commits_and_returns_config(monkeypatch) -> None:
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def load_or_create(db, org_id: str):
+        assert org_id == "org-1"
+        return DigestConfig(
+            id="cfg-1",
+            org_id=org_id,
+            title="Weekly digest",
+            subject="Digest subject",
+            frequency="weekly",
+            recipients=["security@example.com"],
+            widgets=["memory_score"],
+            layout={"theme": "neutral"},
+        )
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router, "_load_or_create_digest_config", load_or_create)
+
+    db = OrgDb(Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={}))
+    payload = asyncio.run(settings_router.get_notifications_digest("org-1", db=db, current_org_id="org-1"))
+
+    assert payload["id"] == "cfg-1"
+    assert payload["title"] == "Weekly digest"
+    assert payload["frequency"] == "weekly"
+    assert db.committed is True
+
+
+def test_update_notifications_digest_emits_audit_and_persists_payload(monkeypatch) -> None:
+    config = DigestConfig(
+        id="cfg-1",
+        org_id="org-1",
+        title="Old",
+        subject="Old",
+        frequency="weekly",
+        recipients=["owner@example.com"],
+        widgets=["memory_score"],
+        layout={},
+    )
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def load_or_create(db, org_id: str):
+        assert org_id == "org-1"
+        return config
+
+    emitted: dict[str, object] = {}
+
+    async def emit(
+        _db: object,
+        org_id: str,
+        event_type: str,
+        action: str,
+        summary: str,
+        *,
+        actor_login: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        emitted.update(
+            {
+                "org_id": org_id,
+                "event_type": event_type,
+                "action": action,
+                "summary": summary,
+                "actor_login": actor_login,
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+                "metadata": metadata,
+            }
+        )
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router, "_load_or_create_digest_config", load_or_create)
+    monkeypatch.setattr(settings_router, "get_actor_login", lambda _request: "ravi")
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    db = OrgDb(Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={}))
+    payload = asyncio.run(
+        settings_router.update_notifications_digest(
+            "org-1",
+            settings_router.DigestConfigPayload(
+                title="New digest",
+                subject="New subject",
+                frequency="monthly",
+                recipients=[" security@example.com ", ""],
+                widgets=["roi_multiplier"],
+                layout={"density": "compact"},
+            ),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    assert payload["title"] == "New digest"
+    assert payload["frequency"] == "monthly"
+    assert payload["recipients"] == ["security@example.com"]
+    assert payload["widgets"] == ["roi_multiplier"]
+    assert emitted["event_type"] == "settings.notifications_updated"
+    assert emitted["actor_login"] == "ravi"
+    assert emitted["resource_id"] == "cfg-1"
+    assert db.committed is True
+
+
 def test_configure_agent_compliance_connector_persists_metadata_only_state(monkeypatch) -> None:
     org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
     db = OrgDb(org)
@@ -277,6 +451,126 @@ def test_configure_agent_compliance_connector_persists_metadata_only_state(monke
     assert stored["enabled"] is True
     assert stored["content_retention"] == "metadata-only"
     assert "secret" not in stored
+    assert db.committed is True
+
+
+def test_configure_agent_compliance_connector_stores_credentials_encrypted(monkeypatch) -> None:
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.configure_agent_compliance_connector(
+            "org-1",
+            settings_router.AgentComplianceConnectorPayload(
+                connector_id="openai-compliance",
+                enabled=True,
+                source_types=["audit logs", "model usage"],
+                scopes=["audit.read"],
+                credential_kind="api_token",
+                credentials={"api_key": "sk-real-secret", "organization_id": "org_ext"},
+            ),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    connection = next(item for item in db.added if isinstance(item, SourceConnection))
+    assert response["configured_count"] == 1
+    assert stored["credential_state"] == "encrypted"
+    assert "api_key" not in stored
+    assert connection.source_type == "agent_compliance:openai-compliance"
+    assert "sk-real-secret" not in connection.encrypted_params
+    assert decrypt_key(connection.encrypted_params)
+    assert json.loads(decrypt_key(connection.encrypted_params))["api_key"] == "sk-real-secret"
+    assert connection.params_hint["api_key_hint"] == "...cret"
+    assert connection.params_hint["organization_id"] == "org_ext"
+    assert db.committed is True
+
+
+def test_agent_compliance_connector_response_migrates_legacy_credentials(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "anthropic-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "api_key": "anthropic-secret",
+                    "base_url": "https://api.anthropic.com",
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    payload = asyncio.run(settings_router._agent_connector_response(db, org))
+
+    stored = org.settings["v8_agent_compliance_connectors"]["anthropic-compliance"]
+    connection = next(item for item in db.added if isinstance(item, SourceConnection))
+    anthropic = next(item for item in payload["connectors"] if item["id"] == "anthropic-compliance")
+    assert stored["credential_migrated_at"]
+    assert "api_key" not in stored
+    assert "anthropic-secret" not in connection.encrypted_params
+    assert json.loads(decrypt_key(connection.encrypted_params))["api_key"] == "anthropic-secret"
+    assert anthropic["connected"] is True
+    assert anthropic["credential_state"] == "encrypted"
+    assert anthropic["credential_hint"]["api_key_hint"] == "...cret"
+
+
+def test_agent_compliance_credential_test_uses_encrypted_connection(monkeypatch) -> None:
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+    connection = SourceConnection(
+        org_id="org-1",
+        source_type="agent_compliance:openai-compliance",
+        display_name="OpenAI Compliance Platform",
+        status="configured",
+        encrypted_params=settings_router._encrypt_agent_credentials({"api_key": "sk-live", "organization_id": "org_ext"}),
+        params_hint={"api_key_hint": "...live", "credential_kind": "api_token"},
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db = OrgDb(org, connections=[connection])
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.test_agent_compliance_connector_credentials(
+            "org-1",
+            "openai-compliance",
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    assert response.success is True
+    assert response.status == "configured"
+    assert response.credential_state == "encrypted"
+    assert response.credential_hint["api_key_hint"] == "...live"
+    assert connection.last_error is None
     assert db.committed is True
 
 

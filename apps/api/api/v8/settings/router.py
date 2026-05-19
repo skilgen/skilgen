@@ -13,12 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from apps.api.api.auth import get_current_org_id
+from apps.api.api.routes import digest as legacy_digest
 from apps.api.api.services import audit
 from apps.api.api.services.audit import get_actor_login
 from apps.api.api.v8.flags import is_v8, request_flag_cache
 from apps.api.api.v8.settings.connectors_registry import connector_registry
 from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, require_permission
 from packages.db.database import get_db, get_sessionmaker
+from packages.db.llm_key import decrypt_key, encrypt_key, key_hint
 from packages.db.models import AuditEvent, DigestConfig, Job, Org, Role, RoleBinding, SourceConnection
 from packages.db.models.base import new_uuid
 
@@ -70,14 +72,36 @@ class DigestConfigPayload(BaseModel):
     layout: dict[str, object] = Field(default_factory=dict)
 
 
+class DigestPreviewPayload(BaseModel):
+    config: DigestConfigPayload | None = None
+
+
+class DigestSendNowPayload(BaseModel):
+    recipient_email: str | None = None
+    config: DigestConfigPayload | None = None
+
+
 class AgentComplianceConnectorPayload(BaseModel):
     connector_id: str = Field(min_length=1, max_length=64)
     enabled: bool = True
     source_types: list[str] = Field(default_factory=list)
     scopes: list[str] = Field(default_factory=list)
+    credentials: dict[str, Any] | None = None
+    credential_kind: Literal["api_token", "oauth", "webhook", "local_hook", "none"] = "none"
     cursor: str | None = Field(default=None, max_length=512)
     last_sync_status: Literal["pending", "success", "failed"] | None = None
     content_retention: Literal["metadata-only", "tenant-enabled-content"] = "metadata-only"
+
+
+class AgentComplianceCredentialTestResponse(BaseModel):
+    connector_id: str
+    success: bool
+    status: Literal["missing", "configured", "connected", "failed"]
+    credential_state: Literal["missing", "encrypted", "legacy-migrated"]
+    credential_kind: str | None = None
+    credential_hint: dict[str, Any] = Field(default_factory=dict)
+    message: str
+    tested_at: datetime
 
 
 class AgentComplianceSyncPayload(BaseModel):
@@ -126,7 +150,17 @@ class AgentComplianceEventPayload(BaseModel):
     warnings: int | None = Field(default=None, ge=0)
     tokens_input: int | None = Field(default=None, ge=0)
     tokens_output: int | None = Field(default=None, ge=0)
+    tokens_cached_input: int | None = Field(default=None, ge=0)
+    tokens_reasoning_output: int | None = Field(default=None, ge=0)
+    tokens_base_input: int | None = Field(default=None, ge=0)
+    tokens_cache_creation_input: int | None = Field(default=None, ge=0)
+    tokens_cache_creation_5m_input: int | None = Field(default=None, ge=0)
+    tokens_cache_creation_1h_input: int | None = Field(default=None, ge=0)
+    tokens_cache_read_input: int | None = Field(default=None, ge=0)
+    token_source: str | None = Field(default=None, max_length=128)
     cost_usd: float | None = Field(default=None, ge=0)
+    cost_source: str | None = Field(default=None, max_length=128)
+    cost_estimate: bool = False
     latency_ms: int | None = Field(default=None, ge=0)
     error_count: int | None = Field(default=None, ge=0)
     session_id: str | None = Field(default=None, max_length=255)
@@ -187,6 +221,31 @@ RAW_CONTENT_KEYS = {
     "raw",
     "raw_event",
 }
+AGENT_COMPLIANCE_SOURCE_PREFIX = "agent_compliance:"
+SECRET_FIELD_NAMES = {
+    "api_key",
+    "apikey",
+    "access_token",
+    "refresh_token",
+    "token",
+    "client_secret",
+    "secret",
+    "password",
+    "private_key",
+    "webhook_secret",
+}
+SAFE_CREDENTIAL_CONTEXT_KEYS = {
+    "base_url",
+    "endpoint",
+    "url",
+    "tenant_id",
+    "workspace_id",
+    "org_id",
+    "organization_id",
+    "installation_id",
+    "account_id",
+    "region",
+}
 
 
 async def _assert_v8_org(org_id: str, current_org_id: str, db: AsyncSession) -> None:
@@ -235,6 +294,12 @@ def _digest_response(config: DigestConfig) -> dict[str, object]:
         "created_at": config.created_at,
         "updated_at": config.updated_at,
     }
+
+
+def _legacy_digest_config(payload: DigestConfigPayload | None) -> legacy_digest.DigestConfigBody | None:
+    if payload is None:
+        return None
+    return legacy_digest.DigestConfigBody(**payload.model_dump())
 
 
 def _billing_response(org: Org) -> dict[str, object]:
@@ -313,6 +378,160 @@ def _agent_compliance_registry() -> list[dict[str, Any]]:
     ]
 
 
+def _agent_connection_source_type(connector_id: str) -> str:
+    return f"{AGENT_COMPLIANCE_SOURCE_PREFIX}{connector_id}"
+
+
+def _is_secret_field(key: str) -> bool:
+    lowered = key.lower()
+    return lowered in SECRET_FIELD_NAMES or any(part in lowered for part in ("token", "secret", "password", "private_key"))
+
+
+def _credential_params_hint(params: dict[str, Any]) -> dict[str, Any]:
+    hint: dict[str, Any] = {}
+    for key, value in params.items():
+        if _is_secret_field(key):
+            if isinstance(value, str) and value:
+                hint[f"{key}_hint"] = key_hint(value)
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            hint[key] = value
+    return hint
+
+
+def _encrypt_agent_credentials(params: dict[str, Any]) -> str:
+    return encrypt_key(json.dumps(params, sort_keys=True, default=str))
+
+
+def _decrypt_agent_credentials(connection: SourceConnection | None) -> dict[str, Any]:
+    if connection is None:
+        return {}
+    try:
+        decoded = json.loads(decrypt_key(connection.encrypted_params))
+        return decoded if isinstance(decoded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _extract_legacy_credentials(row: dict[str, object]) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    for nested_key in ("credentials", "credential", "params", "provider_params"):
+        nested = row.get(nested_key)
+        if isinstance(nested, dict):
+            params.update({str(key): value for key, value in nested.items()})
+    for key, value in row.items():
+        key_str = str(key)
+        if _is_secret_field(key_str) or key_str in SAFE_CREDENTIAL_CONTEXT_KEYS:
+            params[key_str] = value
+    return {key: value for key, value in params.items() if value not in (None, "")}
+
+
+def _settings_row_without_credentials(row: dict[str, object]) -> dict[str, object]:
+    clean: dict[str, object] = {}
+    for key, value in row.items():
+        key_str = str(key)
+        if key_str in {"credentials", "credential", "params", "provider_params"} or _is_secret_field(key_str):
+            continue
+        clean[key_str] = value
+    return clean
+
+
+async def _agent_credential_connection(db: AsyncSession, org_id: str, connector_id: str) -> SourceConnection | None:
+    try:
+        return (
+            await db.execute(
+                select(SourceConnection).where(
+                    SourceConnection.org_id == org_id,
+                    SourceConnection.source_type == _agent_connection_source_type(connector_id),
+                )
+            )
+        ).scalar_one_or_none()
+    except SQLAlchemyError:
+        info = getattr(db, "info", None)
+        if isinstance(info, dict):
+            info["agent_credential_store_unavailable"] = True
+        return None
+
+
+async def _upsert_agent_credential_connection(
+    db: AsyncSession,
+    org_id: str,
+    connector_id: str,
+    *,
+    credentials: dict[str, Any],
+    credential_kind: str,
+    display_name: str | None = None,
+    status: str = "configured",
+) -> SourceConnection:
+    now = datetime.utcnow()
+    connection = await _agent_credential_connection(db, org_id, connector_id)
+    if connection is None:
+        connection = SourceConnection(
+            org_id=org_id,
+            source_type=_agent_connection_source_type(connector_id),
+            created_at=now,
+        )
+    connection.display_name = display_name or connector_id
+    connection.status = status
+    connection.encrypted_params = _encrypt_agent_credentials(credentials)
+    connection.params_hint = {
+        **_credential_params_hint(credentials),
+        "connector_id": connector_id,
+        "credential_kind": credential_kind,
+        "stored_for": "agent_compliance_provider",
+    }
+    connection.last_tested_at = now
+    connection.last_connected_at = now if status in {"connected", "configured"} else connection.last_connected_at
+    connection.last_error = None if status in {"connected", "configured"} else "Credential test failed"
+    connection.updated_at = now
+    db.add(connection)
+    return connection
+
+
+async def _migrate_legacy_agent_credentials(
+    db: AsyncSession,
+    org: Org,
+    configured: dict[str, dict[str, object]],
+) -> tuple[dict[str, dict[str, object]], dict[str, SourceConnection], bool]:
+    connections: dict[str, SourceConnection] = {}
+    changed = False
+    for connector_id, row in list(configured.items()):
+        connection = await _agent_credential_connection(db, org.id, connector_id)
+        info = getattr(db, "info", None)
+        if isinstance(info, dict) and info.get("agent_credential_store_unavailable"):
+            return configured, connections, changed
+        if connection is None:
+            legacy_credentials = _extract_legacy_credentials(row)
+            if legacy_credentials:
+                connection = await _upsert_agent_credential_connection(
+                    db,
+                    org.id,
+                    connector_id,
+                    credentials=legacy_credentials,
+                    credential_kind=str(row.get("credential_kind") or "api_token"),
+                    display_name=str(row.get("display_name") or connector_id),
+                    status="configured",
+                )
+                configured[connector_id] = {
+                    **_settings_row_without_credentials(row),
+                    "credential_migrated_at": datetime.utcnow().isoformat(),
+                }
+                changed = True
+        else:
+            sanitized = _settings_row_without_credentials(row)
+            if sanitized != row:
+                configured[connector_id] = sanitized
+                changed = True
+        if connection is not None:
+            connections[connector_id] = connection
+    if changed:
+        settings = dict(org.settings or {})
+        settings["v8_agent_compliance_connectors"] = configured
+        org.settings = settings
+        flag_modified(org, "settings")
+    return configured, connections, changed
+
+
 def _agent_connector_settings(org: Org | None) -> dict[str, dict[str, object]]:
     settings = dict(getattr(org, "settings", None) or {}) if org else {}
     raw = settings.get("v8_agent_compliance_connectors")
@@ -357,22 +576,42 @@ def _agent_sync_contract(connector_id: str, connector: dict[str, Any], row: dict
     }
 
 
-def _agent_connector_response(org: Org | None) -> dict[str, object]:
+async def _agent_connector_response(db: AsyncSession, org: Org | None) -> dict[str, object]:
     configured = _agent_connector_settings(org)
+    credential_connections: dict[str, SourceConnection] = {}
+    if org is not None:
+        configured, credential_connections, changed = await _migrate_legacy_agent_credentials(db, org, configured)
+        if changed:
+            flush = getattr(db, "flush", None)
+            if flush is not None:
+                await flush()
     connectors: list[dict[str, object]] = []
     for item in _agent_compliance_registry():
         connector_id = str(item["id"])
         row = configured.get(connector_id) or {}
+        credential_connection = credential_connections.get(connector_id)
+        if credential_connection is None and org is not None:
+            credential_connection = await _agent_credential_connection(db, org.id, connector_id)
         enabled = bool(row.get("enabled"))
         sync_plan = row.get("last_sync_plan")
         if not isinstance(sync_plan, dict):
             sync_plan = None
+        credential_hint = credential_connection.params_hint if credential_connection is not None and isinstance(credential_connection.params_hint, dict) else {}
+        credential_state = "encrypted" if credential_connection is not None else "missing"
         connectors.append(
             {
                 **item,
                 "configured": connector_id in configured,
                 "enabled": enabled,
-                "connected": False,
+                "connected": credential_connection is not None,
+                "connection_status": credential_connection.status if credential_connection is not None else None,
+                "credential_state": credential_state,
+                "credential_kind": credential_hint.get("credential_kind") if credential_hint else row.get("credential_kind"),
+                "credential_hint": credential_hint,
+                "credential_source_type": _agent_connection_source_type(connector_id),
+                "last_tested_at": credential_connection.last_tested_at if credential_connection is not None else None,
+                "last_connected_at": credential_connection.last_connected_at if credential_connection is not None else None,
+                "last_error": credential_connection.last_error if credential_connection is not None else None,
                 "source_types": list(row.get("source_types") or []),
                 "scopes": list(row.get("scopes") or []),
                 "last_cursor": row.get("cursor"),
@@ -394,6 +633,38 @@ def _agent_connector_response(org: Org | None) -> dict[str, object]:
         "enabled_count": sum(1 for item in connectors if item["enabled"]),
         "connectors": connectors,
     }
+
+
+async def _test_agent_credentials(db: AsyncSession, org_id: str, connector_id: str) -> AgentComplianceCredentialTestResponse:
+    connection = await _agent_credential_connection(db, org_id, connector_id)
+    tested_at = datetime.utcnow()
+    if connection is None:
+        return AgentComplianceCredentialTestResponse(
+            connector_id=connector_id,
+            success=False,
+            status="missing",
+            credential_state="missing",
+            message="No encrypted credentials are stored for this connector.",
+            tested_at=tested_at,
+        )
+    params = _decrypt_agent_credentials(connection)
+    has_secret = any(_is_secret_field(key) and bool(value) for key, value in params.items())
+    success = bool(params and has_secret)
+    connection.last_tested_at = tested_at
+    connection.status = "configured" if success else "failed"
+    connection.last_error = None if success else "Stored credential bundle does not include an API token, OAuth token, secret, or password."
+    connection.updated_at = tested_at
+    db.add(connection)
+    return AgentComplianceCredentialTestResponse(
+        connector_id=connector_id,
+        success=success,
+        status="configured" if success else "failed",
+        credential_state="encrypted",
+        credential_kind=(connection.params_hint or {}).get("credential_kind") if isinstance(connection.params_hint, dict) else None,
+        credential_hint=connection.params_hint if isinstance(connection.params_hint, dict) else {},
+        message="Encrypted credentials are present and ready for provider adapter use." if success else connection.last_error or "Credential test failed.",
+        tested_at=tested_at,
+    )
 
 
 async def _load_or_create_digest_config(db: AsyncSession, org_id: str) -> DigestConfig:
@@ -488,7 +759,17 @@ def _normalized_event_metadata(
         "tokens_input": event.tokens_input,
         "tokens_output": event.tokens_output,
         "tokens_total": (event.tokens_input or 0) + (event.tokens_output or 0) if event.tokens_input is not None or event.tokens_output is not None else None,
+        "tokens_cached_input": event.tokens_cached_input,
+        "tokens_reasoning_output": event.tokens_reasoning_output,
+        "tokens_base_input": event.tokens_base_input,
+        "tokens_cache_creation_input": event.tokens_cache_creation_input,
+        "tokens_cache_creation_5m_input": event.tokens_cache_creation_5m_input,
+        "tokens_cache_creation_1h_input": event.tokens_cache_creation_1h_input,
+        "tokens_cache_read_input": event.tokens_cache_read_input,
+        "token_source": event.token_source or event.metadata.get("token_source"),
         "cost_usd": event.cost_usd,
+        "cost_source": event.cost_source or event.metadata.get("cost_source") or ("provider_reported" if event.cost_usd is not None else None),
+        "cost_estimate": event.cost_estimate,
         "latency_ms": event.latency_ms,
         "error_count": event.error_count,
         "session_id": event.session_id,
@@ -920,7 +1201,9 @@ async def get_agent_compliance_connectors(
     org = await db.get(Org, org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="Org not found")
-    return _agent_connector_response(org)
+    payload = await _agent_connector_response(db, org)
+    await db.commit()
+    return payload
 
 
 @router.post(
@@ -944,10 +1227,28 @@ async def configure_agent_compliance_connector(
 
     settings = dict(org.settings or {})
     configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+    configured, _, _ = await _migrate_legacy_agent_credentials(db, org, configured)
+    connector = next((item for item in _agent_compliance_registry() if item.get("id") == payload.connector_id), None)
+    existing_row = dict(configured.get(payload.connector_id) or {})
+    credentials = payload.credentials or {}
+    credential_connection = await _agent_credential_connection(db, org_id, payload.connector_id)
+    if credentials:
+        credential_connection = await _upsert_agent_credential_connection(
+            db,
+            org_id,
+            payload.connector_id,
+            credentials=credentials,
+            credential_kind=payload.credential_kind if payload.credential_kind != "none" else "api_token",
+            display_name=str(connector.get("label") if connector else payload.connector_id),
+            status="configured",
+        )
     configured[payload.connector_id] = {
+        **_settings_row_without_credentials(existing_row),
         "enabled": payload.enabled,
         "source_types": [item.strip() for item in payload.source_types if item.strip()],
         "scopes": [item.strip() for item in payload.scopes if item.strip()],
+        "credential_kind": (credential_connection.params_hint or {}).get("credential_kind") if credential_connection is not None and isinstance(credential_connection.params_hint, dict) else (payload.credential_kind if payload.credential_kind != "none" else existing_row.get("credential_kind")),
+        "credential_state": "encrypted" if credential_connection is not None else "missing",
         "cursor": payload.cursor,
         "last_sync_status": payload.last_sync_status or ("pending" if payload.enabled else None),
         "content_retention": payload.content_retention,
@@ -969,11 +1270,63 @@ async def configure_agent_compliance_connector(
             "enabled": payload.enabled,
             "source_type_count": len(payload.source_types),
             "scope_count": len(payload.scopes),
+            "credential_state": "encrypted" if credential_connection is not None else "missing",
+            "credential_kind": (credential_connection.params_hint or {}).get("credential_kind") if credential_connection is not None and isinstance(credential_connection.params_hint, dict) else None,
+            "credential_source_type": _agent_connection_source_type(payload.connector_id),
             "content_retention": payload.content_retention,
         },
     )
     await db.commit()
-    return _agent_connector_response(org)
+    return await _agent_connector_response(db, org)
+
+
+@router.post(
+    "/connectors/{connector_id}/credentials/test",
+    response_model=AgentComplianceCredentialTestResponse,
+    dependencies=[Depends(require_permission("settings.connectors.manage"))],
+)
+async def test_agent_compliance_connector_credentials(
+    org_id: str,
+    connector_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> AgentComplianceCredentialTestResponse:
+    await _assert_v8_org(org_id, current_org_id, db)
+    registry_ids = {str(item["id"]) for item in _agent_compliance_registry()}
+    if connector_id not in registry_ids:
+        raise HTTPException(status_code=404, detail="Agent compliance connector not found")
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    configured = _agent_connector_settings(org)
+    configured, _, changed = await _migrate_legacy_agent_credentials(db, org, configured)
+    response = await _test_agent_credentials(db, org_id, connector_id)
+    if changed:
+        settings = dict(org.settings or {})
+        settings["v8_agent_compliance_connectors"] = configured
+        org.settings = settings
+        flag_modified(org, "settings")
+    await audit.emit(
+        db,
+        org_id,
+        "settings.agent_compliance_credentials_tested",
+        "tested",
+        f"Tested encrypted credentials for {connector_id}",
+        actor_login=get_actor_login(request),
+        resource_type="agent_compliance_connector",
+        resource_id=connector_id,
+        metadata={
+            "connector_id": connector_id,
+            "success": response.success,
+            "status": response.status,
+            "credential_state": response.credential_state,
+            "credential_kind": response.credential_kind,
+            "credential_source_type": _agent_connection_source_type(connector_id),
+        },
+    )
+    await db.commit()
+    return response
 
 
 @router.post(
@@ -999,6 +1352,7 @@ async def request_agent_compliance_connector_sync(
 
     settings = dict(org.settings or {})
     configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+    configured, credential_connections, _ = await _migrate_legacy_agent_credentials(db, org, configured)
     current = dict(configured.get(connector_id) or {})
     if not current.get("enabled"):
         raise HTTPException(status_code=409, detail="Agent compliance connector must be enabled before sync")
@@ -1010,6 +1364,7 @@ async def request_agent_compliance_connector_sync(
     now = datetime.now(UTC).isoformat()
     cursor = payload.cursor or str(current.get("cursor") or "") or None
     sync_plan = _agent_sync_contract(connector_id, connector, current, cursor)
+    credential_connection = credential_connections.get(connector_id) or await _agent_credential_connection(db, org_id, connector_id)
     current.update(
         {
             "cursor": cursor,
@@ -1017,6 +1372,7 @@ async def request_agent_compliance_connector_sync(
             "last_sync_requested_at": now,
             "last_sync_mode": "dry-run",
             "last_sync_plan": sync_plan,
+            "credential_state": "encrypted" if credential_connection is not None else "missing",
             "updated_at": now,
         }
     )
@@ -1040,6 +1396,8 @@ async def request_agent_compliance_connector_sync(
             "retention_window_days": sync_plan["retention_window_days"],
             "source_record_type": sync_plan["source_record_type"],
             "ready_for_provider_pull": sync_plan["ready_for_provider_pull"],
+            "credential_state": "encrypted" if credential_connection is not None else "missing",
+            "credential_source_type": _agent_connection_source_type(connector_id),
             "content_retention": current.get("content_retention") or "metadata-only",
         },
     )
@@ -1353,7 +1711,7 @@ async def get_billing(
     return _billing_response(org)
 
 
-@router.get("/notifications/digest")
+@router.get("/notifications/digest", dependencies=[Depends(require_permission("settings.notifications.read"))])
 async def get_notifications_digest(
     org_id: str,
     db: AsyncSession = Depends(get_db),
@@ -1364,8 +1722,7 @@ async def get_notifications_digest(
     await db.commit()
     return _digest_response(config)
 
-
-@router.put("/notifications/digest")
+@router.put("/notifications/digest", dependencies=[Depends(require_permission("settings.notifications.manage"))])
 async def update_notifications_digest(
     org_id: str,
     payload: DigestConfigPayload,
@@ -1395,3 +1752,37 @@ async def update_notifications_digest(
     )
     await db.commit()
     return _digest_response(config)
+
+
+@router.get("/notifications/digest/preview", dependencies=[Depends(require_permission("settings.notifications.read"))])
+async def get_notifications_digest_preview(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, Any]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    return await legacy_digest._preview(org_id, db)
+
+
+@router.post("/notifications/digest/preview", dependencies=[Depends(require_permission("settings.notifications.read"))])
+async def preview_notifications_digest(
+    org_id: str,
+    payload: DigestPreviewPayload,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, Any]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    return await legacy_digest._preview(org_id, db, _legacy_digest_config(payload.config))
+
+
+@router.post("/notifications/digest/send-now", dependencies=[Depends(require_permission("settings.notifications.manage"))])
+async def send_notifications_digest_now(
+    org_id: str,
+    payload: DigestSendNowPayload,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, Any]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    preview = await legacy_digest._preview(org_id, db, _legacy_digest_config(payload.config))
+    recipient = payload.recipient_email or (preview.get("recipients") or ["owner@skillayer.com"])[0]
+    return await legacy_digest._send_payload(preview, recipient)

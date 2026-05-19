@@ -36,6 +36,13 @@ type AgentComplianceSyncPlan = {
 type AgentComplianceConnector = Connector & {
   configured: boolean;
   enabled: boolean;
+  credential_state: "missing" | "encrypted" | "legacy-migrated";
+  credential_kind?: string | null;
+  credential_hint?: Record<string, string | number | boolean | null>;
+  credential_source_type?: string | null;
+  last_tested_at?: string | null;
+  last_connected_at?: string | null;
+  last_error?: string | null;
   source_types: string[];
   scopes: string[];
   last_cursor?: string | null;
@@ -512,6 +519,28 @@ async function requestAgentComplianceSync(formData: FormData) {
   }
 }
 
+async function testAgentComplianceCredentials(formData: FormData) {
+  "use server";
+
+  const connectorId = String(formData.get("connector_id") ?? "");
+  if (!connectorId) return;
+  const { accessToken, org } = await loadSettingsContext();
+  if (!accessToken) return;
+
+  const response = await fetch(`${API_URL}/v8/orgs/${org.id}/settings/connectors/${encodeURIComponent(connectorId)}/credentials/test`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  if (response.ok) {
+    revalidatePath("/settings/connectors");
+  }
+}
+
 async function queueAgentComplianceIngestJob(formData: FormData) {
   "use server";
 
@@ -558,6 +587,13 @@ export default async function ConnectorsSettingsPage() {
     last_sync_requested_at: null,
     last_sync_mode: null,
     last_sync_plan: null,
+    credential_state: "missing" as const,
+    credential_kind: null,
+    credential_hint: {},
+    credential_source_type: `agent_compliance:${connector.id}`,
+    last_tested_at: null,
+    last_connected_at: null,
+    last_error: null,
     last_ingest_job: null,
     last_ingested_at: null,
     last_ingested_count: 0,
@@ -627,6 +663,23 @@ export default async function ConnectorsSettingsPage() {
               <div className="mt-3 text-[12px] text-[color:var(--text-secondary)]">
                 Sync: {connector.last_sync_status ?? "not started"}{connector.last_sync_mode ? ` · ${connector.last_sync_mode}` : ""} · Retention: {connector.content_retention}
               </div>
+              <div className="mt-3 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Credential vault</span>
+                  <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${connector.credential_state === "encrypted" || connector.credential_state === "legacy-migrated" ? "bg-[color:var(--accent-green)]/15 text-[color:var(--accent-green)]" : "bg-amber-500/15 text-amber-100"}`}>
+                    {connector.credential_state === "missing" ? "Missing" : "Encrypted"}
+                  </span>
+                </div>
+                <div className="mt-2 grid gap-1 text-[11px] leading-5 text-[color:var(--text-secondary)]">
+                  <span>Kind: {connector.credential_kind ?? "not set"}</span>
+                  <span>Stored as: {connector.credential_source_type ?? `agent_compliance:${connector.id}`}</span>
+                  <span>Last test: {connector.last_tested_at ? new Date(connector.last_tested_at).toLocaleString() : "not tested"}</span>
+                  {connector.credential_hint && Object.keys(connector.credential_hint).length ? (
+                    <span className="truncate">Hint: {Object.entries(connector.credential_hint).filter(([key]) => key.endsWith("_hint")).map(([, value]) => String(value)).join(", ") || "metadata only"}</span>
+                  ) : null}
+                  {connector.last_error ? <span className="text-[color:var(--accent-red)]">{connector.last_error}</span> : null}
+                </div>
+              </div>
               {connector.last_sync_plan ? (
                 <div className="mt-3 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -694,6 +747,16 @@ export default async function ConnectorsSettingsPage() {
                     type="submit"
                   >
                     {connector.enabled ? "Request sync" : "Sync gated"}
+                  </button>
+                </form>
+                <form action={testAgentComplianceCredentials}>
+                  <input name="connector_id" type="hidden" value={connector.id} />
+                  <button
+                    className="inline-flex h-9 w-full items-center justify-center rounded-md border border-[color:var(--bg-border)] px-3 text-[12px] font-semibold text-[color:var(--text-primary)] disabled:cursor-not-allowed disabled:text-[color:var(--text-tertiary)]"
+                    disabled={!accessToken || connector.credential_state === "missing"}
+                    type="submit"
+                  >
+                    {connector.credential_state === "missing" ? "Add credentials" : "Test credentials"}
                   </button>
                 </form>
                 <form action={queueAgentComplianceIngestJob}>
