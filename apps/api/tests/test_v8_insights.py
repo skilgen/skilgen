@@ -488,6 +488,14 @@ def test_intelligence_usage_rolls_up_metadata_only_compliance_events(monkeypatch
                 "full_access": True,
                 "autonomous_access": True,
                 "tool_permissions": ["shell", "apply_patch"],
+                "tokens_input": 1000,
+                "tokens_output": 500,
+                "cost_usd": 0.25,
+                "pr_id": "pr-42",
+                "pr_number": 42,
+                "pr_title": "Enterprise provider ingestion",
+                "git_url": "https://github.com/acme/payments/pull/42",
+                "github_enrichment_status": "matched",
             },
         ),
         SimpleNamespace(
@@ -536,6 +544,11 @@ def test_intelligence_usage_rolls_up_metadata_only_compliance_events(monkeypatch
     assert payload["access_grants"][0]["full_access_events"] == 1
     assert payload["access_grants"][0]["autonomous_events"] == 1
     assert payload["access_grants"][0]["tool_permission_events"] == 2
+    pr_usage = payload["pr_push_usage"][0]
+    assert pr_usage["label"] == "Enterprise provider ingestion"
+    assert pr_usage["git_url"] == "https://github.com/acme/payments/pull/42"
+    assert pr_usage["github_enrichment_status"] == "matched"
+    assert pr_usage["tokens_total"] == 1500
 
 
 def test_access_grants_endpoint_returns_metadata_only_exposure_rows(monkeypatch) -> None:

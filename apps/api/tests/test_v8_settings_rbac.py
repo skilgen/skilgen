@@ -20,7 +20,7 @@ from apps.api.api.v8.flags import request_flag_cache
 from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, matches_scope_expression, permission_matches
 from packages.db.database import get_db
 from packages.db.llm_key import decrypt_key
-from packages.db.models import AuditEvent, DigestConfig, Job, Org, SourceConnection
+from packages.db.models import AuditEvent, DigestConfig, Job, Org, PullRequest, Repo, SourceConnection
 
 
 rbac_migration = importlib.import_module("apps.api.alembic.versions.20260505_0002_settings_rbac")
@@ -73,9 +73,17 @@ class EventDb:
 
 
 class OrgDb:
-    def __init__(self, org: Org, connections: list[SourceConnection] | None = None) -> None:
+    def __init__(
+        self,
+        org: Org,
+        connections: list[SourceConnection] | None = None,
+        repos: list[Repo] | None = None,
+        pull_requests: list[PullRequest] | None = None,
+    ) -> None:
         self.org = org
         self.connections = list(connections or [])
+        self.repos = list(repos or [])
+        self.pull_requests = list(pull_requests or [])
         self.committed = False
         self.added: list[object] = []
         self.flushed = False
@@ -89,9 +97,25 @@ class OrgDb:
         self.added.append(item)
 
     async def execute(self, _stmt: object) -> Result:
-        compiled = str(_stmt)
+        compiled = str(_stmt.compile(compile_kwargs={"literal_binds": True}))
         if "source_connections" in compiled:
             return Result([(connection, None) for connection in [*self.connections, *[item for item in self.added if isinstance(item, SourceConnection)]]])
+        if "FROM repos" in compiled:
+            rows = self.repos
+            if "repos.id =" in compiled:
+                rows = [repo for repo in rows if repo.id and f"'{repo.id}'" in compiled]
+            if "repos.full_name =" in compiled or "repos.name =" in compiled:
+                rows = [repo for repo in rows if (repo.full_name and f"'{repo.full_name}'" in compiled) or (repo.name and f"'{repo.name}'" in compiled)]
+            return Result([(repo, None) for repo in rows])
+        if "FROM pull_requests" in compiled:
+            rows = self.pull_requests
+            if "pull_requests.github_pr_number =" in compiled:
+                rows = [pr for pr in rows if str(pr.github_pr_number) in compiled]
+            if "pull_requests.id =" in compiled:
+                rows = [pr for pr in rows if pr.id and f"'{pr.id}'" in compiled]
+            if "pull_requests.head_sha =" in compiled:
+                rows = [pr for pr in rows if pr.head_sha and f"'{pr.head_sha}'" in compiled]
+            return Result([(pr, None) for pr in rows])
         return Result([])
 
     async def flush(self) -> None:
@@ -1334,6 +1358,136 @@ def test_ingest_agent_compliance_events_normalizes_every_metric_metadata_only(mo
     assert event.metadata_json["safe_metric"] == "kept"
     assert "prompt" not in event.metadata_json
     assert "source_envelope_hash" in event.metadata_json
+
+
+def test_ingest_agent_compliance_events_enriches_provider_github_context(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "content_retention": "metadata-only",
+                    "total_ingested_count": 0,
+                }
+            }
+        },
+    )
+    repo = Repo(id="repo-1", org_id="org-1", github_repo_id=101, full_name="ravichanduummadisetti/skilgen", name="skilgen")
+    pr = PullRequest(id="pr-42", repo_id="repo-1", github_pr_number=42, title="Enterprise provider ingestion", head_sha="abc123")
+    db = OrgDb(org, repos=[repo], pull_requests=[pr])
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.ingest_agent_compliance_events(
+            "org-1",
+            "openai-compliance",
+            settings_router.AgentComplianceIngestPayload(
+                events=[
+                    settings_router.AgentComplianceEventPayload(
+                        provider_event_id="evt-github-1",
+                        actor_login="ravi",
+                        provider="OpenAI Compliance Platform",
+                        model="gpt-5.5",
+                        repo_name="ravichanduummadisetti/skilgen",
+                        tokens_input=100,
+                        tokens_output=25,
+                        cost_usd=0.012,
+                        metadata={"pr_number": 42, "head_sha": "abc123", "branch": "v8/provider-enrichment"},
+                    )
+                ],
+            ),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    event = next(item for item in db.added if isinstance(item, AuditEvent))
+    assert response.ingested_count == 1
+    assert event.repo_id == "repo-1"
+    assert event.repo_name == "ravichanduummadisetti/skilgen"
+    assert event.metadata_json["github_enrichment_status"] == "matched"
+    assert event.metadata_json["github_enrichment_source"] == "pull_requests"
+    assert event.metadata_json["pr_id"] == "pr-42"
+    assert event.metadata_json["pr_number"] == 42
+    assert event.metadata_json["pr_title"] == "Enterprise provider ingestion"
+    assert event.metadata_json["git_url"] == "https://github.com/ravichanduummadisetti/skilgen/pull/42"
+
+
+def test_ingest_agent_compliance_events_labels_missing_github_join(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "anthropic-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "content_retention": "metadata-only",
+                    "total_ingested_count": 0,
+                }
+            }
+        },
+    )
+    repo = Repo(id="repo-1", org_id="org-1", github_repo_id=101, full_name="ravichanduummadisetti/skilgen", name="skilgen")
+    db = OrgDb(org, repos=[repo])
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.ingest_agent_compliance_events(
+            "org-1",
+            "anthropic-compliance",
+            settings_router.AgentComplianceIngestPayload(
+                events=[
+                    settings_router.AgentComplianceEventPayload(
+                        provider_event_id="evt-github-gap-1",
+                        actor_login="ravi",
+                        provider="Anthropic Compliance API",
+                        model="claude-opus-4-7",
+                        repo_name="ravichanduummadisetti/skilgen",
+                        tokens_input=100,
+                        tokens_output=25,
+                        cost_usd=0.012,
+                        metadata={"commit_sha": "def456"},
+                    )
+                ],
+            ),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    event = next(item for item in db.added if isinstance(item, AuditEvent))
+    assert response.ingested_count == 1
+    assert event.metadata_json["github_enrichment_status"] == "missing"
+    assert event.metadata_json["github_enrichment_gap"] == "Provider event included GitHub metadata, but no matching PR/commit record was found."
+    assert event.metadata_json["git_url"] == "https://github.com/ravichanduummadisetti/skilgen/commit/def456"
 
 
 def test_ingest_agent_compliance_events_falls_back_to_request_actor(monkeypatch) -> None:

@@ -234,6 +234,8 @@ class IntelligencePrPushUsage(BaseModel):
     git_url: str | None = None
     commit_sha: str | None = None
     branch: str | None = None
+    github_enrichment_status: str = "not_provided"
+    github_enrichment_gap: str | None = None
     task_type: str
     tokens_total: int
     cost_usd: float
@@ -2032,6 +2034,8 @@ def _intelligence_usage_from_events(events: list[AuditEvent], window_days: int) 
                     "git_url": git_url,
                     "commit_sha": _metadata_value(metadata, "commit_sha", "head_sha", "sha"),
                     "branch": _metadata_value(metadata, "branch", "head_branch", "source_branch"),
+                    "github_enrichment_status": _metadata_value(metadata, "github_enrichment_status") or ("matched" if git_url else "not_provided"),
+                    "github_enrichment_gap": _metadata_value(metadata, "github_enrichment_gap"),
                     "task_type": task_type,
                     "tokens_total": 0,
                     "cost_usd": 0.0,
@@ -2115,6 +2119,8 @@ def _intelligence_usage_from_events(events: list[AuditEvent], window_days: int) 
             git_url=values["git_url"] if isinstance(values.get("git_url"), str) else None,
             commit_sha=values["commit_sha"] if isinstance(values.get("commit_sha"), str) else None,
             branch=values["branch"] if isinstance(values.get("branch"), str) else None,
+            github_enrichment_status=str(values.get("github_enrichment_status") or "not_provided"),
+            github_enrichment_gap=values["github_enrichment_gap"] if isinstance(values.get("github_enrichment_gap"), str) else None,
             task_type=str(values["task_type"]),
             tokens_total=int(values["tokens_total"]),
             cost_usd=round(float(values["cost_usd"]), 6),

@@ -935,7 +935,10 @@ export async function IntelligenceUsageView() {
                       <a className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]" href={row.git_url} rel="noreferrer" target="_blank">
                         Open Git evidence <ExternalLink className="h-3 w-3" />
                       </a>
-                    ) : null}
+                    ) : (
+                      <p className="mt-2 text-xs font-semibold text-amber-300">Git coverage gap: {row.github_enrichment_gap ?? "No PR or commit link was available from provider metadata."}</p>
+                    )}
+                    {row.github_enrichment_gap && row.git_url ? <p className="mt-1 text-xs font-semibold text-amber-300">Git coverage gap: {row.github_enrichment_gap}</p> : null}
                   </div>
                   <span className="rounded-md bg-[color:var(--accent-primary)]/15 px-2 py-1 text-xs font-semibold text-[color:var(--accent-primary)]">{compactNumber(row.tokens_total)} tokens</span>
                 </div>

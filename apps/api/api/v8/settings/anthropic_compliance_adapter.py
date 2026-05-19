@@ -66,6 +66,9 @@ def _seeded_anthropic_events(cursor: str | None) -> list[dict[str, Any]]:
                 "cost_source": "provider_reported",
                 "token_source": "anthropic_compliance_api",
                 "usage_provenance_label": "Provider-reported by Anthropic compliance fixture",
+                "pr_number": 11,
+                "head_sha": "0e90c546f4bca6ccec03b9c33ffdec063444a718",
+                "branch": "v8/next-feature-loop",
                 "provider_native_token_buckets": {
                     "input_tokens": 260000,
                     "cache_creation_input_tokens": 90000,
@@ -110,6 +113,8 @@ def _seeded_anthropic_events(cursor: str | None) -> list[dict[str, Any]]:
                 "cost_source": "provider_reported",
                 "token_source": "anthropic_compliance_api",
                 "usage_provenance_label": "Provider-reported by Anthropic compliance fixture",
+                "commit_sha": "e60a760",
+                "branch": "v8/next-feature-loop",
                 "provider_native_token_buckets": {
                     "input_tokens": 16000,
                     "cache_read_input_tokens": 16000,

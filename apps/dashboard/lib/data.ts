@@ -1644,6 +1644,8 @@ export type InsightsIntelligenceUsage = {
     git_url: string | null;
     commit_sha: string | null;
     branch: string | null;
+    github_enrichment_status: string;
+    github_enrichment_gap: string | null;
     task_type: string;
     tokens_total: number;
     cost_usd: number;

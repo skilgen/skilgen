@@ -23,7 +23,7 @@ from apps.api.api.v8.settings.openai_compliance_adapter import pull_openai_compl
 from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, require_permission
 from packages.db.database import get_db, get_sessionmaker
 from packages.db.llm_key import decrypt_key, encrypt_key, key_hint
-from packages.db.models import AuditEvent, DigestConfig, Job, Org, Role, RoleBinding, SourceConnection
+from packages.db.models import AuditEvent, DigestConfig, Job, Org, PullRequest, Repo, Role, RoleBinding, SourceConnection
 from packages.db.models.base import new_uuid
 
 
@@ -727,6 +727,7 @@ def _normalized_event_metadata(
     connector_id: str,
     event: AgentComplianceEventPayload,
     actor_login: str | None = None,
+    github_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     provider = event.provider or connector_id
     model_tier = event.intelligence_tier or event.model_tier
@@ -797,7 +798,165 @@ def _normalized_event_metadata(
         "content_retention": "metadata-only",
         "redaction_state": "raw-content-dropped",
     }
+    if github_context:
+        metadata.update(github_context)
     return {key: value for key, value in metadata.items() if value is not None and value != "" and value != []}
+
+
+def _metadata_string(metadata: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = metadata.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def _metadata_int_value(metadata: dict[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        value = metadata.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _github_pr_url(repo_name: str | None, pr_number: int | None) -> str | None:
+    if repo_name and pr_number:
+        return f"https://github.com/{repo_name}/pull/{pr_number}"
+    return None
+
+
+def _github_commit_url(repo_name: str | None, sha: str | None) -> str | None:
+    if repo_name and sha:
+        return f"https://github.com/{repo_name}/commit/{sha}"
+    return None
+
+
+async def _provider_github_context(
+    db: AsyncSession,
+    org_id: str,
+    event: AgentComplianceEventPayload,
+) -> tuple[str | None, str | None, dict[str, Any]]:
+    metadata = _metadata_without_raw_content(event.metadata)
+    repo_id = event.repo_id or _metadata_string(metadata, "repo_id")
+    repo_name = event.repo_name or _metadata_string(metadata, "repo_name", "repository", "repository_name", "github_repo")
+    pr_number = _metadata_int_value(metadata, "pr_number", "pull_request_number", "github_pr_number")
+    pr_id = _metadata_string(metadata, "pr_id", "pull_request_id")
+    head_sha = _metadata_string(metadata, "head_sha", "commit_sha", "sha")
+    branch = _metadata_string(metadata, "branch", "head_branch", "source_branch")
+    pr_title = _metadata_string(metadata, "pr_title", "pull_request_title")
+
+    repo: Repo | None = None
+    if repo_id:
+        repo = (
+            await db.execute(
+                select(Repo).where(
+                    Repo.org_id == org_id,
+                    Repo.id == repo_id,
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+    if repo is None and repo_name:
+        repo = (
+            await db.execute(
+                select(Repo)
+                .where(
+                    Repo.org_id == org_id,
+                    or_(Repo.full_name == repo_name, Repo.name == repo_name),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    resolved_repo_id = getattr(repo, "id", None) or repo_id
+    resolved_repo_name = getattr(repo, "full_name", None) or repo_name
+    github_context: dict[str, Any] = {
+        "repo_id": resolved_repo_id,
+        "repo_name": resolved_repo_name,
+        "branch": branch,
+        "head_sha": head_sha,
+        "commit_sha": head_sha,
+    }
+
+    has_join_candidate = bool(pr_number or pr_id or head_sha or branch)
+    if not has_join_candidate:
+        github_context.update(
+            {
+                "github_enrichment_status": "not_provided",
+                "github_enrichment_gap": "Provider event did not include PR, commit, head SHA, or branch metadata.",
+            }
+        )
+        return resolved_repo_id, resolved_repo_name, github_context
+
+    pr: PullRequest | None = None
+    pr_lookup_gap: str | None = None
+    try:
+        if repo is not None and pr_number is not None:
+            pr = (
+                await db.execute(
+                    select(PullRequest)
+                    .where(
+                        PullRequest.repo_id == repo.id,
+                        PullRequest.github_pr_number == pr_number,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        if repo is not None and pr is None and pr_id:
+            pr = (
+                await db.execute(
+                    select(PullRequest)
+                    .where(
+                        PullRequest.repo_id == repo.id,
+                        PullRequest.id == pr_id,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        if repo is not None and pr is None and head_sha:
+            pr = (
+                await db.execute(
+                    select(PullRequest)
+                    .where(
+                        PullRequest.repo_id == repo.id,
+                        PullRequest.head_sha == head_sha,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+    except SQLAlchemyError:
+        pr_lookup_gap = "GitHub PR/commit tables are unavailable, so provider metadata could not be joined."
+
+    if pr is not None:
+        matched_pr_number = getattr(pr, "github_pr_number", None)
+        matched_sha = getattr(pr, "head_sha", None) or head_sha
+        github_context.update(
+            {
+                "github_enrichment_status": "matched",
+                "github_enrichment_source": "pull_requests",
+                "pr_id": getattr(pr, "id", None),
+                "pr_number": matched_pr_number,
+                "pr_title": getattr(pr, "title", None) or pr_title or (f"PR #{matched_pr_number}" if matched_pr_number else None),
+                "head_sha": matched_sha,
+                "commit_sha": matched_sha,
+                "git_url": _github_pr_url(resolved_repo_name, matched_pr_number) or _github_commit_url(resolved_repo_name, matched_sha),
+            }
+        )
+        return resolved_repo_id, resolved_repo_name, github_context
+
+    github_context.update(
+        {
+            "github_enrichment_status": "missing",
+            "github_enrichment_gap": pr_lookup_gap or "Provider event included GitHub metadata, but no matching PR/commit record was found.",
+            "pr_number": pr_number,
+            "pr_title": pr_title,
+            "git_url": _github_pr_url(resolved_repo_name, pr_number) or _github_commit_url(resolved_repo_name, head_sha),
+        }
+    )
+    return resolved_repo_id, resolved_repo_name, github_context
 
 
 def _compliance_event_severity(event: AgentComplianceEventPayload) -> str:
@@ -870,7 +1029,8 @@ async def _ingest_agent_compliance_payload(
         if existing:
             skipped += 1
             continue
-        metadata = _normalized_event_metadata(connector_id, event, actor_login=actor_login)
+        resolved_repo_id, resolved_repo_name, github_context = await _provider_github_context(db, org_id, event)
+        metadata = _normalized_event_metadata(connector_id, event, actor_login=actor_login, github_context=github_context)
         db.add(
             AuditEvent(
                 org_id=org_id,
@@ -878,8 +1038,8 @@ async def _ingest_agent_compliance_payload(
                 action="ingested",
                 summary=f"Normalized {event.source_record_type.replace('-', ' ')} from {event.provider or connector_id}",
                 actor_login=resolved_actor,
-                repo_id=event.repo_id,
-                repo_name=event.repo_name,
+                repo_id=resolved_repo_id,
+                repo_name=resolved_repo_name,
                 resource_type="agent_compliance_event",
                 resource_id=resource_id,
                 severity=_compliance_event_severity(event),
