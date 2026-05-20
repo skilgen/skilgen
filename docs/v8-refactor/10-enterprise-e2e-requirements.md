@@ -361,7 +361,7 @@ OAuth device flow endpoints (new on the API):
 | # | Task | Owner | Files |
 | --- | --- | --- | --- |
 | A1 | Refactor `scripts/import_codex_sessions.py` into a reusable Skillayer local-agent importer boundary + keep the script as a compatibility entry point. | platform | ✅ `packages.skillayer_agent.local_importer` is now the Skillayer-owned importer boundary; the legacy script remains available for existing automation. |
-| A2 | Add `skillayer-agent connect` / `sync` / `watch` / `status` commands. | platform | Product-facing helper command; legacy `skilgen` package usage is internal only if needed temporarily. |
+| A2 | Add `skillayer-agent connect` / `sync` / `watch` / `status` commands. | platform | ◐ `skillayer-agent sync`, `status`, and manual-token `connect --token` are implemented behind `packages.skillayer_agent.cli`; browser/device-flow connect remains PR-A4 and watch mode remains PR-X3. |
 | A3 | OAuth device-flow endpoints on the API. | api | `apps/api/api/routes/device_flow.py`, alembic migration `device_authorizations` table. |
 | A4 | Cursor parser per §5.4. | platform | Skillayer local-agent importer module + fixtures under `tests/fixtures/cursor/`. |
 | A5 | Windsurf parser. | platform | Skillayer local-agent importer module + fixtures. |
@@ -694,10 +694,12 @@ installer are expansion after that core path is working.
 3. **PR-A1 (Skillayer importer boundary)** — Task A1. Refactor the current Codex /
    Claude importer into a reusable Skillayer local-agent boundary while keeping the
    existing script as a compatibility entry point.
-4. **PR-A2 (`skillayer-agent` sync/status)** — Task A2 partial. Add product-facing
-   `skillayer-agent sync` and `skillayer-agent status` for Codex Desktop, Codex CLI,
-   and Claude Code. This must preserve today's tool-call, command, search, MCP, file
-   target, token, cost, access-scope, and repo attribution extraction.
+4. **PR-A2 (`skillayer-agent` sync/status)** — ✅ Task A2 partial. Product-facing
+   `skillayer-agent sync` and `skillayer-agent status` now cover Codex Desktop,
+   Codex CLI-compatible Codex JSONL, and Claude Code through the Skillayer importer
+   boundary. Manual-token `skillayer-agent connect --token` writes
+   `~/.skillayer/agent.json`; browser/device-flow connect remains PR-A4 and watch
+   mode remains PR-X3.
 5. **PR-A3 (Codex CLI tag + connect UX)** — Tasks A6, A8. Distinguish Codex CLI from
    Codex Desktop and show per-runtime upload/token/cost health in the Connect
    experience.

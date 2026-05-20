@@ -70,6 +70,7 @@ api = [
 
 [project.scripts]
 skilgen = "skilgen.cli.main:console_main"
+skillayer-agent = "packages.skillayer_agent.cli:console_main"
 
 [project.urls]
 Homepage = "https://github.com/skilgen/skilgen"

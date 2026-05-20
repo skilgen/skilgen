@@ -85,11 +85,11 @@ When PR metadata is present, ingestion resolves it against `pull_requests` for t
 
 Default retention remains metadata-only. Raw prompts, file content, diffs, and tool parameters stay out of the normalized audit event unless a future tenant setting explicitly enables content retention.
 
-## Codex Desktop import helper (local metadata-only)
+## Skillayer local agent helper (metadata-only)
 
-For local QA or bootstrap demos, Skillayer can ingest Codex Desktop session metadata without storing raw prompts or diffs.
+For local QA, bootstrap demos, and the first enterprise local-helper rollout, Skillayer can ingest Codex Desktop, Codex CLI-compatible Codex JSONL, and Claude Code session metadata without storing raw prompts or diffs.
 
-Use `scripts/import_codex_sessions.py` to convert `.codex/sessions/**/*.jsonl` turns into `POST /orgs/{org_id}/agent-runs` payloads that preserve:
+Use `skillayer-agent sync` to convert local coding-agent sessions into `POST /orgs/{org_id}/agent-runs` payloads that preserve:
 - model + reasoning metadata
 - token/cost estimates (when present)
 - tool permissions, MCP tools, and file targets (sanitized)
@@ -98,12 +98,19 @@ Use `scripts/import_codex_sessions.py` to convert `.codex/sessions/**/*.jsonl` t
 Example:
 
 ```bash
-SKILLAYER_API_URL=http://127.0.0.1:8000 \\
-SKILLAYER_ORG_ID=org_skilgen \\
-SKILLAYER_REPO_ID=repo_skilgen \\
-SKILLAYER_API_KEY=sk-local-demo \\
-python scripts/import_codex_sessions.py --project-root .
+skillayer-agent connect \\
+  --api-url http://127.0.0.1:8000 \\
+  --org-id org_skilgen \\
+  --token sk-local-demo \\
+  --repo-id repo_skilgen \\
+  --project-root .
+
+skillayer-agent status --dry-run
+skillayer-agent sync --dry-run
+skillayer-agent sync
 ```
+
+The legacy `scripts/import_codex_sessions.py` entry point remains available for existing automation while product-facing docs and installers move to `skillayer-agent`.
 
 ## Proposed data additions
 
