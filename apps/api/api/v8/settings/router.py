@@ -78,6 +78,10 @@ class DigestPreviewPayload(BaseModel):
     config: DigestConfigPayload | None = None
 
 
+class AutoJoinDomainPayload(BaseModel):
+    enabled: bool = Field(default=True)
+
+
 class DigestSendNowPayload(BaseModel):
     recipient_email: str | None = None
     config: DigestConfigPayload | None = None
@@ -1531,7 +1535,36 @@ async def get_settings_teams(
     from apps.api.api.routes.orgs import _team_rows
 
     rows = await _team_rows(org_id, db)
-    return {"teams": rows, "total": len(rows)}
+    org = await db.get(Org, org_id)
+    auto_join_domain = bool(org.auto_join_domain) if org is not None else True
+    return {"teams": rows, "total": len(rows), "auto_join_domain": auto_join_domain}
+
+
+@router.put("/teams/auto-join-domain", dependencies=[Depends(require_permission("settings.teams.manage"))])
+async def set_auto_join_domain(
+    org_id: str,
+    payload: AutoJoinDomainPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    org.auto_join_domain = bool(payload.enabled)
+    await audit.emit(
+        db,
+        org_id,
+        "settings.auto_join_domain_updated",
+        "updated",
+        f"Set auto-join by domain to {org.auto_join_domain}",
+        actor_login=get_actor_login(request),
+        resource_type="settings",
+        metadata={"auto_join_domain": org.auto_join_domain},
+    )
+    await db.commit()
+    return {"auto_join_domain": bool(org.auto_join_domain)}
 
 
 @router.get("/rbac")

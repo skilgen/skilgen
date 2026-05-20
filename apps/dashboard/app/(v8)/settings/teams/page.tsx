@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { ArrowRight, Users2 } from "lucide-react";
+import { revalidatePath } from "next/cache";
 
 import { EmptyPanel, Metric, SettingsShell } from "../_components/settings-shell";
 import { loadSettingsContext, v8Fetch } from "../_components/settings-data";
+import { API_URL } from "../../../../lib/data";
 
 type Team = {
   id?: string;
@@ -17,9 +19,28 @@ type Team = {
 
 export default async function TeamsSettingsPage() {
   const { accessToken, org } = await loadSettingsContext();
-  const payload = await v8Fetch<{ teams: Team[]; total: number }>(accessToken, org.id, "/teams");
+  const payload = await v8Fetch<{ teams: Team[]; total: number; auto_join_domain?: boolean }>(accessToken, org.id, "/teams");
   const teams = payload?.teams ?? [];
   const repoCount = teams.reduce((sum, team) => sum + Number(team.repo_count ?? 0), 0);
+  const autoJoinDomain = payload?.auto_join_domain ?? true;
+
+  async function setAutoJoinDomain(formData: FormData) {
+    "use server";
+    const enabled = formData.get("enabled") === "true";
+
+    const ctx = await loadSettingsContext();
+    const headers: HeadersInit = { "Content-Type": "application/json" };
+    if (ctx.accessToken) headers.Authorization = `Bearer ${ctx.accessToken}`;
+
+    await fetch(`${API_URL}/v8/orgs/${ctx.org.id}/settings/teams/auto-join-domain`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ enabled }),
+      cache: "no-store",
+    });
+
+    revalidatePath("/settings/teams");
+  }
 
   return (
     <SettingsShell active="Teams">
@@ -28,6 +49,30 @@ export default async function TeamsSettingsPage() {
         <Metric label="Repos" value={repoCount} sub="Grouped under Settings without behavior changes" />
         <Metric label="Role source" value="RBAC" sub="Fine-grained access lives in the next tab" />
       </div>
+
+      <section className="rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-[color:var(--text-primary)]">Auto-join by domain</div>
+            <p className="mt-1 text-xs leading-5 text-[color:var(--text-secondary)]">
+              When enabled, new logins for your email domain join this org automatically. Disable to require explicit invitation.
+            </p>
+          </div>
+          <form action={setAutoJoinDomain}>
+            <input name="enabled" type="hidden" value={autoJoinDomain ? "false" : "true"} />
+            <button
+              className={
+                autoJoinDomain
+                  ? "inline-flex min-h-10 items-center rounded-[8px] bg-[color:var(--accent-primary)] px-4 text-sm font-semibold text-black transition hover:bg-[color:var(--accent-bright)]"
+                  : "inline-flex min-h-10 items-center rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-elevated)] px-4 text-sm font-semibold text-[color:var(--text-primary)] transition hover:border-[color:var(--accent-primary)]"
+              }
+              type="submit"
+            >
+              {autoJoinDomain ? "Enabled" : "Disabled"}
+            </button>
+          </form>
+        </div>
+      </section>
 
       {teams.length ? (
         <section className="overflow-hidden rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)]">

@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.db.database import get_db
 from packages.db.config import settings
-from packages.db.models import Org
+from packages.db.models import Org, User
+from apps.api.api.services.jit_provisioning import ensure_from_login
 
 
 bearer_scheme = HTTPBearer(auto_error=True)
@@ -205,8 +206,24 @@ async def get_current_org_id(
         if org is not None:
             return org.id
 
+    email = str(user.get("email", "") or "").strip().lower()
+    if email:
+        row = (await db.execute(select(User.org_id).where(User.email == email).limit(1))).scalar_one_or_none()
+        if row:
+            org = await db.get(Org, str(row))
+            if org is None:
+                raise HTTPException(status_code=403, detail="No org found")
+            if org.is_suspended:
+                raise HTTPException(status_code=403, detail="Org suspended")
+            return org.id
+
+        org, _, created = await ensure_from_login(db, email=email, name=None, source="workos")
+        if created and workos_org_id and not org.workos_org_id:
+            org.workos_org_id = str(workos_org_id)
+        await db.commit()
+        return org.id
+
     # Temporary bootstrap fallback until WorkOS organization membership is fully mapped.
-    email = str(user.get("email", ""))
     result = await db.execute(select(Org).limit(1))
     org = result.scalar_one_or_none()
     if org is None:

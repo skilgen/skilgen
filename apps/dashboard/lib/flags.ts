@@ -21,6 +21,10 @@ export function iaV8EnvDefault(): boolean {
   return readBooleanEnv(process.env.IA_V8_DEFAULT) ?? false;
 }
 
+export function selfServeAuthEnvDefault(): boolean {
+  return readBooleanEnv(process.env.FF_SELF_SERVE_AUTH) ?? false;
+}
+
 async function accessTokenFromSession(): Promise<string> {
   try {
     const session = await withAuth({ ensureSignedIn: false });

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 
 const PORT = Number(process.env.PLAYWRIGHT_AUTH_ENTRY_PORT || 4331);
@@ -41,7 +42,29 @@ async function waitForReady(url: string, server: ManagedServer): Promise<void> {
   throw new Error(`dashboard did not become ready at ${url}. ${lastError}`);
 }
 
+async function ensureDashboardBuilt(): Promise<void> {
+  const buildIdPath = path.join(dashboardCwd(), ".next", "BUILD_ID");
+  if (fs.existsSync(buildIdPath)) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const build = spawn("npx", ["next", "build"], {
+      cwd: dashboardCwd(),
+      env: {
+        ...process.env,
+        NEXT_TELEMETRY_DISABLED: "1",
+      },
+      stdio: "ignore",
+    });
+    build.once("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`next build failed with exit code ${code ?? "unknown"}`));
+    });
+    build.once("error", reject);
+  });
+}
+
 async function startDashboardServer(): Promise<string> {
+  await ensureDashboardBuilt();
   const url = `http://127.0.0.1:${PORT}`;
   const server = spawn("npx", ["next", "start", "--hostname", "127.0.0.1", "--port", String(PORT)], {
     cwd: dashboardCwd(),
@@ -68,9 +91,12 @@ async function startDashboardServer(): Promise<string> {
 test.setTimeout(90_000);
 test.describe.configure({ mode: "serial" });
 
-test.beforeAll(async () => {
+test.beforeAll(
+  async () => {
   if (!baseUrl) baseUrl = await startDashboardServer();
-});
+  },
+  { timeout: 120_000 },
+);
 
 test.afterAll(async () => {
   await Promise.all(

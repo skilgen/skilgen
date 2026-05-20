@@ -37,6 +37,7 @@ from packages.db.models.skill_snapshot import SkillSnapshot
 from packages.db.models.skill_usage_event import SkillUsageEvent
 from packages.db.models.skill_version import SkillVersion
 from packages.db.models.sla_policy import SLAPolicy
+from packages.db.models.user import User
 
 __all__ = [
     "AgentSession",
@@ -87,4 +88,5 @@ __all__ = [
     "SkillUsageEvent",
     "SkillVersion",
     "SLAPolicy",
+    "User",
 ]

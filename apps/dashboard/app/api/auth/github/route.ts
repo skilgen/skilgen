@@ -22,8 +22,8 @@ export async function GET() {
 
   const signInUrl = await getSignInUrl({
     redirectUri: workOSRedirectUri(),
-    returnTo: "/dashboard/connect?auth=sso",
-    state: JSON.stringify({ source: "workos", method: "sso" }),
+    returnTo: "/dashboard/connect?auth=github",
+    state: JSON.stringify({ source: "github_oauth", method: "github" }),
   });
   redirect(signInUrl);
 }

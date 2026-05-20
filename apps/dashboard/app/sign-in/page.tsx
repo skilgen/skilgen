@@ -1,5 +1,8 @@
 import { ArrowRight, Building2, Github, Mail, ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+
+import { selfServeAuthEnvDefault } from "../../lib/flags";
 
 type SignInPageProps = {
   searchParams?: Promise<{
@@ -65,6 +68,10 @@ function AuthOption({
 }
 
 export default async function SignInPage({ searchParams }: SignInPageProps) {
+  if (!selfServeAuthEnvDefault()) {
+    redirect("/dashboard");
+  }
+
   const params = await searchParams;
   const ssoReady = workOSReady();
   const error = params?.error;
@@ -104,7 +111,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
               <div>
                 <h2 className="text-lg font-semibold">Choose a sign-in method</h2>
                 <p className="mt-1 text-sm leading-6 text-[color:var(--text-secondary)]">
-                  Use SSO or email verification to start the Connect workflow. GitHub sign-in is staged for the next auth slice.
+                  Use SSO, email verification, or GitHub OAuth to start the Connect workflow.
                 </p>
               </div>
             </div>
@@ -170,7 +177,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
               </form>
               <AuthOption
                 description="OAuth sign-in will reuse the GitHub app without requiring repository install."
-                disabled
+                disabled={!ssoReady}
                 href="/api/auth/github"
                 icon={<Github className="h-5 w-5" />}
                 label="Sign in with GitHub"

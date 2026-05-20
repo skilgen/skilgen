@@ -140,7 +140,7 @@ Verified against current `v8/next-feature-loop` (commit `a3f4685`, 2026-05-19).
 | Capability | Where | Notes |
 | --- | --- | --- |
 | WorkOS AuthKit middleware | [apps/dashboard/middleware.ts](../../apps/dashboard/middleware.ts) | Falls back to a "preview" header when env vars are missing; gates `/dashboard`, `/activity`, `/policy`, `/audit`, `/skills`, `/insights`, `/settings`, `/api/admin/*`. |
-| WorkOS sign-in + callback routes | [apps/dashboard/app/sign-in/route.ts](../../apps/dashboard/app/sign-in/route.ts), [apps/dashboard/app/callback/route.ts](../../apps/dashboard/app/callback/route.ts) | SSO works once the four `WORKOS_*` env vars and the redirect URI are set. |
+| WorkOS sign-in + callback routes | [apps/dashboard/app/sign-in/page.tsx](../../apps/dashboard/app/sign-in/page.tsx), [apps/dashboard/app/callback/route.ts](../../apps/dashboard/app/callback/route.ts) | Self-serve entry lives on `/sign-in`; callback warms JIT provisioning via `POST /me/provision`. |
 | `/dashboard/connect` page | [apps/dashboard/app/dashboard/connect/page.tsx](../../apps/dashboard/app/dashboard/connect/page.tsx) | Renders connection status cards for GitHub, API key, skills, agent loads. Reads `${API_URL}/orgs/{org_id}/connect/status`. |
 | Connectors catalog (Settings → Connectors) | [apps/api/api/v8/settings/connectors_registry.py](../../apps/api/api/v8/settings/connectors_registry.py), [apps/dashboard/app/(v8)/settings/connectors/page.tsx](../../apps/dashboard/app/\(v8\)/settings/connectors/page.tsx) | Covers GitHub/GitLab/Bitbucket, Jira/Linear, Slack, Splunk/Datadog/Sentinel, S3 Object Lock/GCS/Azure Immutable Blob, Sigstore/SLSA, Anthropic, OpenAI, plus coding-agent slots for Windsurf, Aider, Copilot, GitLab Duo, MCP. |
 | Anthropic + OpenAI compliance sync adapters | [apps/api/api/v8/settings/router.py](../../apps/api/api/v8/settings/router.py) | Scaffolded; emit `agent.compliance` audit records via the metadata-only ingest contract. |
@@ -161,8 +161,8 @@ Run before and after each milestone PR. ✅ = passes today, ◐ = partial, ❌ =
 | API py-compile for touched files | ✅ | `python -m compileall apps/api/api` | Verified 2026-05-19 pre-push. |
 | API pytest (full) | ◐ | `pytest apps/api/tests -q` | Most suites green; run before each milestone PR — see §10 for the gate. |
 | Replay / Sessions / Live-feed pagination | ✅ | Manual browser walk (logged 2026-05-19). | Keep the Playwright smoke (`apps/dashboard/e2e/`) for this. |
-| WorkOS SSO sign-in | ◐ | Local `.env` with all four `WORKOS_*` vars, hit `/sign-in`. | Works when configured; no UX for self-serve magic-link. |
-| Self-serve magic-link sign-up | ❌ | n/a | Must be built (see §4). |
+| WorkOS SSO sign-in | ◐ | Local `.env` with all four `WORKOS_*` vars, hit `/sign-in`. | Works when configured; routes to `/dashboard/connect`. |
+| Self-serve magic-link sign-up | ◐ | Local `.env` with all four `WORKOS_*` vars, hit `/sign-in` → Send magic link. | UX + JIT provisioning shipped; local preview uses `auth=magic-link-preview` without WorkOS. |
 | GitHub repo/PR/commit enrichment | ✅ | Connect GitHub App, inspect repo/PR links in Insights. | Keep this as the canonical repo evidence backbone. |
 | Codex Desktop import (single dev) | ✅ | `python scripts/import_codex_sessions.py --providers codex --org-id <org> --token <key>` | Verified end-to-end against the local API. |
 | Claude Code import (single dev) | ✅ | `python scripts/import_codex_sessions.py --providers claude --org-id <org> --token <key>` | Same script; uses `~/.claude/projects/**/*.jsonl`. |
@@ -226,17 +226,25 @@ Claude local metadata + OpenAI / Anthropic compliance metadata.
 - ✅ L3: magic-link send and verify routes exist. Local preview safely routes corporate
   email submissions to the Connect experience when WorkOS is not configured; production
   uses WorkOS Passwordless MagicLink sessions.
+- ✅ L4: GitHub OAuth entry is enabled via AuthKit (`/api/auth/github`) and forwards
+  to the canonical Connect flow.
+- ✅ L5: JIT org/user provisioning lands on the API (`/me/provision`) and is invoked
+  from the dashboard callback (`/callback`) on successful AuthKit login.
+- ✅ L6: Settings → Teams includes an "Auto-join by domain" toggle backed by
+  `orgs.auto_join_domain`.
+- ✅ L7: `apps/api/tests/test_jit_provisioning.py` covers new email, returning email,
+  suspended org, and auto-join disabled.
 - ◐ L8: Playwright smoke covers the local-preview magic-link path and screenshots the
   auth entry. Full email-link inbox verification remains for the WorkOS-configured
   staging pass.
-- ❌ L4-L7 remain pending: GitHub OAuth sign-in, JIT org/user provisioning, auto-join
-  domain toggle, and backend provisioning tests.
 
 Latest verification for this sub-slice (2026-05-20):
 
 - `npm --workspace apps/dashboard run type-check`
 - `npm --workspace apps/dashboard run build`
-- `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts`
+- `python -m pytest apps/api/tests/test_jit_provisioning.py -q`
+- `python -m pytest apps/api/tests/test_v8_settings_teams_auto_join.py -q`
+- `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts` (blocked in this Codex automation environment: Chromium exits `SIGTRAP`/`SIGABRT` + `kill EPERM`; run manually on a normal dev machine)
 
 ---
 
@@ -707,7 +715,7 @@ installer are expansion after that core path is working.
 | --- | --- | --- |
 | Q1 | Cursor's `state.vscdb` schema is undocumented and version-skewed. | Pin parser to the schema observed in Cursor ≥ 0.40; gate behind `FF_AGENT_CURSOR`; ship a `cursor-fixture-capture` script that anonymises a real DB into a test fixture. |
 | Q2 | Windsurf JSONL location on Linux / Windows. | Confirm during PR-A3 by running Windsurf on each OS; document in this file before merge. |
-| Q3 | Magic-link domain-auto-join — what about Gmail / personal addresses? | Default: personal-domain emails (gmail.com, outlook.com, ...) always create a fresh org and never auto-join. Maintain block list in `apps/api/api/auth/personal_domains.py`. |
+| Q3 | Magic-link domain-auto-join — what about Gmail / personal addresses? | Default: personal-domain emails (gmail.com, outlook.com, ...) always create a fresh org and never auto-join. Maintain block list in `apps/api/api/services/personal_domains.py`. |
 | Q4 | OAuth device-flow rate limiting. | Cap to 10 outstanding device codes per IP per 5 min; reject with `slow_down` per RFC 8628. |
 | Q5 | Provenance of imported cost numbers. | They are estimates (per `_openai_rates` / `_claude_base_rates`). Surface a "cost estimated" badge in Insights; never call them billing-grade. |
 | Q6 | Multi-machine same user. | The CLI registers the machine ID (`uname -n` + first MAC) under `users.devices`; admin can revoke a single machine's key without rotating the org-wide API key. |

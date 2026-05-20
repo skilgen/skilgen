@@ -49,6 +49,7 @@ class Org(Base):
     siem_webhook_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
     siem_webhook_enabled: Mapped[bool] = mapped_column(default=False)
     siem_event_filter: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    auto_join_domain: Mapped[bool] = mapped_column(default=True)
     workos_org_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     github_installation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     api_key: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
