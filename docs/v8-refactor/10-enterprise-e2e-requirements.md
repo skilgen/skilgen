@@ -406,7 +406,7 @@ helper evidence and compliance API evidence reconciled into one view.
 | --- | --- | --- |
 | B1 | Wire real HTTP call in OpenAI adapter, with cursor persistence + idempotency. | ✅ `apps/api/api/v8/settings/openai_compliance_adapter.py` now calls the OpenAI audit-log endpoint, normalizes metadata-only events, resumes with `after` cursor, keeps provider event ids stable for duplicate suppression, and is covered by `tests/test_openai_compliance_sync.py`. |
 | B2 | Wire real HTTP call in Anthropic adapter, with cursor persistence + idempotency. | ✅ `apps/api/api/v8/settings/anthropic_compliance_adapter.py` now calls the Anthropic compliance messages endpoint, resumes with cursor, respects `retry-after` failure posture, normalizes metadata-only Claude usage/cache/cost/access evidence, and is covered by `tests/test_anthropic_compliance_sync.py`. |
-| B3 | Job worker schedules a sync every 15 min per connected adapter. | `apps/api/api/routes/worker.py`. |
+| B3 | Job worker schedules a sync every 15 min per connected adapter. | ✅ `/worker/agent-compliance/provider-sync` queues due OpenAI/Anthropic provider sync jobs, skips connectors with queued/running jobs, preserves cursor resume state, and records the next 15-minute window. |
 | B4 | Surface adapter health in `/dashboard/connect` and `/settings/connectors`. | already half-built — extend `connect_status.connections`. |
 
 ---
@@ -729,17 +729,22 @@ installer are expansion after that core path is working.
    respects `retry-after` blocked state, maps Claude native token/cache/cost and
    risk/access/repo metadata into Skillayer's metadata-only compliance event shape,
    and keeps stable provider event ids so router ingestion can skip duplicate replays.
-9. **PR-B3 (worker schedule + status)** — Tasks B3, B4 + migrations 0003, 0004.
-   Schedule provider syncs and expose health in Connect/Settings.
-10. **PR-A4 (device flow + connect command)** — Task A3 plus remaining A2. Add OAuth
+9. **PR-B3 (worker schedule)** — ✅ Task B3. `/worker/agent-compliance/provider-sync`
+   now scans connected OpenAI/Anthropic compliance adapters, queues only due jobs,
+   waits when a prior provider-sync job is still queued/running, and records the next
+   15-minute sync window for connector health.
+10. **PR-B4 (provider status health)** — Task B4. Extend `/dashboard/connect` and
+   `connect_status.connections` so admins can see provider sync freshness beside local
+   runtime health.
+11. **PR-A4 (device flow + connect command)** — Task A3 plus remaining A2. Add OAuth
    device flow and `skillayer-agent connect` for self-serve local installs.
-11. **PR-V (verify-enterprise Makefile)** — §10. Lands once the core enterprise path
+12. **PR-V (verify-enterprise Makefile)** — §10. Lands once the core enterprise path
     is green so CI fails closed.
-12. **PR-X1 (Cursor parser)** — Tasks A4, A7. Flag: `FF_AGENT_CURSOR`.
-13. **PR-X2 (Windsurf parser)** — Tasks A5, A7. Flag: `FF_AGENT_WINDSURF`.
-14. **PR-X3 (watch mode)** — remaining A2 watch behavior after one-shot sync is
+13. **PR-X1 (Cursor parser)** — Tasks A4, A7. Flag: `FF_AGENT_CURSOR`.
+14. **PR-X2 (Windsurf parser)** — Tasks A5, A7. Flag: `FF_AGENT_WINDSURF`.
+15. **PR-X3 (watch mode)** — remaining A2 watch behavior after one-shot sync is
     stable.
-15. **PR-X4 (installer)** — Task A9. Ship behind `unlisted` tag until verified.
+16. **PR-X4 (installer)** — Task A9. Ship behind `unlisted` tag until verified.
 
 ---
 

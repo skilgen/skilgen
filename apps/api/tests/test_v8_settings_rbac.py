@@ -143,6 +143,33 @@ class OrgDb:
         self.committed = True
 
 
+class ScalarResult:
+    def __init__(self, rows: list[object]) -> None:
+        self._rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self) -> list[object]:
+        return self._rows
+
+
+class SchedulerDb:
+    def __init__(self, orgs: list[Org]) -> None:
+        self.orgs = orgs
+        self.added: list[object] = []
+        self.committed = False
+
+    async def execute(self, _stmt: object) -> ScalarResult:
+        return ScalarResult(self.orgs)
+
+    def add(self, item: object) -> None:
+        self.added.append(item)
+
+    async def commit(self) -> None:
+        self.committed = True
+
+
 def test_v8_settings_router_is_registered() -> None:
     paths = {route.path for route in app.routes}
 
@@ -159,6 +186,7 @@ def test_v8_settings_router_is_registered() -> None:
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs/{job_id}" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/sync-jobs" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/sync-jobs/{job_id}" in paths
+    assert "/worker/agent-compliance/provider-sync" in paths
     assert "settings.admin_audit.read" in PERMISSIONS
     assert "settings.billing.read" in PERMISSIONS
     assert "settings.notifications.read" in PERMISSIONS
@@ -1872,6 +1900,71 @@ def test_queue_agent_compliance_provider_sync_job_tracks_schedule_state(monkeypa
     assert stored["last_sync_mode"] == "provider-sync-job"
     assert stored["next_sync_at"]
     assert stored["last_provider_sync_job"]["job_id"] == job.id
+
+
+def test_worker_queues_due_provider_sync_and_skips_running_connector(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "cursor": "openai-cursor-1",
+                    "content_retention": "metadata-only",
+                    "next_sync_at": "2026-05-20T14:45:00+00:00",
+                },
+                "anthropic-compliance": {
+                    "enabled": True,
+                    "cursor": "anthropic-cursor-1",
+                    "content_retention": "metadata-only",
+                    "last_provider_sync_job": {"status": "running", "job_id": "job-running"},
+                },
+            }
+        },
+    )
+    db = SchedulerDb([org])
+    background_tasks = BackgroundTasks()
+    emitted: list[dict[str, object]] = []
+
+    async def credential_connection(db, org_id, connector_id):
+        assert org_id == "org-1"
+        assert connector_id == "openai-compliance"
+        return SimpleNamespace(id="connection-1")
+
+    async def emit(db, org_id, event_type, action, summary, **kwargs):
+        emitted.append({"org_id": org_id, "event_type": event_type, "action": action, "summary": summary, **kwargs})
+
+    monkeypatch.setattr(settings_router, "_agent_credential_connection", credential_connection)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.queue_due_agent_compliance_provider_sync_jobs(
+            db,
+            background_tasks,
+            actor_login="worker:agent-compliance-provider-sync",
+            now=datetime.fromisoformat("2026-05-20T15:00:00+00:00"),
+        )
+    )
+
+    job = next(item for item in db.added if isinstance(item, Job))
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    assert response["queued_count"] == 1
+    assert response["skipped_count"] == 1
+    assert response["skipped"][0]["connector_id"] == "anthropic-compliance"
+    assert response["skipped"][0]["reason"] == "previous_sync_still_running"
+    assert job.type == "agent_compliance.provider_sync"
+    assert job.status == "queued"
+    assert job.result_json["scheduled_by"] == "worker"
+    assert job.result_json["cursor"] == "openai-cursor-1"
+    assert stored["last_sync_status"] == "queued"
+    assert stored["last_sync_mode"] == "provider-sync-worker"
+    assert stored["last_provider_sync_job"]["job_id"] == job.id
+    assert len(background_tasks.tasks) == 1
+    assert emitted[0]["org_id"] == "org-1"
+    assert db.committed is True
 
 
 def test_agent_compliance_provider_sync_job_status_is_connector_scoped(monkeypatch) -> None:

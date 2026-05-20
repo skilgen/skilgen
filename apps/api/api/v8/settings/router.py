@@ -44,6 +44,7 @@ DEFAULT_DIGEST_WIDGETS = [
 ADMIN_AUDIT_ROLLUP_LIMIT = 5000
 BILLING_UNLIMITED_SEAT_LIMIT = 999999
 BILLING_ATTENTION_STATUSES = {"past_due", "unpaid", "incomplete", "incomplete_expired"}
+PROVIDER_SYNC_CONNECTORS = {"openai-compliance", "anthropic-compliance"}
 
 
 class RolePayload(BaseModel):
@@ -1487,6 +1488,131 @@ def _provider_sync_adapter(connector_id: str, credentials: dict[str, Any], curso
     if connector_id == "openai-compliance":
         return pull_openai_compliance_events(credentials, cursor=cursor, dry_run=False), "OpenAI Compliance", "openai_compliance_api"
     raise HTTPException(status_code=400, detail="Live provider sync is currently implemented for OpenAI and Anthropic Compliance only")
+
+
+def _parse_sync_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+        except ValueError:
+            return None
+    return None
+
+
+def _connector_sync_due(current: dict[str, Any], now: datetime) -> tuple[bool, str]:
+    last_job = current.get("last_provider_sync_job") if isinstance(current.get("last_provider_sync_job"), dict) else {}
+    if last_job.get("status") in {"queued", "running"}:
+        return False, "previous_sync_still_running"
+    next_sync_at = _parse_sync_datetime(current.get("next_sync_at") or last_job.get("next_sync_at"))
+    if next_sync_at is not None and next_sync_at > now:
+        return False, "not_due_yet"
+    return True, "due"
+
+
+async def queue_due_agent_compliance_provider_sync_jobs(
+    db: AsyncSession,
+    background_tasks: BackgroundTasks,
+    *,
+    actor_login: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    run_at = now or datetime.now(UTC)
+    if run_at.tzinfo is None:
+        run_at = run_at.replace(tzinfo=UTC)
+    orgs = list((await db.execute(select(Org))).scalars().all())
+    queued: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for org in orgs:
+        settings = dict(org.settings or {})
+        configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+        changed = False
+        for connector_id in sorted(PROVIDER_SYNC_CONNECTORS):
+            current = dict(configured.get(connector_id) or {})
+            if not current.get("enabled"):
+                skipped.append({"org_id": org.id, "connector_id": connector_id, "reason": "disabled"})
+                continue
+            due, reason = _connector_sync_due(current, run_at)
+            if not due:
+                skipped.append({"org_id": org.id, "connector_id": connector_id, "reason": reason})
+                continue
+            try:
+                await _agent_credential_connection(db, str(org.id), connector_id)
+            except HTTPException:
+                skipped.append({"org_id": org.id, "connector_id": connector_id, "reason": "missing_credentials"})
+                continue
+            next_sync_at = (run_at + timedelta(minutes=15)).isoformat()
+            job = Job(
+                id=new_uuid(),
+                org_id=str(org.id),
+                type="agent_compliance.provider_sync",
+                status="queued",
+                result_json={
+                    "connector_id": connector_id,
+                    "cursor": current.get("cursor"),
+                    "content_retention": "metadata-only",
+                    "pagination_strategy": "cursor-resume",
+                    "queued_at": run_at.isoformat(),
+                    "scheduled_by": "worker",
+                    "next_sync_at": next_sync_at,
+                },
+            )
+            db.add(job)
+            current.update(
+                {
+                    "last_sync_status": "queued",
+                    "last_sync_mode": "provider-sync-worker",
+                    "last_sync_requested_at": run_at.isoformat(),
+                    "next_sync_at": next_sync_at,
+                    "last_provider_sync_job": {
+                        "job_id": job.id,
+                        "status": "queued",
+                        "cursor": current.get("cursor"),
+                        "content_retention": "metadata-only",
+                        "queued_at": run_at.isoformat(),
+                        "scheduled_by": "worker",
+                        "next_sync_at": next_sync_at,
+                    },
+                    "updated_at": run_at.isoformat(),
+                }
+            )
+            configured[connector_id] = current
+            queued.append({"org_id": org.id, "connector_id": connector_id, "job_id": job.id, "next_sync_at": next_sync_at})
+            background_tasks.add_task(_run_agent_compliance_provider_sync_job, job.id, str(org.id), connector_id, actor_login)
+            changed = True
+        if changed:
+            settings["v8_agent_compliance_connectors"] = configured
+            org.settings = settings
+            flag_modified(org, "settings")
+    for item in queued:
+        await audit.emit(
+            db,
+            str(item["org_id"]),
+            "settings.agent_compliance_provider_sync_worker",
+            "queued",
+            f"Queued scheduled provider compliance sync job for {item['connector_id']}",
+            actor_login=actor_login,
+            resource_type="agent_compliance_connector",
+            resource_id=str(item["connector_id"]),
+            metadata={
+                "job_id": item["job_id"],
+                "connector_id": item["connector_id"],
+                "content_retention": "metadata-only",
+                "schedule_interval_minutes": 15,
+                "next_sync_at": item["next_sync_at"],
+            },
+        )
+    await db.commit()
+    return {
+        "ok": True,
+        "queued_count": len(queued),
+        "skipped_count": len(skipped),
+        "queued": queued,
+        "skipped": skipped,
+        "schedule_interval_minutes": 15,
+    }
 
 
 async def _run_agent_compliance_provider_sync_job(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,3 +66,20 @@ async def worker_analyse(
         source_path=payload.source_path,
     )
     return {"ok": True, "run_id": payload.run_id}
+
+
+@router.post("/worker/agent-compliance/provider-sync", name="worker_agent_compliance_provider_sync")
+async def worker_agent_compliance_provider_sync(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    upstash_signature: str | None = Header(default=None, alias="Upstash-Signature"),
+) -> dict[str, Any]:
+    _verify_qstash_signature(upstash_signature or request.headers.get("upstash-signature"))
+    from apps.api.api.v8.settings.router import queue_due_agent_compliance_provider_sync_jobs
+
+    return await queue_due_agent_compliance_provider_sync_jobs(
+        db,
+        background_tasks,
+        actor_login="worker:agent-compliance-provider-sync",
+    )
