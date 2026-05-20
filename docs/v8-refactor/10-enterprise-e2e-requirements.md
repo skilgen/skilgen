@@ -536,6 +536,14 @@ The run-detail UX must make this understandable without forcing admins to read r
 Developers should see what the agent did and how to make future runs safer. Admins should
 see whether the run was compliant, what it had access to, and why it was risky.
 
+### 7.2B Current PR-R status (2026-05-20)
+
+- ✅ Persisted run-level risk/access/compliance summary fields on `agent_sessions` via `apps/api/alembic/versions/20260520_0005_agent_run_risk_access.py`.
+- ✅ `/orgs/{org_id}/agent-runs` now derives and stores `risk_score`, `risk_level`, `compliance_status`, access posture fields, and summarized counts (commands/MCP/file targets) per imported run.
+- ✅ v8 Activity session payloads now include access posture (`approval_policy`, `sandbox_policy`, `permission_profile`, `access_scope`, `full_access`), GitHub join evidence (`git_url`, `github_enrichment_status`, `github_enrichment_gap`), and policy violation summaries where present.
+- ✅ `/activity/replay/:sessionId` first viewport now shows risk level, compliance status, access summary, GitHub join status/link, and a human next action callout before drilling into files/commands/tools evidence.
+- ◐ Remaining for PR-R: external API/provider call breakdown (provider/domain/category) and elevated-permission indicators per MCP server/tool once those sources are wired.
+
 ### 7.3 What is intentionally NOT extracted
 
 Any new parser **must** drop these on the floor — server also re-redacts as a defence

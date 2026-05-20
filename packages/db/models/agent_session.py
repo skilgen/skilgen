@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,6 +27,19 @@ class AgentSession(Base):
     org_id: Mapped[str] = mapped_column(String, nullable=False)
     session_id: Mapped[str] = mapped_column(String(128), nullable=False)
     agent_runtime: Mapped[str] = mapped_column(String(64), nullable=False)
+    risk_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(16), default="unknown", nullable=False)
+    compliance_status: Mapped[str] = mapped_column(String(16), default="unknown", nullable=False)
+    permission_profile: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    approval_policy: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sandbox_policy: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    access_scope: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    full_access: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    external_api_call_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    command_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    mcp_tools_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    file_targets_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    policy_violations: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
     task_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     engineer_login: Mapped[str | None] = mapped_column(String(128), nullable=True)
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)

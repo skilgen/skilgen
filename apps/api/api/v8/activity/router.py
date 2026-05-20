@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import Counter, defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -196,7 +196,7 @@ def _metadata_float(metadata: object, *keys: str) -> float:
         value = metadata.get(key)
         if isinstance(value, bool):
             continue
-        if isinstance(value, int | float):
+        if isinstance(value, (int, float)):
             return float(value)
         if isinstance(value, str) and value.strip():
             try:
@@ -231,7 +231,7 @@ def _activity_metrics_from_metadata(metadata: object) -> dict[str, int]:
         value = raw_metrics.get(key)
         if isinstance(value, bool):
             value = None
-        if isinstance(value, int | float):
+        if isinstance(value, (int, float)):
             metrics[key] = int(value)
         elif isinstance(value, str) and value.strip():
             try:
@@ -268,6 +268,18 @@ def _event_metric_payload(event: AuditEvent) -> dict[str, Any]:
         "model": model,
         "intelligence_tier": _metadata_value(metadata, "intelligence_tier", "model_tier", "reasoning_tier"),
         "access_scope": _metadata_value(metadata, "access_scope", "permission_scope", "grant_scope"),
+        "approval_policy": _metadata_value(metadata, "approval_policy"),
+        "sandbox_policy": _metadata_value(metadata, "sandbox_policy"),
+        "permission_profile": _metadata_value(metadata, "permission_profile"),
+        "full_access": bool(metadata.get("full_access")) if isinstance(metadata.get("full_access"), bool) else str(metadata.get("access_scope") or "").lower() in {"full-access", "full_access"},
+        "policy_decision": _metadata_value(metadata, "policy_decision", "decision", "outcome"),
+        "policy_violations": _metadata_list(metadata, "policy_violations", "violations"),
+        "tool_permissions": _metadata_list(metadata, "tool_permissions", "tool_calls", "tools"),
+        "file_targets": _metadata_list(metadata, "file_targets"),
+        "external_api_call_count": _metadata_int(metadata, "external_api_call_count", "external_api_calls_count"),
+        "github_enrichment_status": _metadata_value(metadata, "github_enrichment_status"),
+        "github_enrichment_gap": _metadata_value(metadata, "github_enrichment_gap"),
+        "git_url": _metadata_value(metadata, "git_url"),
         "tokens_input": input_tokens,
         "tokens_output": output_tokens,
         "tokens_total": tokens_total,
@@ -313,13 +325,50 @@ async def _compliance_metrics_by_session(db: AsyncSession, org_id: str, session_
                 "model": None,
                 "intelligence_tier": None,
                 "access_scopes": set(),
+                "approval_policies": set(),
+                "sandbox_policies": set(),
+                "permission_profiles": set(),
+                "full_access": False,
+                "policy_decisions": Counter(),
+                "policy_violations": set(),
+                "tool_permissions": set(),
+                "file_targets": set(),
+                "external_api_call_count": 0,
+                "github_enrichment_status": None,
+                "github_enrichment_gap": None,
+                "git_url": None,
                 "activity_metrics": {metric: 0 for metric in ACTIVITY_METRIC_KEYS},
                 "activity_details": {detail: [] for detail in ACTIVITY_DETAIL_KEYS},
             },
         )
         bucket["tokens_total"] = int(bucket["tokens_total"]) + int(metrics["tokens_total"])
         bucket["cost_usd"] = float(bucket["cost_usd"]) + float(metrics["cost_usd"])
+        bucket["external_api_call_count"] = int(bucket.get("external_api_call_count") or 0) + int(metrics.get("external_api_call_count") or 0)
         bucket["mcp_tools"].update(metrics["mcp_tools"])
+        if metrics.get("approval_policy"):
+            bucket["approval_policies"].add(str(metrics["approval_policy"]))
+        if metrics.get("sandbox_policy"):
+            bucket["sandbox_policies"].add(str(metrics["sandbox_policy"]))
+        if metrics.get("permission_profile"):
+            bucket["permission_profiles"].add(str(metrics["permission_profile"]))
+        bucket["full_access"] = bool(bucket.get("full_access")) or bool(metrics.get("full_access"))
+        if metrics.get("policy_decision"):
+            bucket["policy_decisions"][str(metrics["policy_decision"])] += 1
+        for violation in metrics.get("policy_violations") or []:
+            if violation:
+                bucket["policy_violations"].add(str(violation))
+        for tool in metrics.get("tool_permissions") or []:
+            if tool:
+                bucket["tool_permissions"].add(str(tool))
+        for target in metrics.get("file_targets") or []:
+            if target:
+                bucket["file_targets"].add(str(target))
+        if metrics.get("github_enrichment_status") and not bucket.get("github_enrichment_status"):
+            bucket["github_enrichment_status"] = metrics.get("github_enrichment_status")
+        if metrics.get("github_enrichment_gap") and not bucket.get("github_enrichment_gap"):
+            bucket["github_enrichment_gap"] = metrics.get("github_enrichment_gap")
+        if metrics.get("git_url") and not bucket.get("git_url"):
+            bucket["git_url"] = metrics.get("git_url")
         activity_metrics = metrics.get("activity_metrics")
         if isinstance(activity_metrics, dict):
             for metric in ACTIVITY_METRIC_KEYS:
@@ -341,10 +390,21 @@ async def _compliance_metrics_by_session(db: AsyncSession, org_id: str, session_
     for bucket in mapped.values():
         bucket["model"] = bucket["models"].most_common(1)[0][0] if bucket["models"] else bucket["model"]
         bucket["mcp_tools"] = sorted(bucket["mcp_tools"])
+        bucket["approval_policy"] = sorted(bucket["approval_policies"])[0] if bucket["approval_policies"] else None
+        bucket["sandbox_policy"] = sorted(bucket["sandbox_policies"])[0] if bucket["sandbox_policies"] else None
+        bucket["permission_profile"] = sorted(bucket["permission_profiles"])[0] if bucket["permission_profiles"] else None
+        bucket["policy_violations"] = sorted(bucket["policy_violations"])
+        bucket["tool_permissions"] = sorted(bucket["tool_permissions"])
+        bucket["file_targets"] = sorted(bucket["file_targets"])
+        bucket["policy_decision"] = bucket["policy_decisions"].most_common(1)[0][0] if bucket["policy_decisions"] else None
+        bucket["policy_decisions"] = dict(bucket["policy_decisions"])
         bucket["access_scope"] = sorted(bucket["access_scopes"])[0] if bucket["access_scopes"] else None
         bucket["cost_usd"] = round(float(bucket["cost_usd"]), 6)
         del bucket["models"]
         del bucket["access_scopes"]
+        del bucket["approval_policies"]
+        del bucket["sandbox_policies"]
+        del bucket["permission_profiles"]
     return mapped
 
 
@@ -502,7 +562,7 @@ async def _feed_items(
     repo_id: str | None = None,
     filters: dict[str, str | None] | None = None,
 ) -> list[dict[str, Any]]:
-    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
     statement = select(SkillUsageEvent).where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff)
     if repo_id:
         statement = statement.where(SkillUsageEvent.repo_id == repo_id)
@@ -633,7 +693,7 @@ async def activity_compliance_events(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
     await _require_v8(org_id, current_org_id, db)
-    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
     filters: list[Any] = [
         AuditEvent.org_id == org_id,
         AuditEvent.created_at >= cutoff,
@@ -674,7 +734,7 @@ async def activity_compliance_sessions(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
     await _require_v8(org_id, current_org_id, db)
-    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
     filters: list[Any] = [
         AuditEvent.org_id == org_id,
         AuditEvent.created_at >= cutoff,
@@ -725,9 +785,9 @@ async def activity_feed_stream(
     await _require_v8(org_id, actual_org_id, db)
 
     async def generate() -> Any:
-        started = datetime.now(UTC)
+        started = datetime.now(timezone.utc)
         sent: set[str] = set()
-        while (datetime.now(UTC) - started) < timedelta(minutes=5):
+        while (datetime.now(timezone.utc) - started) < timedelta(minutes=5):
             items = await _feed_items(
                 db,
                 org_id,
@@ -915,10 +975,10 @@ async def activity_heatmap(
     await _require_v8(org_id, current_org_id, db)
     if repo_id not in {"all", "_all"}:
         await _repo_in_org(db, org_id, repo_id)
-    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
     if repo_id in {"all", "_all"}:
         trend_days = max(1, min(90, round(hours / 24)))
-        today = datetime.now(UTC).replace(tzinfo=None).date()
+        today = datetime.now(timezone.utc).replace(tzinfo=None).date()
         trend_labels = [(today - timedelta(days=offset)).isoformat() for offset in range(trend_days - 1, -1, -1)]
         trend_label_set = set(trend_labels)
         session_rows = (

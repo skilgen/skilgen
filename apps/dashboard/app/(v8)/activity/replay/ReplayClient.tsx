@@ -11,6 +11,22 @@ function riskClass(band: ReplayStep["risk_band"]): string {
   return "text-[color:var(--accent-green)]";
 }
 
+function riskBadgeClass(level: ActivitySession["risk_level"] | undefined, band: ReplayStep["risk_band"]): string {
+  const normalized = (level ?? band ?? "low") as string;
+  if (normalized === "critical") return "bg-red-500/15 text-red-200 border-red-500/30";
+  if (normalized === "high") return "bg-red-500/10 text-red-200 border-red-500/20";
+  if (normalized === "medium") return "bg-amber-500/10 text-amber-200 border-amber-500/20";
+  return "bg-[color:var(--accent-green)]/10 text-[color:var(--accent-green)] border-[color:var(--accent-green)]/20";
+}
+
+function complianceBadgeClass(status: ActivitySession["compliance_status"] | undefined): string {
+  const normalized = status ?? "unknown";
+  if (normalized === "failed") return "bg-red-500/10 text-red-200 border-red-500/20";
+  if (normalized === "warning") return "bg-amber-500/10 text-amber-200 border-amber-500/20";
+  if (normalized === "passed") return "bg-[color:var(--accent-green)]/10 text-[color:var(--accent-green)] border-[color:var(--accent-green)]/20";
+  return "bg-white/5 text-[color:var(--text-secondary)] border-[color:var(--bg-border)]";
+}
+
 function compactNumber(value: number | null | undefined): string {
   const safe = Number(value ?? 0);
   if (safe >= 1_000_000) return `${(safe / 1_000_000).toFixed(safe >= 10_000_000 ? 0 : 1)}M`;
@@ -34,7 +50,10 @@ export function ReplayClient({ complianceEvents = [], exportHtml, session, timel
   const exploredFiles = details.explored_files ?? [];
   const searches = details.searches ?? [];
   const commands = details.commands ?? [];
-  const tools = details.tools?.length ? details.tools : session.mcp_tools ?? [];
+  const tools = session.tool_permissions?.length ? session.tool_permissions : details.tools?.length ? details.tools : session.mcp_tools ?? [];
+  const fileTargets = session.file_targets?.length ? session.file_targets : editedFiles;
+  const accessSummary = session.full_access ? "full-access" : session.access_scope ?? "scope unknown";
+  const runtimeDetails = [session.permission_profile, session.sandbox_policy, session.approval_policy].filter(Boolean).join(" · ");
 
   return (
     <section className="space-y-4">
@@ -44,6 +63,30 @@ export function ReplayClient({ complianceEvents = [], exportHtml, session, timel
             <h2 className="text-lg font-semibold text-[color:var(--text-primary)]">{session.agent} - {session.repo_name}</h2>
             <p className="mt-1 text-sm text-[color:var(--text-secondary)]">{session.session_id} - {session.user}</p>
             <p className="mt-1 text-xs text-[color:var(--text-tertiary)]">{session.model ?? "model unknown"}{session.intelligence_tier ? ` · ${session.intelligence_tier}` : ""} · {compactNumber(session.tokens_total)} tokens · {formatMoney(session.cost_usd)} · {session.outcome.replaceAll("_", " ")}</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <span className={`inline-flex items-center rounded-full border px-2.5 py-1 font-semibold ${riskBadgeClass(session.risk_level, session.risk_band)}`}>Risk: {session.risk_level ?? session.risk_band} {session.risk_score}</span>
+              <span className={`inline-flex items-center rounded-full border px-2.5 py-1 font-semibold ${complianceBadgeClass(session.compliance_status)}`}>Compliance: {session.compliance_status ?? "unknown"}</span>
+              <span className="inline-flex items-center rounded-full border border-[color:var(--bg-border)] bg-white/5 px-2.5 py-1 font-semibold text-[color:var(--text-secondary)]">Access: {accessSummary}</span>
+              {session.github_enrichment_status ? (
+                <span className="inline-flex items-center rounded-full border border-[color:var(--bg-border)] bg-white/5 px-2.5 py-1 font-semibold text-[color:var(--text-secondary)]">
+                  GitHub: {session.github_enrichment_status}
+                </span>
+              ) : null}
+              {session.git_url ? (
+                <a className="inline-flex items-center rounded-full border border-[color:var(--bg-border)] bg-white/5 px-2.5 py-1 font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--accent-bright)]" href={session.git_url} rel="noreferrer" target="_blank">
+                  Open evidence →
+                </a>
+              ) : null}
+            </div>
+            {session.github_enrichment_status === "missing" && session.github_enrichment_gap ? (
+              <p className="mt-2 text-xs text-amber-200">GitHub join gap: {session.github_enrichment_gap}</p>
+            ) : null}
+            {session.human_next_action ? (
+              <div className="mt-3 rounded-md border border-[rgb(var(--accent-primary-rgb)/0.24)] bg-[rgb(var(--accent-primary-rgb)/0.08)] px-3 py-2 text-xs font-semibold text-[color:var(--accent-primary)]">
+                Next action: <span className="text-[color:var(--text-primary)]">{session.human_next_action}</span>
+              </div>
+            ) : null}
+            {runtimeDetails ? <p className="mt-2 text-xs text-[color:var(--text-tertiary)]">{runtimeDetails}</p> : null}
           </div>
           <a className="inline-flex items-center gap-2 rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-sm font-semibold text-[color:var(--text-primary)]" download={`skillayer-replay-${session.session_id}.html`} href={exportHref}>
             <Download className="h-4 w-4" />
@@ -73,17 +116,29 @@ export function ReplayClient({ complianceEvents = [], exportHtml, session, timel
         )}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-6">
+      <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-7">
         <Metric href="#activity-edited" label="Edited" value={metrics.edited_files ?? session.files_touched.length} />
         <Metric href="#activity-explored" label="Explored" value={metrics.explored_files ?? 0} />
         <Metric href="#activity-searches" label="Searches" value={metrics.searches ?? 0} />
         <Metric href="#activity-commands" label="Commands" value={metrics.commands ?? 0} />
         <Metric href="#activity-tools" label="Tools" value={metrics.tool_calls ?? session.mcp_tools?.length ?? 0} />
-        <Metric label="Risk" value={`${session.risk_band} ${session.risk_score}`} />
+        <Metric href="#activity-external" label="External APIs" value={session.external_api_call_count ?? 0} />
+        <Metric label="Risk" value={`${session.risk_level ?? session.risk_band} ${session.risk_score}`} />
       </div>
       {session.risk_reasons?.length ? (
         <div className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4 text-sm text-[color:var(--text-secondary)]">
           <span className="font-semibold text-[color:var(--text-primary)]">Why this risk score:</span> {session.risk_reasons.join(" · ")}
+        </div>
+      ) : null}
+
+      {session.policy_violations?.length ? (
+        <div className="rounded-lg border border-red-500/25 bg-red-500/10 p-4 text-sm text-red-100">
+          <div className="font-semibold">Policy violations</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+            {session.policy_violations.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
@@ -94,10 +149,12 @@ export function ReplayClient({ complianceEvents = [], exportHtml, session, timel
         </div>
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
           <DetailPanel id="activity-edited" title="Edited files" items={editedFiles} empty="No edited files captured for this run." />
+          <DetailPanel expectedCount={fileTargets.length} id="activity-targets" title="File targets" items={fileTargets} empty="No file targets captured for this run." />
           <DetailPanel expectedCount={metrics.explored_files ?? 0} id="activity-explored" title="Explored files" items={exploredFiles} empty="No explored file paths captured for this run." />
           <DetailPanel expectedCount={metrics.searches ?? 0} id="activity-searches" title="Searches" items={searches} empty="No search commands captured for this run." />
           <DetailPanel expectedCount={metrics.commands ?? 0} id="activity-commands" title="Commands" items={commands} empty="No shell commands captured for this run." />
           <DetailPanel expectedCount={metrics.tool_calls ?? 0} id="activity-tools" title="Tools" items={tools} empty="No tool calls captured for this run." />
+          <DetailPanel expectedCount={session.external_api_call_count ?? 0} id="activity-external" title="External API calls" items={[]} empty="No external API call evidence was captured for this run." />
         </div>
       </article>
 

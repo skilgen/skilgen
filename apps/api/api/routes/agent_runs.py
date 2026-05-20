@@ -18,6 +18,82 @@ from packages.db.models import AgentSession, AuditEvent, Commit, PullRequest, Re
 
 router = APIRouter(prefix="/orgs", tags=["agent-runs"])
 
+def _risk_level(score: int) -> str:
+    if score >= 85:
+        return "critical"
+    if score >= 70:
+        return "high"
+    if score >= 35:
+        return "medium"
+    return "low"
+
+
+def _compliance_status_from_metadata(metadata: dict[str, Any]) -> str:
+    decision = str(metadata.get("policy_decision") or "").strip().lower()
+    violations = metadata.get("policy_violations") or metadata.get("violations") or []
+    has_violations = isinstance(violations, list) and any(bool(item) for item in violations)
+    if decision in {"deny", "denied", "blocked", "block", "failed", "error"} or has_violations:
+        return "failed"
+    if decision in {"require_approval", "log_only", "redact", "route_to_dlp", "warn", "warning"}:
+        return "warning"
+    if bool(metadata.get("full_access")) or str(metadata.get("access_scope") or "").strip().lower() == "full-access":
+        return "warning"
+    if decision in {"allow", "allowed", "success"}:
+        return "passed"
+    return "passed" if (metadata.get("access_scope") or metadata.get("tool_permissions")) else "unknown"
+
+
+def _risk_score_from_metadata(metadata: dict[str, Any], *, sensitivity_tier: str = "internal") -> tuple[int, list[str]]:
+    metrics = metadata.get("activity_metrics") if isinstance(metadata.get("activity_metrics"), dict) else {}
+    edited = int(metrics.get("edited_files") or metadata.get("edited_files") or 0)
+    commands = int(metrics.get("commands") or metadata.get("commands") or 0)
+    tool_permissions = metadata.get("tool_permissions") if isinstance(metadata.get("tool_permissions"), list) else []
+    mcp_tools = metadata.get("mcp_tools") if isinstance(metadata.get("mcp_tools"), list) else []
+    file_targets = metadata.get("file_targets") if isinstance(metadata.get("file_targets"), list) else []
+
+    action_class = "write" if edited > 0 or file_targets else "exec" if commands > 0 else "network" if tool_permissions else "read"
+    base = {"read": 8, "write": 34, "exec": 48, "network": 44}.get(action_class, 10)
+    sensitivity = {
+        "public": 0,
+        "internal": 5,
+        "confidential": 18,
+        "restricted": 28,
+        "regulated": 32,
+        "sensitive": 18,
+        "unknown": 5,
+    }.get(str(sensitivity_tier or "internal").lower(), 5)
+    scope = min(20, len({str(path) for path in file_targets if path}) * 3)
+    score = base + sensitivity + scope
+    reasons = [f"{action_class} activity"]
+    if str(sensitivity_tier or "").strip().lower() not in {"", "public"}:
+        reasons.append(f"{str(sensitivity_tier).lower()} repository")
+    if file_targets:
+        reasons.append(f"{len({str(path) for path in file_targets if path})} file targets")
+
+    if bool(metadata.get("full_access")):
+        score = max(score, 90)
+        reasons.append("full filesystem access")
+    if str(metadata.get("access_scope") or "").strip().lower() == "full-access":
+        score = max(score, 85)
+        reasons.append("full access scope")
+    approval_policy = str(metadata.get("approval_policy") or "").strip().lower()
+    sandbox_policy = str(metadata.get("sandbox_policy") or "").strip().lower()
+    policy = f"{approval_policy} {sandbox_policy}".strip()
+    if any(token in policy for token in ("auto", "autonomous")):
+        score += 12
+        reasons.append("auto-review policy")
+    if mcp_tools:
+        score += min(20, 6 + len(mcp_tools) * 2)
+        reasons.append(f"{len(mcp_tools)} MCP tool(s) used")
+    if commands:
+        score += min(15, commands * 2)
+        reasons.append(f"{commands} shell command(s)")
+    if str(metadata.get("github_enrichment_status") or "") == "missing":
+        score += 10
+        reasons.append("missing GitHub join evidence")
+
+    return max(0, min(100, int(score))), reasons
+
 
 class AgentRunAgent(BaseModel):
     vendor: str
@@ -150,7 +226,7 @@ def _metadata_float(metadata: dict[str, Any], *keys: str) -> float | None:
         value = metadata.get(key)
         if isinstance(value, bool):
             continue
-        if isinstance(value, int | float):
+        if isinstance(value, (int, float)):
             return float(value)
         if isinstance(value, str) and value.strip():
             try:
@@ -210,7 +286,7 @@ def _activity_metrics(metadata: dict[str, Any], artifacts: list[dict[str, Any]],
         value = raw_metrics.get(name)
         if isinstance(value, bool):
             value = None
-        if isinstance(value, int | float):
+        if isinstance(value, (int, float)):
             return int(value)
         if isinstance(value, str) and value.strip():
             try:
@@ -373,6 +449,12 @@ def _agent_compliance_audit_event(org_id: str, payload: AgentRunPayload, repo: R
     envelope_hash = hashlib.sha256(json.dumps(sanitized_envelope, sort_keys=True, default=str).encode("utf-8")).hexdigest()
     provider = _metadata_string(metadata, "provider", "agent_provider", "source_provider") or f"{payload.agent.vendor} {payload.agent.product}".strip()
     access_scope = _metadata_string(metadata, "access_scope", "permission_scope", "grant_scope") or ("full-access" if _metadata_bool(metadata, "full_access", "full_access_granted") else "unspecified")
+    external_api_call_count = _metadata_int(metadata, "external_api_call_count", "external_api_calls_count")
+    external_api_calls = metadata.get("external_api_calls")
+    if isinstance(external_api_calls, dict):
+        summed = sum(int(value) for value in external_api_calls.values() if isinstance(value, (int, float)))
+        if summed > 0:
+            external_api_call_count = external_api_call_count or summed
     tool_permissions = _tool_names(artifacts, metadata)
     file_targets = sorted(dict.fromkeys([str(item.get("file_path")) for item in artifacts if item.get("file_path")] + _metadata_list(metadata, "file_targets", "files", "file_scope")))
     activity_metrics = _activity_metrics(metadata, artifacts, tool_permissions)
@@ -390,11 +472,15 @@ def _agent_compliance_audit_event(org_id: str, payload: AgentRunPayload, repo: R
         "intelligence_tier": _metadata_string(metadata, "intelligence_tier", "model_tier", "reasoning_tier"),
         "task_type": _metadata_string(metadata, "task_type", "task", "workflow_type", "intent"),
         "access_scope": access_scope,
+        "approval_policy": _metadata_string(metadata, "approval_policy"),
+        "sandbox_policy": _metadata_string(metadata, "sandbox_policy"),
+        "permission_profile": _metadata_string(metadata, "permission_profile"),
         "full_access": _metadata_bool(metadata, "full_access", "full_access_granted") or access_scope == "full-access",
         "autonomous_access": _metadata_bool(metadata, "autonomous_access", "autonomous"),
         "tool_permissions": tool_permissions,
         "mcp_tools": _metadata_list(metadata, "mcp_tools"),
         "file_targets": file_targets,
+        "external_api_call_count": external_api_call_count,
         "activity_metrics": activity_metrics,
         "activity_details": activity_details,
         "edited_files": activity_metrics["edited_files"],
@@ -421,6 +507,7 @@ def _agent_compliance_audit_event(org_id: str, payload: AgentRunPayload, repo: R
         "latency_ms": _metadata_float(metadata, "latency_ms", "duration_ms"),
         "policy_decision": _metadata_string(metadata, "policy_decision", "decision"),
         "approval_status": _metadata_string(metadata, "approval_status"),
+        "policy_violations": _metadata_list(metadata, "policy_violations", "violations"),
         "source_record_types": _metadata_list(metadata, "source_record_types", "source_record_type"),
         **pr_context,
         "source_envelope_hash": envelope_hash,
@@ -546,6 +633,26 @@ async def ingest_agent_run(
         repo.last_analysed_at = max(filter(None, [repo.last_analysed_at, ended_at, started_at]), default=started_at)
         audit_event = _agent_compliance_audit_event(org_id, payload, repo, session_key, runtime, artifacts, pr_context)
         audit_event.created_at = ended_at or started_at
+        compliance_metadata = audit_event.metadata_json if isinstance(getattr(audit_event, "metadata_json", None), dict) else {}
+        risk_score, risk_reasons = _risk_score_from_metadata(
+            compliance_metadata,
+            sensitivity_tier=str(getattr(repo, "sensitivity_tier", None) or "internal"),
+        )
+        session.risk_score = int(risk_score)
+        session.risk_level = _risk_level(int(risk_score))
+        session.compliance_status = _compliance_status_from_metadata(compliance_metadata)
+        session.permission_profile = str(compliance_metadata.get("permission_profile") or "") or None
+        session.approval_policy = str(compliance_metadata.get("approval_policy") or "") or None
+        session.sandbox_policy = str(compliance_metadata.get("sandbox_policy") or "") or None
+        session.access_scope = str(compliance_metadata.get("access_scope") or "") or None
+        session.full_access = bool(compliance_metadata.get("full_access") or False)
+        session.external_api_call_count = int(compliance_metadata.get("external_api_call_count") or 0)
+        metrics = compliance_metadata.get("activity_metrics") if isinstance(compliance_metadata.get("activity_metrics"), dict) else {}
+        session.command_count = int(compliance_metadata.get("commands") or metrics.get("commands") or 0)
+        session.mcp_tools_count = len(compliance_metadata.get("mcp_tools") or []) if isinstance(compliance_metadata.get("mcp_tools"), list) else 0
+        session.file_targets_count = len(compliance_metadata.get("file_targets") or []) if isinstance(compliance_metadata.get("file_targets"), list) else 0
+        violations = compliance_metadata.get("policy_violations") or compliance_metadata.get("violations") or []
+        session.policy_violations = [str(item) for item in violations if item not in {None, ""}] if isinstance(violations, list) else []
         if existing_audit is None:
             db.add(audit_event)
         else:

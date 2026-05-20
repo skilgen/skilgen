@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Iterable, Literal
 
 RiskBand = Literal["low", "medium", "high"]
+RiskLevel = Literal["low", "medium", "high", "critical"]
 
 TICKET_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
 URL_RE = re.compile(r"https?://[^\s)>\"]+")
@@ -139,6 +140,84 @@ def risk_band(score: int) -> RiskBand:
     return "low"
 
 
+def risk_level(score: int) -> RiskLevel:
+    if score >= 85:
+        return "critical"
+    if score >= 70:
+        return "high"
+    if score >= 35:
+        return "medium"
+    return "low"
+
+
+def compliance_status(compliance: dict[str, Any] | None) -> str:
+    if not compliance:
+        return "unknown"
+    decision = str(compliance.get("policy_decision") or "").strip().lower()
+    violations = compliance.get("policy_violations") or compliance.get("violations") or []
+    has_violations = isinstance(violations, list) and any(bool(item) for item in violations)
+    if decision in {"deny", "denied", "blocked", "block", "failed", "error"} or has_violations:
+        return "failed"
+    if decision in {"require_approval", "log_only", "redact", "route_to_dlp", "warn", "warning"}:
+        return "warning"
+    if bool(compliance.get("full_access")) or str(compliance.get("access_scope") or "").strip().lower() == "full-access":
+        return "warning"
+    if decision in {"allow", "allowed", "success"}:
+        return "passed"
+    return "passed" if (compliance.get("access_scope") or compliance.get("tool_permissions")) else "unknown"
+
+
+def human_next_action(compliance: dict[str, Any] | None, *, risk: int) -> str | None:
+    if not compliance:
+        return None
+    if bool(compliance.get("full_access")):
+        return "Review why full access was granted"
+    if str(compliance.get("github_enrichment_status") or "") == "missing":
+        return "Fix missing GitHub join evidence"
+    if compliance.get("policy_violations"):
+        return "Review policy violations and approve exception"
+    metrics = compliance.get("activity_metrics") if isinstance(compliance.get("activity_metrics"), dict) else {}
+    if int(metrics.get("commands") or 0) > 0:
+        return "Review command summaries"
+    return "No action" if risk < 35 else "Review run risk reasons"
+
+
+def enrich_risk(
+    base_score: int,
+    base_reasons: list[str],
+    *,
+    compliance: dict[str, Any] | None,
+) -> tuple[int, list[str]]:
+    if not compliance:
+        return base_score, base_reasons
+    score = int(base_score)
+    reasons = list(base_reasons)
+    if bool(compliance.get("full_access")):
+        score = max(score, 90)
+        reasons.append("full filesystem access")
+    if str(compliance.get("access_scope") or "").strip().lower() == "full-access":
+        score = max(score, 85)
+        reasons.append("full access scope")
+    approval_policy = str(compliance.get("approval_policy") or "").lower()
+    sandbox_policy = str(compliance.get("sandbox_policy") or "").lower()
+    if any(token in f"{approval_policy} {sandbox_policy}" for token in ("auto", "autonomous")):
+        score += 12
+        reasons.append("auto-review policy")
+    mcp_tools = compliance.get("mcp_tools") if isinstance(compliance.get("mcp_tools"), list) else []
+    if mcp_tools:
+        score += min(20, 6 + len(mcp_tools) * 2)
+        reasons.append(f"{len(mcp_tools)} MCP tool(s) used")
+    metrics = compliance.get("activity_metrics") if isinstance(compliance.get("activity_metrics"), dict) else {}
+    command_count = int(metrics.get("commands") or 0)
+    if command_count:
+        score += min(15, command_count * 2)
+        reasons.append(f"{command_count} shell command(s)")
+    if str(compliance.get("github_enrichment_status") or "") == "missing":
+        score += 10
+        reasons.append("missing GitHub repo/PR/commit join evidence")
+    return max(0, min(100, score)), reasons
+
+
 def feed_event_view(event: object, repo: object | None, skill: object | None, session: object | None = None) -> dict[str, Any]:
     files = list(getattr(session, "files_touched", []) or [])
     action_class = action_class_for_event(event)
@@ -190,7 +269,9 @@ def session_feed_event_view(session: object, repo: object | None, skills: dict[s
     signature = "verified" if signature_statuses and all(status == "verified" for status in signature_statuses) else signature_statuses[0] if signature_statuses else "none"
     ended = getattr(session, "session_end", None) or getattr(session, "closed_at", None)
     outcome = normalized_outcome(str(getattr(session, "outcome", None) or ""), ended)
-    score = risk_score(action_class, sensitivity, files, signature, outcome)
+    base_score = risk_score(action_class, sensitivity, files, signature, outcome)
+    base_reasons = risk_reasons(action_class, sensitivity, files, signature, outcome)
+    score, reasons = enrich_risk(base_score, base_reasons, compliance=compliance)
     activity_at = getattr(session, "last_artifact_at", None) or getattr(session, "session_start", None) or getattr(session, "created_at", None)
     repo_name = getattr(repo, "full_name", None) or getattr(repo, "name", None) or "Unknown repo"
     session_id = str(getattr(session, "session_id", "") or getattr(session, "id", ""))
@@ -221,12 +302,28 @@ def session_feed_event_view(session: object, repo: object | None, skills: dict[s
         "trigger": linked_external_ticket(getattr(session, "task_description", None), getattr(session, "notes", None)),
         "risk_score": score,
         "risk_band": risk_band(score),
-        "risk_reasons": risk_reasons(action_class, sensitivity, files, signature, outcome),
+        "risk_level": risk_level(score),
+        "risk_reasons": reasons,
+        "compliance_status": compliance_status(compliance),
+        "policy_violations": list((compliance or {}).get("policy_violations") or []),
+        "human_next_action": human_next_action(compliance, risk=score),
         "tokens_total": int((compliance or {}).get("tokens_total") or 0),
         "cost_usd": float((compliance or {}).get("cost_usd") or 0.0),
         "model": (compliance or {}).get("model"),
         "intelligence_tier": (compliance or {}).get("intelligence_tier"),
         "access_scope": (compliance or {}).get("access_scope"),
+        "external_api_call_count": int((compliance or {}).get("external_api_call_count") or 0),
+        "full_access": bool((compliance or {}).get("full_access") or False),
+        "approval_policy": (compliance or {}).get("approval_policy"),
+        "sandbox_policy": (compliance or {}).get("sandbox_policy"),
+        "permission_profile": (compliance or {}).get("permission_profile"),
+        "policy_decision": (compliance or {}).get("policy_decision"),
+        "tool_permissions": list((compliance or {}).get("tool_permissions") or []),
+        "file_targets": list((compliance or {}).get("file_targets") or []),
+        "github_enrichment_status": (compliance or {}).get("github_enrichment_status"),
+        "github_enrichment_gap": (compliance or {}).get("github_enrichment_gap"),
+        "git_url": (compliance or {}).get("git_url"),
+        "mcp_tools": list((compliance or {}).get("mcp_tools") or []),
         "activity_metrics": dict((compliance or {}).get("activity_metrics") or {}),
         "activity_details": dict((compliance or {}).get("activity_details") or {}),
         "replay_url": f"/activity/replay/{session_db_id or session_id}?repo={getattr(session, 'repo_id', '')}",
@@ -246,7 +343,9 @@ def session_view(session: object, repo: object | None, skills: dict[str, object]
     signature = "verified" if all(status == "verified" for status in signature_statuses) else signature_statuses[0]
     ended = getattr(session, "session_end", None) or getattr(session, "closed_at", None)
     outcome = normalized_outcome(str(getattr(session, "outcome", None) or ""), ended)
-    score = risk_score(action_class, sensitivity, files, signature, outcome)
+    base_score = risk_score(action_class, sensitivity, files, signature, outcome)
+    base_reasons = risk_reasons(action_class, sensitivity, files, signature, outcome)
+    score, reasons = enrich_risk(base_score, base_reasons, compliance=compliance)
     started = getattr(session, "session_start", None) or getattr(session, "created_at", None)
     return {
         "id": str(getattr(session, "id", "")),
@@ -267,12 +366,26 @@ def session_view(session: object, repo: object | None, skills: dict[str, object]
         "trigger": linked_external_ticket(getattr(session, "task_description", None), getattr(session, "notes", None)),
         "risk_score": score,
         "risk_band": risk_band(score),
-        "risk_reasons": risk_reasons(action_class, sensitivity, files, signature, outcome),
+        "risk_level": risk_level(score),
+        "risk_reasons": reasons,
+        "compliance_status": compliance_status(compliance),
+        "policy_violations": list((compliance or {}).get("policy_violations") or []),
+        "human_next_action": human_next_action(compliance, risk=score),
         "tokens_total": int((compliance or {}).get("tokens_total") or 0),
         "cost_usd": float((compliance or {}).get("cost_usd") or 0.0),
         "model": (compliance or {}).get("model"),
         "intelligence_tier": (compliance or {}).get("intelligence_tier"),
         "access_scope": (compliance or {}).get("access_scope"),
+        "full_access": bool((compliance or {}).get("full_access") or False),
+        "approval_policy": (compliance or {}).get("approval_policy"),
+        "sandbox_policy": (compliance or {}).get("sandbox_policy"),
+        "permission_profile": (compliance or {}).get("permission_profile"),
+        "policy_decision": (compliance or {}).get("policy_decision"),
+        "tool_permissions": list((compliance or {}).get("tool_permissions") or []),
+        "file_targets": list((compliance or {}).get("file_targets") or []),
+        "github_enrichment_status": (compliance or {}).get("github_enrichment_status"),
+        "github_enrichment_gap": (compliance or {}).get("github_enrichment_gap"),
+        "git_url": (compliance or {}).get("git_url"),
         "mcp_tools": list((compliance or {}).get("mcp_tools") or []),
         "activity_metrics": dict((compliance or {}).get("activity_metrics") or {}),
         "activity_details": dict((compliance or {}).get("activity_details") or {}),
