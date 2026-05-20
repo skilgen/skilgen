@@ -405,7 +405,7 @@ helper evidence and compliance API evidence reconciled into one view.
 | # | Task | Files |
 | --- | --- | --- |
 | B1 | Wire real HTTP call in OpenAI adapter, with cursor persistence + idempotency. | ✅ `apps/api/api/v8/settings/openai_compliance_adapter.py` now calls the OpenAI audit-log endpoint, normalizes metadata-only events, resumes with `after` cursor, keeps provider event ids stable for duplicate suppression, and is covered by `tests/test_openai_compliance_sync.py`. |
-| B2 | Wire real HTTP call in Anthropic adapter, with cursor persistence + idempotency. | `apps/api/api/v8/settings/anthropic_compliance.py` (new), `tests/test_anthropic_compliance_sync.py`. |
+| B2 | Wire real HTTP call in Anthropic adapter, with cursor persistence + idempotency. | ✅ `apps/api/api/v8/settings/anthropic_compliance_adapter.py` now calls the Anthropic compliance messages endpoint, resumes with cursor, respects `retry-after` failure posture, normalizes metadata-only Claude usage/cache/cost/access evidence, and is covered by `tests/test_anthropic_compliance_sync.py`. |
 | B3 | Job worker schedules a sync every 15 min per connected adapter. | `apps/api/api/routes/worker.py`. |
 | B4 | Surface adapter health in `/dashboard/connect` and `/settings/connectors`. | already half-built — extend `connect_status.connections`. |
 
@@ -723,8 +723,12 @@ installer are expansion after that core path is working.
    maps provider usage/cost/risk/access/repo metadata into Skillayer's metadata-only
    compliance event shape, and keeps stable provider event ids so router ingestion can
    skip duplicate replays.
-8. **PR-B2 (Anthropic real sync)** — Task B2. Pull real Anthropic compliance metadata
-   with cursor persistence and idempotency.
+8. **PR-B2 (Anthropic real sync)** — ✅ Task B2. Pull real Anthropic compliance metadata
+   with cursor persistence and idempotency. The Anthropic adapter now calls
+   `GET /v1/admin/compliance/api/messages`, forwards workspace/page/cursor settings,
+   respects `retry-after` blocked state, maps Claude native token/cache/cost and
+   risk/access/repo metadata into Skillayer's metadata-only compliance event shape,
+   and keeps stable provider event ids so router ingestion can skip duplicate replays.
 9. **PR-B3 (worker schedule + status)** — Tasks B3, B4 + migrations 0003, 0004.
    Schedule provider syncs and expose health in Connect/Settings.
 10. **PR-A4 (device flow + connect command)** — Task A3 plus remaining A2. Add OAuth
