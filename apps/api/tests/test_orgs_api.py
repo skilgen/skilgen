@@ -422,6 +422,20 @@ def test_connect_status_merges_runtime_alias_load_counts() -> None:
                 SimpleNamespace(agent_runtime="unknown", last_seen_at=now, load_count_30d=5),
                 SimpleNamespace(agent_runtime="other", last_seen_at=now - timedelta(days=20), load_count_30d=7),
             ]),
+            Result(rows=[
+                SimpleNamespace(agent_runtime="codex_desktop", last_seen_at=now, uploads_30d=3),
+            ]),
+            Result(rows=[
+                SimpleNamespace(
+                    metadata_json={
+                        "agent_runtime": "codex_desktop",
+                        "tokens_total": 1200,
+                        "cost_usd": 0.42,
+                        "commands": 4,
+                        "file_targets": ["apps/api.py", "apps/web.tsx"],
+                    }
+                ),
+            ]),
         ],
     )
 
@@ -431,6 +445,11 @@ def test_connect_status_merges_runtime_alias_load_counts() -> None:
     assert response["codex_cli"]["load_count_30d"] == 36
     assert response["unidentified_agent"]["connected"] is True
     assert response["unidentified_agent"]["load_count_30d"] == 12
+    assert response["codex_desktop"]["connected"] is True
+    assert response["codex_desktop"]["uploads_30d"] == 3
+    assert response["codex_desktop"]["tokens_total_30d"] == 1200
+    assert response["codex_desktop"]["commands_30d"] == 4
+    assert response["codex_desktop"]["files_touched_30d"] == 2
 
 
 def test_org_session_tag_updates_existing_session() -> None:

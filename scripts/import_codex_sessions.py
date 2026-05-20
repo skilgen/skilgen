@@ -536,6 +536,37 @@ def _turn_payload(
     return {key: value for key, value in payload.items() if value is not None}
 
 
+def _codex_runtime_fields(session_meta: dict[str, Any]) -> dict[str, str]:
+    raw = " ".join(
+        str(session_meta.get(key) or "")
+        for key in ("originator", "client", "client_name", "app_name", "source", "runtime", "user_agent")
+    ).lower()
+    if any(token in raw for token in ("codex cli", "codex-cli", "codex_cli", "openai codex cli")) or raw.strip() in {"cli", "codex"}:
+        return {
+            "agent_provider": "Codex CLI",
+            "source_provider": "codex_cli",
+            "source_record_type": "codex_cli_jsonl",
+            "agent_product": "Codex CLI",
+            "agent_runtime": "codex_cli",
+        }
+    return {
+        "agent_provider": "Codex Desktop",
+        "source_provider": "codex_desktop",
+        "source_record_type": "codex_desktop_jsonl",
+        "agent_product": "Codex Desktop",
+        "agent_runtime": "codex_desktop",
+    }
+
+
+def _codex_turn_payload(
+    turn: dict[str, Any],
+    *,
+    repo_id: str | None,
+    repo_full_name: str | None,
+) -> dict[str, Any] | None:
+    return _turn_payload(turn, repo_id=repo_id, repo_full_name=repo_full_name, **_codex_runtime_fields(turn.get("session_meta") or {}))
+
+
 def build_agent_run_payloads(
     *,
     codex_home: Path,
@@ -564,10 +595,11 @@ def build_agent_run_payloads(
             event_type = payload.get("type")
             if event_type == "task_started" and payload.get("turn_id"):
                 if current:
-                    built = _turn_payload(current, repo_id=repo_id, repo_full_name=repo_full_name) if _belongs_to_project(current, project_root) else None
+                    built = _codex_turn_payload(current, repo_id=repo_id, repo_full_name=repo_full_name) if _belongs_to_project(current, project_root) else None
                     if built:
                         payloads.append(built)
                 current = _new_turn(str(payload["turn_id"]), session_meta, thread_name, source_file)
+                current["session_meta"] = dict(session_meta)
                 current["started_at"] = timestamp
                 continue
             if current is None:
@@ -594,12 +626,12 @@ def build_agent_run_payloads(
                     _record_command_metrics(current, payload, project_root)
             if event_type == "task_complete":
                 current["ended_at"] = timestamp
-                built = _turn_payload(current, repo_id=repo_id, repo_full_name=repo_full_name) if _belongs_to_project(current, project_root) else None
+                built = _codex_turn_payload(current, repo_id=repo_id, repo_full_name=repo_full_name) if _belongs_to_project(current, project_root) else None
                 if built:
                     payloads.append(built)
                 current = None
         if current:
-            built = _turn_payload(current, repo_id=repo_id, repo_full_name=repo_full_name) if _belongs_to_project(current, project_root) else None
+            built = _codex_turn_payload(current, repo_id=repo_id, repo_full_name=repo_full_name) if _belongs_to_project(current, project_root) else None
             if built:
                 payloads.append(built)
     return payloads

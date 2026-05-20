@@ -157,8 +157,15 @@ def _write_state(config: AgentConfig, payload: dict[str, Any]) -> None:
 def _runtime_status(config: AgentConfig) -> list[dict[str, Any]]:
     return [
         {
-            "runtime": "codex",
-            "label": "Codex Desktop / Codex CLI",
+            "runtime": "codex_desktop",
+            "label": "Codex Desktop",
+            "configured": "codex" in config.providers,
+            "detected": (config.codex_home / "sessions").exists(),
+            "store": str(config.codex_home / "sessions"),
+        },
+        {
+            "runtime": "codex_cli",
+            "label": "Codex CLI",
             "configured": "codex" in config.providers,
             "detected": (config.codex_home / "sessions").exists(),
             "store": str(config.codex_home / "sessions"),

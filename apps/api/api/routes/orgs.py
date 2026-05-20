@@ -751,6 +751,11 @@ class ConnectRuntimeStatus(BaseModel):
     connected: bool
     last_seen_at: str | None = None
     load_count_30d: int = 0
+    uploads_30d: int = 0
+    tokens_total_30d: int = 0
+    cost_usd_30d: float = 0.0
+    commands_30d: int = 0
+    files_touched_30d: int = 0
 
 
 class ConnectStatusResponse(BaseModel):
@@ -2063,7 +2068,10 @@ async def get_org_connect_status(
         raise HTTPException(status_code=400, detail="Unable to load connection status") from exc
 
     github_connected = any(repo.github_installation_id for repo in repos)
-    has_agent_loads = any(bool(item.get("connected")) or int(item.get("load_count_30d") or 0) > 0 for item in runtime_status.values())
+    has_agent_loads = any(
+        bool(item.get("connected")) or int(item.get("load_count_30d") or 0) > 0 or int(item.get("uploads_30d") or 0) > 0
+        for item in runtime_status.values()
+    )
     repo_ids = [repo.id for repo in repos if repo.id]
     github_repo_count = sum(1 for repo in repos if repo.github_installation_id)
     github_pr_count = 0

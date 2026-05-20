@@ -95,7 +95,10 @@ class SkillayerAgentCliTests(unittest.TestCase):
             payload = json.loads(output)
             self.assertEqual(payload["command"], "status")
             self.assertEqual(payload["discoverable_runs"], 1)
-            self.assertEqual({runtime["runtime"]: runtime["detected"] for runtime in payload["runtimes"]}, {"codex": True, "claude_code": True})
+            self.assertEqual(
+                {runtime["runtime"]: runtime["detected"] for runtime in payload["runtimes"]},
+                {"codex_desktop": True, "codex_cli": True, "claude_code": True},
+            )
 
     def test_sync_dry_run_uses_skillayer_importer_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

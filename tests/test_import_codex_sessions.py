@@ -66,6 +66,9 @@ class CodexSessionImporterTests(unittest.TestCase):
         self.assertEqual(len(payloads), 1)
         payload = payloads[0]
         self.assertEqual(payload["session_id"], "turn_1")
+        self.assertEqual(payload["agent"]["product"], "Codex Desktop")
+        self.assertEqual(payload["agent"]["runtime"], "codex_desktop")
+        self.assertEqual(payload["metadata"]["source_provider"], "codex_desktop")
         self.assertEqual(payload["repo_id"], "repo_1")
         self.assertEqual(payload["metadata"]["model"], "gpt-5.5")
         self.assertEqual(payload["metadata"]["tokens_total"], 15)
@@ -86,6 +89,30 @@ class CodexSessionImporterTests(unittest.TestCase):
         self.assertIn("rg TODO apps", payload["metadata"]["activity_details"]["searches"])
         self.assertNotIn("please edit secret file", json.dumps(payload))
         self.assertNotIn("+raw code", json.dumps(payload))
+
+    def test_build_agent_run_payloads_tags_codex_cli_distinctly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            codex_home = root / ".codex"
+            sessions = codex_home / "sessions" / "2026" / "05" / "20"
+            sessions.mkdir(parents=True)
+            source = sessions / "codex-cli.jsonl"
+            records = [
+                {"timestamp": "2026-05-20T04:00:00Z", "type": "session_meta", "payload": {"id": "thread_cli", "cwd": str(root), "client": "codex-cli"}},
+                {"timestamp": "2026-05-20T04:01:00Z", "type": "event_msg", "payload": {"type": "task_started", "turn_id": "turn_cli"}},
+                {"timestamp": "2026-05-20T04:01:01Z", "type": "turn_context", "payload": {"turn_id": "turn_cli", "cwd": str(root), "model": "gpt-5.5"}},
+                {"timestamp": "2026-05-20T04:02:00Z", "type": "event_msg", "payload": {"type": "task_complete", "turn_id": "turn_cli"}},
+            ]
+            source.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+
+            payloads = build_agent_run_payloads(codex_home=codex_home, project_root=root, repo_id="repo_1")
+
+        self.assertEqual(len(payloads), 1)
+        payload = payloads[0]
+        self.assertEqual(payload["agent"]["product"], "Codex CLI")
+        self.assertEqual(payload["agent"]["runtime"], "codex_cli")
+        self.assertEqual(payload["metadata"]["source_provider"], "codex_cli")
+        self.assertEqual(payload["metadata"]["source_record_types"], ["codex_cli_jsonl"])
 
     def test_build_claude_agent_run_payloads_matches_background_metrics_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

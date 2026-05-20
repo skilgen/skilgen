@@ -7,14 +7,17 @@ import re
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.db.models import SkillUsageEvent
+from packages.db.models import AgentSession, AuditEvent, SkillUsageEvent
 
 
-AGENT_RUNTIMES = ["claude_code", "codex_cli", "cursor", "copilot", "gemini_cli", "unidentified_agent"]
+AGENT_RUNTIMES = ["claude_code", "codex_desktop", "codex_cli", "cursor", "windsurf", "copilot", "gemini_cli", "unidentified_agent"]
 RUNTIME_ALIASES = {
     "anthropic": "claude_code",
     "claude": "claude_code",
     "codex": "codex_cli",
+    "codex-desktop": "codex_desktop",
+    "codex_desktop": "codex_desktop",
+    "codex desktop": "codex_desktop",
     "codex-mac": "codex_cli",
     "codex_mac": "codex_cli",
     "codex-app": "codex_cli",
@@ -26,6 +29,10 @@ RUNTIME_ALIASES = {
     "claude_code": "claude_code",
     "claudecode": "claude_code",
     "cursor": "cursor",
+    "windsurf": "windsurf",
+    "codeium": "windsurf",
+    "codeium-windsurf": "windsurf",
+    "codeium_windsurf": "windsurf",
     "github-copilot": "copilot",
     "github_copilot": "copilot",
     "copilot": "copilot",
@@ -39,8 +46,10 @@ RUNTIME_ALIASES = {
 }
 RUNTIME_DISPLAY_NAMES = {
     "claude_code": "Claude Code",
+    "codex_desktop": "Codex Desktop",
     "codex_cli": "Codex CLI",
     "cursor": "Cursor",
+    "windsurf": "Windsurf",
     "copilot": "GitHub Copilot",
     "gemini_cli": "Gemini CLI",
     "unidentified_agent": "Unidentified Agent",
@@ -71,6 +80,8 @@ def detect_runtime_from_headers(headers: Mapping[str, str]) -> str:
         return "codex_cli"
     if "cursor" in ua:
         return "cursor"
+    if "windsurf" in ua or "codeium" in ua:
+        return "windsurf"
     if "copilot" in ua or "github" in ua:
         return "copilot"
     if "gemini" in ua:
@@ -102,7 +113,19 @@ async def get_agent_connection_status(org_id: str, db: AsyncSession) -> dict:
             .group_by(SkillUsageEvent.agent_runtime)
         )
     ).all()
-    status = {runtime: {"connected": False, "last_seen_at": None, "load_count_30d": 0} for runtime in AGENT_RUNTIMES}
+    status = {
+        runtime: {
+            "connected": False,
+            "last_seen_at": None,
+            "load_count_30d": 0,
+            "uploads_30d": 0,
+            "tokens_total_30d": 0,
+            "cost_usd_30d": 0.0,
+            "commands_30d": 0,
+            "files_touched_30d": 0,
+        }
+        for runtime in AGENT_RUNTIMES
+    }
     for row in rows:
         runtime = normalize_runtime(row.agent_runtime)
         if runtime not in status:
@@ -111,9 +134,52 @@ async def get_agent_connection_status(org_id: str, db: AsyncSession) -> dict:
         existing_seen_raw = status[runtime]["last_seen_at"]
         existing_seen = datetime.fromisoformat(existing_seen_raw) if existing_seen_raw else None
         latest_seen = max((seen for seen in (existing_seen, last_seen) if seen is not None), default=None)
-        status[runtime] = {
-            "connected": bool(latest_seen and latest_seen >= cutoff_14),
-            "last_seen_at": latest_seen.isoformat() if latest_seen else None,
-            "load_count_30d": int(status[runtime]["load_count_30d"] or 0) + int(row.load_count_30d or 0),
-        }
+        status[runtime]["connected"] = bool(latest_seen and latest_seen >= cutoff_14)
+        status[runtime]["last_seen_at"] = latest_seen.isoformat() if latest_seen else None
+        status[runtime]["load_count_30d"] = int(status[runtime]["load_count_30d"] or 0) + int(row.load_count_30d or 0)
+
+    session_rows = (
+        await db.execute(
+            select(
+                AgentSession.agent_runtime,
+                func.max(AgentSession.session_start).label("last_seen_at"),
+                func.count(AgentSession.id).label("uploads_30d"),
+            )
+            .where(AgentSession.org_id == org_id, AgentSession.session_start >= cutoff_30)
+            .group_by(AgentSession.agent_runtime)
+        )
+    ).all()
+    for row in session_rows:
+        runtime = normalize_runtime(row.agent_runtime)
+        if runtime not in status:
+            continue
+        last_seen = row.last_seen_at
+        existing_seen_raw = status[runtime]["last_seen_at"]
+        existing_seen = datetime.fromisoformat(existing_seen_raw) if existing_seen_raw else None
+        latest_seen = max((seen for seen in (existing_seen, last_seen) if seen is not None), default=None)
+        status[runtime]["connected"] = bool(latest_seen and latest_seen >= cutoff_14)
+        status[runtime]["last_seen_at"] = latest_seen.isoformat() if latest_seen else None
+        status[runtime]["uploads_30d"] = int(status[runtime]["uploads_30d"] or 0) + int(row.uploads_30d or 0)
+
+    audit_rows = (
+        await db.execute(
+            select(AuditEvent).where(
+                AuditEvent.org_id == org_id,
+                AuditEvent.event_type == "agent.compliance",
+                AuditEvent.created_at >= cutoff_30,
+            )
+        )
+    ).scalars().all()
+    for event in audit_rows:
+        metadata = getattr(event, "metadata_json", None)
+        if not isinstance(metadata, dict):
+            continue
+        runtime = normalize_runtime(str(metadata.get("agent_runtime") or ""))
+        if runtime not in status:
+            continue
+        metrics = metadata.get("activity_metrics") if isinstance(metadata.get("activity_metrics"), dict) else {}
+        status[runtime]["tokens_total_30d"] = int(status[runtime]["tokens_total_30d"] or 0) + int(metadata.get("tokens_total") or 0)
+        status[runtime]["cost_usd_30d"] = round(float(status[runtime]["cost_usd_30d"] or 0.0) + float(metadata.get("cost_usd") or 0.0), 6)
+        status[runtime]["commands_30d"] = int(status[runtime]["commands_30d"] or 0) + int(metadata.get("commands") or metrics.get("commands") or 0)
+        status[runtime]["files_touched_30d"] = int(status[runtime]["files_touched_30d"] or 0) + len(metadata.get("file_targets") or [])
     return status

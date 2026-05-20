@@ -166,7 +166,7 @@ Run before and after each milestone PR. ✅ = passes today, ◐ = partial, ❌ =
 | GitHub repo/PR/commit enrichment | ✅ | Connect GitHub App, inspect repo/PR links in Insights. | Keep this as the canonical repo evidence backbone. |
 | Codex Desktop import (single dev) | ✅ | `python scripts/import_codex_sessions.py --providers codex --org-id <org> --token <key>` | Verified end-to-end against the local API. |
 | Claude Code import (single dev) | ✅ | `python scripts/import_codex_sessions.py --providers claude --org-id <org> --token <key>` | Same script; uses `~/.claude/projects/**/*.jsonl`. |
-| Codex CLI import | ❌ | n/a | Codex CLI writes to `~/.codex/sessions` like Codex Desktop, but agent_runtime tagging is unverified. Confirm fixture and add explicit test. |
+| Codex CLI import | ✅ | `python -m unittest tests.test_codex_cli_runtime -v` | Codex CLI writes to `~/.codex/sessions` like Codex Desktop. Runtime tagging is verified via `session_meta.client='codex-cli'` (or `originator='Codex CLI'`) → `agent.runtime='codex_cli'`. |
 | Cursor import | ❌ | n/a | No parser. Cursor stores sessions in `~/Library/Application Support/Cursor/User/History` (macOS) / `%APPDATA%/Cursor/...`. New parser required. |
 | Windsurf import | ❌ | n/a | No parser. Windsurf JSONL location TBD. |
 | Anthropic compliance pull | ◐ | Settings → Connectors → Anthropic → "Queue sync". | Scaffold only; adapter needs the real API call + cursor persistence. |
@@ -291,7 +291,7 @@ needs. Cursor and Windsurf remain expansion runtimes after the core path is gree
 | Runtime | Local store | Parser status | Owner |
 | --- | --- | --- | --- |
 | Codex Desktop | `~/.codex/sessions/**/*.jsonl` + `~/.codex/session_index.jsonl` | ✅ Core milestone. Implemented in `scripts/import_codex_sessions.py:build_agent_run_payloads`; move behind Skillayer helper boundary. | platform |
-| Codex CLI | `~/.codex/sessions/**/*.jsonl` (same store; differing `session_meta`) | ◐ Core milestone. Reuses Codex parser; needs explicit `agent_runtime='codex_cli'` selection when `session_meta.client='codex-cli'`. Add fixture + test. | platform |
+| Codex CLI | `~/.codex/sessions/**/*.jsonl` (same store; differing `session_meta`) | ✅ Core milestone. Reuses Codex parser and tags `agent_runtime='codex_cli'` when session metadata identifies CLI clients. | platform |
 | Claude Code | `~/.claude/projects/**/*.jsonl` | ✅ Core milestone. `build_claude_agent_run_payloads`; move behind Skillayer helper boundary. | platform |
 | Cursor | `~/Library/Application Support/Cursor/User/History/**/entries.json` + `~/Library/Application Support/Cursor/User/workspaceStorage/**/state.vscdb` | ❌ Expansion after enterprise core. New parser; spec in §5.4. | platform |
 | Windsurf | `~/.codeium/windsurf/conversations/**/*.jsonl` (verify on macOS/Linux) | ❌ Expansion after enterprise core. New parser. | platform |
@@ -365,9 +365,9 @@ OAuth device flow endpoints (new on the API):
 | A3 | OAuth device-flow endpoints on the API. | api | `apps/api/api/routes/device_flow.py`, alembic migration `device_authorizations` table. |
 | A4 | Cursor parser per §5.4. | platform | Skillayer local-agent importer module + fixtures under `tests/fixtures/cursor/`. |
 | A5 | Windsurf parser. | platform | Skillayer local-agent importer module + fixtures. |
-| A6 | Tag Codex CLI runs distinctly from Codex Desktop. | platform | Skillayer local-agent Codex importer. |
-| A7 | `tests/test_cursor_importer.py`, `tests/test_windsurf_importer.py`, `tests/test_codex_cli_runtime.py`. | platform | New files. |
-| A8 | Dashboard: surface per-runtime "last upload" / token / cost counters in `/dashboard/connect`. | dashboard | Already half-wired via `agent_runtimes`; extend the card for Cursor / Windsurf. |
+| A6 | Tag Codex CLI runs distinctly from Codex Desktop. | platform | ✅ Codex Desktop now emits `codex_desktop`; Codex CLI emits `codex_cli`. |
+| A7 | `tests/test_cursor_importer.py`, `tests/test_windsurf_importer.py`, `tests/test_codex_cli_runtime.py`. | platform | ◐ `tests/test_codex_cli_runtime.py` is complete; Cursor and Windsurf parser tests remain with A4/A5 expansion work. |
+| A8 | Dashboard: surface per-runtime "last upload" / token / cost counters in `/dashboard/connect`. | dashboard | ✅ `/dashboard/connect` now shows runtime health for Codex Desktop, Codex CLI, Claude Code, Cursor, and Windsurf with uploads, commands, files, tokens, and cost. |
 | A9 | `install.sh` one-liner installer (downloads versioned Skillayer local-helper artifact + writes `skillayer-agent` shim). | platform | new `scripts/install.sh` + release pipeline. |
 
 ---
@@ -700,9 +700,9 @@ installer are expansion after that core path is working.
    boundary. Manual-token `skillayer-agent connect --token` writes
    `~/.skillayer/agent.json`; browser/device-flow connect remains PR-A4 and watch
    mode remains PR-X3.
-5. **PR-A3 (Codex CLI tag + connect UX)** — Tasks A6, A8. Distinguish Codex CLI from
-   Codex Desktop and show per-runtime upload/token/cost health in the Connect
-   experience.
+5. **PR-A3 (Codex CLI tag + connect UX)** — ✅ Tasks A6, A8. Codex CLI is now
+   distinct from Codex Desktop, and `/dashboard/connect` shows per-runtime
+   upload/token/cost/command/file health before setup instructions.
 6. **PR-R (run risk/access/compliance detail)** — §7.2B and §8A. Persist and display
    run-level risk score, risk reasons, external API/provider call counts, commands,
    file targets, MCP usage, permission posture, full/default/auto-review access state,

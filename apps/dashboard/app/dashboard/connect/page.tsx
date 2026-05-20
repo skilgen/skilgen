@@ -32,7 +32,19 @@ type ConnectStatus = {
   repos_connected?: number;
   skills_generated?: number;
   connections?: ConnectStatusItem[];
-  agent_runtimes?: Record<string, { connected?: boolean; load_count_30d?: number }>;
+  agent_runtimes?: Record<
+    string,
+    {
+      connected?: boolean;
+      last_seen_at?: string | null;
+      load_count_30d?: number;
+      uploads_30d?: number;
+      tokens_total_30d?: number;
+      cost_usd_30d?: number;
+      commands_30d?: number;
+      files_touched_30d?: number;
+    }
+  >;
 };
 
 async function resolveConnectData(): Promise<{
@@ -104,7 +116,7 @@ function statusCards(status: ConnectStatus | null, repos: Repo[], setupStatus: S
     : !githubEnrichmentActive
       ? "GitHub App installed · waiting for PR/commit enrichment"
       : `Enrichment active · ${githubPrCount} PRs · ${githubCommitCount} commits${githubJoinMissing ? ` · ${githubJoinMissing} join gaps` : ""}`;
-  const runtimeConnected = Object.values(status?.agent_runtimes ?? {}).some((runtime) => Boolean(runtime.connected) || Number(runtime.load_count_30d ?? 0) > 0);
+  const runtimeConnected = Object.values(status?.agent_runtimes ?? {}).some((runtime) => Boolean(runtime.connected) || Number(runtime.load_count_30d ?? 0) > 0 || Number(runtime.uploads_30d ?? 0) > 0);
   const agentConnected = status?.agent_connected ?? (Boolean(setupStatus?.has_agent_loads) || runtimeConnected);
   return [
     {
@@ -129,7 +141,7 @@ function statusCards(status: ConnectStatus | null, repos: Repo[], setupStatus: S
       id: "agent",
       label: "Agent loads",
       connected: agentConnected,
-      detail: agentConnected ? "Agents have loaded Skillayer context" : "Connect Claude, Codex, Cursor, or CI",
+      detail: agentConnected ? "Local helper or agents have sent metadata" : "Install Skillayer locally or send a test load",
     },
   ];
 }
@@ -189,11 +201,100 @@ function ConnectionStatusPanel({ apiKey, repos, setupStatus, status }: { apiKey:
   );
 }
 
+const RUNTIME_LABELS: Record<string, string> = {
+  codex_desktop: "Codex Desktop",
+  codex_cli: "Codex CLI",
+  claude_code: "Claude Code",
+  cursor: "Cursor",
+  windsurf: "Windsurf",
+  copilot: "GitHub Copilot",
+  gemini_cli: "Gemini CLI",
+  unidentified_agent: "Unidentified",
+};
+
+function formatNumber(value: number | undefined): string {
+  return new Intl.NumberFormat("en-US").format(Number(value ?? 0));
+}
+
+function RuntimeHealthPanel({ status }: { status: ConnectStatus | null }) {
+  const runtimeStatus =
+    status?.agent_runtimes ?? {
+      codex_desktop: {},
+      codex_cli: {},
+      claude_code: {},
+      cursor: {},
+      windsurf: {},
+    };
+  const runtimes = Object.entries(runtimeStatus)
+    .map(([id, runtime]) => ({ id, ...runtime }))
+    .filter((runtime) => ["codex_desktop", "codex_cli", "claude_code", "cursor", "windsurf"].includes(runtime.id))
+    .sort((a, b) => Number(Boolean(b.connected)) - Number(Boolean(a.connected)) || (RUNTIME_LABELS[a.id] ?? a.id).localeCompare(RUNTIME_LABELS[b.id] ?? b.id));
+  const totals = runtimes.reduce(
+    (acc, runtime) => ({
+      uploads: acc.uploads + Number(runtime.uploads_30d ?? 0),
+      commands: acc.commands + Number(runtime.commands_30d ?? 0),
+      files: acc.files + Number(runtime.files_touched_30d ?? 0),
+      tokens: acc.tokens + Number(runtime.tokens_total_30d ?? 0),
+      cost: acc.cost + Number(runtime.cost_usd_30d ?? 0),
+    }),
+    { uploads: 0, commands: 0, files: 0, tokens: 0, cost: 0 },
+  );
+  if (!runtimes.length) return null;
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--accent-primary)]">Runtime health</p>
+          <h2 className="mt-2 text-xl font-semibold text-[color:var(--text-primary)]">Local coding-agent coverage</h2>
+          <p className="mt-1 max-w-2xl text-sm text-[color:var(--text-secondary)]">Start with the fleet picture, then drill into which runtimes are uploading commands, files, tokens, and cost.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-3 text-[12px] text-[color:var(--text-secondary)] md:grid-cols-5">
+          <span><strong className="block text-[color:var(--text-primary)]">{formatNumber(totals.uploads)}</strong>uploads</span>
+          <span><strong className="block text-[color:var(--text-primary)]">{formatNumber(totals.commands)}</strong>commands</span>
+          <span><strong className="block text-[color:var(--text-primary)]">{formatNumber(totals.files)}</strong>files</span>
+          <span><strong className="block text-[color:var(--text-primary)]">{formatNumber(totals.tokens)}</strong>tokens</span>
+          <span><strong className="block text-[color:var(--text-primary)]">${totals.cost.toFixed(2)}</strong>cost</span>
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {runtimes.map((runtime) => {
+          const connected = Boolean(runtime.connected) || Number(runtime.uploads_30d ?? 0) > 0 || Number(runtime.load_count_30d ?? 0) > 0;
+          const lastSeenLabel = runtime.last_seen_at
+            ? `Last upload ${new Date(runtime.last_seen_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+            : null;
+          const uploadLabel = `${formatNumber(runtime.uploads_30d)} uploads in 30d`;
+          const subtitle = connected ? [lastSeenLabel, uploadLabel].filter(Boolean).join(" · ") : "No local metadata yet";
+          return (
+            <article key={runtime.id} className="rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-[14px] font-semibold text-[color:var(--text-primary)]">{RUNTIME_LABELS[runtime.id] ?? runtime.id}</h3>
+                  <p className="mt-1 text-[12px] text-[color:var(--text-secondary)]">{subtitle}</p>
+                </div>
+                <span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${connected ? "bg-[color:var(--accent-green)]/10 text-[color:var(--accent-green)]" : "bg-[color:var(--bg-base)] text-[color:var(--text-tertiary)]"}`}>
+                  {connected ? "Active" : "Pending"}
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2 text-[12px] text-[color:var(--text-secondary)]">
+                <span><strong className="block text-[color:var(--text-primary)]">{formatNumber(runtime.commands_30d)}</strong>commands</span>
+                <span><strong className="block text-[color:var(--text-primary)]">{formatNumber(runtime.files_touched_30d)}</strong>files</span>
+                <span><strong className="block text-[color:var(--text-primary)]">{formatNumber(runtime.tokens_total_30d)}</strong>tokens</span>
+                <span><strong className="block text-[color:var(--text-primary)]">${Number(runtime.cost_usd_30d ?? 0).toFixed(2)}</strong>cost</span>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export default async function ConnectPage() {
   const data = await resolveConnectData();
   return (
     <div className="space-y-6">
       <ConnectionStatusPanel apiKey={data.apiKey} repos={data.repos} setupStatus={data.setupStatus} status={data.connectStatus} />
+      <RuntimeHealthPanel status={data.connectStatus} />
       <ConnectShell accessToken={data.accessToken} apiKey={data.apiKey} orgId={data.orgId} repos={data.repos} setupStatus={data.setupStatus} />
     </div>
   );
