@@ -113,8 +113,26 @@ test("sign-in page exposes enterprise auth choices", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /Sign in to connect local agents/i })).toBeVisible();
   await expect(page.getByText("Sign in with work account")).toBeVisible();
   await expect(page.getByText("Email magic link")).toBeVisible();
+  await expect(page.getByPlaceholder("you@company.com")).toBeVisible();
   await expect(page.getByText("Sign in with GitHub")).toBeVisible();
   await page.screenshot({ path: "test-results/auth-entry-sign-in-desktop.png", fullPage: true });
+});
+
+test("magic-link form routes corporate email to Connect in local preview", async ({ page }) => {
+  await page.goto(`${baseUrl}/sign-in`, { waitUntil: "domcontentloaded" });
+  await page.getByPlaceholder("you@company.com").fill("dev@acme.test");
+  await page.getByRole("button", { name: /^Send$/ }).click();
+
+  await expect(page).toHaveURL(/\/settings\/connectors\?auth=magic-link-preview&email=dev%40acme\.test$/);
+});
+
+test("magic-link form rejects personal email domains", async ({ page }) => {
+  await page.goto(`${baseUrl}/sign-in`, { waitUntil: "domcontentloaded" });
+  await page.getByPlaceholder("you@company.com").fill("dev@gmail.com");
+  await page.getByRole("button", { name: /^Send$/ }).click();
+
+  await expect(page).toHaveURL(/\/sign-in\?error=personal-email&email=dev%40gmail\.com$/);
+  await expect(page.getByText(/Use a work email/i)).toBeVisible();
 });
 
 test("sso route falls back to local preview when WorkOS is not configured", async ({ page }) => {

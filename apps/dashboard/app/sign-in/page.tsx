@@ -1,9 +1,11 @@
-import { Building2, Github, Mail, ShieldCheck } from "lucide-react";
+import { ArrowRight, Building2, Github, Mail, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
 type SignInPageProps = {
   searchParams?: Promise<{
+    email?: string;
     error?: string;
+    sent?: string;
   }>;
 };
 
@@ -66,6 +68,8 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   const params = await searchParams;
   const ssoReady = workOSReady();
   const error = params?.error;
+  const sent = params?.sent === "magic-link";
+  const email = params?.email || "";
 
   return (
     <main className="min-h-screen bg-[color:var(--bg-base)] px-5 py-6 text-[color:var(--text-primary)] sm:px-8">
@@ -100,14 +104,24 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
               <div>
                 <h2 className="text-lg font-semibold">Choose a sign-in method</h2>
                 <p className="mt-1 text-sm leading-6 text-[color:var(--text-secondary)]">
-                  Use SSO today. Magic-link and GitHub sign-in are staged for the next auth slices.
+                  Use SSO or email verification to start the Connect workflow. GitHub sign-in is staged for the next auth slice.
                 </p>
               </div>
             </div>
 
             {error ? (
               <p className="mb-3 rounded-[8px] border border-[color:var(--accent-red)]/40 bg-[color:var(--accent-red)]/10 px-3 py-2 text-sm text-red-100">
-                Sign-in needs a valid WorkOS configuration before SSO can start.
+                {error === "personal-email"
+                  ? "Use a work email so Skillayer can create or join the right enterprise workspace."
+                  : error === "email-required"
+                    ? "Enter a valid email address to send a magic link."
+                    : "Sign-in needs a valid WorkOS configuration before SSO can start."}
+              </p>
+            ) : null}
+
+            {sent ? (
+              <p className="mb-3 rounded-[8px] border border-[color:var(--accent-primary)]/40 bg-[color:var(--accent-primary)]/10 px-3 py-2 text-sm text-[color:var(--text-primary)]">
+                Check {email ? <span className="font-semibold">{email}</span> : "your inbox"} for a Skillayer sign-in link.
               </p>
             ) : null}
 
@@ -118,13 +132,42 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
                 icon={<Building2 className="h-5 w-5" />}
                 label="Sign in with work account"
               />
-              <AuthOption
-                description="Email verification and JIT org provisioning land in the magic-link slice."
-                disabled
-                href="/api/auth/magic-link/send"
-                icon={<Mail className="h-5 w-5" />}
-                label="Email magic link"
-              />
+              <form
+                action="/api/auth/magic-link/send"
+                className="rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4"
+                method="post"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-[color:var(--accent-primary)]/15 text-[color:var(--accent-bright)]">
+                    <Mail className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <label className="block text-sm font-semibold text-[color:var(--text-primary)]" htmlFor="magic-link-email">
+                      Email magic link
+                    </label>
+                    <p className="mt-1 text-xs leading-5 text-[color:var(--text-secondary)]">
+                      Verify a corporate email and land directly in the Connect experience.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    className="min-h-11 flex-1 rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-elevated)] px-3 text-sm text-[color:var(--text-primary)] outline-none transition placeholder:text-[color:var(--text-tertiary)] focus:border-[color:var(--accent-primary)]"
+                    id="magic-link-email"
+                    name="email"
+                    placeholder="you@company.com"
+                    type="email"
+                    required
+                  />
+                  <button
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] bg-[color:var(--accent-primary)] px-4 text-sm font-semibold text-black transition hover:bg-[color:var(--accent-bright)]"
+                    type="submit"
+                  >
+                    Send
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </form>
               <AuthOption
                 description="OAuth sign-in will reuse the GitHub app without requiring repository install."
                 disabled

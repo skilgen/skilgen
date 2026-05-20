@@ -1,0 +1,724 @@
+# Skillayer Enterprise End-to-End Requirements
+
+**Status:** Draft v1 — 2026-05-19
+**Owner:** Ravi (with v8 working group)
+**Scope:** Wire every Skillayer surface (API, dashboard, CLI, provider adapters) into a single
+enterprise-grade flow that a non-admin end user can sign up for, connect their local coding
+agents to, and produce repo + metric coverage from — without ever uploading raw prompts,
+chats, diffs, or file contents.
+
+This document is the single source of truth for the "enterprise-wide end-to-end" milestone.
+Anything not covered here is out of scope for this milestone and must be filed as a follow-up.
+
+### Product thesis
+
+Skillayer is a **deep coding-agent activity platform** for enterprises. The product must
+show what coding agents are actually doing in the background across a company: which
+tools they called, which files they touched, which commands they ran, which repos and
+PRs they affected, which models and access scopes they used, and where that activity
+creates policy, audit, risk, skill, and cost signals.
+
+The core enterprise promise is:
+
+- If an admin connects GitHub, Skillayer automatically pulls repo, PR, commit, branch,
+  author, review, and approval metadata for enrichment.
+- If an admin or developer installs Skillayer locally, Skillayer automatically pulls
+  metadata-only Codex Desktop, Codex CLI, and Claude Code activity from local session
+  stores.
+- If an admin connects OpenAI or Anthropic compliance APIs, Skillayer automatically
+  pulls provider-side agent/compliance metadata.
+- All sources must converge into one normalized, metadata-only activity graph.
+
+Every run must be explainable to both a developer and an admin:
+
+- What did the agent do?
+- What external APIs or providers did it touch?
+- What commands did it run?
+- What files did it edit or inspect?
+- What permissions and access scope did it have?
+- Was it running with full access, default sandbox permissions, or auto-review style
+  approval?
+- What risk did the run create?
+- Which policy or compliance rules did it violate, if any?
+- What should a human do next?
+
+Every feature must follow an enterprise information hierarchy:
+
+1. **Overall:** show the company/org-wide picture first: totals, trend, risk, coverage,
+   compliance state, and the most important action.
+2. **Segments:** let admins break the overall picture down by team, repo, runtime,
+   provider, policy, developer, and time window.
+3. **Entities:** let users drill into a repo, developer, PR, model, connector, policy, or
+   run.
+4. **Events:** only after the overview and entity context, show the deepest event-level
+   detail: tool calls, commands, files, MCP, external APIs, access posture, and policy
+   evidence.
+
+If a feature starts at raw event detail without first answering "what is happening across
+the enterprise?", it is incomplete.
+
+### Naming and implementation boundary
+
+This milestone is a **Skillayer** product milestone. Product-facing commands, config
+paths, installers, dashboard copy, and docs must not require customers to know or install
+"Skilgen".
+
+The current repository still contains legacy/internal Skilgen package code and scripts.
+Those files may be reused as implementation scaffolding where it is the fastest safe path,
+but roadmap items must be expressed as Skillayer surfaces:
+
+- Product-facing local helper command: `skillayer-agent`.
+- Product-facing local config: `~/.skillayer/agent.json`.
+- Existing `scripts/import_codex_sessions.py` may remain as a compatibility entry point
+  during migration, but new user docs should point at `skillayer-agent`.
+- The sample repo `ravichanduummadisetti/skilgen` is local proof data only, not an
+  enterprise product dependency.
+
+---
+
+## 1. Goals and non-goals
+
+### 1.1 Goals
+
+1. **End-user self-serve login.** Any developer with a corporate email can sign in to
+   Skillayer (WorkOS SSO when the org is provisioned, magic-link for individual signups,
+   GitHub OAuth as a third option), land in the dashboard, and reach a working `/dashboard/connect`
+   experience without an admin pre-provisioning their account.
+2. **Enterprise activation must feel automatic.** Once the org connects GitHub and/or
+   installs the Skillayer local helper, Skillayer should start pulling every available
+   metadata-only signal without a manual per-repo or per-session workflow:
+   - **GitHub connected:** pull repositories, PRs, commits, branches, authors, reviews,
+     and installation metadata needed to attribute agent work to real engineering
+     evidence.
+   - **Skillayer local helper installed:** discover and import local Codex Desktop,
+     Codex CLI, and Claude Code sessions first, including tool calls, files modified,
+     token/cost estimates, access scope, MCP usage, commands, searches, and repo cwd.
+   - **Provider compliance connected:** pull OpenAI and Anthropic compliance metadata
+     on a cursor-backed schedule, then join it to GitHub and identity records.
+3. **One normalized metadata pipeline.** Local agent capture, GitHub enrichment, and
+   provider compliance pull all write the same metadata-only `AgentRun` /
+   `agent.compliance` shape so Activity, Insights, Policy, Audit, and Skills do not need
+   source-specific hacks.
+4. **Repo + metric extraction from chat history.** Every imported session must end up
+   attributed to the right repo (by `cwd` / project-root match), with full coding-agent
+   metrics (tool calls, files edited, tokens, cost, access scope, MCP usage) populated
+   in Activity, Insights, Policy, Audit, and Skills surfaces.
+5. **Run-level risk and access explainability.** Every run must expose its external API
+   calls, shell commands, permission posture, access scope, compliance state, risk score,
+   and human-readable risk reasons.
+6. **Developer/admin friendly UX.** Every feature in this milestone must answer:
+   "Would a developer or admin actually use this to understand, govern, or improve agent
+   work?" If not, the UX must be changed before the feature is considered done.
+7. **Overview-to-drilldown product shape.** Every feature must start with the overall
+   enterprise picture, then allow drilldown into teams/repos/developers/runs/events
+   without forcing users to begin in raw detail.
+8. **Enterprise verification checklist.** A documented matrix of which flows pass today,
+   which need glue, and a repeatable verification command (`make verify-enterprise`)
+   that exercises the whole chain end-to-end against a seeded SQLite + dashboard build.
+
+### 1.2 Non-goals
+
+- Capturing raw prompts, agent chat text, file contents, diffs, or tool arguments
+  (explicit PRD-v8 constraint — `content_retention: metadata-only` is contractual).
+- Replacing the existing admin panel (`/dashboard/admin`) — admin stays as-is.
+- Multi-region data residency, BYO-KMS, on-prem deploy — those are post-milestone.
+- New analytic surfaces — this milestone only fills the data pipeline; downstream
+  surfaces (Activity, Insights, etc.) already exist and only need data to flow.
+- GitHub as a source for local prompt/chat history. GitHub gives repo/PR/commit evidence
+  and enrichment; local coding-agent session files and provider compliance APIs provide
+  agent telemetry.
+- Generic productivity surveillance. Skillayer is about coding-agent actions, codebase
+  impact, governance, and compliance evidence, not keystroke monitoring or employee
+  screen surveillance.
+
+---
+
+## 2. What already exists (do not rebuild)
+
+Verified against current `v8/next-feature-loop` (commit `a3f4685`, 2026-05-19).
+
+| Capability | Where | Notes |
+| --- | --- | --- |
+| WorkOS AuthKit middleware | [apps/dashboard/middleware.ts](../../apps/dashboard/middleware.ts) | Falls back to a "preview" header when env vars are missing; gates `/dashboard`, `/activity`, `/policy`, `/audit`, `/skills`, `/insights`, `/settings`, `/api/admin/*`. |
+| WorkOS sign-in + callback routes | [apps/dashboard/app/sign-in/route.ts](../../apps/dashboard/app/sign-in/route.ts), [apps/dashboard/app/callback/route.ts](../../apps/dashboard/app/callback/route.ts) | SSO works once the four `WORKOS_*` env vars and the redirect URI are set. |
+| `/dashboard/connect` page | [apps/dashboard/app/dashboard/connect/page.tsx](../../apps/dashboard/app/dashboard/connect/page.tsx) | Renders connection status cards for GitHub, API key, skills, agent loads. Reads `${API_URL}/orgs/{org_id}/connect/status`. |
+| Connectors catalog (Settings → Connectors) | [apps/api/api/v8/settings/connectors_registry.py](../../apps/api/api/v8/settings/connectors_registry.py), [apps/dashboard/app/(v8)/settings/connectors/page.tsx](../../apps/dashboard/app/\(v8\)/settings/connectors/page.tsx) | Covers GitHub/GitLab/Bitbucket, Jira/Linear, Slack, Splunk/Datadog/Sentinel, S3 Object Lock/GCS/Azure Immutable Blob, Sigstore/SLSA, Anthropic, OpenAI, plus coding-agent slots for Windsurf, Aider, Copilot, GitLab Duo, MCP. |
+| Anthropic + OpenAI compliance sync adapters | [apps/api/api/v8/settings/router.py](../../apps/api/api/v8/settings/router.py) | Scaffolded; emit `agent.compliance` audit records via the metadata-only ingest contract. |
+| Codex Desktop + Claude Code JSONL → `AgentRun` importer | [scripts/import_codex_sessions.py](../../scripts/import_codex_sessions.py) | Already parses tool calls, files, tokens, cost, access scope. CLI flags: `--codex-home`, `--claude-home`, `--providers`, `--project-root`, `--org-id`, `--api-url`, `--token`. |
+| `POST /orgs/{org_id}/agent-runs` ingest | [apps/api/api/routes/agent_runs.py](../../apps/api/api/routes/agent_runs.py) | Receives the importer payloads. Already redacts raw content keys server-side. |
+| Activity / Insights / Policy / Audit v8 surfaces | [apps/dashboard/app/(v8)/](../../apps/dashboard/app/\(v8\)/) | All driven by normalized `agent.compliance` events; populated automatically when ingest is wired. |
+
+---
+
+## 3. Functional verification matrix — current state
+
+Run before and after each milestone PR. ✅ = passes today, ◐ = partial, ❌ = missing.
+
+| Flow | Status | What to run | Notes |
+| --- | --- | --- | --- |
+| Dashboard type-check | ✅ | `npm --workspace apps/dashboard run typecheck` | Verified 2026-05-19 pre-push. |
+| Dashboard build | ✅ | `npm --workspace apps/dashboard run build` | Verified 2026-05-19 pre-push. |
+| API py-compile for touched files | ✅ | `python -m compileall apps/api/api` | Verified 2026-05-19 pre-push. |
+| API pytest (full) | ◐ | `pytest apps/api/tests -q` | Most suites green; run before each milestone PR — see §10 for the gate. |
+| Replay / Sessions / Live-feed pagination | ✅ | Manual browser walk (logged 2026-05-19). | Keep the Playwright smoke (`apps/dashboard/e2e/`) for this. |
+| WorkOS SSO sign-in | ◐ | Local `.env` with all four `WORKOS_*` vars, hit `/sign-in`. | Works when configured; no UX for self-serve magic-link. |
+| Self-serve magic-link sign-up | ❌ | n/a | Must be built (see §4). |
+| GitHub repo/PR/commit enrichment | ✅ | Connect GitHub App, inspect repo/PR links in Insights. | Keep this as the canonical repo evidence backbone. |
+| Codex Desktop import (single dev) | ✅ | `python scripts/import_codex_sessions.py --providers codex --org-id <org> --token <key>` | Verified end-to-end against the local API. |
+| Claude Code import (single dev) | ✅ | `python scripts/import_codex_sessions.py --providers claude --org-id <org> --token <key>` | Same script; uses `~/.claude/projects/**/*.jsonl`. |
+| Codex CLI import | ❌ | n/a | Codex CLI writes to `~/.codex/sessions` like Codex Desktop, but agent_runtime tagging is unverified. Confirm fixture and add explicit test. |
+| Cursor import | ❌ | n/a | No parser. Cursor stores sessions in `~/Library/Application Support/Cursor/User/History` (macOS) / `%APPDATA%/Cursor/...`. New parser required. |
+| Windsurf import | ❌ | n/a | No parser. Windsurf JSONL location TBD. |
+| Anthropic compliance pull | ◐ | Settings → Connectors → Anthropic → "Queue sync". | Scaffold only; adapter needs the real API call + cursor persistence. |
+| OpenAI compliance pull | ◐ | Settings → Connectors → OpenAI → "Queue sync". | Same as above. |
+| Repo attribution from `cwd` | ✅ | Inspect `metadata.cwd` and `repo.full_name` on imported runs. | Works whenever `--project-root` matches the agent's cwd. |
+| Activity / Insights / Audit population from imported runs | ✅ | After import, visit `/activity/replay`, `/insights/developer-track`, `/audit/evidence-packages`. | Already wired; no glue needed. |
+
+`make verify-enterprise` (to be added in §10) should chain the green rows above into one
+command. Cursor/Windsurf importers are valuable expansion work, but they are not allowed
+to block the first enterprise-saleable milestone, which is GitHub enrichment + Codex /
+Claude local metadata + OpenAI / Anthropic compliance metadata.
+
+---
+
+## 4. End-user login
+
+### 4.1 Modes (in priority order)
+
+1. **WorkOS SSO (existing).** Used when the org has an AuthKit connection configured.
+   No change needed; we only fix discovery — the dashboard `/` landing page must show a
+   "Sign in with your work account" button that routes to `/sign-in`.
+2. **Magic-link self-serve (new).** Any developer with a verified corporate email
+   creates a personal org on first login. Implemented with WorkOS Passwordless API
+   (Magic Auth). One screen: enter email → receive link → land at `/dashboard/connect`.
+3. **GitHub OAuth (new, optional).** Re-uses the existing GitHub App for sign-in only
+   (no install). Adds a "Sign in with GitHub" button on `/sign-in`. Useful for the
+   solo-dev / try-before-you-buy persona.
+
+### 4.2 Provisioning rules
+
+- First successful sign-in for an unrecognised email triggers **JIT org creation**:
+  - Create `orgs` row (`plan='free'`, `is_suspended=false`).
+  - Create `users` row, bind to the org with role `owner`.
+  - Generate an `orgs.api_key` (used by the local-agent importer).
+  - Emit `audit_events` row `event_type='org.created'`, `actor=<user>`.
+- Subsequent sign-ins with the same domain join the existing org as `developer` unless
+  the org has `auto_join_domain=false` (settable in `/settings`). This matches the
+  Vercel / Linear self-serve model and keeps day-1 zero-friction.
+
+### 4.3 Tasks
+
+| # | Task | Owner | Files / interfaces |
+| --- | --- | --- | --- |
+| L1 | Add public landing route `/` with "Sign in" CTA when no session. | dashboard | `apps/dashboard/app/page.tsx` |
+| L2 | Add `/sign-in/page.tsx` with three buttons (SSO, Magic-link, GitHub). | dashboard | `apps/dashboard/app/sign-in/page.tsx` (currently a `route.ts` — convert to `page.tsx` + a server action). |
+| L3 | Magic-link send + verify endpoints. | dashboard + WorkOS | `app/api/auth/magic-link/send/route.ts`, `app/api/auth/magic-link/verify/route.ts`. Use `@workos-inc/node` Passwordless. |
+| L4 | GitHub OAuth sign-in route. | dashboard | `app/api/auth/github/route.ts` + `callback` branch in existing `/callback`. |
+| L5 | JIT org/user provisioning in `/callback`. | api | Add `orgs.ensure_from_login(email, name, source)` helper; call from `/callback`. |
+| L6 | Settings → Members → "Auto-join by domain" toggle. | full-stack | `apps/api/api/v8/settings/router.py`, `apps/dashboard/app/(v8)/settings/teams/page.tsx`. |
+| L7 | `tests/test_jit_provisioning.py` covering new-email, returning-email, suspended-org, mismatched-domain. | api | New file. |
+| L8 | Playwright smoke: sign in via magic-link → land on `/dashboard/connect`. | dashboard | `apps/dashboard/e2e/auth.spec.ts`. |
+
+### 4.4 Current PR-L status
+
+- ✅ L1: public landing route is implemented.
+- ✅ L2: `/sign-in` is a real page with SSO, email magic-link, and staged GitHub entry.
+- ✅ L3: magic-link send and verify routes exist. Local preview safely routes corporate
+  email submissions to the Connect experience when WorkOS is not configured; production
+  uses WorkOS Passwordless MagicLink sessions.
+- ◐ L8: Playwright smoke covers the local-preview magic-link path and screenshots the
+  auth entry. Full email-link inbox verification remains for the WorkOS-configured
+  staging pass.
+- ❌ L4-L7 remain pending: GitHub OAuth sign-in, JIT org/user provisioning, auto-join
+  domain toggle, and backend provisioning tests.
+
+Latest verification for this sub-slice (2026-05-20):
+
+- `npm --workspace apps/dashboard run type-check`
+- `npm --workspace apps/dashboard run build`
+- `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts`
+
+---
+
+## 5. Path A — local-agent capture (Skillayer local helper)
+
+Path A is the "install Skillayer and it pulls local agent evidence" motion. The first
+enterprise-saleable version must cover Codex Desktop, Codex CLI, and Claude Code because
+those are already close to working and already expose the tool calls, file targets,
+commands, searches, tokens, cost estimates, access scope, and MCP metadata Skillayer
+needs. Cursor and Windsurf remain expansion runtimes after the core path is green.
+
+### 5.1 User experience
+
+1. Admin connects GitHub and invites developers or installs Skillayer local helper
+   through the enterprise rollout instructions.
+2. Developer signs in (§4), lands on the canonical Connect experience, clicks "Install
+   Skillayer locally" if the helper is not already deployed.
+3. Connect page shows a code block:
+   ```sh
+   curl -fsSL https://skillayer.com/install.sh | sh
+   skillayer-agent connect  # opens browser, OAuth device flow, writes ~/.skillayer/agent.json
+   skillayer-agent sync     # one-shot import of all local agent sessions
+   skillayer-agent watch    # optional: tail new sessions in the background
+   ```
+4. As soon as `skillayer-agent sync` posts the first payload, the connect-page status card flips
+   to "Connected" via `connect_status.agent_runtimes`.
+5. On every subsequent `sync` or `watch` tick, Skillayer imports all newly discovered
+   supported local agent sessions under the configured project roots and joins them to
+   GitHub repo/PR/commit evidence when available.
+6. Enterprise admins must be able to confirm fleet coverage: which developers have the
+   helper installed, which runtimes were detected, last sync time, events imported,
+   files/tools/commands observed, and what repo attribution is missing.
+
+### 5.2 Agent runtimes covered
+
+| Runtime | Local store | Parser status | Owner |
+| --- | --- | --- | --- |
+| Codex Desktop | `~/.codex/sessions/**/*.jsonl` + `~/.codex/session_index.jsonl` | ✅ Core milestone. Implemented in `scripts/import_codex_sessions.py:build_agent_run_payloads`; move behind Skillayer helper boundary. | platform |
+| Codex CLI | `~/.codex/sessions/**/*.jsonl` (same store; differing `session_meta`) | ◐ Core milestone. Reuses Codex parser; needs explicit `agent_runtime='codex_cli'` selection when `session_meta.client='codex-cli'`. Add fixture + test. | platform |
+| Claude Code | `~/.claude/projects/**/*.jsonl` | ✅ Core milestone. `build_claude_agent_run_payloads`; move behind Skillayer helper boundary. | platform |
+| Cursor | `~/Library/Application Support/Cursor/User/History/**/entries.json` + `~/Library/Application Support/Cursor/User/workspaceStorage/**/state.vscdb` | ❌ Expansion after enterprise core. New parser; spec in §5.4. | platform |
+| Windsurf | `~/.codeium/windsurf/conversations/**/*.jsonl` (verify on macOS/Linux) | ❌ Expansion after enterprise core. New parser. | platform |
+
+### 5.3 Skillayer local helper design
+
+New product-facing helper command: `skillayer-agent`. It imports local Codex Desktop,
+Codex CLI, Claude Code, Cursor, and Windsurf metadata without uploading raw prompts,
+chat text, diffs, file contents, or tool arguments.
+
+Implementation may initially reuse `scripts/import_codex_sessions.py` for the heavy
+lifting, but the roadmap must not introduce a customer-facing `skilgen` dependency.
+The reusable import code should live behind a Skillayer-owned helper boundary. If the
+legacy `skilgen` package is used temporarily, keep it an internal compatibility layer
+and document the removal/migration path in the PR.
+
+```text
+skillayer-agent connect             OAuth device flow against dashboard, writes config
+skillayer-agent connect --token X   Manual API-key fallback for air-gapped users
+skillayer-agent sync                One-shot import (calls importers; respects --project-root)
+skillayer-agent watch               Long-running fswatch-based tail (macOS uses fsevents,
+                                    Linux inotify, Windows ReadDirectoryChangesW)
+skillayer-agent status              Prints which runtimes are detected + last upload time
+```
+
+Config lives at `~/.skillayer/agent.json` (mode `0600`):
+```json
+{
+  "api_url": "https://api.skillayer.com",
+  "org_id": "org_xyz",
+  "api_key": "...",
+  "project_roots": [{"path": "/Users/.../customer-repo", "repo_full_name": "acme/customer-repo"}],
+  "providers": ["codex", "claude", "cursor", "windsurf"]
+}
+```
+
+Enterprise rollout should also support an admin-provisioned config mode so teams can
+deploy `skillayer-agent` through MDM, fleet scripts, or developer bootstrap tooling
+without asking every developer to manually paste an org token.
+
+OAuth device flow endpoints (new on the API):
+- `POST /v1/device/code` → `{device_code, user_code, verification_uri, interval, expires_in}`
+- `POST /v1/device/token` → polled by the CLI until the user confirms in the browser.
+
+### 5.4 Cursor parser spec
+
+- **Discovery.** Walk `~/Library/Application Support/Cursor/User/workspaceStorage/*/state.vscdb`
+  (SQLite). Each workspace row contains a `workspace.folder` URI (gives us the `cwd`) and
+  a `chat-data` JSON blob holding the message timeline.
+- **Per-conversation extraction.** For each conversation:
+  - `started_at` = first message timestamp, `ended_at` = last.
+  - `model` = `assistant.modelInfo.name`.
+  - For each `tool_call` event: increment `tool_calls`, classify as edit/search/list
+    using the same heuristics as `_record_claude_tool` in `import_codex_sessions.py`.
+  - For `edit_file` / `multi_edit`: record `file_targets[relative_path]` with
+    `after_hash = sha256(tool + relative_path)`.
+  - Tokens: Cursor exposes `usage.prompt_tokens` / `usage.completion_tokens` per
+    message — feed into `_record_claude_usage`-equivalent (split out a generic
+    `_record_usage` helper).
+- **Repo attribution.** Use `workspace.folder` URI as `cwd`; pass through
+  `_belongs_to_project`.
+- **Output.** `agent_vendor='Cursor'`, `agent_product='Cursor'`, `agent_runtime='cursor'`,
+  `source_provider='cursor_local'`, `source_record_type='cursor_state_vscdb'`.
+
+### 5.5 Tasks
+
+| # | Task | Owner | Files |
+| --- | --- | --- | --- |
+| A1 | Refactor `scripts/import_codex_sessions.py` into a reusable Skillayer local-agent importer boundary + keep the script as a compatibility entry point. | platform | new helper/importer module path chosen by implementation; do not expose `skilgen` as the product API. |
+| A2 | Add `skillayer-agent connect` / `sync` / `watch` / `status` commands. | platform | Product-facing helper command; legacy `skilgen` package usage is internal only if needed temporarily. |
+| A3 | OAuth device-flow endpoints on the API. | api | `apps/api/api/routes/device_flow.py`, alembic migration `device_authorizations` table. |
+| A4 | Cursor parser per §5.4. | platform | Skillayer local-agent importer module + fixtures under `tests/fixtures/cursor/`. |
+| A5 | Windsurf parser. | platform | Skillayer local-agent importer module + fixtures. |
+| A6 | Tag Codex CLI runs distinctly from Codex Desktop. | platform | Skillayer local-agent Codex importer. |
+| A7 | `tests/test_cursor_importer.py`, `tests/test_windsurf_importer.py`, `tests/test_codex_cli_runtime.py`. | platform | New files. |
+| A8 | Dashboard: surface per-runtime "last upload" / token / cost counters in `/dashboard/connect`. | dashboard | Already half-wired via `agent_runtimes`; extend the card for Cursor / Windsurf. |
+| A9 | `install.sh` one-liner installer (downloads versioned Skillayer local-helper artifact + writes `skillayer-agent` shim). | platform | new `scripts/install.sh` + release pipeline. |
+
+---
+
+## 6. Path B — provider compliance pull
+
+Path B is the "connect provider compliance and Skillayer pulls org-wide telemetry"
+motion. This is core enterprise value, not a nice-to-have: some customers will prefer
+provider-admin telemetry over local installs, and larger customers will want both local
+helper evidence and compliance API evidence reconciled into one view.
+
+### 6.1 Anthropic compliance API
+
+- Endpoint: `GET https://api.anthropic.com/v1/admin/compliance/api/messages`
+  (cursor-paginated). Returns metadata-only event rows.
+- The scaffold in `apps/api/api/v8/settings/router.py` already builds the request and
+  ships normalized rows into `audit_events` with `event_type='agent.compliance'`.
+- **Required to ship:**
+  - Persist cursor in `source_connection_cursors` (table already exists).
+  - Map `workspace_id` → `repos.full_name` via the per-org GitHub install (best effort;
+    if the workspace can't be matched, leave `repo_id=null` and surface in
+    `/insights/provider-coverage` as "unattributed").
+  - Map `actor` → `users` row by email; fall back to the JIT provisioning path (§4.2).
+  - Rate-limit backoff respecting Anthropic's `retry-after` headers.
+  - Test: replay a 200-event compliance fixture, assert idempotent re-runs (same
+    cursor → zero duplicate inserts).
+
+### 6.2 OpenAI compliance API
+
+- Endpoint: `GET https://api.openai.com/v1/organization/audit_logs?event_types[]=...`
+- Same shape as §6.1; same cursor + mapping requirements.
+
+### 6.3 Tasks
+
+| # | Task | Files |
+| --- | --- | --- |
+| B1 | Wire real HTTP call in OpenAI adapter, with cursor persistence + idempotency. | `apps/api/api/v8/settings/openai_compliance.py` (new), `tests/test_openai_compliance_sync.py`. |
+| B2 | Wire real HTTP call in Anthropic adapter, with cursor persistence + idempotency. | `apps/api/api/v8/settings/anthropic_compliance.py` (new), `tests/test_anthropic_compliance_sync.py`. |
+| B3 | Job worker schedules a sync every 15 min per connected adapter. | `apps/api/api/routes/worker.py`. |
+| B4 | Surface adapter health in `/dashboard/connect` and `/settings/connectors`. | already half-built — extend `connect_status.connections`. |
+
+---
+
+## 6A. GitHub enrichment backbone
+
+GitHub is the repo evidence backbone for enterprise selling. Connecting GitHub should
+pull all metadata Skillayer needs to enrich agent and compliance events:
+
+- Repositories, default branches, installation state, and repo ownership metadata.
+- Pull requests, PR ids/numbers, authors, reviewers, labels, head/base branches, head
+  SHA, merge SHA, state, timestamps, and URLs.
+- Commits and branch heads needed to match provider events by `commit_sha`, `head_sha`,
+  `branch`, `repo.full_name`, or PR number/id.
+- Review and approval metadata needed by Policy and Audit surfaces.
+
+GitHub does **not** replace local agent capture or provider compliance APIs. It is the
+join layer that turns raw agent/provider metadata into repo, PR, commit, reviewer, and
+policy evidence.
+
+### 6A.1 Tasks
+
+| # | Task | Files |
+| --- | --- | --- |
+| G1 | Treat GitHub connection as a first-class Connect requirement and show whether repo/PR/commit enrichment is active. | `/dashboard/connect`, `/settings/connectors`, existing GitHub connector APIs. |
+| G2 | Ensure local-agent and provider-compliance events join to GitHub by repo full name, PR number/id, branch, head SHA, or commit SHA. | Insights/Activity enrichment services. |
+| G3 | Surface unmatched GitHub gaps as action items, not silent misses. | `/insights/provider-coverage`, `/insights/identity-mapping`, `/settings/connectors`. |
+
+---
+
+## 7. Cracking repos + metrics from chat history
+
+This is the question the user explicitly asked. Here is the contract.
+
+### 7.1 Repo attribution
+
+A chat-history record becomes an `AgentRun` attributed to a repo when **at least one of**:
+
+1. `cwd` (Codex `turn_context.cwd`, Claude `cwd`, Cursor `workspace.folder`) resolves
+   under a configured `project_root` (`~/.skillayer/agent.json:project_roots[].path`).
+2. Any `file_targets` path resolves under that `project_root`.
+3. The runtime's session metadata contains an explicit `repo` field (rare; Anthropic
+   compliance and OpenAI compliance both supply `workspace_id` which we map server-side).
+
+The current implementation lives in
+[`_belongs_to_project`](../../scripts/import_codex_sessions.py:62) — it is the canonical
+predicate and must be reused unchanged across Codex, Claude, Cursor, Windsurf.
+
+Repo name resolution chain (first hit wins):
+
+1. CLI flag `--repo-full-name` or `--repo-id` (explicit).
+2. `git config --get remote.origin.url` resolved at `project_root`.
+3. `project_root` directory name (fallback for unversioned folders).
+
+### 7.2 Metrics derived per session
+
+The importer already produces these. They are the canonical metric surface and downstream
+dashboards must not invent new shapes:
+
+- `tokens_input`, `tokens_output`, `tokens_total`, `tokens_cached_input`,
+  `tokens_reasoning_output`, plus Claude cache-creation 5m/1h splits.
+- `cost_usd` (provider-aware: `_openai_rates`, `_claude_base_rates`).
+- `tool_calls`, `mcp_tools`, `tool_permissions`, `access_scope`, `full_access`.
+- `activity_metrics.{edited_files,explored_files,searches,lists,commands,tool_calls,mcp_tools}`.
+- `activity_details.{edited_files,explored_files,searches,lists,commands,tools}` (the
+  redacted human-readable summaries — commands run through `_redact_command`).
+- `file_targets[path] = {file_path, tool, after_hash}` (no diff body, no contents).
+- `reasoning_effort` + derived `reasoning_mode` (`fast`/`normal`/`high`).
+- `cwd`, `model`, `approval_policy`, `sandbox_policy`, `permission_profile`.
+- `provider`, `agent_provider`, `agent_vendor`, `agent_product`, `agent_runtime`,
+  `source_provider`, `source_record_types[]`.
+
+### 7.2A Deep activity events
+
+Skillayer must preserve event-level depth wherever the source exposes it safely. Session
+rollups are not enough for the enterprise product. The normalized metadata pipeline must
+be able to answer:
+
+- Which tool was called, by which runtime, at what time, in which repo/session.
+- Whether the tool was an edit, write, read, search, list, shell command, MCP call,
+  approval request, provider action, or unknown tool.
+- Which file path was targeted and whether it was edited, explored, searched, listed, or
+  generated. Store path and hashes only; never store file bodies or diffs.
+- Which shell command category ran, with redacted command summaries only.
+- Which MCP server/tool names were used and whether they required elevated permissions.
+- Which approval policy, sandbox/access scope, and permission profile applied.
+- Which model/reasoning mode/tokens/cost estimate or provider-reported cost was tied to
+  the event/session.
+- Which GitHub repo/PR/commit/branch evidence the event could be joined to.
+- Which external API/provider endpoint category was contacted when the source exposes it
+  safely, including OpenAI, Anthropic, GitHub, package registries, cloud APIs, MCP
+  servers, or other networked tools. Store provider/domain/category and count; do not
+  store request bodies, secrets, or raw tool arguments.
+
+Downstream surfaces may aggregate these events, but ingestion must keep the deepest
+metadata granularity available so an admin can inspect what happened instead of seeing
+only high-level totals.
+
+### 7.2B Run risk, access, and compliance view
+
+Every imported run must have a risk/access/compliance summary that can power a useful
+run-detail UX:
+
+- `risk_score` and `risk_level` (`low`, `medium`, `high`, `critical`).
+- `risk_reasons[]` with short human-readable reasons such as "full filesystem access",
+  "network-capable MCP tool used", "shell command touched production config", "many
+  files edited", "unattributed repo", or "provider event missing GitHub evidence".
+- `permission_profile`, `approval_policy`, `sandbox_policy`, `access_scope`, and
+  `full_access`.
+- `compliance_status` (`passed`, `warning`, `failed`, `unknown`) and
+  `policy_violations[]`.
+- `external_api_calls.count`, grouped by provider/domain/category where available.
+- `commands.count` plus redacted command summaries and command categories.
+- `file_targets.count`, grouped by edit/read/search/list/generated.
+- `mcp_tools.count`, server/tool names, and elevated-permission indicators.
+- `human_next_action`, for example "review command", "map repo", "approve exception",
+  "rotate token", or "no action".
+
+The run-detail UX must make this understandable without forcing admins to read raw JSON.
+Developers should see what the agent did and how to make future runs safer. Admins should
+see whether the run was compliant, what it had access to, and why it was risky.
+
+### 7.3 What is intentionally NOT extracted
+
+Any new parser **must** drop these on the floor — server also re-redacts as a defence
+in depth, but parsers are the first line:
+
+- Message text (`user_message.content`, `agent_message.content`).
+- `function_call.arguments` body (only the shape — name, tool, redacted command summary).
+- File contents (`Read.contents`, `Write.contents`, `Edit.old_string` / `new_string`).
+- Unified-diff bodies (only the file path + hash).
+- API keys / tokens / passwords (already scrubbed by `_redact_command`).
+
+If a parser is found leaking any of the above, treat it as a P0 incident; the server
+ingest will reject the payload but we lose evidence.
+
+---
+
+## 8. Data model deltas
+
+All migrations land in `apps/api/alembic/versions/` with the date prefix convention.
+
+| Migration | Purpose |
+| --- | --- |
+| `20260520_0001_jit_user_provisioning.py` | Add `users.source` (`workos`, `magic_link`, `github_oauth`), `orgs.auto_join_domain` (bool, default true), index on `users.email`. |
+| `20260520_0002_device_authorizations.py` | New table backing the OAuth device flow (`device_code`, `user_code`, `org_id`, `user_id`, `approved_at`, `expires_at`). |
+| `20260520_0003_agent_runtime_metadata.py` | Add `agent_runs.agent_runtime` (already in metadata JSON; promote to column for indexed filters) + index on `(org_id, agent_runtime, started_at)`. |
+| `20260520_0004_source_connection_cursors.py` (if not already) | Persistent cursor storage for Anthropic/OpenAI sync. |
+| `20260520_0005_agent_run_risk_access.py` | Persist run-level risk/access/compliance fields for indexed run-detail views: `risk_score`, `risk_level`, `compliance_status`, `permission_profile`, `approval_policy`, `sandbox_policy`, `access_scope`, `full_access`, external API call counts, command counts, MCP counts, file target counts, and policy violation summary. |
+
+---
+
+## 8A. Run-detail UX requirements
+
+All Skillayer UX must use progressive disclosure: overview first, drilldown second,
+raw event detail last. Enterprise admins need to orient at org scale before deciding
+where to investigate.
+
+For every feature:
+
+- Start with the overall enterprise picture: totals, trends, risk/compliance summary,
+  coverage state, and highest-priority action.
+- Provide drilldowns by team, repo, developer, runtime, provider, model, policy, and time
+  window as relevant.
+- Provide entity pages for repos, developers, PRs, runs, connectors, policies, and
+  evidence packages.
+- Provide raw event-level metadata only after the user has enough context to understand
+  why that event matters.
+
+The run-detail page is a core enterprise surface. If this UX is confusing, the product
+will not sell. Each run detail must be developer/admin friendly:
+
+- **At-a-glance header:** repo, branch/PR/commit, runtime, model, actor, started/ended
+  time, duration, risk level, compliance status, and cost/tokens.
+- **What happened:** timeline or grouped sections for tool calls, file targets, commands,
+  searches/lists, MCP usage, external API/provider calls, and approvals.
+- **Access posture:** clear labels for full access, default sandbox, auto-review,
+  approval policy, permission profile, and network/MCP capabilities.
+- **Risk explanation:** risk score, top reasons, policy violations, and the human next
+  action.
+- **Evidence joins:** GitHub repo/PR/commit links where matched; explicit "missing
+  attribution" action when unmatched.
+- **Developer usefulness:** show enough detail for a developer to understand and improve
+  the run without exposing raw prompts or file contents.
+- **Admin usefulness:** show enough detail for an admin to audit, approve, quarantine, or
+  tune policy without reading JSON.
+
+Before shipping any UI feature, ask and answer in the PR/evaluator notes:
+
+1. Would a developer use this to understand what the agent did?
+2. Would an admin use this to assess risk, access, and compliance?
+3. Does the page start with the overall enterprise picture before drilling down?
+4. Can users drill from overall → segment → entity → event without losing context?
+5. Is the important action visible within the first viewport?
+6. Are empty/error/unattributed states actionable?
+7. Is raw metadata transformed into a clear product explanation?
+
+---
+
+## 9. Settings & env vars
+
+Cloud (Vercel + Neon):
+
+```
+# Dashboard
+NEXT_PUBLIC_API_URL=https://api.skillayer.com
+NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://app.skillayer.com/callback
+WORKOS_API_KEY=...
+WORKOS_CLIENT_ID=...
+WORKOS_COOKIE_PASSWORD=<>=32 chars>
+WORKOS_PASSWORDLESS_FROM=auth@skillayer.com
+GITHUB_OAUTH_CLIENT_ID=...
+GITHUB_OAUTH_CLIENT_SECRET=...
+IA_V8_DEFAULT=true   # routes /dashboard/* legacy URLs to v8 surfaces
+
+# API
+DATABASE_URL=postgres://...neon...
+ADMIN_SECRET=...
+ANTHROPIC_COMPLIANCE_API_KEY=...
+OPENAI_ADMIN_API_KEY=...
+SKILLAYER_VERSION=1.0.0
+SKILLAYER_INSTANCE=cloud
+```
+
+Local dev fallback (`.env.example` already covers most): if any of the WorkOS vars are
+missing, middleware drops into "preview" mode and skips auth — keep this behaviour, it
+is what unblocks the type-check / build verification commands.
+
+---
+
+## 10. Verification gate (`make verify-enterprise`)
+
+Add a Makefile target chaining the green flows from §3 plus the new ones from §4–§6.
+Until every row below passes, the milestone is not done.
+
+```makefile
+verify-enterprise:
+	npm --workspace apps/dashboard run typecheck
+	npm --workspace apps/dashboard run build
+	python -m compileall apps/api/api scripts
+	pytest apps/api/tests -q -x
+	pytest tests -q -x
+	npx --workspace apps/dashboard playwright test e2e/auth.spec.ts e2e/connect.spec.ts
+	python scripts/import_codex_sessions.py --providers codex,claude --dry-run --project-root .
+	skillayer-agent status --dry-run
+```
+
+Acceptance for the milestone:
+
+1. `make verify-enterprise` returns 0 on a freshly cloned checkout with seed data.
+2. A new end user can run, on their own machine, against staging:
+   - Visit `https://app-staging.skillayer.com` → click "Sign in" → magic-link email →
+     land on the canonical Connect experience.
+   - Connect GitHub and see repositories/PR/commit enrichment marked active.
+   - Run the three CLI lines from §5.1.
+   - See their Codex Desktop / Codex CLI / Claude Code sessions appear in
+     `/activity/replay` within one minute, attributed to the right repo, with token /
+     cost / tool / file-modification metrics populated.
+3. Same end user can alternately skip the CLI, connect Anthropic + OpenAI in
+   `/settings/connectors`, wait for the next sync tick, and see the same coverage in
+   `/insights/agent-compliance-metrics`, enriched by GitHub wherever repo/PR/commit
+   metadata is available.
+
+---
+
+## 11. Sequencing (PR plan)
+
+PRs in this order. Each is independently mergeable behind a feature flag. The first
+enterprise-saleable milestone is login + GitHub enrichment + Skillayer local helper for
+Codex/Claude + OpenAI/Anthropic compliance pull. Cursor, Windsurf, watch mode, and the
+installer are expansion after that core path is working.
+
+1. **PR-L (login)** — §4 tasks L1–L8 + migration 0001. Flag:
+   `FF_SELF_SERVE_AUTH`.
+2. **PR-G (GitHub enrichment backbone)** — §6A tasks G1–G3. Make GitHub connection
+   the repo/PR/commit evidence backbone for all local-agent and provider-compliance
+   telemetry.
+3. **PR-A1 (Skillayer importer boundary)** — Task A1. Refactor the current Codex /
+   Claude importer into a reusable Skillayer local-agent boundary while keeping the
+   existing script as a compatibility entry point.
+4. **PR-A2 (`skillayer-agent` sync/status)** — Task A2 partial. Add product-facing
+   `skillayer-agent sync` and `skillayer-agent status` for Codex Desktop, Codex CLI,
+   and Claude Code. This must preserve today's tool-call, command, search, MCP, file
+   target, token, cost, access-scope, and repo attribution extraction.
+5. **PR-A3 (Codex CLI tag + connect UX)** — Tasks A6, A8. Distinguish Codex CLI from
+   Codex Desktop and show per-runtime upload/token/cost health in the Connect
+   experience.
+6. **PR-R (run risk/access/compliance detail)** — §7.2B and §8A. Persist and display
+   run-level risk score, risk reasons, external API/provider call counts, commands,
+   file targets, MCP usage, permission posture, full/default/auto-review access state,
+   compliance violations, and human next actions in a developer/admin friendly run
+   detail UX.
+7. **PR-B1 (OpenAI real sync)** — Task B1. Pull real OpenAI compliance metadata with
+   cursor persistence and idempotency.
+8. **PR-B2 (Anthropic real sync)** — Task B2. Pull real Anthropic compliance metadata
+   with cursor persistence and idempotency.
+9. **PR-B3 (worker schedule + status)** — Tasks B3, B4 + migrations 0003, 0004.
+   Schedule provider syncs and expose health in Connect/Settings.
+10. **PR-A4 (device flow + connect command)** — Task A3 plus remaining A2. Add OAuth
+   device flow and `skillayer-agent connect` for self-serve local installs.
+11. **PR-V (verify-enterprise Makefile)** — §10. Lands once the core enterprise path
+    is green so CI fails closed.
+12. **PR-X1 (Cursor parser)** — Tasks A4, A7. Flag: `FF_AGENT_CURSOR`.
+13. **PR-X2 (Windsurf parser)** — Tasks A5, A7. Flag: `FF_AGENT_WINDSURF`.
+14. **PR-X3 (watch mode)** — remaining A2 watch behavior after one-shot sync is
+    stable.
+15. **PR-X4 (installer)** — Task A9. Ship behind `unlisted` tag until verified.
+
+---
+
+## 12. Risks and open questions
+
+| # | Question | Action |
+| --- | --- | --- |
+| Q1 | Cursor's `state.vscdb` schema is undocumented and version-skewed. | Pin parser to the schema observed in Cursor ≥ 0.40; gate behind `FF_AGENT_CURSOR`; ship a `cursor-fixture-capture` script that anonymises a real DB into a test fixture. |
+| Q2 | Windsurf JSONL location on Linux / Windows. | Confirm during PR-A3 by running Windsurf on each OS; document in this file before merge. |
+| Q3 | Magic-link domain-auto-join — what about Gmail / personal addresses? | Default: personal-domain emails (gmail.com, outlook.com, ...) always create a fresh org and never auto-join. Maintain block list in `apps/api/api/auth/personal_domains.py`. |
+| Q4 | OAuth device-flow rate limiting. | Cap to 10 outstanding device codes per IP per 5 min; reject with `slow_down` per RFC 8628. |
+| Q5 | Provenance of imported cost numbers. | They are estimates (per `_openai_rates` / `_claude_base_rates`). Surface a "cost estimated" badge in Insights; never call them billing-grade. |
+| Q6 | Multi-machine same user. | The CLI registers the machine ID (`uname -n` + first MAC) under `users.devices`; admin can revoke a single machine's key without rotating the org-wide API key. |
+
+---
+
+## 13. Definition of done
+
+- All §3 rows are ✅.
+- `make verify-enterprise` is green on `main`.
+- The §10 acceptance walkthrough is recorded as a Loom / video and linked from the PR
+  that lands PR-V.
+- This document is referenced from `docs/v8-refactor/06-pr-sequence.md` and from the
+  root `README.md` quickstart section.
