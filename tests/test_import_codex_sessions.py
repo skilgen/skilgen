@@ -5,7 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.import_codex_sessions import build_agent_run_payloads, build_claude_agent_run_payloads
+from packages.skillayer_agent.local_importer import (
+    build_agent_run_payloads,
+    build_claude_agent_run_payloads,
+)
 
 
 class CodexSessionImporterTests(unittest.TestCase):

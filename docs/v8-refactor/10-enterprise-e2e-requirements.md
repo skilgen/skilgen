@@ -360,7 +360,7 @@ OAuth device flow endpoints (new on the API):
 
 | # | Task | Owner | Files |
 | --- | --- | --- | --- |
-| A1 | Refactor `scripts/import_codex_sessions.py` into a reusable Skillayer local-agent importer boundary + keep the script as a compatibility entry point. | platform | new helper/importer module path chosen by implementation; do not expose `skilgen` as the product API. |
+| A1 | Refactor `scripts/import_codex_sessions.py` into a reusable Skillayer local-agent importer boundary + keep the script as a compatibility entry point. | platform | ✅ `packages.skillayer_agent.local_importer` is now the Skillayer-owned importer boundary; the legacy script remains available for existing automation. |
 | A2 | Add `skillayer-agent connect` / `sync` / `watch` / `status` commands. | platform | Product-facing helper command; legacy `skilgen` package usage is internal only if needed temporarily. |
 | A3 | OAuth device-flow endpoints on the API. | api | `apps/api/api/routes/device_flow.py`, alembic migration `device_authorizations` table. |
 | A4 | Cursor parser per §5.4. | platform | Skillayer local-agent importer module + fixtures under `tests/fixtures/cursor/`. |
