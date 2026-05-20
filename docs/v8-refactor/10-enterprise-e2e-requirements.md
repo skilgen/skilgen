@@ -404,7 +404,7 @@ helper evidence and compliance API evidence reconciled into one view.
 
 | # | Task | Files |
 | --- | --- | --- |
-| B1 | Wire real HTTP call in OpenAI adapter, with cursor persistence + idempotency. | `apps/api/api/v8/settings/openai_compliance.py` (new), `tests/test_openai_compliance_sync.py`. |
+| B1 | Wire real HTTP call in OpenAI adapter, with cursor persistence + idempotency. | ✅ `apps/api/api/v8/settings/openai_compliance_adapter.py` now calls the OpenAI audit-log endpoint, normalizes metadata-only events, resumes with `after` cursor, keeps provider event ids stable for duplicate suppression, and is covered by `tests/test_openai_compliance_sync.py`. |
 | B2 | Wire real HTTP call in Anthropic adapter, with cursor persistence + idempotency. | `apps/api/api/v8/settings/anthropic_compliance.py` (new), `tests/test_anthropic_compliance_sync.py`. |
 | B3 | Job worker schedules a sync every 15 min per connected adapter. | `apps/api/api/routes/worker.py`. |
 | B4 | Surface adapter health in `/dashboard/connect` and `/settings/connectors`. | already half-built — extend `connect_status.connections`. |
@@ -711,13 +711,18 @@ installer are expansion after that core path is working.
 5. **PR-A3 (Codex CLI tag + connect UX)** — ✅ Tasks A6, A8. Codex CLI is now
    distinct from Codex Desktop, and `/dashboard/connect` shows per-runtime
    upload/token/cost/command/file health before setup instructions.
-6. **PR-R (run risk/access/compliance detail)** — §7.2B and §8A. Persist and display
-   run-level risk score, risk reasons, external API/provider call counts, commands,
-   file targets, MCP usage, permission posture, full/default/auto-review access state,
-   compliance violations, and human next actions in a developer/admin friendly run
-   detail UX.
-7. **PR-B1 (OpenAI real sync)** — Task B1. Pull real OpenAI compliance metadata with
-   cursor persistence and idempotency.
+6. **PR-R (run risk/access/compliance detail)** — ✅ §7.2B and §8A. Persisted
+   run-level risk/access/compliance fields (migration `20260520_0005_agent_run_risk_access.py`)
+   and upgraded the v8 Activity Replay run-detail UX to surface risk level, compliance
+   status, access posture (approval/sandbox/permission profile), GitHub evidence joins,
+   policy violations, external API call counts, and human next actions without exposing
+   raw prompts/diffs.
+7. **PR-B1 (OpenAI real sync)** — ✅ Task B1. Pull real OpenAI compliance metadata with
+   cursor persistence and idempotency. The OpenAI adapter now calls
+   `GET /v1/organization/audit_logs`, forwards event-type filters and resume cursor,
+   maps provider usage/cost/risk/access/repo metadata into Skillayer's metadata-only
+   compliance event shape, and keeps stable provider event ids so router ingestion can
+   skip duplicate replays.
 8. **PR-B2 (Anthropic real sync)** — Task B2. Pull real Anthropic compliance metadata
    with cursor persistence and idempotency.
 9. **PR-B3 (worker schedule + status)** — Tasks B3, B4 + migrations 0003, 0004.
