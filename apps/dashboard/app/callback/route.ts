@@ -1,6 +1,6 @@
 import { handleAuth } from "@workos-inc/authkit-nextjs";
 
-import { API_URL } from "../lib/data";
+import { API_URL } from "../../lib/data";
 
 type ProvisionPayload = {
   source: "workos" | "magic_link" | "github_oauth";

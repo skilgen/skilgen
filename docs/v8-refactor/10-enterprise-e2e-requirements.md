@@ -217,7 +217,7 @@ Claude local metadata + OpenAI / Anthropic compliance metadata.
 | L5 | JIT org/user provisioning in `/callback`. | api | Add `orgs.ensure_from_login(email, name, source)` helper; call from `/callback`. |
 | L6 | Settings → Members → "Auto-join by domain" toggle. | full-stack | `apps/api/api/v8/settings/router.py`, `apps/dashboard/app/(v8)/settings/teams/page.tsx`. |
 | L7 | `tests/test_jit_provisioning.py` covering new-email, returning-email, suspended-org, mismatched-domain. | api | New file. |
-| L8 | Playwright smoke: sign in via magic-link → land on `/dashboard/connect`. | dashboard | `apps/dashboard/e2e/auth.spec.ts`. |
+| L8 | Playwright smoke: sign in via magic-link → land on `/dashboard/connect`. | dashboard | `apps/dashboard/e2e/auth-entry.spec.ts`. |
 
 ### 4.4 Current PR-L status
 
@@ -243,8 +243,16 @@ Latest verification for this sub-slice (2026-05-20):
 - `npm --workspace apps/dashboard run type-check`
 - `npm --workspace apps/dashboard run build`
 - `python -m pytest apps/api/tests/test_jit_provisioning.py -q`
+- `python -m pytest apps/api/tests/test_me_provision_endpoint.py -q`
 - `python -m pytest apps/api/tests/test_v8_settings_teams_auto_join.py -q`
 - `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts` (blocked in this Codex automation environment: Chromium exits `SIGTRAP`/`SIGABRT` + `kill EPERM`; run manually on a normal dev machine)
+- `git push origin v8/next-feature-loop` (blocked in this Codex automation environment: no GitHub HTTPS credentials; `fatal: could not read Username for 'https://github.com': Device not configured`)
+
+Push workaround in this repo:
+
+```sh
+GIT_DIR=.git_writable GIT_WORK_TREE=. git push origin v8/next-feature-loop
+```
 
 ---
 

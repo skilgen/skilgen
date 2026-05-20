@@ -1,7 +1,14 @@
 import { ArrowRight, CheckCircle2, DatabaseZap, LockKeyhole, TerminalSquare } from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+
+import { selfServeAuthEnvDefault } from "../lib/flags";
 
 export default function HomePage() {
+  if (!selfServeAuthEnvDefault()) {
+    redirect("/dashboard");
+  }
+
   return (
     <main className="min-h-screen bg-[color:var(--bg-base)] text-[color:var(--text-primary)]">
       <section className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 py-6 sm:px-8">

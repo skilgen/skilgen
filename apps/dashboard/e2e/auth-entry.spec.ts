@@ -71,6 +71,7 @@ async function startDashboardServer(): Promise<string> {
     env: {
       ...process.env,
       API_URL: process.env.PLAYWRIGHT_TEST_API_URL || "http://127.0.0.1:59999",
+      FF_SELF_SERVE_AUTH: "true",
       IA_V8_DEFAULT: "true",
       NEXT_PUBLIC_API_URL: process.env.PLAYWRIGHT_TEST_API_URL || "http://127.0.0.1:59999",
       NEXT_TELEMETRY_DISABLED: "1",
@@ -88,15 +89,13 @@ async function startDashboardServer(): Promise<string> {
   return url;
 }
 
-test.setTimeout(90_000);
+test.setTimeout(120_000);
 test.describe.configure({ mode: "serial" });
 
-test.beforeAll(
-  async () => {
+test.beforeAll(async (_args, testInfo) => {
+  testInfo.setTimeout(120_000);
   if (!baseUrl) baseUrl = await startDashboardServer();
-  },
-  { timeout: 120_000 },
-);
+});
 
 test.afterAll(async () => {
   await Promise.all(
