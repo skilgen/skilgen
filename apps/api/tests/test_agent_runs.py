@@ -189,6 +189,39 @@ def test_agent_run_ingest_preserves_intelligence_and_pr_metadata() -> None:
     assert audit.metadata_json["mcp_tools"] == ["browser"]
 
 
+def test_agent_run_ingest_matches_commit_sha_to_commit_row() -> None:
+    repo = _repo()
+    commit = SimpleNamespace(repo_id="repo_1", sha="def456", pr_id=None)
+    db = Db([Result(repo), Result(None), Result(None), Result(commit), Result(None), Result(None)])
+    client = _client(db)
+
+    response = client.post(
+        "/orgs/org_1/agent-runs",
+        json={
+            "spec_version": "0",
+            "session_id": "codex-run-commit-1",
+            "agent": {"vendor": "OpenAI", "product": "Codex"},
+            "repo_id": "repo_1",
+            "code_artifacts": [{"file_path": "apps/api/api/v8/settings/router.py", "tool": "apply_patch", "after_hash": "abc"}],
+            "metadata": {
+                "commit_sha": "def456",
+                "branch": "main",
+                "model": "gpt-5.2",
+                "tokens_input": 100,
+                "tokens_output": 25,
+                "cost_usd": 0.012,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    audit = next(item for item in db.added if isinstance(item, AuditEvent))
+    assert audit.metadata_json["github_enrichment_status"] == "matched"
+    assert audit.metadata_json["github_enrichment_source"] == "commits"
+    assert audit.metadata_json["commit_sha"] == "def456"
+    assert audit.metadata_json["git_url"] == "https://github.com/acme/api/commit/def456"
+
+
 def test_agent_run_ingest_derives_after_hash_from_artifact_content() -> None:
     db = Db([Result(_repo()), Result(None)])
     client = _client(db)

@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -600,6 +600,15 @@ async def _agent_connector_response(db: AsyncSession, org: Org | None) -> dict[s
     configured = _agent_connector_settings(org)
     credential_connections: dict[str, SourceConnection] = {}
     source_connections: list[SourceConnection] = []
+    github_enrichment: dict[str, object] = {
+        "github_repo_count": 0,
+        "github_pr_count": 0,
+        "github_commit_count": 0,
+        "github_last_pr_at": None,
+        "github_last_commit_at": None,
+        "github_enrichment_active": False,
+        "github_join_missing_30d": 0,
+    }
     if org is not None:
         configured, credential_connections, changed = await _migrate_legacy_agent_credentials(db, org, configured)
         if changed:
@@ -610,6 +619,78 @@ async def _agent_connector_response(db: AsyncSession, org: Org | None) -> dict[s
             source_connections = (await db.execute(select(SourceConnection).where(SourceConnection.org_id == org.id))).scalars().all()
         except SQLAlchemyError:
             source_connections = []
+        try:
+            repo_count = int(
+                (
+                    await db.execute(
+                        select(func.count(Repo.id)).where(
+                            Repo.org_id == org.id,
+                            Repo.is_active.is_(True),
+                            Repo.github_installation_id.is_not(None),
+                        )
+                    )
+                ).scalar_one_or_none()
+                or 0
+            )
+            pr_count = int(
+                (
+                    await db.execute(
+                        select(func.count(PullRequest.id))
+                        .join(Repo, Repo.id == PullRequest.repo_id)
+                        .where(Repo.org_id == org.id)
+                    )
+                ).scalar_one_or_none()
+                or 0
+            )
+            commit_count = int(
+                (
+                    await db.execute(
+                        select(func.count(Commit.id))
+                        .join(Repo, Repo.id == Commit.repo_id)
+                        .where(Repo.org_id == org.id)
+                    )
+                ).scalar_one_or_none()
+                or 0
+            )
+            last_pr_at = (
+                await db.execute(
+                    select(func.max(PullRequest.updated_at)).join(Repo, Repo.id == PullRequest.repo_id).where(Repo.org_id == org.id)
+                )
+            ).scalar_one_or_none()
+            last_commit_at = (
+                await db.execute(
+                    select(func.max(Commit.updated_at)).join(Repo, Repo.id == Commit.repo_id).where(Repo.org_id == org.id)
+                )
+            ).scalar_one_or_none()
+            cutoff = (datetime.now(UTC) - timedelta(days=30)).replace(tzinfo=None)
+            recent_events = (
+                await db.execute(
+                    select(AuditEvent)
+                    .where(
+                        AuditEvent.org_id == org.id,
+                        AuditEvent.event_type == "agent.compliance",
+                        AuditEvent.created_at >= cutoff,
+                    )
+                    .order_by(desc(AuditEvent.created_at))
+                    .limit(5000)
+                )
+            ).scalars().all()
+            missing_30d = 0
+            for event in recent_events:
+                metadata = getattr(event, "metadata_json", None) or {}
+                if isinstance(metadata, dict) and metadata.get("github_enrichment_status") == "missing":
+                    missing_30d += 1
+            github_enrichment = {
+                "github_repo_count": repo_count,
+                "github_pr_count": pr_count,
+                "github_commit_count": commit_count,
+                "github_last_pr_at": last_pr_at.isoformat() if isinstance(last_pr_at, datetime) else None,
+                "github_last_commit_at": last_commit_at.isoformat() if isinstance(last_commit_at, datetime) else None,
+                "github_enrichment_active": bool(repo_count) and (bool(pr_count) or bool(commit_count)),
+                "github_join_missing_30d": missing_30d,
+            }
+        except SQLAlchemyError:
+            pass
     connectors: list[dict[str, object]] = []
     for item in _agent_compliance_registry():
         connector_id = str(item["id"])
@@ -660,12 +741,17 @@ async def _agent_connector_response(db: AsyncSession, org: Org | None) -> dict[s
         "content_retention_default": "metadata-only",
         "configured_count": sum(1 for item in connectors if item["configured"]),
         "enabled_count": sum(1 for item in connectors if item["enabled"]),
-        "enterprise_setup": _enterprise_setup_response(org, connectors, source_connections),
+        "enterprise_setup": _enterprise_setup_response(org, connectors, source_connections, github_enrichment),
         "connectors": connectors,
     }
 
 
-def _enterprise_setup_response(org: Org | None, connectors: list[dict[str, object]], source_connections: list[SourceConnection]) -> dict[str, object]:
+def _enterprise_setup_response(
+    org: Org | None,
+    connectors: list[dict[str, object]],
+    source_connections: list[SourceConnection],
+    github_enrichment: dict[str, object] | None = None,
+) -> dict[str, object]:
     by_id = {str(item.get("id")): item for item in connectors}
     openai = by_id.get("openai-compliance") or {}
     anthropic = by_id.get("anthropic-compliance") or {}
@@ -709,6 +795,17 @@ def _enterprise_setup_response(org: Org | None, connectors: list[dict[str, objec
                 "next_action": "Install the GitHub App so provider runs can join to repos, PRs, commits, and branches.",
             }
         )
+    enrichment_active = bool((github_enrichment or {}).get("github_enrichment_active"))
+    missing_joins = int((github_enrichment or {}).get("github_join_missing_30d") or 0)
+    if github_connected and missing_joins:
+        coverage_gaps.append(
+            {
+                "id": "github-join-gaps",
+                "label": f"{missing_joins} recent agent.compliance events have GitHub join gaps",
+                "severity": "medium",
+                "next_action": "Ensure events include repo + PR number/head SHA/commit SHA, and that GitHub PR/commit tables are populated for the org.",
+            }
+        )
     for index, gap in enumerate(provider_gaps):
         coverage_gaps.append(
             {
@@ -726,6 +823,17 @@ def _enterprise_setup_response(org: Org | None, connectors: list[dict[str, objec
             "status": "complete" if github_connected else "blocked",
             "detail": "Required for repo, PR, commit, and branch enrichment.",
             "next_action": "Install GitHub App" if not github_connected else "Monitor GitHub enrichment",
+        },
+        {
+            "id": "github-enrichment-active",
+            "label": "GitHub enrichment active",
+            "status": "complete" if (github_connected and enrichment_active) else ("pending" if github_connected else "blocked"),
+            "detail": "Confirm GitHub repo/PR/commit tables are populated so provider and local-agent events can join to evidence.",
+            "next_action": (
+                "Review join coverage"
+                if github_connected and enrichment_active
+                else ("Wait for webhook deliveries" if github_connected else "Install GitHub App")
+            ),
         },
         {
             "id": "connect-openai",
@@ -771,9 +879,24 @@ def _enterprise_setup_response(org: Org | None, connectors: list[dict[str, objec
             "next_action": "Review coverage gaps" if coverage_gaps else "Monitor connector health",
         },
     ]
+    setup_complete_ids = {
+        "install-github-app",
+        "connect-openai",
+        "connect-anthropic",
+        "test-connections",
+        "start-sync",
+        "review-coverage",
+    }
     return {
-        "setup_complete": all(step["status"] == "complete" for step in steps),
+        "setup_complete": all(step["status"] == "complete" for step in steps if step["id"] in setup_complete_ids),
         "github_connected": github_connected,
+        "github_enrichment_active": enrichment_active,
+        "github_repo_count": int((github_enrichment or {}).get("github_repo_count") or 0),
+        "github_pr_count": int((github_enrichment or {}).get("github_pr_count") or 0),
+        "github_commit_count": int((github_enrichment or {}).get("github_commit_count") or 0),
+        "github_last_pr_at": (github_enrichment or {}).get("github_last_pr_at"),
+        "github_last_commit_at": (github_enrichment or {}).get("github_last_commit_at"),
+        "github_join_missing_30d": int((github_enrichment or {}).get("github_join_missing_30d") or 0),
         "required_provider_ids": ["openai-compliance", "anthropic-compliance"],
         "steps": steps,
         "coverage_gaps": coverage_gaps,
@@ -1053,6 +1176,17 @@ async def _provider_github_context(
                     .limit(1)
                 )
             ).scalar_one_or_none()
+        if repo is not None and pr is None and branch:
+            pr = (
+                await db.execute(
+                    select(PullRequest)
+                    .where(
+                        PullRequest.repo_id == repo.id,
+                        PullRequest.head_branch == branch,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
         if repo is not None and pr is None and head_sha:
             commit = (
                 await db.execute(
@@ -1065,45 +1199,48 @@ async def _provider_github_context(
                 )
             ).scalar_one_or_none()
             if commit is not None and getattr(commit, "pr_id", None):
-                pr = (
+                linked_pr_id = str(getattr(commit, "pr_id"))
+                linked = (
                     await db.execute(
                         select(PullRequest)
                         .where(
-                            PullRequest.id == commit.pr_id,
+                            PullRequest.repo_id == repo.id,
+                            PullRequest.id == linked_pr_id,
                         )
                         .limit(1)
                     )
                 ).scalar_one_or_none()
-        if repo is not None and pr is None and branch:
-            pr = (
-                await db.execute(
-                    select(PullRequest)
-                    .where(
-                        PullRequest.repo_id == repo.id,
-                        PullRequest.head_branch == branch,
-                    )
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
+                if linked is not None:
+                    pr = linked
     except SQLAlchemyError:
         pr_lookup_gap = "GitHub PR/commit tables are unavailable, so provider metadata could not be joined."
 
     if pr is not None:
         matched_pr_number = getattr(pr, "github_pr_number", None)
         matched_sha = getattr(pr, "head_sha", None) or head_sha
-        source = "pull_requests"
-        if commit is not None:
-            source = "commits"
         github_context.update(
             {
                 "github_enrichment_status": "matched",
-                "github_enrichment_source": source,
+                "github_enrichment_source": "pull_requests",
                 "pr_id": getattr(pr, "id", None),
                 "pr_number": matched_pr_number,
                 "pr_title": getattr(pr, "title", None) or pr_title or (f"PR #{matched_pr_number}" if matched_pr_number else None),
                 "head_sha": matched_sha,
                 "commit_sha": matched_sha,
                 "git_url": _github_pr_url(resolved_repo_name, matched_pr_number) or _github_commit_url(resolved_repo_name, matched_sha),
+            }
+        )
+        return resolved_repo_id, resolved_repo_name, github_context
+
+    if commit is not None:
+        commit_sha = getattr(commit, "sha", None) or head_sha
+        github_context.update(
+            {
+                "github_enrichment_status": "matched",
+                "github_enrichment_source": "commits",
+                "commit_sha": commit_sha,
+                "head_sha": commit_sha,
+                "git_url": _github_commit_url(resolved_repo_name, commit_sha),
             }
         )
         return resolved_repo_id, resolved_repo_name, github_context

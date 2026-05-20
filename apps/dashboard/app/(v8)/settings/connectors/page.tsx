@@ -92,6 +92,13 @@ type AgentCompliancePayload = {
   enterprise_setup?: {
     setup_complete: boolean;
     github_connected: boolean;
+    github_enrichment_active?: boolean;
+    github_repo_count?: number;
+    github_pr_count?: number;
+    github_commit_count?: number;
+    github_last_pr_at?: string | null;
+    github_last_commit_at?: string | null;
+    github_join_missing_30d?: number;
     required_provider_ids: string[];
     steps: Array<{
       id: string;
@@ -734,6 +741,33 @@ export default async function ConnectorsSettingsPage() {
                   <p className="mt-2 text-[11px] font-semibold text-[color:var(--text-primary)]">Next: {step.next_action}</p>
                 </article>
               ))}
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <article className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">GitHub enrichment</div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] font-semibold text-[color:var(--text-primary)]">
+                  <span className={`rounded-full px-2 py-1 ${enterpriseSetup.github_connected ? "bg-[color:var(--accent-green)]/15 text-[color:var(--accent-green)]" : "bg-amber-500/15 text-amber-100"}`}>{enterpriseSetup.github_connected ? "connected" : "missing"}</span>
+                  <span className={`rounded-full px-2 py-1 ${enterpriseSetup.github_enrichment_active ? "bg-[color:var(--accent-green)]/15 text-[color:var(--accent-green)]" : "bg-[color:var(--bg-surface)] text-[color:var(--text-tertiary)]"}`}>{enterpriseSetup.github_enrichment_active ? "active" : "pending"}</span>
+                </div>
+                <p className="mt-2 text-[11px] leading-5 text-[color:var(--text-secondary)]">
+                  {enterpriseSetup.github_pr_count ?? 0} PRs · {enterpriseSetup.github_commit_count ?? 0} commits · {enterpriseSetup.github_join_missing_30d ?? 0} join gaps (30d)
+                </p>
+              </article>
+              <article className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Last PR</div>
+                <div className="mt-2 text-[12px] font-semibold text-[color:var(--text-primary)]">{enterpriseSetup.github_last_pr_at ? new Date(enterpriseSetup.github_last_pr_at).toLocaleString() : "none"}</div>
+                <p className="mt-2 text-[11px] leading-5 text-[color:var(--text-secondary)]">Most recent pull_request webhook/update.</p>
+              </article>
+              <article className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Last commit</div>
+                <div className="mt-2 text-[12px] font-semibold text-[color:var(--text-primary)]">{enterpriseSetup.github_last_commit_at ? new Date(enterpriseSetup.github_last_commit_at).toLocaleString() : "none"}</div>
+                <p className="mt-2 text-[11px] leading-5 text-[color:var(--text-secondary)]">Most recent push/commit record update.</p>
+              </article>
+              <article className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)]">Repos installed</div>
+                <div className="mt-2 text-[12px] font-semibold text-[color:var(--text-primary)]">{enterpriseSetup.github_repo_count ?? 0}</div>
+                <p className="mt-2 text-[11px] leading-5 text-[color:var(--text-secondary)]">Active repos with a GitHub installation id.</p>
+              </article>
             </div>
             {enterpriseSetup.coverage_gaps.length ? (
               <div className="mt-4 rounded-md border border-amber-500/35 bg-amber-500/10 p-3">

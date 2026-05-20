@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AuditEvent, PullRequest, Repo
+from packages.db.models import AgentSession, AuditEvent, Commit, PullRequest, Repo
 
 
 router = APIRouter(prefix="/orgs", tags=["agent-runs"])
@@ -255,8 +255,36 @@ async def _resolve_pr_context(db: AsyncSession, repo: Repo, metadata: dict[str, 
     pr_number = _metadata_int(metadata, "pr_number", "pull_request_number")
     pr_id = _metadata_string(metadata, "pr_id", "pull_request_id")
     head_sha = _metadata_string(metadata, "head_sha", "commit_sha", "sha")
+    branch = _metadata_string(metadata, "branch", "head_branch")
+    pr_title = _metadata_string(metadata, "pr_title", "pull_request_title")
+
+    def github_pr_url(repo_name: str | None, number: int | None) -> str | None:
+        if repo_name and number:
+            return f"https://github.com/{repo_name}/pull/{number}"
+        return None
+
+    def github_commit_url(repo_name: str | None, sha: str | None) -> str | None:
+        if repo_name and sha:
+            return f"https://github.com/{repo_name}/commit/{sha}"
+        return None
+
+    has_join_candidate = bool(pr_number is not None or pr_id or head_sha or branch)
     row = None
+    commit = None
+    lookup_gap: str | None = None
     try:
+        if not has_join_candidate:
+            return {
+                "pr_id": pr_id,
+                "pr_number": pr_number,
+                "pr_title": pr_title,
+                "head_sha": head_sha,
+                "commit_sha": head_sha,
+                "branch": branch,
+                "git_url": None,
+                "github_enrichment_status": "not_provided",
+                "github_enrichment_gap": "Run metadata did not include PR number/id, commit/head SHA, or branch identifiers.",
+            }
         if pr_number is not None:
             row = (
                 await db.execute(select(PullRequest).where(PullRequest.repo_id == repo.id, PullRequest.github_pr_number == pr_number).limit(1))
@@ -265,22 +293,51 @@ async def _resolve_pr_context(db: AsyncSession, repo: Repo, metadata: dict[str, 
             row = (await db.execute(select(PullRequest).where(PullRequest.repo_id == repo.id, PullRequest.id == pr_id).limit(1))).scalar_one_or_none()
         if row is None and head_sha:
             row = (await db.execute(select(PullRequest).where(PullRequest.repo_id == repo.id, PullRequest.head_sha == head_sha).limit(1))).scalar_one_or_none()
+        if row is None and branch:
+            row = (await db.execute(select(PullRequest).where(PullRequest.repo_id == repo.id, PullRequest.head_branch == branch).limit(1))).scalar_one_or_none()
+        if row is None and head_sha:
+            commit = (await db.execute(select(Commit).where(Commit.repo_id == repo.id, Commit.sha == head_sha).limit(1))).scalar_one_or_none()
+            if commit is not None and getattr(commit, "pr_id", None):
+                linked_pr_id = str(getattr(commit, "pr_id"))
+                row = (await db.execute(select(PullRequest).where(PullRequest.repo_id == repo.id, PullRequest.id == linked_pr_id).limit(1))).scalar_one_or_none()
     except OperationalError:
         row = None
+        lookup_gap = "GitHub PR/commit tables are unavailable, so run metadata could not be joined."
+    if row is None and commit is not None:
+        commit_sha = getattr(commit, "sha", None) or head_sha
+        return {
+            "pr_id": pr_id,
+            "pr_number": pr_number,
+            "pr_title": pr_title,
+            "head_sha": commit_sha,
+            "commit_sha": commit_sha,
+            "branch": branch,
+            "git_url": github_commit_url(repo.full_name, commit_sha),
+            "github_enrichment_status": "matched",
+            "github_enrichment_source": "commits",
+        }
     if row is None:
         return {
             "pr_id": pr_id,
             "pr_number": pr_number,
-            "pr_title": _metadata_string(metadata, "pr_title", "pull_request_title"),
+            "pr_title": pr_title,
             "head_sha": head_sha,
-            "branch": _metadata_string(metadata, "branch", "head_branch"),
+            "commit_sha": head_sha,
+            "branch": branch,
+            "git_url": github_pr_url(repo.full_name, pr_number) or github_commit_url(repo.full_name, head_sha),
+            "github_enrichment_status": "missing" if has_join_candidate else "not_provided",
+            "github_enrichment_gap": lookup_gap or "Run metadata included GitHub identifiers, but no matching PR/commit record was found.",
         }
     return {
         "pr_id": row.id,
         "pr_number": row.github_pr_number,
         "pr_title": row.title,
         "head_sha": row.head_sha,
-        "branch": _metadata_string(metadata, "branch", "head_branch"),
+        "commit_sha": row.head_sha or head_sha,
+        "branch": branch,
+        "git_url": github_pr_url(repo.full_name, row.github_pr_number) or github_commit_url(repo.full_name, row.head_sha or head_sha),
+        "github_enrichment_status": "matched",
+        "github_enrichment_source": "pull_requests",
     }
 
 

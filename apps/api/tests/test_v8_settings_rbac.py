@@ -122,13 +122,17 @@ class OrgDb:
                 rows = [pr for pr in rows if pr.id and f"'{pr.id}'" in compiled]
             if "pull_requests.head_sha =" in compiled:
                 rows = [pr for pr in rows if pr.head_sha and f"'{pr.head_sha}'" in compiled]
+            if "pull_requests.head_branch =" in compiled:
+                rows = [pr for pr in rows if getattr(pr, "head_branch", None) and f"'{getattr(pr, 'head_branch', None)}'" in compiled]
             return Result([(pr, None) for pr in rows])
         if "FROM commits" in compiled:
             rows = self.commits
-            if "commits.sha =" in compiled:
-                rows = [commit for commit in rows if commit.sha and f"'{commit.sha}'" in compiled]
             if "commits.repo_id =" in compiled:
                 rows = [commit for commit in rows if commit.repo_id and f"'{commit.repo_id}'" in compiled]
+            if "commits.sha =" in compiled:
+                rows = [commit for commit in rows if commit.sha and f"'{commit.sha}'" in compiled]
+            if "commits.pr_id =" in compiled:
+                rows = [commit for commit in rows if commit.pr_id and f"'{commit.pr_id}'" in compiled]
             return Result([(commit, None) for commit in rows])
         return Result([])
 
@@ -265,7 +269,7 @@ def test_agent_compliance_connector_endpoint_returns_enterprise_setup_complete(m
     assert setup["setup_complete"] is True
     assert setup["github_connected"] is True
     assert setup["coverage_gaps"] == []
-    assert [step["status"] for step in setup["steps"]] == ["complete", "complete", "complete", "complete", "complete", "complete"]
+    assert [step["status"] for step in setup["steps"]] == ["complete", "pending", "complete", "complete", "complete", "complete", "complete"]
 
 
 def test_admin_audit_returns_operator_rollups(monkeypatch) -> None:
@@ -1573,7 +1577,7 @@ def test_ingest_agent_compliance_events_labels_missing_github_join(monkeypatch) 
     assert event.metadata_json["git_url"] == "https://github.com/ravichanduummadisetti/skilgen/commit/def456"
 
 
-def test_ingest_agent_compliance_events_matches_commit_sha_to_pull_request(monkeypatch) -> None:
+def test_ingest_agent_compliance_events_matches_commit_sha_to_commit_row(monkeypatch) -> None:
     org = Org(
         id="org-1",
         github_org_id=1,
@@ -1592,9 +1596,8 @@ def test_ingest_agent_compliance_events_matches_commit_sha_to_pull_request(monke
         },
     )
     repo = Repo(id="repo-1", org_id="org-1", github_repo_id=101, full_name="ravichanduummadisetti/skilgen", name="skilgen")
-    pr = PullRequest(id="pr-99", repo_id="repo-1", github_pr_number=99, title="Commit join coverage", head_sha="abc123")
-    commit = Commit(id="commit-1", repo_id="repo-1", sha="def456", pr_id="pr-99", raw={})
-    db = OrgDb(org, repos=[repo], pull_requests=[pr], commits=[commit])
+    commit = Commit(repo_id="repo-1", sha="def456")
+    db = OrgDb(org, repos=[repo], commits=[commit])
 
     async def ensure_v8(org_id, current_org_id, db):
         assert org_id == current_org_id == "org-1"
@@ -1612,7 +1615,7 @@ def test_ingest_agent_compliance_events_matches_commit_sha_to_pull_request(monke
             settings_router.AgentComplianceIngestPayload(
                 events=[
                     settings_router.AgentComplianceEventPayload(
-                        provider_event_id="evt-github-commit-1",
+                        provider_event_id="evt-github-commit-match-1",
                         actor_login="ravi",
                         provider="Anthropic Compliance API",
                         model="claude-opus-4-7",
@@ -1634,9 +1637,8 @@ def test_ingest_agent_compliance_events_matches_commit_sha_to_pull_request(monke
     assert response.ingested_count == 1
     assert event.metadata_json["github_enrichment_status"] == "matched"
     assert event.metadata_json["github_enrichment_source"] == "commits"
-    assert event.metadata_json["pr_id"] == "pr-99"
-    assert event.metadata_json["pr_number"] == 99
-    assert event.metadata_json["git_url"] == "https://github.com/ravichanduummadisetti/skilgen/pull/99"
+    assert event.metadata_json["commit_sha"] == "def456"
+    assert event.metadata_json["git_url"] == "https://github.com/ravichanduummadisetti/skilgen/commit/def456"
 
 
 def test_ingest_agent_compliance_events_falls_back_to_request_actor(monkeypatch) -> None:

@@ -435,6 +435,13 @@ policy evidence.
 | G2 | Ensure local-agent and provider-compliance events join to GitHub by repo full name, PR number/id, branch, head SHA, or commit SHA. | Insights/Activity enrichment services. |
 | G3 | Surface unmatched GitHub gaps as action items, not silent misses. | `/insights/provider-coverage`, `/insights/identity-mapping`, `/settings/connectors`. |
 
+### 6A.2 Current PR-G status
+
+- ✅ G1: `/dashboard/connect` and `/settings/connectors` surface GitHub enrichment active/pending with PR/commit counts + join gaps.
+- ✅ G2: Provider-compliance ingest and local-agent ingest attach `github_enrichment_status` + `git_url` by joining on repo name/id, PR number/id, branch, and head/commit SHA.
+- ✅ G3: Join gaps show as actionable coverage gaps (not silent misses) in Provider Coverage and Settings → Connectors.
+- ◐ Operational: this branch has the PR-G commits locally, but push/PR-proof is blocked until GitHub auth is refreshed in the automation environment.
+
 ---
 
 ## 7. Cracking repos + metrics from chat history

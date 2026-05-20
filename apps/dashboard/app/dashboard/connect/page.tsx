@@ -20,6 +20,13 @@ type ConnectStatusItem = {
 type ConnectStatus = {
   github_connected?: boolean;
   github_app_installed?: boolean;
+  github_enrichment_active?: boolean;
+  github_repo_count?: number;
+  github_pr_count?: number;
+  github_commit_count?: number;
+  github_last_pr_at?: string | null;
+  github_last_commit_at?: string | null;
+  github_join_missing_30d?: number;
   api_key_configured?: boolean;
   agent_connected?: boolean;
   repos_connected?: number;
@@ -86,7 +93,17 @@ function isConnected(item: ConnectStatusItem): boolean {
 function statusCards(status: ConnectStatus | null, repos: Repo[], setupStatus: SetupStatus | null, apiKey: string): ConnectStatusItem[] {
   if (status?.connections?.length) return status.connections;
   const repoCount = status?.repos_connected ?? repos.length;
-  const githubConnected = status?.github_app_installed ?? status?.github_connected ?? setupStatus?.has_repos ?? repoCount > 0;
+  const githubInstalled = Boolean(status?.github_app_installed ?? status?.github_connected);
+  const githubEnrichmentActive = Boolean(status?.github_enrichment_active);
+  const githubConnected = githubInstalled && githubEnrichmentActive;
+  const githubPrCount = Number(status?.github_pr_count ?? 0);
+  const githubCommitCount = Number(status?.github_commit_count ?? 0);
+  const githubJoinMissing = Number(status?.github_join_missing_30d ?? 0);
+  const githubDetail = !githubInstalled
+    ? "Install the GitHub App to unlock repo/PR/commit evidence"
+    : !githubEnrichmentActive
+      ? "GitHub App installed · waiting for PR/commit enrichment"
+      : `Enrichment active · ${githubPrCount} PRs · ${githubCommitCount} commits${githubJoinMissing ? ` · ${githubJoinMissing} join gaps` : ""}`;
   const runtimeConnected = Object.values(status?.agent_runtimes ?? {}).some((runtime) => Boolean(runtime.connected) || Number(runtime.load_count_30d ?? 0) > 0);
   const agentConnected = status?.agent_connected ?? (Boolean(setupStatus?.has_agent_loads) || runtimeConnected);
   return [
@@ -94,7 +111,7 @@ function statusCards(status: ConnectStatus | null, repos: Repo[], setupStatus: S
       id: "github",
       label: "GitHub repositories",
       connected: githubConnected,
-      detail: repoCount ? `${repoCount} repo${repoCount === 1 ? "" : "s"} connected` : "No repositories connected yet",
+      detail: githubDetail || (repoCount ? `${repoCount} repo${repoCount === 1 ? "" : "s"} connected` : "No repositories connected yet"),
     },
     {
       id: "api-key",
