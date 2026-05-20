@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { History, Search } from "lucide-react";
 
 import { ActivityHeader } from "../ActivityNav";
-import { getActivitySessions, loadActivityContext, normalizeSearchParams, type ActivitySession } from "../activity-data";
+import { RepoTaskStrip } from "../RepoTaskStrip";
+import { getActivityAgentRepos, getActivitySessions, loadActivityContext, normalizeSearchParams, type ActivitySession } from "../activity-data";
 
 type PageSearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -31,29 +33,54 @@ function formatMoney(value: number | null | undefined): string {
 
 export default async function ActivitySessionsPage({ searchParams }: { searchParams?: PageSearchParams }) {
   const params = await normalizeSearchParams(searchParams);
+  const limit = Number(params.get("limit") ?? 25);
+  const offset = Number(params.get("offset") ?? 0);
+  params.set("limit", String(limit));
+  if (offset > 0) {
+    params.delete("offset");
+    params.set("limit", String(offset + limit));
+    redirect(`/activity/sessions?${params.toString()}`);
+  }
   const context = await loadActivityContext();
-  const payload = context.org?.id ? await getActivitySessions(context.accessToken, context.org.id, params) : null;
+  const [payload, repoOptions] = context.org?.id
+    ? await Promise.all([
+        getActivitySessions(context.accessToken, context.org.id, params),
+        getActivityAgentRepos(context.accessToken, context.org.id),
+      ])
+    : [null, []];
   const sessions = payload?.sessions ?? [];
   const providers = payload?.rollup.providers ?? [];
+  const nextParams = new URLSearchParams(params);
+  nextParams.delete("offset");
+  nextParams.set("limit", String(limit + 25));
+  const hasMore = payload ? sessions.length < payload.total : false;
 
   return (
     <div className="space-y-6">
       <ActivityHeader active="sessions" />
 
+      <RepoTaskStrip basePath="/activity/sessions" currentParams={params} repos={repoOptions} selectedRepoId={params.get("repo_id")} title="Repository runs" />
+
       <form className="grid gap-3 rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4 md:grid-cols-[repeat(4,minmax(0,1fr))_auto]" method="get">
         <input className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={params.get("agent_provider") ?? ""} name="agent_provider" placeholder="Provider" />
-        <input className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={params.get("repo_id") ?? ""} name="repo_id" placeholder="Repo ID" />
+        <select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={params.get("repo_id") ?? ""} name="repo_id">
+          <option value="">All repos</option>
+          {repoOptions.map((repo) => (
+            <option key={repo.id} value={repo.id}>{repo.full_name}</option>
+          ))}
+        </select>
         <select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={params.get("risk_band") ?? ""} name="risk_band">
           <option value="">All risk</option>
           <option value="low">Low</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
         </select>
-        <select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={params.get("limit") ?? "50"} name="limit">
+        <select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={String(limit)} name="limit">
           <option value="25">25 sessions</option>
           <option value="50">50 sessions</option>
           <option value="100">100 sessions</option>
         </select>
+        <input name="offset" type="hidden" value="0" />
         <button className="inline-flex items-center justify-center gap-2 rounded-md bg-[color:var(--accent-primary)] px-3 py-2 text-sm font-semibold text-[color:var(--bg-base)]" type="submit">
           <Search className="h-4 w-4" />
           Apply
@@ -101,6 +128,13 @@ export default async function ActivitySessionsPage({ searchParams }: { searchPar
           </div>
         )}
       </section>
+      {hasMore ? (
+        <Link className="inline-flex w-full items-center justify-center rounded-md border border-[color:var(--bg-border)] px-4 py-3 text-sm font-semibold text-[color:var(--text-primary)] hover:border-[color:var(--accent-primary)]" href={`/activity/sessions?${nextParams.toString()}`}>
+          Load more runs
+        </Link>
+      ) : sessions.length ? (
+        <div className="rounded-lg border border-dashed border-[color:var(--bg-border)] px-4 py-3 text-center text-sm text-[color:var(--text-secondary)]">All runs for this filter are loaded.</div>
+      ) : null}
     </div>
   );
 }

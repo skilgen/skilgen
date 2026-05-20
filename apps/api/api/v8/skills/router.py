@@ -15,7 +15,7 @@ from apps.api.api.auth import get_current_org_id, get_current_org_id_optional
 from apps.api.api.routes import orgs as org_routes
 from apps.api.api.v8.flags import is_v8, request_flag_cache
 from packages.db.database import get_db
-from packages.db.models import OrgPolicy, Repo, Skill, SkillHalfLife, SkillUsageEvent, SkillVersion
+from packages.db.models import AgentSession, OrgPolicy, Repo, Skill, SkillHalfLife, SkillUsageEvent, SkillVersion
 
 
 router = APIRouter(
@@ -117,6 +117,30 @@ class V8RepoItem(BaseModel):
 class V8ReposResponse(BaseModel):
     repos: list[V8RepoItem]
     total: int
+
+
+class V8AvailableRepoItem(BaseModel):
+    id: str
+    full_name: str
+    name: str
+    language: str | None
+    private: bool = False
+    connected: bool
+    connected_repo_id: str | None
+    url: str | None = None
+    updated_at: datetime | None
+    source: str
+    providers: list[str] = Field(default_factory=list)
+    session_count: int = 0
+    last_activity_at: datetime | None = None
+
+
+class V8AvailableReposResponse(BaseModel):
+    repos: list[V8AvailableRepoItem]
+    total: int
+    source: str
+    github_available: bool
+    next_action: str | None = None
 
 
 async def _require_v8(org_id: str, current_org_id: str | None, db: AsyncSession) -> None:
@@ -379,6 +403,65 @@ async def skillql_suggestions(
 ) -> dict[str, list[str]]:
     await _require_v8(org_id, current_org_id, db)
     return await org_routes.get_skillql_suggestions(org_id, current_org_id)
+
+
+@router.get("/repos/available", response_model=V8AvailableReposResponse)
+async def available_repos(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str | None = Depends(get_current_org_id_optional),
+) -> V8AvailableReposResponse:
+    await _require_v8(org_id, current_org_id, db)
+    rows = (
+        await db.execute(
+            select(
+                Repo,
+                func.count(AgentSession.id).label("session_count"),
+                func.max(func.coalesce(AgentSession.last_artifact_at, AgentSession.session_start, AgentSession.created_at)).label("last_activity_at"),
+            )
+            .outerjoin(
+                AgentSession,
+                (AgentSession.repo_id == Repo.id) & (AgentSession.org_id == org_id),
+            )
+            .where(Repo.org_id == org_id, Repo.is_active.is_(True))
+            .group_by(Repo.id)
+            .order_by(desc("last_activity_at"), Repo.full_name)
+        )
+    ).all()
+    provider_rows = (
+        await db.execute(
+            select(AgentSession.repo_id, AgentSession.agent_runtime)
+            .where(AgentSession.org_id == org_id)
+            .group_by(AgentSession.repo_id, AgentSession.agent_runtime)
+        )
+    ).all()
+    providers_by_repo: dict[str, list[str]] = {}
+    for repo_id, provider in provider_rows:
+        providers_by_repo.setdefault(str(repo_id), []).append(str(provider))
+
+    items = [
+        V8AvailableRepoItem(
+            id=repo.id,
+            full_name=repo.full_name,
+            name=repo.name,
+            language=repo.language,
+            connected=bool(repo.last_analysed_at),
+            connected_repo_id=repo.id if repo.last_analysed_at else None,
+            updated_at=repo.last_analysed_at,
+            source="coding-agent-telemetry" if int(session_count or 0) else "skillayer",
+            providers=sorted(providers_by_repo.get(repo.id, [])),
+            session_count=int(session_count or 0),
+            last_activity_at=last_activity_at,
+        )
+        for repo, session_count, last_activity_at in rows
+    ]
+    return V8AvailableReposResponse(
+        repos=items,
+        total=len(items),
+        source="coding-agent-telemetry",
+        github_available=bool(items),
+        next_action=None if items else "Connect Codex or Claude Code telemetry to show coding-agent repositories here.",
+    )
 
 
 @router.get("/repos", response_model=V8ReposResponse)

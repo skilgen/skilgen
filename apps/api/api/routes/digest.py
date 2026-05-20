@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id
@@ -170,8 +171,14 @@ async def _preview(org_id: str, db: AsyncSession, config_override: DigestConfigB
     skills_by_id = {skill.id: skill for skill in skills}
     top_skill_id, top_skill_loads = Counter(event.skill_id for event in current_loads).most_common(1)[0] if current_loads else (None, 0)
     top_skill = skills_by_id.get(top_skill_id) if top_skill_id else None
-    gaps = (await db.execute(select(SkillGap).where(SkillGap.org_id == org_id, SkillGap.status == "open"))).scalars().all()
-    tasks = (await db.execute(select(AgentTask).where(AgentTask.org_id == org_id, AgentTask.started_at >= week_start))).scalars().all()
+    try:
+        gaps = (await db.execute(select(SkillGap).where(SkillGap.org_id == org_id, SkillGap.status == "open"))).scalars().all()
+    except SQLAlchemyError:
+        gaps = []
+    try:
+        tasks = (await db.execute(select(AgentTask).where(AgentTask.org_id == org_id, AgentTask.started_at >= week_start))).scalars().all()
+    except SQLAlchemyError:
+        tasks = []
     high = [task for task in tasks if task.skill_score_at_task is not None and task.skill_score_at_task >= 70]
     low = [task for task in tasks if task.skill_score_at_task is not None and task.skill_score_at_task < 40]
     high_rate = sum(1 for task in high if task.outcome == "success") / len(high) if high else None

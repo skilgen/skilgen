@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { Filter, Radio, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ActivityEvent } from "./activity-data";
+import type { ActivityEvent, ActivityFeedResponse, ActivityRepoOption } from "./activity-data";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.skillayer.com";
 
@@ -29,6 +29,14 @@ function compactNumber(value: number | null | undefined): string {
 function formatMoney(value: number | null | undefined): string {
   const safe = Number(value ?? 0);
   return safe > 0 ? `$${safe.toFixed(safe >= 1 ? 2 : 4)}` : "$0.00";
+}
+
+function providerLabel(value: string): string {
+  const normalized = value.toLowerCase();
+  if (normalized === "codex_cli") return "Codex CLI";
+  if (normalized === "claude_code") return "Claude Code";
+  if (normalized === "codex") return "Codex";
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function activitySummary(event: ActivityEvent): string | null {
@@ -71,20 +79,66 @@ export function LiveFeedPanel({
   feedAvailable,
   orgId,
   query,
+  repoOptions,
   sessionCount,
   streamKey,
+  hasMore,
+  nextOffset,
+  total,
 }: {
   events: ActivityEvent[];
   feedAvailable: boolean;
   orgId: string;
   query: Record<string, string>;
+  repoOptions: ActivityRepoOption[];
   sessionCount: number;
   streamKey: string;
+  hasMore: boolean;
+  nextOffset: number | null;
+  total: number;
 }) {
   const [rows, setRows] = useState(events);
   const [status, setStatus] = useState(streamKey ? "connecting" : "offline");
+  const [canLoadMore, setCanLoadMore] = useState(hasMore);
+  const [loadOffset, setLoadOffset] = useState(nextOffset);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const repoById = useMemo(() => new Map(repoOptions.map((repo) => [repo.id, repo])), [repoOptions]);
+  const providerOptions = useMemo(
+    () => Array.from(new Set(repoOptions.flatMap((repo) => repo.providers ?? []))).sort((a, b) => providerLabel(a).localeCompare(providerLabel(b))),
+    [repoOptions],
+  );
+  const selectedRepo = query.repo_id ? repoById.get(query.repo_id) : null;
+  const repoRowCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const event of rows) {
+      counts.set(event.repo_id, (counts.get(event.repo_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [rows]);
+  const taskRepos = useMemo(
+    () => repoOptions.filter((repo) => (repo.session_count ?? 0) > 0 || (repoRowCounts.get(repo.id) ?? 0) > 0),
+    [repoOptions, repoRowCounts],
+  );
 
-  useEffect(() => setRows(events), [events]);
+  function feedHref(overrides: Record<string, string | null>): string {
+    const params = new URLSearchParams(query);
+    if (!params.get("hours")) params.set("hours", "24");
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value) {
+        params.set(key, value);
+      } else {
+        params.delete(key);
+      }
+    }
+    return `/activity/live-feed?${params.toString()}`;
+  }
+
+  useEffect(() => {
+    setRows(events);
+    setCanLoadMore(hasMore);
+    setLoadOffset(nextOffset);
+  }, [events, hasMore, nextOffset]);
 
   useEffect(() => {
     if (!orgId || !streamKey) return undefined;
@@ -103,6 +157,37 @@ export function LiveFeedPanel({
     return () => source.close();
   }, [orgId, query, streamKey]);
 
+  useEffect(() => {
+    if (!canLoadMore || loadingMore || loadOffset === null || !loadMoreRef.current || !orgId) return undefined;
+    const node = loadMoreRef.current;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setLoadingMore(true);
+      const params = new URLSearchParams(query);
+      params.set("offset", String(loadOffset));
+      params.set("limit", params.get("limit") || "25");
+      fetch(`${API_URL}/v8/orgs/${orgId}/activity/feed?${params.toString()}`, { headers: { "Content-Type": "application/json" } })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload: ActivityFeedResponse | null) => {
+          if (!payload) {
+            setCanLoadMore(false);
+            return;
+          }
+          setRows((current) => {
+            const seen = new Set(current.map((item) => item.id));
+            const nextRows = payload.events.filter((item) => !seen.has(item.id));
+            return [...current, ...nextRows];
+          });
+          setCanLoadMore(Boolean(payload.has_more));
+          setLoadOffset(payload.next_offset ?? null);
+        })
+        .catch(() => setCanLoadMore(false))
+        .finally(() => setLoadingMore(false));
+    }, { rootMargin: "400px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [canLoadMore, loadOffset, loadingMore, orgId, query]);
+
   const activeFilters = useMemo(
     () =>
       Object.entries(query).filter(([key, value]) => {
@@ -112,6 +197,8 @@ export function LiveFeedPanel({
       }),
     [query],
   );
+  const visibleLimit = Number(query.limit ?? 25);
+  const expandedLimit = Math.max(visibleLimit + 25, rows.length + 25);
 
   return (
     <section className="space-y-4">
@@ -124,8 +211,8 @@ export function LiveFeedPanel({
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[color:var(--text-secondary)]">
             <span className="w-full font-semibold uppercase tracking-widest text-[color:var(--text-tertiary)] md:w-auto">Shareable filter set</span>
             {activeFilters.map(([key, value]) => (
-              <span className="rounded-full border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-2.5 py-1 capitalize" key={key}>
-                {filterLabels[key]}: {filterValue(key, value)}
+              <span className="rounded-full border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-2.5 py-1" key={key}>
+                {filterLabels[key]}: {key === "repo_id" ? (repoById.get(value)?.full_name ?? filterValue(key, value)) : key === "agent_provider" ? providerLabel(value) : filterValue(key, value)}
               </span>
             ))}
             <Link className="rounded-full border border-[color:var(--bg-border)] px-2.5 py-1 font-semibold text-[color:var(--text-primary)] hover:border-[color:var(--accent-primary)]" href="/activity/live-feed">
@@ -133,16 +220,30 @@ export function LiveFeedPanel({
             </Link>
           </div>
         ) : null}
-        <div className="mt-3 grid gap-3 md:grid-cols-4 xl:grid-cols-[140px_repeat(8,minmax(0,1fr))_auto]">
+        <div className="mt-3 grid gap-3 md:grid-cols-4 xl:grid-cols-[140px_minmax(170px,1fr)_minmax(190px,1.2fr)_repeat(5,minmax(0,1fr))_auto]">
           <select aria-label="Time window" className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={query.hours ?? "24"} name="hours">
             <option value="1">1 hour</option>
             <option value="24">24 hours</option>
             <option value="168">7 days</option>
             <option value="720">30 days</option>
           </select>
-          <input aria-label="Agent provider" className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={query.agent_provider ?? ""} name="agent_provider" placeholder="Provider" />
+          <select aria-label="Agent provider" className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={query.agent_provider ?? ""} name="agent_provider">
+            <option value="">All providers</option>
+            {providerOptions.map((provider) => (
+              <option key={provider} value={provider}>
+                {providerLabel(provider)}
+              </option>
+            ))}
+          </select>
           <input aria-label="User" className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={query.user ?? ""} name="user" placeholder="User" />
-          <input aria-label="Repository ID" className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={query.repo_id ?? ""} name="repo_id" placeholder="Repo ID" />
+          <select aria-label="Repository" className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={query.repo_id ?? ""} name="repo_id">
+            <option value="">All repos</option>
+            {repoOptions.map((repo) => (
+              <option key={repo.id} value={repo.id}>
+                {repo.full_name} ({(repo.session_count ?? 0).toLocaleString()})
+              </option>
+            ))}
+          </select>
           <input aria-label="Skill ID" className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={query.skill_id ?? ""} name="skill_id" placeholder="Skill ID" />
           <select aria-label="Action class" className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={query.action_class ?? ""} name="action_class">
             <option value="">All actions</option>
@@ -178,8 +279,55 @@ export function LiveFeedPanel({
         </div>
       </form>
 
+      {taskRepos.length ? (
+        <section className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-[color:var(--text-primary)]">Repository task feed</h2>
+              <p className="mt-1 text-xs leading-5 text-[color:var(--text-secondary)]">
+                Click a repository to show only the Codex, Claude Code, and coding-agent tasks tied to that repo.
+              </p>
+            </div>
+            {selectedRepo ? (
+              <Link className="w-fit rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-xs font-semibold text-[color:var(--text-primary)] hover:border-[color:var(--accent-primary)]" href={feedHref({ repo_id: null })}>
+                Show all repositories
+              </Link>
+            ) : null}
+          </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            <Link
+              className={`rounded-md border px-3 py-3 text-sm transition-colors ${!query.repo_id ? "border-[color:var(--accent-primary)] bg-[color:var(--accent-primary)]/10 text-[color:var(--text-primary)]" : "border-[color:var(--bg-border)] bg-[color:var(--bg-base)] text-[color:var(--text-secondary)] hover:border-[color:var(--accent-primary)] hover:text-[color:var(--text-primary)]"}`}
+              href={feedHref({ repo_id: null })}
+            >
+              <span className="block font-semibold">All repositories</span>
+              <span className="mt-1 block text-xs text-[color:var(--text-tertiary)]">{query.repo_id ? "Clear repo filter" : `${rows.length} visible tasks`}</span>
+            </Link>
+            {taskRepos.map((repo) => {
+              const rowCount = repoRowCounts.get(repo.id) ?? 0;
+              const isActive = query.repo_id === repo.id;
+              return (
+                <Link
+                  className={`rounded-md border px-3 py-3 text-sm transition-colors ${isActive ? "border-[color:var(--accent-primary)] bg-[color:var(--accent-primary)]/10 text-[color:var(--text-primary)]" : "border-[color:var(--bg-border)] bg-[color:var(--bg-base)] text-[color:var(--text-secondary)] hover:border-[color:var(--accent-primary)] hover:text-[color:var(--text-primary)]"}`}
+                  href={feedHref({ repo_id: repo.id })}
+                  key={repo.id}
+                >
+                  <span className="block truncate font-semibold">{repo.full_name}</span>
+                  <span className="mt-1 block text-xs text-[color:var(--text-tertiary)]">
+                    {rowCount ? `${rowCount} tasks in this window` : `${(repo.session_count ?? 0).toLocaleString()} total runs`}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
       <div className="flex items-center justify-between text-sm text-[color:var(--text-secondary)]">
-        <span>{rows.length} events</span>
+        <span>
+          {rows.length} events
+          {total > rows.length ? <span className="ml-1 text-[color:var(--text-tertiary)]">of {total}+</span> : null}
+          {selectedRepo ? <span className="ml-2 text-[color:var(--text-tertiary)]">{" "}for {selectedRepo.full_name}</span> : null}
+        </span>
         <span className="inline-flex items-center gap-2 capitalize">
           <Radio className="h-4 w-4 text-[color:var(--accent-primary)]" />
           {status}
@@ -206,7 +354,9 @@ export function LiveFeedPanel({
                 {event.model ? <span className="mt-1 block text-xs text-[color:var(--text-secondary)]">{event.model}{event.intelligence_tier ? ` · ${event.intelligence_tier}` : ""}</span> : null}
               </span>
               <span>
-                <b className="block text-[color:var(--text-primary)]">{event.repo}</b>
+                <Link className="block font-semibold text-[color:var(--text-primary)] hover:text-[color:var(--accent-primary)] hover:underline" href={feedHref({ repo_id: event.repo_id })}>
+                  {event.repo}
+                </Link>
                 <span className="text-[color:var(--text-secondary)]">{event.skill}</span>
                 <span className="mt-1 block text-xs capitalize text-[color:var(--text-tertiary)]">{event.repo_sensitivity_tier} tier</span>
                 {event.tokens_total ? <span className="mt-1 block text-xs text-[color:var(--accent-primary)]">{compactNumber(event.tokens_total)} tokens · {formatMoney(event.cost_usd)}</span> : null}
@@ -260,6 +410,13 @@ export function LiveFeedPanel({
           Open latest replay
         </Link>
       ) : null}
+      <div ref={loadMoreRef} className="rounded-lg border border-dashed border-[color:var(--bg-border)] px-4 py-3 text-center text-sm text-[color:var(--text-secondary)]">
+        {loadingMore ? "Loading more activity..." : canLoadMore && loadOffset !== null ? (
+          <Link className="font-semibold text-[color:var(--accent-primary)]" href={feedHref({ offset: null, limit: String(expandedLimit) })}>
+            Load more activity
+          </Link>
+        ) : "All visible activity for this filter is loaded."}
+      </div>
     </section>
   );
 }

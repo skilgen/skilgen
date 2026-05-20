@@ -22,6 +22,7 @@ PERMISSIONS = [
     "settings.connectors.manage",
     "settings.admin_audit.read",
     "settings.billing.read",
+    "settings.notifications.read",
     "settings.notifications.manage",
     "policy.approvals.approve",
 ]

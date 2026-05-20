@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowRight, Code2, FileText, RadioTower, Search } from "lucide-react";
 
 import { ActivityHeader } from "../ActivityNav";
-import { getActivitySessions, loadActivityContext, normalizeSearchParams, type ActivitySession } from "../activity-data";
+import { RepoTaskStrip } from "../RepoTaskStrip";
+import { getActivityAgentRepos, getActivitySessions, loadActivityContext, normalizeSearchParams, type ActivitySession } from "../activity-data";
 
 type PageSearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -113,10 +115,26 @@ function ReplayReviewCard({ session }: { session: ActivitySession }) {
 
 export default async function ActivityReplayIndexPage({ searchParams }: { searchParams?: PageSearchParams }) {
   const params = await normalizeSearchParams(searchParams);
-  params.set("limit", params.get("limit") ?? "25");
+  const limit = Number(params.get("limit") ?? 25);
+  const offset = Number(params.get("offset") ?? 0);
+  params.set("limit", String(limit));
+  if (offset > 0) {
+    params.delete("offset");
+    params.set("limit", String(offset + limit));
+    redirect(`/activity/replay?${params.toString()}`);
+  }
   const context = await loadActivityContext();
-  const payload = context.org?.id ? await getActivitySessions(context.accessToken, context.org.id, params) : null;
+  const [payload, repoOptions] = context.org?.id
+    ? await Promise.all([
+        getActivitySessions(context.accessToken, context.org.id, params),
+        getActivityAgentRepos(context.accessToken, context.org.id),
+      ])
+    : [null, []];
   const sessions = payload?.sessions ?? [];
+  const nextParams = new URLSearchParams(params);
+  nextParams.delete("offset");
+  nextParams.set("limit", String(limit + 25));
+  const hasMore = payload ? sessions.length < payload.total : false;
   const totalTokens = sessions.reduce((sum, session) => sum + Number(session.tokens_total ?? 0), 0);
   const totalCommands = sessions.reduce((sum, session) => sum + Number(session.activity_metrics?.commands ?? 0), 0);
   const totalEdited = sessions.reduce((sum, session) => sum + Number(session.activity_metrics?.edited_files ?? session.files_touched.length), 0);
@@ -125,6 +143,27 @@ export default async function ActivityReplayIndexPage({ searchParams }: { search
   return (
     <div className="space-y-6">
       <ActivityHeader active="replay" />
+
+      <RepoTaskStrip basePath="/activity/replay" currentParams={params} repos={repoOptions} selectedRepoId={params.get("repo_id")} title="Repository replay queue" />
+
+      <form className="grid gap-3 rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4 md:grid-cols-[minmax(220px,1fr)_180px_auto]" method="get">
+        <select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={params.get("repo_id") ?? ""} name="repo_id">
+          <option value="">All repos</option>
+          {repoOptions.map((repo) => (
+            <option key={repo.id} value={repo.id}>{repo.full_name}</option>
+          ))}
+        </select>
+        <select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={params.get("limit") ?? "25"} name="limit">
+          <option value="25">25 runs</option>
+          <option value="50">50 runs</option>
+          <option value="100">100 runs</option>
+        </select>
+        <input name="offset" type="hidden" value="0" />
+        <button className="inline-flex items-center justify-center gap-2 rounded-md bg-[color:var(--accent-primary)] px-3 py-2 text-sm font-semibold text-[color:var(--bg-base)]" type="submit">
+          <Search className="h-4 w-4" />
+          Apply
+        </button>
+      </form>
 
       <section className="rounded-lg border border-[color:var(--accent-primary)]/35 bg-[color:var(--accent-primary)]/10 p-4">
         <div className="flex items-start gap-3">
@@ -170,6 +209,13 @@ export default async function ActivityReplayIndexPage({ searchParams }: { search
           </div>
         ) : null}
       </section>
+      {hasMore ? (
+        <Link className="inline-flex w-full items-center justify-center rounded-md border border-[color:var(--bg-border)] px-4 py-3 text-sm font-semibold text-[color:var(--text-primary)] hover:border-[color:var(--accent-primary)]" href={`/activity/replay?${nextParams.toString()}`}>
+          Load more replay candidates
+        </Link>
+      ) : sessions.length ? (
+        <div className="rounded-lg border border-dashed border-[color:var(--bg-border)] px-4 py-3 text-center text-sm text-[color:var(--text-secondary)]">All replay candidates for this filter are loaded.</div>
+      ) : null}
     </div>
   );
 }

@@ -497,6 +497,7 @@ async def _feed_items(
     org_id: str,
     *,
     limit: int,
+    offset: int = 0,
     hours: int,
     repo_id: str | None = None,
     filters: dict[str, str | None] | None = None,
@@ -514,7 +515,8 @@ async def _feed_items(
     offset = 0
     scanned = 0
     items: list[dict[str, Any]] = []
-    while len(items) < limit and scanned < 5000:
+    requested = limit + offset + 1
+    while len(items) < requested and scanned < 5000:
         events = (await db.execute(statement.order_by(desc(SkillUsageEvent.loaded_at)).limit(page_size).offset(offset))).scalars().all()
         if not events:
             break
@@ -546,7 +548,7 @@ async def _feed_items(
     if active_filters.get("agent_provider"):
         session_statement = session_statement.where(AgentSession.agent_runtime == active_filters["agent_provider"])
     sessions = (
-        await db.execute(session_statement.order_by(desc(session_activity_at)).limit(limit * 2))
+        await db.execute(session_statement.order_by(desc(session_activity_at)).limit(requested * 2))
     ).scalars().all()
     if sessions:
         repos = await _repos_by_id(db, [session.repo_id for session in sessions])
@@ -560,7 +562,7 @@ async def _feed_items(
         ]
         items.extend(item for item in session_items if _matches_filters(item, active_filters))
 
-    return sorted(items, key=lambda item: str(item.get("timestamp") or ""), reverse=True)[:limit]
+    return sorted(items, key=lambda item: str(item.get("timestamp") or ""), reverse=True)
 
 
 @router.get("/activity/feed")
@@ -569,6 +571,7 @@ async def activity_feed(
     db: AsyncSession = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id),
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     hours: int = Query(default=24, ge=1, le=24 * 30),
     repo_id: str | None = None,
     skill_id: str | None = None,
@@ -584,6 +587,7 @@ async def activity_feed(
         db,
         org_id,
         limit=limit,
+        offset=offset,
         hours=hours,
         repo_id=repo_id,
         filters={
@@ -596,9 +600,13 @@ async def activity_feed(
             "user": user,
         },
     )
+    page_items = items[offset : offset + limit]
+    has_more = len(items) > offset + limit
     return {
-        "events": items,
-        "total": len(items),
+        "events": page_items,
+        "total": offset + len(page_items) + (1 if has_more else 0),
+        "has_more": has_more,
+        "next_offset": offset + len(page_items) if has_more else None,
         "filters": _active_feed_filters(
             hours=hours,
             repo_id=repo_id,

@@ -135,6 +135,21 @@ export type ActivityRollup = {
   total_sessions: number;
 };
 
+export type ActivityRepoOption = {
+  id: string;
+  full_name: string;
+  name: string;
+  providers?: string[];
+  session_count?: number;
+};
+
+export type ActivityFeedResponse = {
+  events: ActivityEvent[];
+  total: number;
+  has_more?: boolean;
+  next_offset?: number | null;
+};
+
 export type ReplayStep = {
   index: number;
   timestamp: string | null;
@@ -233,9 +248,9 @@ async function activityFetch<T>(accessToken: string, path: string): Promise<T | 
   }
 }
 
-export async function getActivityFeed(accessToken: string, orgId: string, params: URLSearchParams): Promise<{ events: ActivityEvent[]; total: number } | null> {
+export async function getActivityFeed(accessToken: string, orgId: string, params: URLSearchParams): Promise<ActivityFeedResponse | null> {
   const query = params.toString();
-  return activityFetch<{ events: ActivityEvent[]; total: number }>(accessToken, `/v8/orgs/${orgId}/activity/feed${query ? `?${query}` : ""}`);
+  return activityFetch<ActivityFeedResponse>(accessToken, `/v8/orgs/${orgId}/activity/feed${query ? `?${query}` : ""}`);
 }
 
 export async function getActivityComplianceEvents(accessToken: string, orgId: string, params: URLSearchParams): Promise<{ events: ActivityComplianceEvent[]; total: number; content_retention: "metadata-only" } | null> {
@@ -264,6 +279,19 @@ export async function getActivityHeatmap(accessToken: string, orgId: string, rep
 
 export async function getActivityRepos(accessToken: string, orgId: string): Promise<Repo[]> {
   return (await getOrgRepos(accessToken, orgId)) ?? [];
+}
+
+export async function getActivityAgentRepos(accessToken: string, orgId: string): Promise<ActivityRepoOption[]> {
+  const response = await activityFetch<{ repos: ActivityRepoOption[] }>(accessToken, `/v8/orgs/${orgId}/skills/repos/available`);
+  const unique = new Map<string, ActivityRepoOption>();
+  for (const repo of response?.repos ?? []) {
+    const key = repo.full_name.toLowerCase();
+    const existing = unique.get(key);
+    if (!existing || (repo.session_count ?? 0) > (existing.session_count ?? 0)) {
+      unique.set(key, repo);
+    }
+  }
+  return Array.from(unique.values()).sort((a, b) => a.full_name.localeCompare(b.full_name));
 }
 
 export async function getActivitySetupStatus(accessToken: string, orgId: string): Promise<SetupStatus | null> {

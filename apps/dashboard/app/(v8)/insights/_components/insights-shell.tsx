@@ -464,6 +464,11 @@ function identityStatusClass(status: InsightsIdentityMappingRow["match_status"])
   return "bg-amber-500/15 text-amber-100";
 }
 
+function identityStatusLabel(status: InsightsIdentityMappingRow["match_status"]) {
+  if (status === "unmatched") return "needs mapping";
+  return status;
+}
+
 function IdentityRow({ row }: { row: InsightsIdentityMappingRow }) {
   return (
     <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
@@ -471,7 +476,7 @@ function IdentityRow({ row }: { row: InsightsIdentityMappingRow }) {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-semibold text-[color:var(--text-primary)]">{row.display_name ?? row.canonical_email ?? row.provider_actor_login}</h2>
-            <span className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase ${identityStatusClass(row.match_status)}`}>{row.match_status}</span>
+            <span className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase ${identityStatusClass(row.match_status)}`}>{identityStatusLabel(row.match_status)}</span>
           </div>
           <p className="mt-1 text-sm text-[color:var(--text-secondary)]">{row.provider} · {row.provider_actor_login} · {row.match_method} · {Math.round(row.confidence * 100)}% confidence</p>
         </div>
@@ -492,8 +497,8 @@ function IdentityRow({ row }: { row: InsightsIdentityMappingRow }) {
       </div>
       <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Canonical</div>
-          <p className="mt-1 text-[color:var(--text-primary)]">{row.canonical_user_id ?? "not mapped"}</p>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Canonical company user</div>
+          <p className="mt-1 text-[color:var(--text-primary)]">{row.canonical_user_id ?? "not mapped yet"}</p>
           <p className="mt-1 text-xs text-[color:var(--text-secondary)]">{row.canonical_email ?? "email unknown"}</p>
         </div>
         <div>
@@ -523,13 +528,13 @@ export async function IdentityMappingView() {
       <section className="grid gap-4 md:grid-cols-4">
         <DeveloperMetric detail="Provider identities observed in metadata-only coding-agent telemetry." icon={<UserRoundCheck className="h-4 w-4" />} label="Provider IDs" value={data?.summary.provider_identities ?? 0} />
         <DeveloperMetric detail="Deterministically mapped by admin mapping table or email evidence." icon={<CheckCircle2 className="h-4 w-4" />} label="Matched" value={data?.summary.matched ?? 0} />
-        <DeveloperMetric detail="Need admin mapping to merge provider/local identities correctly." icon={<AlertTriangle className="h-4 w-4" />} label="Unmatched" value={data?.summary.unmatched ?? 0} />
+        <DeveloperMetric detail="Provider identities seen in telemetry but not linked to one company user yet." icon={<AlertTriangle className="h-4 w-4" />} label="Needs mapping" value={data?.summary.unmatched ?? 0} />
         <DeveloperMetric detail="Multiple mappings matched the same provider identity and need cleanup." icon={<ShieldAlert className="h-4 w-4" />} label="Ambiguous" value={data?.summary.ambiguous ?? 0} />
       </section>
 
       <section className="rounded-lg border border-[color:var(--accent-primary)]/35 bg-[color:var(--accent-primary)]/10 p-4">
         <p className="text-sm leading-6 text-[color:var(--text-secondary)]">
-          Identity mapping prevents Codex, Claude, Cursor, GitHub, SSO, and local machine identities from being counted as different people. Matched rows are safe for developer rollups; unmatched and ambiguous rows are admin action items.
+          Needs mapping means Skillayer saw this person in Codex, Claude, OpenAI, or another provider, but has not linked that provider identity to a canonical company user yet. Until an admin maps it to an email, GitHub login, SSO subject, or local identity, developer rollups can double-count the same person.
         </p>
       </section>
 
@@ -1109,37 +1114,61 @@ export async function AccessGrantsView() {
             <span>Last seen</span>
           </div>
           {grants.map((row) => (
-            <div className="grid gap-3 border-t border-[color:var(--bg-border)] px-4 py-4 text-sm first:border-t-0 lg:grid-cols-[1.2fr_1fr_1fr_100px_100px_1.4fr_150px]" key={`${row.actor_login}-${row.provider}-${row.repo_name}-${row.access_scope}`}>
-              <div>
-                <div className="font-semibold text-[color:var(--text-primary)]">{row.actor_login}</div>
-                <div className="mt-1 text-xs text-[color:var(--text-tertiary)]">{row.repo_name ?? "repo unknown"}</div>
+            <article className="border-t border-[color:var(--bg-border)] first:border-t-0" key={`${row.actor_login}-${row.provider}-${row.repo_name}-${row.access_scope}`}>
+              <div className="grid gap-3 px-4 py-4 text-sm lg:grid-cols-[1.2fr_1fr_1fr_100px_100px_1.4fr_150px]">
+                <div>
+                  <div className="font-semibold text-[color:var(--text-primary)]">{row.actor_login}</div>
+                  <div className="mt-1 text-xs text-[color:var(--text-tertiary)]">{row.repo_name ?? "repo unknown"}</div>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-[color:var(--text-secondary)] lg:block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Provider</span>
+                  <span>{row.provider}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-[color:var(--text-secondary)] lg:block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Scope</span>
+                  <span>{row.access_scope}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 font-semibold text-[color:var(--text-primary)] lg:block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Full or autonomous</span>
+                  <span>{row.full_access_events + row.autonomous_events}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 font-semibold text-[color:var(--accent-primary)] lg:block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Tool permissions</span>
+                  <span>{row.tool_permission_events}</span>
+                </div>
+                <div className="flex flex-wrap justify-end gap-1 lg:justify-start">
+                  {(row.tools ?? []).slice(0, 8).map((tool) => (
+                    <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5 text-[11px] text-[color:var(--text-secondary)]" key={`${row.actor_login}-${row.provider}-${tool}`}>{tool}</span>
+                  ))}
+                  {(row.tools?.length ?? 0) > 8 ? <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5 text-[11px] text-[color:var(--text-tertiary)]">+{(row.tools?.length ?? 0) - 8} more</span> : null}
+                </div>
+                <div className="flex items-center justify-between gap-3 text-[color:var(--text-secondary)] lg:block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Last seen</span>
+                  <span>{row.last_seen_at ? new Date(row.last_seen_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Unknown"}</span>
+                </div>
               </div>
-              <div className="flex items-center justify-between gap-3 text-[color:var(--text-secondary)] lg:block">
-                <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Provider</span>
-                <span>{row.provider}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3 text-[color:var(--text-secondary)] lg:block">
-                <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Scope</span>
-                <span>{row.access_scope}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3 font-semibold text-[color:var(--text-primary)] lg:block">
-                <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Full or autonomous</span>
-                <span>{row.full_access_events + row.autonomous_events}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3 font-semibold text-[color:var(--accent-primary)] lg:block">
-                <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Tool permissions</span>
-                <span>{row.tool_permission_events}</span>
-              </div>
-              <div className="flex flex-wrap justify-end gap-1 lg:justify-start">
-                {(row.tools ?? []).slice(0, 5).map((tool) => (
-                  <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5 text-[11px] text-[color:var(--text-secondary)]" key={`${row.actor_login}-${row.provider}-${tool}`}>{tool}</span>
-                ))}
-              </div>
-              <div className="flex items-center justify-between gap-3 text-[color:var(--text-secondary)] lg:block">
-                <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)] lg:hidden">Last seen</span>
-                <span>{row.last_seen_at ? new Date(row.last_seen_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Unknown"}</span>
-              </div>
-            </div>
+              <details className="border-t border-[color:var(--bg-border)] bg-[color:var(--bg-base)]/35 px-4 pb-4">
+                <summary className="cursor-pointer list-none py-3 text-xs font-semibold text-[color:var(--accent-primary)] hover:text-[color:var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-primary)]/50">
+                  View all {row.tools?.length ?? 0} unique tools from {row.tool_permission_events} permission events
+                </summary>
+                <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3 text-xs text-[color:var(--text-secondary)]">
+                  <p>
+                    {row.tool_permission_events} permission events were reported for {row.provider} under {row.access_scope}. Tool names are metadata only; raw prompts, arguments, and file content are not shown.
+                  </p>
+                  {row.tools?.length ? (
+                    <div className="mt-3 max-h-64 overflow-auto pr-1">
+                      <div className="flex flex-wrap gap-1.5">
+                        {row.tools.map((tool) => (
+                          <span className="rounded-sm border border-[color:var(--bg-border)] px-1.5 py-0.5 text-[11px] text-[color:var(--text-secondary)]" key={`${row.actor_login}-${row.provider}-all-${tool}`}>{tool}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-[color:var(--text-tertiary)]">This provider reported event counts without item-level tool names.</p>
+                  )}
+                </div>
+              </details>
+            </article>
           ))}
         </section>
       ) : null}

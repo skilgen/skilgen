@@ -64,6 +64,62 @@ def _create_schema(cursor: sqlite3.Cursor) -> None:
 
     cursor.execute(
         """
+        CREATE TABLE IF NOT EXISTS roles (
+          id TEXT PRIMARY KEY,
+          org_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          permissions TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT,
+          updated_at TEXT,
+          FOREIGN KEY(org_id) REFERENCES orgs(id) ON DELETE CASCADE
+        );
+        """.strip()
+    )
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_roles_org_name ON roles(org_id, name);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS ix_roles_org_id ON roles(org_id);")
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS role_bindings (
+          id TEXT PRIMARY KEY,
+          org_id TEXT NOT NULL,
+          role_id TEXT NOT NULL,
+          principal_type TEXT NOT NULL,
+          principal_id TEXT NOT NULL,
+          scope_expression TEXT DEFAULT '{}',
+          created_at TEXT,
+          updated_at TEXT,
+          FOREIGN KEY(org_id) REFERENCES orgs(id) ON DELETE CASCADE,
+          FOREIGN KEY(role_id) REFERENCES roles(id) ON DELETE CASCADE
+        );
+        """.strip()
+    )
+    cursor.execute("CREATE INDEX IF NOT EXISTS ix_role_bindings_org_principal ON role_bindings(org_id, principal_type, principal_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS ix_role_bindings_role_id ON role_bindings(role_id);")
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS digest_configs (
+          id TEXT PRIMARY KEY,
+          org_id TEXT NOT NULL,
+          title TEXT NOT NULL DEFAULT 'Weekly AI Readiness Digest',
+          subject TEXT NOT NULL DEFAULT 'Your Weekly AI Readiness Report',
+          frequency TEXT NOT NULL DEFAULT 'weekly',
+          recipients TEXT NOT NULL DEFAULT '[]',
+          widgets TEXT NOT NULL DEFAULT '[]',
+          layout TEXT DEFAULT '{}',
+          created_at TEXT,
+          updated_at TEXT,
+          FOREIGN KEY(org_id) REFERENCES orgs(id) ON DELETE CASCADE
+        );
+        """.strip()
+    )
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_digest_configs_org_id ON digest_configs(org_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS ix_digest_configs_org_id ON digest_configs(org_id);")
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS repos (
           id TEXT PRIMARY KEY,
           org_id TEXT NOT NULL,
@@ -248,11 +304,51 @@ def seed(db_path: Path) -> None:
         skill_id = "skill_activity"
         session_db_id = "sess_skilgen_codex_1"
         api_key = "sk-local-demo"
-        now = "2026-05-12T02:30:00Z"
+        now = "2026-05-12T02:30:00"
 
         cursor.execute(
             "INSERT INTO orgs (id, github_org_id, login, name, plan, settings, api_key, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
             (org_id, 1, "Skilgen", "Skilgen", "dev", json.dumps({"feature_flags": {"IA_V8": True}}), api_key, now, now),
+        )
+        cursor.execute(
+            "INSERT INTO roles (id, org_id, name, description, permissions, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+            (
+                "role_bootstrap_admin",
+                org_id,
+                "Bootstrap admin",
+                "Local bootstrap role for demo UX + screenshots.",
+                json.dumps(["settings.*", "audit.*", "insights.*", "policy.*", "skills.*"]),
+                now,
+                now,
+            ),
+        )
+        cursor.execute(
+            "INSERT INTO role_bindings (id, org_id, role_id, principal_type, principal_id, scope_expression, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                "binding_bootstrap_admin",
+                org_id,
+                "role_bootstrap_admin",
+                "user",
+                "bootstrap@skillayer.com",
+                json.dumps({}),
+                now,
+                now,
+            ),
+        )
+        cursor.execute(
+            "INSERT INTO digest_configs (id, org_id, title, subject, frequency, recipients, widgets, layout, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                "digest_cfg_1",
+                org_id,
+                "Weekly AI Readiness Digest",
+                "Your Weekly AI Readiness Report",
+                "weekly",
+                json.dumps(["platform@example.com"]),
+                json.dumps(["memory_score", "agent_loads", "active_repos", "top_skill", "skill_gaps", "roi_multiplier"]),
+                json.dumps({"columns": 2}),
+                now,
+                now,
+            ),
         )
         cursor.execute(
             "INSERT INTO repos (id, org_id, github_repo_id, full_name, name, default_branch, language, sensitivity_tier, is_active, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -436,7 +532,7 @@ def seed(db_path: Path) -> None:
                 "High-tier tokens used for documentation + PR push",
                 json.dumps(high_tier_metadata),
                 "warning",
-                "2026-05-12T03:10:00Z",
+                "2026-05-12T03:10:00",
             ),
         )
 

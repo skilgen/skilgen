@@ -2142,7 +2142,7 @@ def _intelligence_usage_from_events(events: list[AuditEvent], window_days: int) 
             full_access_events=int(values["full_access_events"]),
             autonomous_events=int(values["autonomous_events"]),
             tool_permission_events=int(values["tool_permission_events"]),
-            tools=sorted(values["tools"])[:8] if isinstance(values.get("tools"), set) else [],
+            tools=sorted(values["tools"]) if isinstance(values.get("tools"), set) else [],
             last_seen_at=values["last_seen_at"] if isinstance(values["last_seen_at"], datetime) else None,
         )
         for (actor, provider, repo_name, scope), values in access_buckets.items()

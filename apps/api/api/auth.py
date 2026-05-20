@@ -155,13 +155,15 @@ async def _verify_oidc_token(token: str) -> dict[str, Any]:
     return dict(payload)
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict[str, Any]:
+async def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(optional_bearer)) -> dict[str, Any]:
     if _deployment_mode() == "bootstrap":
         return {
             "email": "bootstrap@skillayer.com",
             "sub": "bootstrap",
             "org_id": None,
         }
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     token = credentials.credentials
     try:
         if _deployment_mode() == "selfhosted":

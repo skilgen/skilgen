@@ -2,6 +2,7 @@ import Link from "next/link";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { Github, GitBranch, ShieldCheck } from "lucide-react";
 
+import { AvailableReposPicker } from "./AvailableReposPicker";
 import { API_URL, getBootstrapOrg, getMyOrg, type Org } from "../../../../lib/data";
 
 type V8RepoItem = {
@@ -20,6 +21,30 @@ type V8RepoItem = {
 type V8ReposResponse = {
   repos: V8RepoItem[];
   total: number;
+};
+
+type V8AvailableRepoItem = {
+  id: string;
+  full_name: string;
+  name: string;
+  language: string | null;
+  private: boolean;
+  connected: boolean;
+  connected_repo_id: string | null;
+  url: string | null;
+  updated_at: string | null;
+  source: string;
+  providers?: string[];
+  session_count?: number;
+  last_activity_at?: string | null;
+};
+
+type V8AvailableReposResponse = {
+  repos: V8AvailableRepoItem[];
+  total: number;
+  source: string;
+  github_available: boolean;
+  next_action: string | null;
 };
 
 async function loadContext(): Promise<{ accessToken: string; org: Org | null }> {
@@ -49,6 +74,21 @@ async function getRepos(accessToken: string, orgId: string): Promise<V8ReposResp
   }
 }
 
+async function getAvailableRepos(accessToken: string, orgId: string): Promise<V8AvailableReposResponse | null> {
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    const response = await fetch(`${API_URL}/v8/orgs/${orgId}/skills/repos/available`, {
+      cache: "no-store",
+      headers,
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as V8AvailableReposResponse;
+  } catch {
+    return null;
+  }
+}
+
 function fmtDate(value: string | null): string {
   if (!value) return "Pending";
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
@@ -71,8 +111,28 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 
 export default async function SkillsReposPage() {
   const { accessToken, org } = await loadContext();
-  const response = org?.id ? await getRepos(accessToken, org.id) : null;
+  const [response, availableResponse] = org?.id
+    ? await Promise.all([getRepos(accessToken, org.id), getAvailableRepos(accessToken, org.id)])
+    : [null, null];
   const repos = response?.repos ?? [];
+  const availableRepos =
+    availableResponse?.repos ??
+    repos.map((repo) => ({
+      id: repo.id,
+      full_name: repo.full_name,
+      name: repo.name,
+      language: repo.language,
+      private: false,
+      connected: true,
+      connected_repo_id: repo.id,
+      url: null,
+      updated_at: repo.last_analysed_at,
+      source: "skillayer",
+      providers: [],
+      session_count: 0,
+      last_activity_at: null,
+    }));
+  const primaryRepo = repos[0];
   const generatedSkills = repos.reduce((sum, repo) => sum + repo.generated_skill_count, 0);
   const indexed = repos.filter((repo) => repo.indexing_status === "indexed").length;
 
@@ -83,10 +143,23 @@ export default async function SkillsReposPage() {
           <h1 className="text-[32px] font-semibold text-[color:var(--text-primary)]">Repositories</h1>
           <p className="mt-2 text-[15px] text-[color:var(--text-secondary)]">Repos connected to Skillayer and covered by generated skills.</p>
         </div>
-        <a className="inline-flex items-center gap-2 rounded-md bg-[color:var(--accent-primary)] px-4 py-2.5 text-[13px] font-semibold text-[color:var(--bg-base)]" href="https://github.com/apps/skillayer/installations/new" rel="noreferrer" target="_blank">
-          <Github className="h-4 w-4" />
-          Connect repo
-        </a>
+        {primaryRepo ? (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Link className="inline-flex items-center justify-center gap-2 rounded-md bg-[color:var(--accent-primary)] px-4 py-2.5 text-[13px] font-semibold text-[color:var(--bg-base)]" href={`/skills/registry?repo=${encodeURIComponent(primaryRepo.id)}`}>
+              <GitBranch className="h-4 w-4" />
+              View repo skills
+            </Link>
+            <a className="inline-flex items-center justify-center gap-2 rounded-md border border-[color:var(--bg-border)] px-4 py-2.5 text-[13px] font-semibold text-[color:var(--text-secondary)] transition-colors hover:text-[color:var(--text-primary)]" href="#available-repositories">
+              <Github className="h-4 w-4" />
+              Available repos
+            </a>
+          </div>
+        ) : (
+          <a className="inline-flex items-center gap-2 rounded-md bg-[color:var(--accent-primary)] px-4 py-2.5 text-[13px] font-semibold text-[color:var(--bg-base)]" href="https://github.com/apps/skillayer/installations/new" rel="noreferrer" target="_blank">
+            <Github className="h-4 w-4" />
+            Connect repo
+          </a>
+        )}
       </div>
 
       {response === null ? (
@@ -135,6 +208,8 @@ export default async function SkillsReposPage() {
               </article>
             ))}
           </section>
+
+          <AvailableReposPicker githubAvailable={Boolean(availableResponse?.github_available)} nextAction={availableResponse?.next_action ?? null} repos={availableRepos} />
         </>
       )}
     </div>
