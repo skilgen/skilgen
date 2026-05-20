@@ -1244,6 +1244,8 @@ export async function ProviderCoverageView() {
   const active = rows.filter((row) => row.status === "active").length;
   const atRisk = rows.filter((row) => row.status === "retention-risk" || row.status === "stale" || row.status === "silent").length;
   const configured = rows.filter((row) => row.configured).length;
+  const github = data?.github_enrichment ?? null;
+  const githubMatchRate = github ? Math.round((github.match_rate ?? 0) * 1000) / 10 : null;
   return (
     <PageFrame active="provider-coverage">
       <section className="grid gap-4 md:grid-cols-3">
@@ -1272,6 +1274,64 @@ export async function ProviderCoverageView() {
           Provider coverage compares configured compliance connectors with recent `agent.compliance` events so teams can see silent sources before 30-day provider log retention becomes unrecoverable.
         </p>
       </section>
+
+      {github ? (
+        <section className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-[color:var(--text-primary)]">GitHub enrichment join health</h2>
+              <p className="mt-1 text-sm text-[color:var(--text-secondary)]">
+                Skillayer joins provider + agent events to GitHub repo/PR/commit evidence using repo, PR number/id, branch, and commit/head SHA metadata.
+              </p>
+            </div>
+            <Link className="inline-flex items-center gap-2 rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-xs font-semibold text-[color:var(--text-primary)] hover:border-[color:var(--accent-primary)]" href="/settings/connectors">
+              Review connectors <ExternalLink className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Match rate</div>
+              <div className="mt-2 text-xl font-semibold text-[color:var(--text-primary)]">{githubMatchRate === null ? "N/A" : `${githubMatchRate}%`}</div>
+              <p className="mt-1 text-xs text-[color:var(--text-secondary)]">Of events with GitHub metadata.</p>
+            </div>
+            <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Matched</div>
+              <div className="mt-2 text-xl font-semibold text-[color:var(--accent-green)]">{github.matched}</div>
+            </div>
+            <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Missing join</div>
+              <div className="mt-2 text-xl font-semibold text-amber-200">{github.missing}</div>
+              <p className="mt-1 text-xs text-[color:var(--text-secondary)]">GitHub metadata present but no PR/commit record.</p>
+            </div>
+            <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Not provided</div>
+              <div className="mt-2 text-xl font-semibold text-[color:var(--text-primary)]">{github.not_provided}</div>
+              <p className="mt-1 text-xs text-[color:var(--text-secondary)]">Events missing PR/branch/SHA metadata.</p>
+            </div>
+          </div>
+
+          {github.gaps?.length ? (
+            <div className="mt-4 space-y-2">
+              {github.gaps.map((gap) => (
+                <div className="flex flex-col justify-between gap-2 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-4 py-3 md:flex-row md:items-center" key={gap.id}>
+                  <div>
+                    <p className="text-sm font-semibold text-[color:var(--text-primary)]">{gap.label}</p>
+                    <p className="mt-1 text-xs text-[color:var(--text-secondary)]">{gap.next_action}</p>
+                  </div>
+                  {gap.href ? (
+                    <Link className="shrink-0 rounded-md border border-[color:var(--bg-border)] px-3 py-2 text-xs font-semibold text-[color:var(--text-primary)] hover:border-[color:var(--accent-primary)]" href={gap.href}>
+                      Fix in settings
+                    </Link>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-[color:var(--text-secondary)]">No GitHub enrichment gaps detected in the current window.</p>
+          )}
+        </section>
+      ) : null}
 
       {!data ? <EmptyState label="Provider coverage unavailable" /> : null}
       {data && !rows.length ? <EmptyState label="No provider connectors in coverage scope" /> : null}

@@ -28,6 +28,8 @@ class PullRequest(Base):
     author_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     head_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
     base_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
+    head_branch: Mapped[str | None] = mapped_column(Text, nullable=True)
+    base_branch: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     state: Mapped[str | None] = mapped_column(String(16), nullable=True)

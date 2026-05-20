@@ -179,6 +179,8 @@ async def _upsert_pull_request_record(db: AsyncSession, repo: Repo, payload: dic
     record.author_type = user.get("type")
     record.head_sha = head.get("sha")
     record.base_sha = base.get("sha")
+    record.head_branch = head.get("ref")
+    record.base_branch = base.get("ref")
     record.title = pull_request.get("title")
     record.body = pull_request.get("body")
     record.state = _normalize_pr_state(pull_request)

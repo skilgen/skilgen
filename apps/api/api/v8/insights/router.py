@@ -295,12 +295,30 @@ class ProviderCoverageRow(BaseModel):
     content_retention: Literal["metadata-only"] = "metadata-only"
 
 
+class GithubEnrichmentGap(BaseModel):
+    id: str
+    label: str
+    severity: Literal["low", "medium", "high"]
+    next_action: str
+    href: str | None = None
+
+
+class GithubEnrichmentCoverage(BaseModel):
+    matched: int
+    missing: int
+    not_provided: int
+    total: int
+    match_rate: float
+    gaps: list[GithubEnrichmentGap] = Field(default_factory=list)
+
+
 class ProviderCoverageResponse(BaseModel):
     window_days: int
     retention_window_days: int
     generated_at: datetime
     content_retention: Literal["metadata-only"] = "metadata-only"
     rows: list[ProviderCoverageRow]
+    github_enrichment: GithubEnrichmentCoverage | None = None
 
 
 class IdentityMappingRow(BaseModel):
@@ -2700,9 +2718,57 @@ async def get_provider_coverage(
             .limit(5000)
         )
     ).scalars().all()
+    github_counts = {"matched": 0, "missing": 0, "not_provided": 0}
+    for event in events:
+        metadata = getattr(event, "metadata_json", {}) or {}
+        if not isinstance(metadata, dict):
+            github_counts["not_provided"] += 1
+            continue
+        status = str(metadata.get("github_enrichment_status") or "not_provided")
+        if status not in github_counts:
+            status = "not_provided"
+        github_counts[status] += 1
+
+    matched = int(github_counts["matched"])
+    missing = int(github_counts["missing"])
+    not_provided = int(github_counts["not_provided"])
+    total = matched + missing + not_provided
+    provided = matched + missing
+    match_rate = round(matched / provided, 4) if provided else 0.0
+    gaps: list[GithubEnrichmentGap] = []
+    if missing:
+        gaps.append(
+            GithubEnrichmentGap(
+                id="github-join-missing",
+                label=f"{missing} provider/agent events include GitHub metadata but did not match any PR/commit record.",
+                severity="high" if missing >= 25 else "medium",
+                next_action="Verify the GitHub App is installed for the repos and that PR + commit webhooks are ingesting.",
+                href="/settings/connectors",
+            )
+        )
+    if not_provided:
+        gaps.append(
+            GithubEnrichmentGap(
+                id="github-join-not-provided",
+                label=f"{not_provided} provider/agent events are missing PR, commit SHA, head SHA, or branch metadata.",
+                severity="medium" if not_provided >= 25 else "low",
+                next_action="Update the connector/runtime to include repo + branch or commit SHA metadata so Skillayer can join to GitHub evidence.",
+                href="/settings/connectors",
+            )
+        )
     return ProviderCoverageResponse(
         window_days=window_days,
         retention_window_days=retention_window_days,
         generated_at=_utc_now(),
         rows=_provider_coverage_rows(org, list(events), window_days=window_days, retention_window_days=retention_window_days),
+        github_enrichment=GithubEnrichmentCoverage(
+            matched=matched,
+            missing=missing,
+            not_provided=not_provided,
+            total=total,
+            match_rate=match_rate,
+            gaps=gaps,
+        )
+        if total
+        else None,
     )

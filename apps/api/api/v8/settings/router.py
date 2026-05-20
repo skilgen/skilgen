@@ -23,7 +23,7 @@ from apps.api.api.v8.settings.openai_compliance_adapter import pull_openai_compl
 from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, require_permission
 from packages.db.database import get_db, get_sessionmaker
 from packages.db.llm_key import decrypt_key, encrypt_key, key_hint
-from packages.db.models import AuditEvent, DigestConfig, Job, Org, PullRequest, Repo, Role, RoleBinding, SourceConnection
+from packages.db.models import AuditEvent, Commit, DigestConfig, Job, Org, PullRequest, Repo, Role, RoleBinding, SourceConnection
 from packages.db.models.base import new_uuid
 
 
@@ -1017,6 +1017,7 @@ async def _provider_github_context(
         return resolved_repo_id, resolved_repo_name, github_context
 
     pr: PullRequest | None = None
+    commit: Commit | None = None
     pr_lookup_gap: str | None = None
     try:
         if repo is not None and pr_number is not None:
@@ -1052,16 +1053,51 @@ async def _provider_github_context(
                     .limit(1)
                 )
             ).scalar_one_or_none()
+        if repo is not None and pr is None and head_sha:
+            commit = (
+                await db.execute(
+                    select(Commit)
+                    .where(
+                        Commit.repo_id == repo.id,
+                        Commit.sha == head_sha,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if commit is not None and getattr(commit, "pr_id", None):
+                pr = (
+                    await db.execute(
+                        select(PullRequest)
+                        .where(
+                            PullRequest.id == commit.pr_id,
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+        if repo is not None and pr is None and branch:
+            pr = (
+                await db.execute(
+                    select(PullRequest)
+                    .where(
+                        PullRequest.repo_id == repo.id,
+                        PullRequest.head_branch == branch,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
     except SQLAlchemyError:
         pr_lookup_gap = "GitHub PR/commit tables are unavailable, so provider metadata could not be joined."
 
     if pr is not None:
         matched_pr_number = getattr(pr, "github_pr_number", None)
         matched_sha = getattr(pr, "head_sha", None) or head_sha
+        source = "pull_requests"
+        if commit is not None:
+            source = "commits"
         github_context.update(
             {
                 "github_enrichment_status": "matched",
-                "github_enrichment_source": "pull_requests",
+                "github_enrichment_source": source,
                 "pr_id": getattr(pr, "id", None),
                 "pr_number": matched_pr_number,
                 "pr_title": getattr(pr, "title", None) or pr_title or (f"PR #{matched_pr_number}" if matched_pr_number else None),

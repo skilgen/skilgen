@@ -51,7 +51,7 @@ from apps.api.api.services.redflags import compute_repo_red_flags
 from apps.api.api.services.skillql import SkillQLParseError, execute_skillql
 from apps.api.api.services.standup import collect_standup_summary, parse_standup_date, send_standup
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AnalysisRun, AuditEvent, CoverageGap, DependencyGraphCache, FlagDismissal, LoginEvent, Org, OrgLLMConfig, OrgPolicy, PRAttribution, PullRequest, Repo, ScoreHistory, Skill, SkillHalfLife, SkillMemoryStub, SkillUsageEvent, SkillVersion
+from packages.db.models import AgentSession, AnalysisRun, AuditEvent, Commit, CoverageGap, DependencyGraphCache, FlagDismissal, LoginEvent, Org, OrgLLMConfig, OrgPolicy, PRAttribution, PullRequest, Repo, ScoreHistory, Skill, SkillHalfLife, SkillMemoryStub, SkillUsageEvent, SkillVersion
 from packages.db.models import SourceConnection as SourceConnectionModel
 from packages.db.models.skill import skill_category_for_source_type
 from packages.db.schemas import (
@@ -753,12 +753,22 @@ class ConnectRuntimeStatus(BaseModel):
     load_count_30d: int = 0
 
 
+class ConnectStatusItem(BaseModel):
+    id: str
+    label: str
+    connected: bool
+    status: str | None = None
+    detail: str | None = None
+    updated_at: str | None = None
+
+
 class ConnectStatusResponse(BaseModel):
     org_id: str
     repos_connected: int
     skills_generated: int
     github_app_installed: bool
     agent_runtimes: dict[str, ConnectRuntimeStatus]
+    connections: list[ConnectStatusItem] = Field(default_factory=list)
     next_step: str | None = None
 
 
@@ -2031,6 +2041,8 @@ async def get_org_connect_status(
                 select(Repo).where(Repo.org_id == org_id, Repo.is_active.is_(True)).order_by(Repo.name)
             )
         ).scalars().all()
+        repo_ids = [repo.id for repo in repos]
+        api_key = (await db.execute(select(Org.api_key).where(Org.id == org_id))).scalar_one_or_none()
         skill_count = 0
         for repo in repos:
             latest_run = (
@@ -2056,6 +2068,44 @@ async def get_org_connect_status(
         raise HTTPException(status_code=400, detail="Unable to load connection status") from exc
 
     github_connected = any(repo.github_installation_id for repo in repos)
+    pr_count = 0
+    commit_count = 0
+    last_pr_update: datetime | None = None
+    if repo_ids:
+        pr_count = int((await db.execute(select(func.count(PullRequest.id)).where(PullRequest.repo_id.in_(repo_ids)))).scalar() or 0)
+        commit_count = int((await db.execute(select(func.count(Commit.id)).where(Commit.repo_id.in_(repo_ids)))).scalar() or 0)
+        last_pr_update = (await db.execute(select(func.max(PullRequest.updated_at)).where(PullRequest.repo_id.in_(repo_ids)))).scalar()
+
+    github_join_counts: Counter[str] = Counter()
+    github_missing = 0
+    github_matched = 0
+    github_not_provided = 0
+    try:
+        cutoff = _utc_now_naive() - timedelta(days=30)
+        recent_metadata = (
+            await db.execute(
+                select(AuditEvent.metadata_json)
+                .where(
+                    AuditEvent.org_id == org_id,
+                    AuditEvent.event_type == "agent.compliance",
+                    AuditEvent.created_at >= cutoff,
+                )
+                .order_by(desc(AuditEvent.created_at))
+                .limit(5000)
+            )
+        ).scalars().all()
+        for metadata in recent_metadata:
+            if not isinstance(metadata, dict):
+                github_join_counts["not_provided"] += 1
+                continue
+            status = str(metadata.get("github_enrichment_status") or "not_provided")
+            github_join_counts[status] += 1
+        github_missing = int(github_join_counts.get("missing") or 0)
+        github_matched = int(github_join_counts.get("matched") or 0)
+        github_not_provided = int(github_join_counts.get("not_provided") or 0)
+    except Exception:
+        github_join_counts = Counter()
+
     has_agent_loads = any(bool(item.get("connected")) or int(item.get("load_count_30d") or 0) > 0 for item in runtime_status.values())
     next_step = None
     if not repos:
@@ -2064,12 +2114,68 @@ async def get_org_connect_status(
         next_step = "Generate skills for connected repositories"
     elif not has_agent_loads:
         next_step = "Connect an AI coding agent"
+
+    github_detail_parts: list[str] = []
+    repo_count = len(repos)
+    github_detail_parts.append("App installed" if github_connected else "App not installed")
+    github_detail_parts.append(f"{repo_count} repo{'s' if repo_count != 1 else ''}")
+    if pr_count:
+        github_detail_parts.append(f"{pr_count} PR{'s' if pr_count != 1 else ''}")
+    if commit_count:
+        github_detail_parts.append(f"{commit_count} commit{'s' if commit_count != 1 else ''}")
+    if github_missing:
+        github_detail_parts.append(f"{github_missing} unmatched event{'s' if github_missing != 1 else ''}")
+
+    github_ready = bool(github_connected and repo_count and (pr_count or commit_count))
+    connections = [
+        ConnectStatusItem(
+            id="github",
+            label="GitHub enrichment backbone",
+            connected=github_ready,
+            status="connected" if github_ready else ("pending" if github_connected else "blocked"),
+            detail=" · ".join(github_detail_parts),
+            updated_at=last_pr_update.isoformat() if isinstance(last_pr_update, datetime) else None,
+        ),
+        ConnectStatusItem(
+            id="enrichment-join",
+            label="PR/commit join coverage",
+            connected=bool(github_matched) and github_missing == 0,
+            status="healthy" if (github_matched and github_missing == 0) else ("needs-attention" if github_missing else "pending"),
+            detail=f"{github_matched} matched · {github_missing} missing · {github_not_provided} missing metadata",
+            updated_at=None,
+        ),
+        ConnectStatusItem(
+            id="api-key",
+            label="Agent API key",
+            connected=bool(api_key),
+            status="connected" if api_key else "pending",
+            detail="API key is ready for agents" if api_key else "Generate a key before wiring agents",
+            updated_at=None,
+        ),
+        ConnectStatusItem(
+            id="skills",
+            label="Skills generated",
+            connected=skill_count > 0,
+            status="connected" if skill_count > 0 else "pending",
+            detail=f"{skill_count} skills generated" if skill_count else "Run analysis to create skills",
+            updated_at=None,
+        ),
+        ConnectStatusItem(
+            id="agent",
+            label="Agent loads",
+            connected=has_agent_loads,
+            status="connected" if has_agent_loads else "pending",
+            detail="Agents have loaded Skillayer context" if has_agent_loads else "Connect Claude, Codex, or CLI runtimes",
+            updated_at=None,
+        ),
+    ]
     return ConnectStatusResponse(
         org_id=org_id,
         repos_connected=len(repos),
         skills_generated=skill_count,
         github_app_installed=github_connected,
         agent_runtimes={key: ConnectRuntimeStatus(**value) for key, value in runtime_status.items()},
+        connections=connections,
         next_step=next_step,
     )
 

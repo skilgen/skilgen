@@ -1973,12 +1973,30 @@ export type InsightsProviderCoverageRow = {
   content_retention: "metadata-only";
 };
 
+export type InsightsGithubEnrichmentGap = {
+  id: string;
+  label: string;
+  severity: "low" | "medium" | "high" | string;
+  next_action: string;
+  href: string | null;
+};
+
+export type InsightsGithubEnrichmentCoverage = {
+  matched: number;
+  missing: number;
+  not_provided: number;
+  total: number;
+  match_rate: number;
+  gaps: InsightsGithubEnrichmentGap[];
+};
+
 export type InsightsProviderCoverage = {
   window_days: number;
   retention_window_days: number;
   generated_at: string;
   content_retention: "metadata-only";
   rows: InsightsProviderCoverageRow[];
+  github_enrichment: InsightsGithubEnrichmentCoverage | null;
 };
 
 export type RegistryList = {
