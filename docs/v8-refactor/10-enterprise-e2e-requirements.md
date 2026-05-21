@@ -238,14 +238,14 @@ Claude local metadata + OpenAI / Anthropic compliance metadata.
   auth entry. Full email-link inbox verification remains for the WorkOS-configured
   staging pass.
 
-Latest verification for this sub-slice (2026-05-20):
+Latest verification for this sub-slice (2026-05-21):
 
 - `npm --workspace apps/dashboard run type-check`
 - `npm --workspace apps/dashboard run build`
 - `python -m pytest apps/api/tests/test_jit_provisioning.py -q`
 - `python -m pytest apps/api/tests/test_me_provision_endpoint.py -q`
 - `python -m pytest apps/api/tests/test_v8_settings_teams_auto_join.py -q`
-- `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts` (blocked in this Codex automation environment: Chromium exits `SIGTRAP`/`SIGABRT` + `kill EPERM`; run manually on a normal dev machine)
+- `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts` (the spec now compiles under Playwright `1.59.1`, but browser launch is still blocked inside the Codex Desktop macOS sandbox: Chromium exits `SIGTRAP`/`SIGABRT` and Playwright reports `kill EPERM` / `bootstrap_check_in ... Permission denied (1100)`; run manually on a normal dev machine or with an approved unsandboxed command; see `openai/codex#21292`)
 - `git push origin v8/next-feature-loop` (blocked in this Codex automation environment: no GitHub HTTPS credentials; `fatal: could not read Username for 'https://github.com': Device not configured`)
 
 Push workaround in this repo:

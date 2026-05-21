@@ -92,7 +92,7 @@ async function startDashboardServer(): Promise<string> {
 test.setTimeout(120_000);
 test.describe.configure({ mode: "serial" });
 
-test.beforeAll(async (_args, testInfo) => {
+test.beforeAll(async ({}, testInfo) => {
   testInfo.setTimeout(120_000);
   if (!baseUrl) baseUrl = await startDashboardServer();
 });
