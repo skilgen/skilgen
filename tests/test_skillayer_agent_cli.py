@@ -189,6 +189,51 @@ class SkillayerAgentCliTests(unittest.TestCase):
             self.assertEqual(payload["failed"], 0)
             self.assertFalse((root / "state.json").exists())
 
+    def test_watch_once_posts_only_new_runs_and_records_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_path = root / "state.json"
+            state_path.write_text(json.dumps({"posted_session_ids": ["already-posted"]}) + "\n", encoding="utf-8")
+            payloads = [
+                {"session_id": "already-posted"},
+                {"session_id": "new-run", "metadata": {"provider": "Codex"}},
+            ]
+
+            with mock.patch.object(cli, "discover_payloads", return_value=payloads), mock.patch.object(cli, "post_payload") as post:
+                code, output = _run_cli(
+                    [
+                        "watch",
+                        "--config",
+                        str(root / "missing-agent.json"),
+                        "--state",
+                        str(state_path),
+                        "--org-id",
+                        "org_1",
+                        "--token",
+                        "secret-token",
+                        "--project-root",
+                        str(root),
+                        "--providers",
+                        "codex",
+                        "--once",
+                        "--interval",
+                        "1",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            post.assert_called_once()
+            payload = json.loads(output)
+            self.assertEqual(payload["command"], "watch")
+            self.assertEqual(payload["discovered"], 2)
+            self.assertEqual(payload["new"], 1)
+            self.assertEqual(payload["posted"], 1)
+            saved = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["last_new"], 1)
+            self.assertEqual(saved["last_posted"], 1)
+            self.assertEqual(saved["posted_session_ids"], ["already-posted", "new-run"])
+
 
 if __name__ == "__main__":
     unittest.main()

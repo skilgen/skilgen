@@ -361,7 +361,7 @@ OAuth device flow endpoints (new on the API):
 | # | Task | Owner | Files |
 | --- | --- | --- | --- |
 | A1 | Refactor `scripts/import_codex_sessions.py` into a reusable Skillayer local-agent importer boundary + keep the script as a compatibility entry point. | platform | ✅ `packages.skillayer_agent.local_importer` is now the Skillayer-owned importer boundary; the legacy script remains available for existing automation. |
-| A2 | Add `skillayer-agent connect` / `sync` / `watch` / `status` commands. | platform | ◐ `skillayer-agent sync`, `status`, manual-token `connect --token`, and browser/device-flow `connect` are implemented behind `packages.skillayer_agent.cli`; watch mode remains PR-X3. |
+| A2 | Add `skillayer-agent connect` / `sync` / `watch` / `status` commands. | platform | ✅ `skillayer-agent sync`, `status`, manual-token `connect --token`, browser/device-flow `connect`, and polling `watch` are implemented behind `packages.skillayer_agent.cli`. |
 | A3 | OAuth device-flow endpoints on the API. | api | ✅ `apps/api/api/routes/device_flow.py`, `DeviceAuthorization`, and migration `20260520_0006_device_authorizations.py` back the CLI browser approval flow. |
 | A4 | Cursor parser per §5.4. | platform | ✅ `packages.skillayer_agent.local_importer.build_cursor_agent_run_payloads` plus `tests/test_cursor_importer.py`. |
 | A5 | Windsurf parser. | platform | ✅ `packages.skillayer_agent.local_importer.build_windsurf_agent_run_payloads` plus `tests/test_windsurf_importer.py`. |
@@ -705,8 +705,8 @@ installer are expansion after that core path is working.
    `skillayer-agent sync` and `skillayer-agent status` now cover Codex Desktop,
    Codex CLI-compatible Codex JSONL, and Claude Code through the Skillayer importer
    boundary. Manual-token `skillayer-agent connect --token` writes
-   `~/.skillayer/agent.json`; browser/device-flow connect remains PR-A4 and watch
-   mode remains PR-X3.
+   `~/.skillayer/agent.json`; browser/device-flow connect is covered by PR-A4 and
+   watch mode is covered by PR-X3.
 5. **PR-A3 (Codex CLI tag + connect UX)** — ✅ Tasks A6, A8. Codex CLI is now
    distinct from Codex Desktop, and `/dashboard/connect` shows per-runtime
    upload/token/cost/command/file health before setup instructions.
@@ -750,8 +750,9 @@ installer are expansion after that core path is working.
     can now import Windsurf JSONL metadata-only sessions into the same AgentRun
     evidence shape as Codex, Claude, and Cursor, including commands, edits, searches,
     tokens, and runtime identity.
-15. **PR-X3 (watch mode)** — remaining A2 watch behavior after one-shot sync is
-    stable.
+15. **PR-X3 (watch mode)** — ✅ remaining A2. `skillayer-agent watch` now polls local
+    agent stores, posts only newly discovered session IDs, records local state, and
+    supports `--once` / `--dry-run` for fleet bootstrap verification.
 16. **PR-X4 (installer)** — Task A9. Ship behind `unlisted` tag until verified.
 
 ---

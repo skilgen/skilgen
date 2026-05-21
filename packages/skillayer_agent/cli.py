@@ -179,6 +179,29 @@ def _write_state(config: AgentConfig, payload: dict[str, Any]) -> None:
     os.chmod(config.state_path, stat.S_IRUSR | stat.S_IWUSR)
 
 
+def _upload_payloads(config: AgentConfig, payloads: list[dict[str, Any]], *, dry_run: bool) -> tuple[int, int, list[dict[str, str]], list[str]]:
+    posted = 0
+    failed = 0
+    failures: list[dict[str, str]] = []
+    posted_session_ids: list[str] = []
+    for payload in payloads:
+        session_id = str(payload.get("session_id") or "")
+        if dry_run:
+            posted += 1
+            if session_id:
+                posted_session_ids.append(session_id)
+            continue
+        try:
+            post_payload(config.api_url, config.org_id, payload, config.api_key)
+            posted += 1
+            if session_id:
+                posted_session_ids.append(session_id)
+        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            failed += 1
+            failures.append({"session_id": session_id, "error": str(exc)})
+    return posted, failed, failures, posted_session_ids
+
+
 def _runtime_status(config: AgentConfig) -> list[dict[str, Any]]:
     return [
         {
@@ -309,19 +332,7 @@ def command_sync(args: argparse.Namespace) -> int:
         raise SystemExit("error: --token, SKILLAYER_API_KEY, or ~/.skillayer/agent.json api_key is required")
 
     payloads = discover_payloads(config)
-    posted = 0
-    failed = 0
-    failures: list[dict[str, str]] = []
-    for payload in payloads:
-        if args.dry_run:
-            posted += 1
-            continue
-        try:
-            post_payload(config.api_url, config.org_id, payload, config.api_key)
-            posted += 1
-        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            failed += 1
-            failures.append({"session_id": str(payload.get("session_id") or ""), "error": str(exc)})
+    posted, failed, failures, posted_session_ids = _upload_payloads(config, payloads, dry_run=bool(args.dry_run))
     summary = {
         "command": "sync",
         "discovered": len(payloads),
@@ -342,6 +353,7 @@ def command_sync(args: argparse.Namespace) -> int:
                 "last_failed": failed,
                 "providers": list(config.providers),
                 "project_roots": [str(project.path) for project in config.project_roots],
+                "posted_session_ids": posted_session_ids[-5000:],
             },
         )
     _print(summary, as_json=args.json)
@@ -419,7 +431,52 @@ def command_connect(args: argparse.Namespace) -> int:
 
 
 def command_watch(args: argparse.Namespace) -> int:
-    raise SystemExit("error: watch mode is scheduled for PR-X3; use `skillayer-agent sync` for one-shot imports")
+    config = load_agent_config(args)
+    if not config.org_id:
+        raise SystemExit("error: --org-id, SKILLAYER_ORG_ID, or ~/.skillayer/agent.json org_id is required")
+    if not args.dry_run and not config.api_key:
+        raise SystemExit("error: --token, SKILLAYER_API_KEY, or ~/.skillayer/agent.json api_key is required")
+
+    state = _state(config)
+    known_session_ids = {str(item) for item in state.get("posted_session_ids", []) if item}
+    interval = max(1.0, float(args.interval))
+    while True:
+        payloads = discover_payloads(config)
+        new_payloads = [payload for payload in payloads if str(payload.get("session_id") or "") not in known_session_ids]
+        posted, failed, failures, posted_session_ids = _upload_payloads(config, new_payloads, dry_run=bool(args.dry_run))
+        known_session_ids.update(posted_session_ids)
+        summary = {
+            "command": "watch",
+            "discovered": len(payloads),
+            "new": len(new_payloads),
+            "posted": posted,
+            "failed": failed,
+            "dry_run": bool(args.dry_run),
+            "providers": list(config.providers),
+            "project_root_count": len(config.project_roots),
+            "failures": failures[:10],
+            "interval_seconds": interval,
+        }
+        if not args.dry_run:
+            _write_state(
+                config,
+                {
+                    "last_watch_at": datetime.now(timezone.utc).isoformat(),
+                    "last_sync_at": datetime.now(timezone.utc).isoformat(),
+                    "last_discovered": len(payloads),
+                    "last_new": len(new_payloads),
+                    "last_posted": posted,
+                    "last_failed": failed,
+                    "providers": list(config.providers),
+                    "project_roots": [str(project.path) for project in config.project_roots],
+                    "posted_session_ids": sorted(known_session_ids)[-5000:],
+                },
+            )
+        _print(summary, as_json=args.json)
+        sys.stdout.flush()
+        if args.once:
+            return 1 if failed else 0
+        time.sleep(interval)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -467,7 +524,11 @@ def build_parser() -> argparse.ArgumentParser:
     connect.add_argument("--json", action="store_true")
     connect.set_defaults(func=command_connect)
 
-    watch = subparsers.add_parser("watch", help="Watch local agent stores for new sessions.")
+    watch = subparsers.add_parser("watch", help="Poll local agent stores and upload newly discovered sessions.")
+    add_common(watch)
+    watch.add_argument("--dry-run", action="store_true", help="Discover new payloads without posting to Skillayer.")
+    watch.add_argument("--interval", type=float, default=60.0, help="Seconds between watch ticks.")
+    watch.add_argument("--once", action="store_true", help="Run one watch tick and exit.")
     watch.set_defaults(func=command_watch)
     return parser
 
