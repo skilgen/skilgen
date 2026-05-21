@@ -14,7 +14,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .local_importer import build_agent_run_payloads, build_claude_agent_run_payloads, post_payload
+from .local_importer import build_agent_run_payloads, build_claude_agent_run_payloads, build_cursor_agent_run_payloads, post_payload
 
 DEFAULT_API_URL = "https://api.skillayer.com"
 DEFAULT_PROVIDERS = ("codex", "claude")
@@ -38,6 +38,7 @@ class AgentConfig:
     project_roots: tuple[ProjectRoot, ...]
     codex_home: Path
     claude_home: Path
+    cursor_home: Path
     config_path: Path
     state_path: Path
 
@@ -64,7 +65,7 @@ def _providers(value: object) -> tuple[str, ...]:
     normalized = {"claude" if item in {"claude_code", "claude-code"} else item for item in raw}
     if "all" in normalized:
         normalized = set(DEFAULT_PROVIDERS)
-    supported = {"codex", "claude"}
+    supported = {"codex", "claude", "cursor"}
     unsupported = sorted(normalized - supported)
     if unsupported:
         raise SystemExit(f"error: unsupported provider(s): {', '.join(unsupported)}")
@@ -118,6 +119,7 @@ def load_agent_config(args: argparse.Namespace) -> AgentConfig:
         project_roots=_project_roots(config, args),
         codex_home=Path(getattr(args, "codex_home", None) or os.getenv("CODEX_HOME") or config.get("codex_home") or Path.home() / ".codex").expanduser(),
         claude_home=Path(getattr(args, "claude_home", None) or os.getenv("CLAUDE_HOME") or config.get("claude_home") or Path.home() / ".claude").expanduser(),
+        cursor_home=Path(getattr(args, "cursor_home", None) or os.getenv("CURSOR_HOME") or config.get("cursor_home") or Path.home() / "Library" / "Application Support" / "Cursor").expanduser(),
         config_path=config_path,
         state_path=state_path,
     )
@@ -139,6 +141,15 @@ def discover_payloads(config: AgentConfig) -> list[dict[str, Any]]:
             payloads.extend(
                 build_claude_agent_run_payloads(
                     claude_home=config.claude_home,
+                    project_root=project.path,
+                    repo_id=project.repo_id,
+                    repo_full_name=project.repo_full_name,
+                )
+            )
+        if "cursor" in config.providers:
+            payloads.extend(
+                build_cursor_agent_run_payloads(
+                    cursor_home=config.cursor_home,
                     project_root=project.path,
                     repo_id=project.repo_id,
                     repo_full_name=project.repo_full_name,
@@ -179,6 +190,13 @@ def _runtime_status(config: AgentConfig) -> list[dict[str, Any]]:
             "configured": "claude" in config.providers,
             "detected": (config.claude_home / "projects").exists(),
             "store": str(config.claude_home / "projects"),
+        },
+        {
+            "runtime": "cursor",
+            "label": "Cursor",
+            "configured": "cursor" in config.providers,
+            "detected": (config.cursor_home / "User" / "workspaceStorage").exists(),
+            "store": str(config.cursor_home / "User" / "workspaceStorage"),
         },
     ]
 
@@ -404,6 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--repo-full-name")
         subparser.add_argument("--codex-home")
         subparser.add_argument("--claude-home")
+        subparser.add_argument("--cursor-home")
         subparser.add_argument("--json", action="store_true")
 
     sync = subparsers.add_parser("sync", help="One-shot import of local Codex and Claude Code metadata.")

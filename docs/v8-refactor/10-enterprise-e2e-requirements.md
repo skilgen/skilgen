@@ -167,7 +167,7 @@ Run before and after each milestone PR. ✅ = passes today, ◐ = partial, ❌ =
 | Codex Desktop import (single dev) | ✅ | `python scripts/import_codex_sessions.py --providers codex --org-id <org> --token <key>` | Verified end-to-end against the local API. |
 | Claude Code import (single dev) | ✅ | `python scripts/import_codex_sessions.py --providers claude --org-id <org> --token <key>` | Same script; uses `~/.claude/projects/**/*.jsonl`. |
 | Codex CLI import | ✅ | `python -m unittest tests.test_codex_cli_runtime -v` | Codex CLI writes to `~/.codex/sessions` like Codex Desktop. Runtime tagging is verified via `session_meta.client='codex-cli'` (or `originator='Codex CLI'`) → `agent.runtime='codex_cli'`. |
-| Cursor import | ❌ | n/a | No parser. Cursor stores sessions in `~/Library/Application Support/Cursor/User/History` (macOS) / `%APPDATA%/Cursor/...`. New parser required. |
+| Cursor import | ✅ | `python -m unittest tests.test_cursor_importer -v` | `packages.skillayer_agent.local_importer.build_cursor_agent_run_payloads` parses `state.vscdb` metadata, tool calls, commands, edited files, searches, tokens, and Cursor runtime identity without raw prompts/diffs. |
 | Windsurf import | ❌ | n/a | No parser. Windsurf JSONL location TBD. |
 | Anthropic compliance pull | ◐ | Settings → Connectors → Anthropic → "Queue sync". | Scaffold only; adapter needs the real API call + cursor persistence. |
 | OpenAI compliance pull | ◐ | Settings → Connectors → OpenAI → "Queue sync". | Same as above. |
@@ -293,7 +293,7 @@ needs. Cursor and Windsurf remain expansion runtimes after the core path is gree
 | Codex Desktop | `~/.codex/sessions/**/*.jsonl` + `~/.codex/session_index.jsonl` | ✅ Core milestone. Implemented in `scripts/import_codex_sessions.py:build_agent_run_payloads`; move behind Skillayer helper boundary. | platform |
 | Codex CLI | `~/.codex/sessions/**/*.jsonl` (same store; differing `session_meta`) | ✅ Core milestone. Reuses Codex parser and tags `agent_runtime='codex_cli'` when session metadata identifies CLI clients. | platform |
 | Claude Code | `~/.claude/projects/**/*.jsonl` | ✅ Core milestone. `build_claude_agent_run_payloads`; move behind Skillayer helper boundary. | platform |
-| Cursor | `~/Library/Application Support/Cursor/User/History/**/entries.json` + `~/Library/Application Support/Cursor/User/workspaceStorage/**/state.vscdb` | ❌ Expansion after enterprise core. New parser; spec in §5.4. | platform |
+| Cursor | `~/Library/Application Support/Cursor/User/workspaceStorage/**/state.vscdb` | ✅ Expansion parser. Implemented in `packages.skillayer_agent.local_importer.build_cursor_agent_run_payloads`; gated by selecting provider `cursor`. | platform |
 | Windsurf | `~/.codeium/windsurf/conversations/**/*.jsonl` (verify on macOS/Linux) | ❌ Expansion after enterprise core. New parser. | platform |
 
 ### 5.3 Skillayer local helper design
@@ -363,10 +363,10 @@ OAuth device flow endpoints (new on the API):
 | A1 | Refactor `scripts/import_codex_sessions.py` into a reusable Skillayer local-agent importer boundary + keep the script as a compatibility entry point. | platform | ✅ `packages.skillayer_agent.local_importer` is now the Skillayer-owned importer boundary; the legacy script remains available for existing automation. |
 | A2 | Add `skillayer-agent connect` / `sync` / `watch` / `status` commands. | platform | ◐ `skillayer-agent sync`, `status`, manual-token `connect --token`, and browser/device-flow `connect` are implemented behind `packages.skillayer_agent.cli`; watch mode remains PR-X3. |
 | A3 | OAuth device-flow endpoints on the API. | api | ✅ `apps/api/api/routes/device_flow.py`, `DeviceAuthorization`, and migration `20260520_0006_device_authorizations.py` back the CLI browser approval flow. |
-| A4 | Cursor parser per §5.4. | platform | Skillayer local-agent importer module + fixtures under `tests/fixtures/cursor/`. |
+| A4 | Cursor parser per §5.4. | platform | ✅ `packages.skillayer_agent.local_importer.build_cursor_agent_run_payloads` plus `tests/test_cursor_importer.py`. |
 | A5 | Windsurf parser. | platform | Skillayer local-agent importer module + fixtures. |
 | A6 | Tag Codex CLI runs distinctly from Codex Desktop. | platform | ✅ Codex Desktop now emits `codex_desktop`; Codex CLI emits `codex_cli`. |
-| A7 | `tests/test_cursor_importer.py`, `tests/test_windsurf_importer.py`, `tests/test_codex_cli_runtime.py`. | platform | ◐ `tests/test_codex_cli_runtime.py` is complete; Cursor and Windsurf parser tests remain with A4/A5 expansion work. |
+| A7 | `tests/test_cursor_importer.py`, `tests/test_windsurf_importer.py`, `tests/test_codex_cli_runtime.py`. | platform | ◐ `tests/test_codex_cli_runtime.py` and `tests/test_cursor_importer.py` are complete; Windsurf parser tests remain with A5 expansion work. |
 | A8 | Dashboard: surface per-runtime "last upload" / token / cost counters in `/dashboard/connect`. | dashboard | ✅ `/dashboard/connect` now shows runtime health for Codex Desktop, Codex CLI, Claude Code, Cursor, and Windsurf with uploads, commands, files, tokens, and cost. |
 | A9 | `install.sh` one-liner installer (downloads versioned Skillayer local-helper artifact + writes `skillayer-agent` shim). | platform | new `scripts/install.sh` + release pipeline. |
 
@@ -742,7 +742,10 @@ installer are expansion after that core path is working.
 12. **PR-V (verify-enterprise Makefile)** — ✅ §10. `make verify-enterprise` chains
     the core API, provider sync, local helper, compile, dashboard type-check, dashboard
     build, and dry-run importer checks so CI can fail closed on the enterprise path.
-13. **PR-X1 (Cursor parser)** — Tasks A4, A7. Flag: `FF_AGENT_CURSOR`.
+13. **PR-X1 (Cursor parser)** — ✅ Tasks A4, A7. `skillayer-agent --providers cursor`
+    can now import Cursor `state.vscdb` metadata-only sessions into the same AgentRun
+    evidence shape as Codex and Claude, including commands, edits, searches, tokens,
+    and runtime identity.
 14. **PR-X2 (Windsurf parser)** — Tasks A5, A7. Flag: `FF_AGENT_WINDSURF`.
 15. **PR-X3 (watch mode)** — remaining A2 watch behavior after one-shot sync is
     stable.

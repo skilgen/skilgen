@@ -135,6 +135,8 @@ class SkillayerAgentCliTests(unittest.TestCase):
                     str(codex_home),
                     "--claude-home",
                     str(claude_home),
+                    "--cursor-home",
+                    str(root / "missing-cursor"),
                     "--providers",
                     "codex,claude",
                     "--dry-run",
@@ -148,7 +150,7 @@ class SkillayerAgentCliTests(unittest.TestCase):
             self.assertEqual(payload["discoverable_runs"], 1)
             self.assertEqual(
                 {runtime["runtime"]: runtime["detected"] for runtime in payload["runtimes"]},
-                {"codex_desktop": True, "codex_cli": True, "claude_code": True},
+                {"codex_desktop": True, "codex_cli": True, "claude_code": True, "cursor": False},
             )
 
     def test_sync_dry_run_uses_skillayer_importer_boundary(self) -> None:
