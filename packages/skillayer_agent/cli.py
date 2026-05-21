@@ -5,11 +5,14 @@ import json
 import os
 import stat
 import sys
+import time
+import webbrowser
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from .local_importer import build_agent_run_payloads, build_claude_agent_run_payloads, post_payload
 
@@ -201,6 +204,43 @@ def _print(payload: dict[str, Any], *, as_json: bool) -> None:
     print(json.dumps(payload, sort_keys=True))
 
 
+def _post_json(api_url: str, path: str, payload: dict[str, Any], *, timeout: float = 10) -> dict[str, Any]:
+    data = json.dumps(payload).encode("utf-8")
+    request = Request(
+        f"{api_url.rstrip('/')}{path}",
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "skillayer-agent/1.0"},
+    )
+    with urlopen(request, timeout=timeout) as response:
+        decoded = json.loads(response.read().decode("utf-8"))
+    if not isinstance(decoded, dict):
+        raise RuntimeError(f"Unexpected response from {path}: expected JSON object")
+    return decoded
+
+
+def _write_connect_config(args: argparse.Namespace, *, token: str, org_id: str, api_url: str, repo_id: str | None = None, repo_full_name: str | None = None) -> dict[str, Any]:
+    config_path = Path(args.config).expanduser()
+    providers = list(_providers(args.providers))
+    payload = {
+        "api_url": api_url,
+        "org_id": org_id,
+        "api_key": token,
+        "project_roots": [
+            {
+                "path": str(Path(args.project_root).expanduser().resolve()),
+                **({"repo_id": repo_id or args.repo_id} if repo_id or args.repo_id else {}),
+                **({"repo_full_name": repo_full_name or args.repo_full_name} if repo_full_name or args.repo_full_name else {}),
+            }
+        ],
+        "providers": providers,
+    }
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)
+    return {"command": "connect", "config_path": str(config_path), "org_id": org_id, "providers": providers}
+
+
 def command_status(args: argparse.Namespace) -> int:
     config = load_agent_config(args)
     state = _state(config)
@@ -273,29 +313,71 @@ def command_sync(args: argparse.Namespace) -> int:
 
 
 def command_connect(args: argparse.Namespace) -> int:
-    if not args.token:
-        raise SystemExit("error: browser/device-flow connect is scheduled for PR-A4; use connect --token for the manual bootstrap path")
-    if not args.org_id:
-        raise SystemExit("error: --org-id is required")
-    config_path = Path(args.config).expanduser()
-    providers = list(_providers(args.providers))
-    payload = {
-        "api_url": args.api_url,
-        "org_id": args.org_id,
-        "api_key": args.token,
-        "project_roots": [
+    if args.token:
+        if not args.org_id:
+            raise SystemExit("error: --org-id is required")
+        result = _write_connect_config(args, token=args.token, org_id=args.org_id, api_url=args.api_url)
+        _print(result, as_json=args.json)
+        return 0
+
+    try:
+        code = _post_json(
+            args.api_url,
+            "/v1/device/code",
             {
-                "path": str(Path(args.project_root).expanduser().resolve()),
-                **({"repo_id": args.repo_id} if args.repo_id else {}),
-                **({"repo_full_name": args.repo_full_name} if args.repo_full_name else {}),
-            }
-        ],
-        "providers": providers,
-    }
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)
-    result = {"command": "connect", "config_path": str(config_path), "org_id": args.org_id, "providers": providers}
+                "project_root": str(Path(args.project_root).expanduser().resolve()),
+                "repo_id": args.repo_id,
+                "repo_full_name": args.repo_full_name,
+            },
+        )
+    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError, RuntimeError) as exc:
+        raise SystemExit(f"error: failed to start Skillayer device flow: {exc}") from exc
+
+    verification_url = str(code.get("verification_uri_complete") or code.get("verification_uri") or "")
+    user_code = str(code.get("user_code") or "")
+    device_code = str(code.get("device_code") or "")
+    interval = int(code.get("interval") or 5)
+    expires_in = int(code.get("expires_in") or 900)
+    if not device_code or not verification_url:
+        raise SystemExit("error: invalid device flow response from Skillayer")
+    if not args.json:
+        print("Open this URL to connect Skillayer:")
+        print(verification_url)
+        if user_code:
+            print(f"Code: {user_code}")
+    if not args.no_browser:
+        webbrowser.open(verification_url)
+
+    deadline = time.monotonic() + expires_in
+    token_response: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        time.sleep(interval)
+        try:
+            token_response = _post_json(args.api_url, "/v1/device/token", {"device_code": device_code})
+        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError, RuntimeError) as exc:
+            raise SystemExit(f"error: failed while polling Skillayer device flow: {exc}") from exc
+        error = token_response.get("error")
+        if not error:
+            break
+        if error == "authorization_pending":
+            interval = int(token_response.get("interval") or interval)
+            continue
+        raise SystemExit(f"error: device flow failed: {error}")
+    else:
+        raise SystemExit("error: device flow expired before approval")
+
+    token = str(token_response.get("access_token") or "")
+    org_id = str(token_response.get("org_id") or args.org_id or "")
+    if not token or not org_id:
+        raise SystemExit("error: device flow completed without token/org_id")
+    result = _write_connect_config(
+        args,
+        token=token,
+        org_id=org_id,
+        api_url=str(token_response.get("api_url") or args.api_url),
+        repo_id=str(token_response.get("repo_id") or "") or None,
+        repo_full_name=str(token_response.get("repo_full_name") or "") or None,
+    )
     _print(result, as_json=args.json)
     return 0
 
@@ -343,6 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
     connect.add_argument("--project-root", default=".")
     connect.add_argument("--repo-id", default=os.getenv("SKILLAYER_REPO_ID"))
     connect.add_argument("--repo-full-name", default=os.getenv("SKILLAYER_REPO_FULL_NAME"))
+    connect.add_argument("--no-browser", action="store_true", help="Print the device-flow URL without opening a browser.")
     connect.add_argument("--json", action="store_true")
     connect.set_defaults(func=command_connect)
 

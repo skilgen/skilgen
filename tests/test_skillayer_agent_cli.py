@@ -5,6 +5,7 @@ import io
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from packages.skillayer_agent import cli
@@ -61,6 +62,56 @@ class SkillayerAgentCliTests(unittest.TestCase):
             self.assertEqual(saved["org_id"], "org_1")
             self.assertEqual(saved["api_key"], "secret-token")
             self.assertEqual(saved["project_roots"][0]["repo_full_name"], "acme/app")
+            self.assertEqual(oct(config.stat().st_mode & 0o777), "0o600")
+
+    def test_connect_device_flow_writes_private_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "agent.json"
+            calls: list[tuple[str, dict[str, object]]] = []
+            responses = [
+                {
+                    "device_code": "device-1",
+                    "user_code": "ABCD-1234",
+                    "verification_uri_complete": "https://app.skillayer.com/device?user_code=ABCD-1234",
+                    "interval": 1,
+                    "expires_in": 60,
+                },
+                {"error": "authorization_pending", "interval": 1},
+                {
+                    "access_token": "device-token",
+                    "org_id": "org_device",
+                    "api_url": "https://api.skillayer.test",
+                    "repo_full_name": "acme/device",
+                },
+            ]
+
+            def fake_post(api_url: str, path: str, payload: dict[str, object], *, timeout: float = 10) -> dict[str, object]:
+                calls.append((path, payload))
+                return responses.pop(0)
+
+            with mock.patch.object(cli, "_post_json", side_effect=fake_post), mock.patch.object(cli.time, "sleep"), mock.patch.object(cli.webbrowser, "open") as open_browser:
+                code, output = _run_cli(
+                    [
+                        "connect",
+                        "--config",
+                        str(config),
+                        "--api-url",
+                        "https://api.skillayer.test",
+                        "--project-root",
+                        tmp,
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertNotIn("device-token", output)
+            self.assertEqual([path for path, _ in calls], ["/v1/device/code", "/v1/device/token", "/v1/device/token"])
+            open_browser.assert_called_once_with("https://app.skillayer.com/device?user_code=ABCD-1234")
+            saved = json.loads(config.read_text(encoding="utf-8"))
+            self.assertEqual(saved["org_id"], "org_device")
+            self.assertEqual(saved["api_key"], "device-token")
+            self.assertEqual(saved["api_url"], "https://api.skillayer.test")
+            self.assertEqual(saved["project_roots"][0]["repo_full_name"], "acme/device")
             self.assertEqual(oct(config.stat().st_mode & 0o777), "0o600")
 
     def test_status_dry_run_reports_detected_runtimes_and_discoverable_runs(self) -> None:

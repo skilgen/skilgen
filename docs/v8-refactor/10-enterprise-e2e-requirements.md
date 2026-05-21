@@ -361,8 +361,8 @@ OAuth device flow endpoints (new on the API):
 | # | Task | Owner | Files |
 | --- | --- | --- | --- |
 | A1 | Refactor `scripts/import_codex_sessions.py` into a reusable Skillayer local-agent importer boundary + keep the script as a compatibility entry point. | platform | ✅ `packages.skillayer_agent.local_importer` is now the Skillayer-owned importer boundary; the legacy script remains available for existing automation. |
-| A2 | Add `skillayer-agent connect` / `sync` / `watch` / `status` commands. | platform | ◐ `skillayer-agent sync`, `status`, and manual-token `connect --token` are implemented behind `packages.skillayer_agent.cli`; browser/device-flow connect remains PR-A4 and watch mode remains PR-X3. |
-| A3 | OAuth device-flow endpoints on the API. | api | `apps/api/api/routes/device_flow.py`, alembic migration `device_authorizations` table. |
+| A2 | Add `skillayer-agent connect` / `sync` / `watch` / `status` commands. | platform | ◐ `skillayer-agent sync`, `status`, manual-token `connect --token`, and browser/device-flow `connect` are implemented behind `packages.skillayer_agent.cli`; watch mode remains PR-X3. |
+| A3 | OAuth device-flow endpoints on the API. | api | ✅ `apps/api/api/routes/device_flow.py`, `DeviceAuthorization`, and migration `20260520_0006_device_authorizations.py` back the CLI browser approval flow. |
 | A4 | Cursor parser per §5.4. | platform | Skillayer local-agent importer module + fixtures under `tests/fixtures/cursor/`. |
 | A5 | Windsurf parser. | platform | Skillayer local-agent importer module + fixtures. |
 | A6 | Tag Codex CLI runs distinctly from Codex Desktop. | platform | ✅ Codex Desktop now emits `codex_desktop`; Codex CLI emits `codex_cli`. |
@@ -736,8 +736,10 @@ installer are expansion after that core path is working.
 10. **PR-B4 (provider status health)** — ✅ Task B4. `/orgs/{org_id}/connect/status`
    now returns OpenAI/Anthropic provider sync health, and `/dashboard/connect` shows
    compliance API coverage beside local runtime health before setup instructions.
-11. **PR-A4 (device flow + connect command)** — Task A3 plus remaining A2. Add OAuth
-   device flow and `skillayer-agent connect` for self-serve local installs.
+11. **PR-A4 (device flow + connect command)** — ✅ Task A3 plus remaining A2.
+   `skillayer-agent connect` now starts the browser/device flow, polls for approval,
+   and writes `~/.skillayer/agent.json`; `connect --token` remains the air-gapped
+   fallback.
 12. **PR-V (verify-enterprise Makefile)** — §10. Lands once the core enterprise path
     is green so CI fails closed.
 13. **PR-X1 (Cursor parser)** — Tasks A4, A7. Flag: `FF_AGENT_CURSOR`.

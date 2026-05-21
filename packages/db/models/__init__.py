@@ -10,6 +10,7 @@ from packages.db.models.cross_repo_opportunity import CrossRepoOpportunity
 from packages.db.models.coverage_gap import CoverageGap
 from packages.db.models.dependency_graph_cache import DependencyGraphCache
 from packages.db.models.digest_config import DigestConfig
+from packages.db.models.device_authorization import DeviceAuthorization
 from packages.db.models.eval import ABTest, AgentTask, EvalSession, SkillGap
 from packages.db.models.flag_dismissal import FlagDismissal
 from packages.db.models.half_life import SkillHalfLife
@@ -55,6 +56,7 @@ __all__ = [
     "CoverageGap",
     "DependencyGraphCache",
     "DigestConfig",
+    "DeviceAuthorization",
     "EvalSession",
     "FlagDismissal",
     "MarketplaceInstall",
