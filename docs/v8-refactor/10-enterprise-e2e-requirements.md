@@ -234,9 +234,9 @@ Claude local metadata + OpenAI / Anthropic compliance metadata.
   `orgs.auto_join_domain`.
 - ✅ L7: `apps/api/tests/test_jit_provisioning.py` covers new email, returning email,
   suspended org, and auto-join disabled.
-- ◐ L8: Playwright smoke covers the local-preview magic-link path and screenshots the
-  auth entry. Full email-link inbox verification remains for the WorkOS-configured
-  staging pass.
+- ✅ L8: Playwright smoke covers the local-preview magic-link path, captures desktop +
+  mobile screenshots, and is enforced in GitHub Actions (`verify-enterprise`). Full
+  email-link inbox verification remains for the WorkOS-configured staging pass.
 
 Latest verification for this sub-slice (2026-05-21):
 
@@ -245,7 +245,7 @@ Latest verification for this sub-slice (2026-05-21):
 - `python -m pytest apps/api/tests/test_jit_provisioning.py -q`
 - `python -m pytest apps/api/tests/test_me_provision_endpoint.py -q`
 - `python -m pytest apps/api/tests/test_v8_settings_teams_auto_join.py -q`
-- `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts` (the spec compiles under Playwright `1.59.1`, but browser launch is still blocked inside the Codex Desktop macOS sandbox. Chromium/Firefox fail with `kill EPERM` / `bootstrap_check_in ... Permission denied (1100)` / `SIGTRAP`; WebKit can be downloaded with `PLAYWRIGHT_BROWSERS_PATH=0 npx --workspace apps/dashboard playwright install webkit`, but still aborts at launch (`Abort trap: 6`, exit code `134`). Run this spec on a normal dev machine or in CI; see `openai/codex#21292`.)
+- `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts --browser=chromium` (blocked inside the Codex Desktop macOS sandbox, but runs in GitHub Actions via `.github/workflows/ci.yml` → `verify-enterprise`; see `openai/codex#21292`.)
 - `GIT_DIR=.git_writable GIT_WORK_TREE=. git push origin v8/next-feature-loop` (blocked in this Codex automation environment: no GitHub HTTPS credentials; `fatal: could not read Password for 'https://RaviChanduUmmadisetti@github.com': Device not configured`)
 
 Push workaround in this repo:
@@ -805,12 +805,12 @@ enterprise-saleable milestone is login + GitHub enrichment + Skillayer local hel
 Codex/Claude + OpenAI/Anthropic compliance pull. Cursor, Windsurf, watch mode, and the
 installer are expansion after that core path is working.
 
-1. **PR-L (login)** — §4 tasks L1–L8 + migration 0001. Flag:
+1. ✅ **PR-L (login)** — §4 tasks L1–L8 + migration 0001. Flag:
    `FF_SELF_SERVE_AUTH`.
-2. **PR-G (GitHub enrichment backbone)** — §6A tasks G1–G3. Make GitHub connection
+2. ✅ **PR-G (GitHub enrichment backbone)** — §6A tasks G1–G3. Make GitHub connection
    the repo/PR/commit evidence backbone for all local-agent and provider-compliance
    telemetry.
-3. **PR-A1 (Skillayer importer boundary)** — Task A1. Refactor the current Codex /
+3. ✅ **PR-A1 (Skillayer importer boundary)** — Task A1. Refactor the current Codex /
    Claude importer into a reusable Skillayer local-agent boundary while keeping the
    existing script as a compatibility entry point.
 4. **PR-A2 (`skillayer-agent` sync/status)** — ✅ Task A2 partial. Product-facing

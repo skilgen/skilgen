@@ -148,7 +148,8 @@ test("magic-link form routes corporate email to Connect in local preview", async
   await page.getByPlaceholder("you@company.com").fill("dev@acme.test");
   await page.getByRole("button", { name: /^Send$/ }).click();
 
-  await expect(page).toHaveURL(/\/settings\/connectors\?auth=magic-link-preview&email=dev%40acme\.test$/);
+  await expect(page).toHaveURL(/\/dashboard\/connect\?auth=magic-link-preview&email=dev%40acme\.test$/);
+  await expect(page.getByRole("heading", { name: /Agent context pipeline/i })).toBeVisible();
 });
 
 test("magic-link form rejects personal email domains", async ({ page }) => {
