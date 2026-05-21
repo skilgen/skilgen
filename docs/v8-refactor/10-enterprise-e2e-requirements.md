@@ -815,13 +815,13 @@ installer are expansion after that core path is working.
 3. ✅ **PR-A1 (Skillayer importer boundary)** — Task A1. Refactor the current Codex /
    Claude importer into a reusable Skillayer local-agent boundary while keeping the
    existing script as a compatibility entry point.
-4. **PR-A2 (`skillayer-agent` sync/status)** — ✅ Task A2 partial. Product-facing
+4. ✅ **PR-A2 (`skillayer-agent` sync/status)** — ✅ Task A2. Product-facing
    `skillayer-agent sync` and `skillayer-agent status` now cover Codex Desktop,
    Codex CLI-compatible Codex JSONL, and Claude Code through the Skillayer importer
-   boundary. Manual-token `skillayer-agent connect --token` writes
-   `~/.skillayer/agent.json`; browser/device-flow connect is covered by PR-A4 and
-   watch mode is covered by PR-X3.
-5. **PR-A3 (Codex CLI tag + connect UX)** — ✅ Tasks A6, A8. Codex CLI is now
+   boundary. `skillayer-agent connect --token` writes `~/.skillayer/agent.json`;
+   browser/device-flow connect is covered by PR-A4 and watch mode is covered by
+   PR-X3.
+5. ✅ **PR-A3 (Codex CLI tag + connect UX)** — ✅ Tasks A6, A8. Codex CLI is now
    distinct from Codex Desktop, and `/dashboard/connect` shows per-runtime
    upload/token/cost/command/file health before setup instructions.
 6. **PR-R (run risk/access/compliance detail)** — ✅ §7.2B and §8A. Persisted
