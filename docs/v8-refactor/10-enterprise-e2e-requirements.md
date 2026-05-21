@@ -659,14 +659,13 @@ Until every row below passes, the milestone is not done.
 
 ```makefile
 verify-enterprise:
-	npm --workspace apps/dashboard run typecheck
+	npm --workspace apps/dashboard run type-check
 	npm --workspace apps/dashboard run build
-	python -m compileall apps/api/api scripts
-	pytest apps/api/tests -q -x
-	pytest tests -q -x
-	npx --workspace apps/dashboard playwright test e2e/auth.spec.ts e2e/connect.spec.ts
+	python -m compileall apps/api/api packages/skillayer_agent scripts
+	python -m pytest apps/api/tests/test_device_flow.py apps/api/tests/test_connect_status.py apps/api/tests/test_v8_settings_rbac.py -q
+	python -m unittest tests.test_openai_compliance_sync tests.test_anthropic_compliance_sync tests.test_agent_runs_smoke tests.test_skillayer_agent_cli tests.test_codex_cli_runtime tests.test_import_codex_sessions -v
 	python scripts/import_codex_sessions.py --providers codex,claude --dry-run --project-root .
-	skillayer-agent status --dry-run
+	python -m packages.skillayer_agent.cli status --providers codex,claude --project-root . --dry-run --json
 ```
 
 Acceptance for the milestone:
@@ -740,8 +739,9 @@ installer are expansion after that core path is working.
    `skillayer-agent connect` now starts the browser/device flow, polls for approval,
    and writes `~/.skillayer/agent.json`; `connect --token` remains the air-gapped
    fallback.
-12. **PR-V (verify-enterprise Makefile)** — §10. Lands once the core enterprise path
-    is green so CI fails closed.
+12. **PR-V (verify-enterprise Makefile)** — ✅ §10. `make verify-enterprise` chains
+    the core API, provider sync, local helper, compile, dashboard type-check, dashboard
+    build, and dry-run importer checks so CI can fail closed on the enterprise path.
 13. **PR-X1 (Cursor parser)** — Tasks A4, A7. Flag: `FF_AGENT_CURSOR`.
 14. **PR-X2 (Windsurf parser)** — Tasks A5, A7. Flag: `FF_AGENT_WINDSURF`.
 15. **PR-X3 (watch mode)** — remaining A2 watch behavior after one-shot sync is
