@@ -245,8 +245,8 @@ Latest verification for this sub-slice (2026-05-21):
 - `python -m pytest apps/api/tests/test_jit_provisioning.py -q`
 - `python -m pytest apps/api/tests/test_me_provision_endpoint.py -q`
 - `python -m pytest apps/api/tests/test_v8_settings_teams_auto_join.py -q`
-- `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts` (the spec now compiles under Playwright `1.59.1`, but browser launch is still blocked inside the Codex Desktop macOS sandbox: Chromium exits `SIGTRAP`/`SIGABRT` and Playwright reports `kill EPERM` / `bootstrap_check_in ... Permission denied (1100)`; run manually on a normal dev machine or with an approved unsandboxed command; see `openai/codex#21292`)
-- `git push origin v8/next-feature-loop` (blocked in this Codex automation environment: no GitHub HTTPS credentials; `fatal: could not read Username for 'https://github.com': Device not configured`)
+- `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts` (the spec compiles under Playwright `1.59.1`, but browser launch is still blocked inside the Codex Desktop macOS sandbox. Chromium/Firefox fail with `kill EPERM` / `bootstrap_check_in ... Permission denied (1100)` / `SIGTRAP`; WebKit can be downloaded with `PLAYWRIGHT_BROWSERS_PATH=0 npx --workspace apps/dashboard playwright install webkit`, but still aborts at launch (`Abort trap: 6`, exit code `134`). Run this spec on a normal dev machine or in CI; see `openai/codex#21292`.)
+- `GIT_DIR=.git_writable GIT_WORK_TREE=. git push origin v8/next-feature-loop` (blocked in this Codex automation environment: no GitHub HTTPS credentials; `fatal: could not read Password for 'https://RaviChanduUmmadisetti@github.com': Device not configured`)
 
 Push workaround in this repo:
 
