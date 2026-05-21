@@ -778,5 +778,5 @@ installer are expansion after that core path is working.
 - `make verify-enterprise` is green on `main`.
 - The §10 acceptance walkthrough is recorded as a Loom / video and linked from the PR
   that lands PR-V.
-- This document is referenced from `docs/v8-refactor/06-pr-sequence.md` and from the
-  root `README.md` quickstart section.
+- ✅ This document is referenced from `docs/v8-refactor/06-pr-sequence.md` and from the
+  root `README.md` quickstart section (2026-05-20).

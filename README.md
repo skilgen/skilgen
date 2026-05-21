@@ -23,6 +23,18 @@ The migrated v8 app lives under `apps/dashboard/app/(v8)` and uses the Skillayer
 | Insights | Fleet trends and risk posture: KPIs, developer track, risky agents/repos, coverage SLA, and agent compliance metrics. | `/insights/fleet-kpis`, `/insights/developer-track`, `/insights/agent-compliance-metrics`, `/insights/intelligence-usage`, `/insights/access-grants`, `/insights/provider-coverage`, `/insights/coverage-sla` |
 | Settings | Enterprise administration for teams, RBAC, SSO, connectors, admin audit, notifications, and billing. | `/settings/teams`, `/settings/rbac`, `/settings/sso`, `/settings/connectors`, `/settings/admin-audit` |
 
+## Quickstart (Enterprise E2E)
+
+The end-to-end enterprise milestone (login → connect → local agent capture → provider sync → v8 surfaces) is defined in:
+
+- `docs/v8-refactor/10-enterprise-e2e-requirements.md` (see §11 for the PR plan)
+
+Validate the full path with:
+
+```bash
+make verify-enterprise
+```
+
 ## Implemented v8 Capabilities
 
 Current feature slices tracked in `FEATURES.md` include:

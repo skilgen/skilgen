@@ -1,5 +1,7 @@
 # PR-0 PR Sequence
 
+> For the enterprise end-to-end milestone PR plan (login → connect → local helper → provider sync → verify gate), see `docs/v8-refactor/10-enterprise-e2e-requirements.md` (Section 11).
+
 This sequence fixes the Phase A risks by turning them into reviewable, bounded PRs. No application code changes are included in PR-0.
 
 ## PR-1: IA shell and feature flag
