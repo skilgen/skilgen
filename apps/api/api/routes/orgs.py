@@ -758,6 +758,25 @@ class ConnectRuntimeStatus(BaseModel):
     files_touched_30d: int = 0
 
 
+class ConnectProviderSyncStatus(BaseModel):
+    id: str
+    label: str
+    enabled: bool = False
+    connected: bool = False
+    credential_state: str = "missing"
+    last_sync_status: str | None = None
+    last_sync_mode: str | None = None
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+    next_sync_at: str | None = None
+    last_ingested_count: int = 0
+    total_ingested_count: int = 0
+    last_cursor: str | None = None
+    last_error: str | None = None
+    active_job_status: str | None = None
+    blocked_reason: str | None = None
+
+
 class ConnectStatusResponse(BaseModel):
     org_id: str
     repos_connected: int
@@ -771,7 +790,53 @@ class ConnectStatusResponse(BaseModel):
     github_last_commit_at: str | None = None
     github_join_missing_30d: int = 0
     agent_runtimes: dict[str, ConnectRuntimeStatus]
+    provider_sync: list[ConnectProviderSyncStatus] = Field(default_factory=list)
     next_step: str | None = None
+
+
+PROVIDER_SYNC_LABELS = {
+    "openai-compliance": "OpenAI Compliance",
+    "anthropic-compliance": "Anthropic Compliance",
+}
+AGENT_COMPLIANCE_SOURCE_PREFIX = "agent_compliance:"
+
+
+def _provider_sync_source_type(connector_id: str) -> str:
+    return f"{AGENT_COMPLIANCE_SOURCE_PREFIX}{connector_id}"
+
+
+def _provider_sync_statuses(org: Org | None, source_connections: list[SourceConnectionModel]) -> list[ConnectProviderSyncStatus]:
+    settings = dict(org.settings or {}) if org is not None and isinstance(org.settings, dict) else {}
+    configured = dict(settings.get("v8_agent_compliance_connectors") or {})
+    connections_by_source = {str(connection.source_type): connection for connection in source_connections}
+    statuses: list[ConnectProviderSyncStatus] = []
+    for connector_id, label in PROVIDER_SYNC_LABELS.items():
+        current = dict(configured.get(connector_id) or {})
+        connection = connections_by_source.get(_provider_sync_source_type(connector_id))
+        last_job = current.get("last_provider_sync_job") if isinstance(current.get("last_provider_sync_job"), dict) else {}
+        last_plan = current.get("last_sync_plan") if isinstance(current.get("last_sync_plan"), dict) else {}
+        blocked_reason = str(last_plan.get("blocked_reason") or last_job.get("blocked_reason") or current.get("last_error") or "") or None
+        statuses.append(
+            ConnectProviderSyncStatus(
+                id=connector_id,
+                label=label,
+                enabled=bool(current.get("enabled")),
+                connected=connection is not None,
+                credential_state="encrypted" if connection is not None else "missing",
+                last_sync_status=str(current.get("last_sync_status")) if current.get("last_sync_status") else None,
+                last_sync_mode=str(current.get("last_sync_mode")) if current.get("last_sync_mode") else None,
+                last_success_at=str(current.get("last_success_at")) if current.get("last_success_at") else None,
+                last_failure_at=str(current.get("last_failure_at")) if current.get("last_failure_at") else None,
+                next_sync_at=str(current.get("next_sync_at") or last_job.get("next_sync_at")) if (current.get("next_sync_at") or last_job.get("next_sync_at")) else None,
+                last_ingested_count=int(current.get("last_ingested_count") or 0),
+                total_ingested_count=int(current.get("total_ingested_count") or 0),
+                last_cursor=str(current.get("cursor")) if current.get("cursor") else None,
+                last_error=str(current.get("last_error")) if current.get("last_error") else None,
+                active_job_status=str(last_job.get("status")) if last_job.get("status") else None,
+                blocked_reason=blocked_reason,
+            )
+        )
+    return statuses
 
 
 class HalfLifeBufferRequest(BaseModel):
@@ -2108,6 +2173,16 @@ async def get_org_connect_status(
             )
         except Exception:
             github_pr_count = github_pr_count or 0
+    org = (await db.execute(select(Org).where(Org.id == org_id))).scalar_one_or_none()
+    provider_connections = (
+        await db.execute(
+            select(SourceConnectionModel).where(
+                SourceConnectionModel.org_id == org_id,
+                SourceConnectionModel.source_type.in_([_provider_sync_source_type(connector_id) for connector_id in PROVIDER_SYNC_LABELS]),
+            )
+        )
+    ).scalars().all()
+    provider_sync = _provider_sync_statuses(org, list(provider_connections))
     next_step = None
     if not repos:
         next_step = "Connect a GitHub repository"
@@ -2128,6 +2203,7 @@ async def get_org_connect_status(
         github_last_commit_at=github_last_commit_at,
         github_join_missing_30d=github_join_missing_30d,
         agent_runtimes={key: ConnectRuntimeStatus(**value) for key, value in runtime_status.items()},
+        provider_sync=provider_sync,
         next_step=next_step,
     )
 

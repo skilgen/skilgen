@@ -407,7 +407,7 @@ helper evidence and compliance API evidence reconciled into one view.
 | B1 | Wire real HTTP call in OpenAI adapter, with cursor persistence + idempotency. | ✅ `apps/api/api/v8/settings/openai_compliance_adapter.py` now calls the OpenAI audit-log endpoint, normalizes metadata-only events, resumes with `after` cursor, keeps provider event ids stable for duplicate suppression, and is covered by `tests/test_openai_compliance_sync.py`. |
 | B2 | Wire real HTTP call in Anthropic adapter, with cursor persistence + idempotency. | ✅ `apps/api/api/v8/settings/anthropic_compliance_adapter.py` now calls the Anthropic compliance messages endpoint, resumes with cursor, respects `retry-after` failure posture, normalizes metadata-only Claude usage/cache/cost/access evidence, and is covered by `tests/test_anthropic_compliance_sync.py`. |
 | B3 | Job worker schedules a sync every 15 min per connected adapter. | ✅ `/worker/agent-compliance/provider-sync` queues due OpenAI/Anthropic provider sync jobs, skips connectors with queued/running jobs, preserves cursor resume state, and records the next 15-minute window. |
-| B4 | Surface adapter health in `/dashboard/connect` and `/settings/connectors`. | already half-built — extend `connect_status.connections`. |
+| B4 | Surface adapter health in `/dashboard/connect` and `/settings/connectors`. | ✅ `/orgs/{org_id}/connect/status` now returns provider sync health for OpenAI/Anthropic, and `/dashboard/connect` shows compliance API coverage beside runtime health before setup instructions. |
 
 ---
 
@@ -733,9 +733,9 @@ installer are expansion after that core path is working.
    now scans connected OpenAI/Anthropic compliance adapters, queues only due jobs,
    waits when a prior provider-sync job is still queued/running, and records the next
    15-minute sync window for connector health.
-10. **PR-B4 (provider status health)** — Task B4. Extend `/dashboard/connect` and
-   `connect_status.connections` so admins can see provider sync freshness beside local
-   runtime health.
+10. **PR-B4 (provider status health)** — ✅ Task B4. `/orgs/{org_id}/connect/status`
+   now returns OpenAI/Anthropic provider sync health, and `/dashboard/connect` shows
+   compliance API coverage beside local runtime health before setup instructions.
 11. **PR-A4 (device flow + connect command)** — Task A3 plus remaining A2. Add OAuth
    device flow and `skillayer-agent connect` for self-serve local installs.
 12. **PR-V (verify-enterprise Makefile)** — §10. Lands once the core enterprise path

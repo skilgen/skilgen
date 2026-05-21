@@ -1,5 +1,5 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { CheckCircle2, CircleDashed, GitBranch, KeyRound, PlugZap, TerminalSquare } from "lucide-react";
+import { CheckCircle2, CircleDashed, CloudCog, GitBranch, KeyRound, PlugZap, ShieldCheck, TerminalSquare } from "lucide-react";
 
 import { API_URL, getBootstrapOrg, getMyOrg, getOrgApiKey, getOrgRepos, getOrgSetupStatus, type Repo, type SetupStatus } from "../../../lib/data";
 import { ConnectShell } from "./connect-shell";
@@ -32,6 +32,7 @@ type ConnectStatus = {
   repos_connected?: number;
   skills_generated?: number;
   connections?: ConnectStatusItem[];
+  provider_sync?: ProviderSyncStatus[];
   agent_runtimes?: Record<
     string,
     {
@@ -45,6 +46,25 @@ type ConnectStatus = {
       files_touched_30d?: number;
     }
   >;
+};
+
+type ProviderSyncStatus = {
+  id: string;
+  label: string;
+  enabled?: boolean;
+  connected?: boolean;
+  credential_state?: string;
+  last_sync_status?: string | null;
+  last_sync_mode?: string | null;
+  last_success_at?: string | null;
+  last_failure_at?: string | null;
+  next_sync_at?: string | null;
+  last_ingested_count?: number;
+  total_ingested_count?: number;
+  last_cursor?: string | null;
+  last_error?: string | null;
+  active_job_status?: string | null;
+  blocked_reason?: string | null;
 };
 
 async function resolveConnectData(): Promise<{
@@ -216,6 +236,13 @@ function formatNumber(value: number | undefined): string {
   return new Intl.NumberFormat("en-US").format(Number(value ?? 0));
 }
 
+function formatDateTime(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
 function RuntimeHealthPanel({ status }: { status: ConnectStatus | null }) {
   const runtimeStatus =
     status?.agent_runtimes ?? {
@@ -289,12 +316,73 @@ function RuntimeHealthPanel({ status }: { status: ConnectStatus | null }) {
   );
 }
 
+function ProviderSyncHealthPanel({ status }: { status: ConnectStatus | null }) {
+  const providers = status?.provider_sync ?? [];
+  if (!providers.length) return null;
+  const connectedCount = providers.filter((provider) => provider.connected).length;
+  const activeCount = providers.filter((provider) => ["success", "queued", "running"].includes(String(provider.last_sync_status ?? provider.active_job_status ?? "").toLowerCase())).length;
+  const totalIngested = providers.reduce((sum, provider) => sum + Number(provider.total_ingested_count ?? 0), 0);
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--accent-primary)]">Provider sync health</p>
+          <h2 className="mt-2 text-xl font-semibold text-[color:var(--text-primary)]">Compliance API coverage</h2>
+          <p className="mt-1 max-w-2xl text-sm text-[color:var(--text-secondary)]">Provider pulls show whether org-wide OpenAI and Anthropic evidence is fresh before you drill into Settings.</p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-3 text-[12px] text-[color:var(--text-secondary)]">
+          <span><strong className="block text-[color:var(--text-primary)]">{connectedCount}/{providers.length}</strong>credentialed</span>
+          <span><strong className="block text-[color:var(--text-primary)]">{activeCount}</strong>active</span>
+          <span><strong className="block text-[color:var(--text-primary)]">{formatNumber(totalIngested)}</strong>events</span>
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {providers.map((provider) => {
+          const statusText = String(provider.active_job_status ?? provider.last_sync_status ?? (provider.connected ? "ready" : "missing")).toLowerCase();
+          const healthy = Boolean(provider.connected) && ["success", "completed", "queued", "running", "ready"].includes(statusText);
+          const lastSuccess = formatDateTime(provider.last_success_at);
+          const nextSync = formatDateTime(provider.next_sync_at);
+          const issue = provider.blocked_reason ?? provider.last_error;
+          return (
+            <article key={provider.id} className="rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 gap-3">
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border ${healthy ? "border-[color:var(--accent-green)]/30 bg-[color:var(--accent-green)]/10 text-[color:var(--accent-green)]" : "border-amber-500/25 bg-amber-500/10 text-amber-200"}`}>
+                    {healthy ? <ShieldCheck className="h-5 w-5" /> : <CloudCog className="h-5 w-5" />}
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-[14px] font-semibold text-[color:var(--text-primary)]">{provider.label}</h3>
+                    <p className="mt-1 text-[12px] text-[color:var(--text-secondary)]">
+                      {lastSuccess ? `Last success ${lastSuccess}` : provider.connected ? "Credential ready; waiting for first sync" : "Credentials missing"}
+                    </p>
+                  </div>
+                </div>
+                <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${healthy ? "bg-[color:var(--accent-green)]/10 text-[color:var(--accent-green)]" : "bg-amber-500/10 text-amber-200"}`}>
+                  {statusText}
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2 text-[12px] text-[color:var(--text-secondary)] md:grid-cols-4">
+                <span><strong className="block text-[color:var(--text-primary)]">{formatNumber(provider.last_ingested_count)}</strong>last pull</span>
+                <span><strong className="block text-[color:var(--text-primary)]">{formatNumber(provider.total_ingested_count)}</strong>total</span>
+                <span><strong className="block text-[color:var(--text-primary)]">{nextSync ?? "pending"}</strong>next sync</span>
+                <span><strong className="block text-[color:var(--text-primary)]">{provider.credential_state ?? "missing"}</strong>credential</span>
+              </div>
+              {issue ? <p className="mt-3 rounded-[8px] border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100">{issue}</p> : null}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export default async function ConnectPage() {
   const data = await resolveConnectData();
   return (
     <div className="space-y-6">
       <ConnectionStatusPanel apiKey={data.apiKey} repos={data.repos} setupStatus={data.setupStatus} status={data.connectStatus} />
       <RuntimeHealthPanel status={data.connectStatus} />
+      <ProviderSyncHealthPanel status={data.connectStatus} />
       <ConnectShell accessToken={data.accessToken} apiKey={data.apiKey} orgId={data.orgId} repos={data.repos} setupStatus={data.setupStatus} />
     </div>
   );
