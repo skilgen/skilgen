@@ -667,12 +667,14 @@ export function ReplayClient({ exportHtml, session, timeline }: { exportHtml: st
           activeIndex={activeIndex}
           expanded={expandedNodes}
           onSelect={setIndex}
-	          onToggleExpand={(id) => setExpandedNodes((current) => {
-	            const next = new Set(current);
-	            if (next.has(id)) next.delete(id);
-	            else next.add(id);
-	            return next;
-	          })}
+          onToggleExpand={(id) =>
+            setExpandedNodes((current) => {
+              const next = new Set(current);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            })
+          }
           timeline={typedTimeline}
         />
         <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">

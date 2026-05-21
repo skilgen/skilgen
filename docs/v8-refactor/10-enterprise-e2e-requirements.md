@@ -875,11 +875,11 @@ installer are expansion after that core path is working.
 
 | # | Question | Action |
 | --- | --- | --- |
-| Q1 | Cursor's `state.vscdb` schema is undocumented and version-skewed. | Pin parser to the schema observed in Cursor ≥ 0.40; gate behind `FF_AGENT_CURSOR`; ship a `cursor-fixture-capture` script that anonymises a real DB into a test fixture. |
-| Q2 | Windsurf JSONL location on Linux / Windows. | Confirm during PR-A3 by running Windsurf on each OS; document in this file before merge. |
+| Q1 | Cursor's `state.vscdb` schema is undocumented and version-skewed. | ✅ Slice 32 adds `scripts/cursor_fixture_capture.py`, which anonymizes real `state.vscdb` rows into shareable JSON fixtures for parser regression tests. |
+| Q2 | Windsurf JSONL location on Linux / Windows. | Use `WINDSURF_HOME` / `--windsurf-home` as the enterprise-safe override. Known default shipped today is macOS/local Codeium path `~/.codeium/windsurf/conversations/**/*.jsonl`; Linux/Windows defaults require fleet validation before marking GA. |
 | Q3 | Magic-link domain-auto-join — what about Gmail / personal addresses? | ✅ Implemented: personal-domain emails (`gmail.com`, `outlook.com`, etc.) always create a fresh org and never auto-join; covered by `apps/api/tests/test_jit_provisioning.py`. |
 | Q4 | OAuth device-flow rate limiting. | ✅ Implemented in Slice 31: `/v1/device/code` stores `client_ip`, caps each IP at 10 pending device codes per 5 minutes, and rejects excess requests with `slow_down` per RFC 8628. |
-| Q5 | Provenance of imported cost numbers. | They are estimates (per `_openai_rates` / `_claude_base_rates`). Surface a "cost estimated" badge in Insights; never call them billing-grade. |
+| Q5 | Provenance of imported cost numbers. | ✅ Implemented: importer metadata uses `cost_source=estimated_from_provider_token_usage`, Insights splits provider-reported vs Skillayer-estimated spend, and evidence docs prohibit billing-grade language for estimates. |
 | Q6 | Multi-machine same user. | The CLI registers the machine ID (`uname -n` + first MAC) under `users.devices`; admin can revoke a single machine's key without rotating the org-wide API key. |
 
 ---
