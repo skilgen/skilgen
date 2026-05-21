@@ -30,6 +30,21 @@ export type ExternalApiCall = {
   count: number;
 };
 
+export type SkillCoverage = {
+  loaded_count: number;
+  relevant_count: number;
+  coverage_percent: number;
+  loaded_skills: string[];
+  relevant_skills: string[];
+  zero_loaded_relevant: boolean;
+};
+
+export type RiskContributor = {
+  factor: string;
+  label: string;
+  points: number;
+};
+
 export type ActivityEvent = {
   id: string;
   timestamp: string | null;
@@ -51,6 +66,8 @@ export type ActivityEvent = {
   risk_score: number;
   risk_band: "low" | "medium" | "high";
   risk_reasons?: string[];
+  risk_contributors?: RiskContributor[];
+  skill_coverage?: SkillCoverage;
   tokens_total?: number;
   cost_usd?: number;
   model?: string | null;
@@ -126,6 +143,8 @@ export type ActivitySession = {
   risk_band: "low" | "medium" | "high";
   risk_level?: "critical" | "high" | "medium" | "low";
   risk_reasons?: string[];
+  risk_contributors?: RiskContributor[];
+  skill_coverage?: SkillCoverage;
   compliance_status?: "passed" | "warning" | "failed" | "unknown";
   policy_violations?: string[];
   human_next_action?: string | null;
@@ -176,8 +195,13 @@ export type ActivityFeedResponse = {
 export type ReplayStep = {
   index: number;
   timestamp: string | null;
+  type?: "session_start" | "search" | "explore" | "command" | "edit" | "tool" | "pause" | "finish";
   action: string;
   action_class: string;
+  label?: string;
+  target?: string;
+  detail?: string;
+  risk_flag?: boolean;
   reasoning: string | null;
   tool_call: Record<string, unknown> | null;
   result: Record<string, unknown>;
@@ -251,7 +275,7 @@ export async function loadActivityContext(): Promise<ActivityContext> {
   }
 
   const org = (accessToken ? await getMyOrg(accessToken) : null) ?? (await getBootstrapOrg());
-  const apiKey = org?.id && accessToken ? await getOrgApiKey(accessToken, org.id) : null;
+  const apiKey = org?.id ? await getOrgApiKey(accessToken, org.id) : null;
   return { accessToken, org, streamKey: apiKey?.api_key ?? "" };
 }
 

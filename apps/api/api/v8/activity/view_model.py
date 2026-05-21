@@ -5,6 +5,8 @@ import re
 from datetime import datetime
 from typing import Any, Iterable, Literal
 
+from apps.api.api.services.agent_risk_policy import classify_agent_command_danger, risk_level_for_score, score_agent_run_risk_breakdown
+
 RiskBand = Literal["low", "medium", "high"]
 RiskLevel = Literal["low", "medium", "high", "critical"]
 
@@ -141,13 +143,7 @@ def risk_band(score: int) -> RiskBand:
 
 
 def risk_level(score: int) -> RiskLevel:
-    if score >= 85:
-        return "critical"
-    if score >= 70:
-        return "high"
-    if score >= 35:
-        return "medium"
-    return "low"
+    return risk_level_for_score(score, danger_signal=True)  # type: ignore[return-value]
 
 
 def compliance_status(compliance: dict[str, Any] | None) -> str:
@@ -170,6 +166,9 @@ def compliance_status(compliance: dict[str, Any] | None) -> str:
 def human_next_action(compliance: dict[str, Any] | None, *, risk: int) -> str | None:
     if not compliance:
         return None
+    signals = compliance.get("risk_signals") if isinstance(compliance.get("risk_signals"), dict) else {}
+    if any(signals.get(key) for key in ("dangerous_commands", "sensitive_paths", "unknown_external_domains", "unapproved_mcp_tools")):
+        return "Review detected danger signal"
     if bool(compliance.get("full_access")):
         return "Review why full access was granted"
     if str(compliance.get("github_enrichment_status") or "") == "missing":
@@ -203,40 +202,77 @@ def external_api_calls(compliance: dict[str, Any] | None) -> list[dict[str, Any]
     return rows
 
 
+def _skill_label(skill: object) -> str:
+    return str(getattr(skill, "domain", None) or getattr(skill, "skill_path", None) or getattr(skill, "id", "skill"))
+
+
+def _unique_repo_skills(skill_map: dict[str, object], repo_id: str | None) -> list[object]:
+    seen: set[str] = set()
+    skills: list[object] = []
+    for skill in skill_map.values():
+        skill_id = str(getattr(skill, "id", "") or _skill_label(skill))
+        if skill_id in seen:
+            continue
+        if repo_id and str(getattr(skill, "repo_id", "") or "") != str(repo_id):
+            continue
+        seen.add(skill_id)
+        skills.append(skill)
+    return sorted(skills, key=lambda item: _skill_label(item).lower())
+
+
+def _matches_file(skill: object, file_path: str) -> bool:
+    haystack = file_path.replace("\\", "/").lower()
+    candidates = [
+        str(getattr(skill, "domain", "") or ""),
+        str(getattr(skill, "skill_category", "") or ""),
+        str(getattr(skill, "source_type", "") or ""),
+    ]
+    path = str(getattr(skill, "skill_path", "") or "").replace("\\", "/").lower()
+    candidates.extend(part for part in path.split("/") if part not in {"", "skills", "skill.md", "skilgen", ".skilgen"})
+    return any(candidate and candidate.lower().replace("_", "-") in haystack.replace("_", "-") for candidate in candidates)
+
+
+def skill_coverage_for_session(session: object, skill_map: dict[str, object] | None) -> dict[str, Any]:
+    skills = _unique_repo_skills(skill_map or {}, str(getattr(session, "repo_id", "") or ""))
+    files = [str(path) for path in list(getattr(session, "files_touched", []) or []) if str(path)]
+    relevant = [skill for skill in skills if any(_matches_file(skill, file_path) for file_path in files)] if files else []
+    if not relevant:
+        relevant = skills[:12]
+    loaded_raw = [str(item) for item in list(getattr(session, "skills_loaded", None) or getattr(session, "skill_paths_loaded", None) or []) if str(item)]
+    loaded_keys = {item.lower() for item in loaded_raw}
+    loaded = [
+        skill
+        for skill in relevant
+        if str(getattr(skill, "id", "")).lower() in loaded_keys
+        or str(getattr(skill, "domain", "")).lower() in loaded_keys
+        or str(getattr(skill, "skill_path", "")).lower() in loaded_keys
+    ]
+    loaded_count = len(loaded) if relevant else len(loaded_raw)
+    relevant_count = len(relevant)
+    percent = round((loaded_count / relevant_count) * 100) if relevant_count else 100 if loaded_raw else 0
+    return {
+        "loaded_count": loaded_count,
+        "relevant_count": relevant_count,
+        "coverage_percent": max(0, min(100, percent)),
+        "loaded_skills": [_skill_label(skill) for skill in loaded] or loaded_raw,
+        "relevant_skills": [_skill_label(skill) for skill in relevant],
+        "zero_loaded_relevant": relevant_count > 0 and loaded_count == 0,
+    }
+
+
 def enrich_risk(
     base_score: int,
     base_reasons: list[str],
     *,
     compliance: dict[str, Any] | None,
-) -> tuple[int, list[str]]:
+    sensitivity_tier: str = "internal",
+    risk_policy: dict[str, Any] | None = None,
+) -> tuple[int, list[str], list[dict[str, Any]]]:
     if not compliance:
-        return base_score, base_reasons
-    score = int(base_score)
-    reasons = list(base_reasons)
-    if bool(compliance.get("full_access")):
-        score = max(score, 90)
-        reasons.append("full filesystem access")
-    if str(compliance.get("access_scope") or "").strip().lower() == "full-access":
-        score = max(score, 85)
-        reasons.append("full access scope")
-    approval_policy = str(compliance.get("approval_policy") or "").lower()
-    sandbox_policy = str(compliance.get("sandbox_policy") or "").lower()
-    if any(token in f"{approval_policy} {sandbox_policy}" for token in ("auto", "autonomous")):
-        score += 12
-        reasons.append("auto-review policy")
-    mcp_tools = compliance.get("mcp_tools") if isinstance(compliance.get("mcp_tools"), list) else []
-    if mcp_tools:
-        score += min(20, 6 + len(mcp_tools) * 2)
-        reasons.append(f"{len(mcp_tools)} MCP tool(s) used")
-    metrics = compliance.get("activity_metrics") if isinstance(compliance.get("activity_metrics"), dict) else {}
-    command_count = int(metrics.get("commands") or 0)
-    if command_count:
-        score += min(15, command_count * 2)
-        reasons.append(f"{command_count} shell command(s)")
-    if str(compliance.get("github_enrichment_status") or "") == "missing":
-        score += 10
-        reasons.append("missing GitHub repo/PR/commit join evidence")
-    return max(0, min(100, score)), reasons
+        return base_score, base_reasons, []
+    score, _level, reasons, signals, contributors = score_agent_run_risk_breakdown(compliance, sensitivity_tier=sensitivity_tier, policy=risk_policy)
+    compliance["risk_signals"] = signals
+    return max(base_score, score), list(dict.fromkeys([*base_reasons, *reasons])), contributors
 
 
 def feed_event_view(event: object, repo: object | None, skill: object | None, session: object | None = None) -> dict[str, Any]:
@@ -276,7 +312,7 @@ def feed_event_view(event: object, repo: object | None, skill: object | None, se
     }
 
 
-def session_feed_event_view(session: object, repo: object | None, skills: dict[str, object] | None = None, compliance: dict[str, Any] | None = None) -> dict[str, Any]:
+def session_feed_event_view(session: object, repo: object | None, skills: dict[str, object] | None = None, compliance: dict[str, Any] | None = None, risk_policy: dict[str, Any] | None = None) -> dict[str, Any]:
     """Project an agent session into the live feed so activity is visible before skill-load telemetry exists."""
     skill_map = skills or {}
     loaded = list(getattr(session, "skills_loaded", None) or getattr(session, "skill_paths_loaded", None) or [])
@@ -292,7 +328,13 @@ def session_feed_event_view(session: object, repo: object | None, skills: dict[s
     outcome = normalized_outcome(str(getattr(session, "outcome", None) or ""), ended)
     base_score = risk_score(action_class, sensitivity, files, signature, outcome)
     base_reasons = risk_reasons(action_class, sensitivity, files, signature, outcome)
-    score, reasons = enrich_risk(base_score, base_reasons, compliance=compliance)
+    coverage = skill_coverage_for_session(session, skill_map)
+    scoring_compliance = dict(compliance or {})
+    scoring_compliance["skill_coverage"] = coverage
+    score, reasons, contributors = enrich_risk(base_score, base_reasons, compliance=scoring_compliance, sensitivity_tier=sensitivity, risk_policy=risk_policy)
+    if compliance is not None:
+        compliance["risk_signals"] = scoring_compliance.get("risk_signals")
+    danger_signal = bool((compliance or {}).get("risk_signals") and any((compliance or {}).get("risk_signals", {}).values()))
     activity_at = getattr(session, "last_artifact_at", None) or getattr(session, "session_start", None) or getattr(session, "created_at", None)
     repo_name = getattr(repo, "full_name", None) or getattr(repo, "name", None) or "Unknown repo"
     session_id = str(getattr(session, "session_id", "") or getattr(session, "id", ""))
@@ -323,8 +365,10 @@ def session_feed_event_view(session: object, repo: object | None, skills: dict[s
         "trigger": linked_external_ticket(getattr(session, "task_description", None), getattr(session, "notes", None)),
         "risk_score": score,
         "risk_band": risk_band(score),
-        "risk_level": risk_level(score),
+        "risk_level": risk_level_for_score(score, risk_policy, danger_signal=danger_signal),
         "risk_reasons": reasons,
+        "risk_contributors": contributors,
+        "skill_coverage": coverage,
         "compliance_status": compliance_status(compliance),
         "policy_violations": list((compliance or {}).get("policy_violations") or []),
         "human_next_action": human_next_action(compliance, risk=score),
@@ -356,7 +400,7 @@ def session_feed_event_view(session: object, repo: object | None, skills: dict[s
     }
 
 
-def session_view(session: object, repo: object | None, skills: dict[str, object] | None = None, compliance: dict[str, Any] | None = None) -> dict[str, Any]:
+def session_view(session: object, repo: object | None, skills: dict[str, object] | None = None, compliance: dict[str, Any] | None = None, risk_policy: dict[str, Any] | None = None) -> dict[str, Any]:
     skill_map = skills or {}
     loaded = list(getattr(session, "skills_loaded", None) or getattr(session, "skill_paths_loaded", None) or [])
     resolved_skills = [skill_map[item] for item in loaded if item in skill_map]
@@ -369,7 +413,13 @@ def session_view(session: object, repo: object | None, skills: dict[str, object]
     outcome = normalized_outcome(str(getattr(session, "outcome", None) or ""), ended)
     base_score = risk_score(action_class, sensitivity, files, signature, outcome)
     base_reasons = risk_reasons(action_class, sensitivity, files, signature, outcome)
-    score, reasons = enrich_risk(base_score, base_reasons, compliance=compliance)
+    coverage = skill_coverage_for_session(session, skill_map)
+    scoring_compliance = dict(compliance or {})
+    scoring_compliance["skill_coverage"] = coverage
+    score, reasons, contributors = enrich_risk(base_score, base_reasons, compliance=scoring_compliance, sensitivity_tier=sensitivity, risk_policy=risk_policy)
+    if compliance is not None:
+        compliance["risk_signals"] = scoring_compliance.get("risk_signals")
+    danger_signal = bool((compliance or {}).get("risk_signals") and any((compliance or {}).get("risk_signals", {}).values()))
     started = getattr(session, "session_start", None) or getattr(session, "created_at", None)
     return {
         "id": str(getattr(session, "id", "")),
@@ -390,8 +440,10 @@ def session_view(session: object, repo: object | None, skills: dict[str, object]
         "trigger": linked_external_ticket(getattr(session, "task_description", None), getattr(session, "notes", None)),
         "risk_score": score,
         "risk_band": risk_band(score),
-        "risk_level": risk_level(score),
+        "risk_level": risk_level_for_score(score, risk_policy, danger_signal=danger_signal),
         "risk_reasons": reasons,
+        "risk_contributors": contributors,
+        "skill_coverage": coverage,
         "compliance_status": compliance_status(compliance),
         "policy_violations": list((compliance or {}).get("policy_violations") or []),
         "human_next_action": human_next_action(compliance, risk=score),
@@ -417,9 +469,78 @@ def session_view(session: object, repo: object | None, skills: dict[str, object]
     }
 
 
-def replay_timeline(session: object, repo: object | None) -> list[dict[str, Any]]:
+def _append_trace_step(
+    timeline: list[dict[str, Any]],
+    *,
+    action: str,
+    action_class: str,
+    label: str,
+    target: str = "",
+    timestamp: str | None = None,
+    detail: str = "",
+    risk_score_value: int | None = None,
+    result: dict[str, Any] | None = None,
+    tool_call: dict[str, Any] | None = None,
+) -> None:
+    score = risk_score_value if risk_score_value is not None else risk_score(action_class, "internal", [target] if target else [])
+    timeline.append(
+        {
+            "index": len(timeline),
+            "timestamp": timestamp,
+            "type": action,
+            "action": action,
+            "action_class": action_class,
+            "label": label,
+            "target": target,
+            "detail": detail,
+            "reasoning": detail or None,
+            "tool_call": tool_call,
+            "result": result or {},
+            "policy_decision": "allowed",
+            "file_diff": detail,
+            "risk_score": score,
+            "risk_band": risk_band(score),
+            "risk_flag": score >= 70,
+        }
+    )
+
+
+def replay_timeline(session: object, repo: object | None, compliance: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     artifacts = [item for item in list(getattr(session, "produced_artifacts", []) or []) if isinstance(item, dict)]
     timeline: list[dict[str, Any]] = []
+    started_at = isoformat(getattr(session, "session_start", None) or getattr(session, "created_at", None))
+    _append_trace_step(
+        timeline,
+        action="session_start",
+        action_class="read",
+        label="Session started",
+        target=str(getattr(session, "session_id", "") or getattr(session, "id", "")),
+        timestamp=started_at,
+        detail=getattr(session, "task_description", None) or "",
+        risk_score_value=8,
+    )
+    details = (compliance or {}).get("activity_details") if isinstance((compliance or {}).get("activity_details"), dict) else {}
+    for item in details.get("searches") or []:
+        _append_trace_step(timeline, action="search", action_class="read", label="Searched codebase", target=str(item), timestamp=started_at, risk_score_value=12)
+    for item in details.get("explored_files") or []:
+        _append_trace_step(timeline, action="explore", action_class="read", label="Explored file", target=str(item), timestamp=started_at, risk_score_value=16)
+    for item in details.get("commands") or []:
+        score = risk_score("exec", repo_sensitivity_tier(repo), [])
+        findings = classify_agent_command_danger(str(item))
+        risk_boost = 90 if any(finding["severity"] == "critical" for finding in findings) else 75 if any(finding["severity"] == "high" for finding in findings) else 55 if findings else score
+        _append_trace_step(
+            timeline,
+            action="command",
+            action_class="exec",
+            label="Ran shell command",
+            target=str(item),
+            timestamp=started_at,
+            detail=findings[0]["reason"] if findings else "",
+            risk_score_value=max(score, risk_boost),
+            result={"danger_findings": findings} if findings else None,
+        )
+    for item in details.get("tools") or []:
+        _append_trace_step(timeline, action="tool", action_class="network", label="Called tool", target=str(item), timestamp=started_at, risk_score_value=44)
     for index, artifact in enumerate(artifacts):
         action_class = action_class_for_event(artifact=artifact)
         file_path = str(artifact.get("file_path") or artifact.get("path") or "")
@@ -430,44 +551,48 @@ def replay_timeline(session: object, repo: object | None) -> list[dict[str, Any]
             "verified",
             str(getattr(session, "outcome", None) or "allowed"),
         )
-        timeline.append(
-            {
-                "index": index,
-                "timestamp": str(artifact.get("ts") or isoformat(getattr(session, "created_at", None)) or ""),
-                "action": str(artifact.get("tool") or "tool"),
-                "action_class": action_class,
-                "reasoning": getattr(session, "transcript_summary", None),
-                "tool_call": {"tool": artifact.get("tool"), "file_path": file_path},
-                "result": {"after_hash": artifact.get("after_hash")},
-                "policy_decision": "allowed",
-                "file_diff": str(artifact.get("diff") or ""),
-                "risk_score": score,
-                "risk_band": risk_band(score),
-            }
+        _append_trace_step(
+            timeline,
+            action="edit" if action_class == "write" else "tool",
+            action_class=action_class,
+            label="Edited file" if action_class == "write" else str(artifact.get("tool") or "Tool action"),
+            target=file_path,
+            timestamp=str(artifact.get("ts") or isoformat(getattr(session, "created_at", None)) or ""),
+            detail=str(artifact.get("diff") or getattr(session, "transcript_summary", None) or ""),
+            risk_score_value=score,
+            result={"after_hash": artifact.get("after_hash")},
+            tool_call={"tool": artifact.get("tool"), "file_path": file_path},
         )
-    if timeline:
-        return timeline
 
     code = str(getattr(session, "code_produced", None) or "")
-    if not code:
-        return []
-    chunks = [chunk.strip() for chunk in code.split("\n\n") if chunk.strip()] or [code]
-    for index, chunk in enumerate(chunks):
-        timeline.append(
-            {
-                "index": index,
-                "timestamp": isoformat(getattr(session, "created_at", None)),
-                "action": "produced code",
-                "action_class": "write",
-                "reasoning": getattr(session, "transcript_summary", None),
-                "tool_call": None,
-                "result": {"excerpt": chunk[:240]},
-                "policy_decision": "allowed",
-                "file_diff": chunk,
-                "risk_score": risk_score("write", repo_sensitivity_tier(repo), list(getattr(session, "files_touched", []) or [])),
-                "risk_band": risk_band(risk_score("write", repo_sensitivity_tier(repo), list(getattr(session, "files_touched", []) or []))),
-            }
-        )
+    if code and len(timeline) <= 1:
+        chunks = [chunk.strip() for chunk in code.split("\n\n") if chunk.strip()] or [code]
+        for chunk in chunks:
+            score = risk_score("write", repo_sensitivity_tier(repo), list(getattr(session, "files_touched", []) or []))
+            _append_trace_step(
+                timeline,
+                action="edit",
+                action_class="write",
+                label="Produced code",
+                target=", ".join(list(getattr(session, "files_touched", []) or [])[:2]),
+                timestamp=isoformat(getattr(session, "created_at", None)),
+                detail=chunk,
+                risk_score_value=score,
+                result={"excerpt": chunk[:240]},
+            )
+    ended_at = isoformat(getattr(session, "session_end", None) or getattr(session, "closed_at", None))
+    _append_trace_step(
+        timeline,
+        action="finish" if ended_at else "pause",
+        action_class="read",
+        label="Session finished" if ended_at else "Session still in progress",
+        target=str(getattr(session, "outcome", None) or "in progress"),
+        timestamp=ended_at or started_at,
+        detail=getattr(session, "transcript_summary", None) or "",
+        risk_score_value=int((compliance or {}).get("risk_score") or getattr(session, "risk_score", 0) or 0),
+    )
+    for index, item in enumerate(timeline):
+        item["index"] = index
     return timeline
 
 

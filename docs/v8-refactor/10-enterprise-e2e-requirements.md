@@ -619,6 +619,118 @@ Before shipping any UI feature, ask and answer in the PR/evaluator notes:
 6. Are empty/error/unattributed states actionable?
 7. Is raw metadata transformed into a clear product explanation?
 
+### 8A.1 No-compromise enterprise UX gates
+
+These gates apply to every automation-built dashboard slice. A feature is not complete
+when the data is present; it is complete only when an enterprise reviewer can scan,
+decide, and act without reading raw rows or JSON.
+
+- **Triage over tables.** Dangerous runs must announce themselves visually; benign,
+  grounded runs must recede. Security leads and compliance reviewers scan for danger
+  first, then drill into evidence.
+- **Overview before evidence.** Start every surface with the overall state, risk,
+  coverage, trend, and primary action. Only then expose grouped entities, runs, and
+  event-level details.
+- **Skill coverage is first-class.** Because Skillayer's thesis is that agents grounded
+  in skill docs are safer, skill coverage must appear in summary KPIs, run/session
+  cards, and run-detail verdicts. "Read `SKILL.md` as a file" is not the same as
+  "loaded skill docs as agent context"; the UX must explain the difference.
+- **One primary action.** Each review surface must have exactly one loud primary action.
+  Secondary actions are quiet outline/ghost controls.
+- **No raw metadata leak.** No raw JSON, duplicate file panels, fabricated network-call
+  counts, or repeated boilerplate such as "Agent session - No skill loads recorded".
+- **No noisy repetition.** Repeated evidence must be grouped by issue type, severity,
+  entity, or step range. Do not render long piles of duplicate one-line cards.
+- **Responsive proof required.** Browser verification at desktop and mobile widths is a
+  release gate. Screenshots or equivalent browser checks must prove no clipped text,
+  broken radii, overlapping controls, or unusable horizontal sprawl.
+
+### 8A.2 Activity Live feed enterprise design contract
+
+The Activity Live feed (`/activity/live-feed`) is the enterprise triage queue. It must
+let a security or governance lead scan 50 agent runs in a few seconds and identify the
+runs requiring attention.
+
+Required design:
+
+- Constrain the feed column to approximately `1080px` and center it; do not stretch
+  session cards across ultra-wide monitors.
+- Keep the KPI strip, compact one-row filters, active-filter chips, Live indicator, and
+  Grouped/Chronological toggle.
+- KPI tiles:
+  - Agent sessions and Spend are neutral secondary-surface tiles.
+  - Skill coverage and High-risk runs become alarm tiles only when unhealthy.
+  - Low coverage must include a visible track pinned to the real value and a context
+    line such as "50 of 50 runs loaded 0 skills".
+- Grouped view default sort is highest risk first, not pure reverse chronology.
+- Every session card has:
+  - a 4px inner risk rail preserving rounded corners (`red >=70`, `amber 40-69`,
+    `green <40`);
+  - a right-side verdict column with prominent risk score, band label, skill-coverage
+    segments, and a quiet Replay button;
+  - a left header with agent, model, repo, timestamp, and correctly cased outcome;
+  - a plain-language summary sentence;
+  - one quiet metadata line, not a chip soup;
+  - specific danger chips from the shared classifier, or a calm "Grounded · no flags"
+    chip for clean runs.
+- Expanded state shows individual actions as a compact list, not nested mini-cards and
+  not duplicate risk badges.
+- Forbidden regressions: "1 actions" chips, giant solid Replay blocks, repeated
+  "Agent session - No skill loads recorded", uniform card styling that hides risk, and
+  raw event tables as the default grouped experience.
+
+Latest verification snapshot (2026-05-21): the live feed uses the constrained triage
+layout, alarm KPI tiles, risk rails, verdict columns, highest-risk-first grouped sort,
+quiet Replay buttons, clean danger chips, and compact expanded action lists.
+
+### 8A.3 Activity Replay enterprise forensic design contract
+
+The Activity Replay page (`/activity/replay/[sessionId]?repo=...`) is the single-run
+forensic review surface. It must answer, in order: what happened, why it was flagged,
+and what the reviewer should do.
+
+Required design:
+
+- Route naming uses `[sessionId]` consistently. Any links from Live feed or other
+  surfaces must resolve to `/activity/replay/[sessionId]?repo=...`.
+- Header shows agent + repo, truncated/copyable run id, one metadata line, and actions.
+  "Acknowledge run" is the only primary/loud action; "Create policy rule" and "Export"
+  are quiet secondary actions.
+- Risk verdict panel:
+  - score marker is clamped and never clips at `0` or `100`;
+  - contributor bars sum exactly to the displayed risk score;
+  - verdict facts size naturally and do not create giant empty boxes;
+  - recommended action is concise and concrete.
+- Replay trace is an interactive serpentine flowchart:
+  - D3 computes node coordinates;
+  - grouped node labels use clean title case (`Searches x2`, `Commands x7`,
+    `Tools x5`, `Explored x14`);
+  - destructive/high-risk nodes stand out with decisive red styling without chaotic
+    oversized rings;
+  - clicking a grouped node selects its first step, while expanding requires an
+    explicit count/expand affordance;
+  - the detail panel shows exact command/file/query, policy decision, action type,
+    result, risk score, and flagged severity/title/reason.
+- Flagged Activity is a grouped triage panel:
+  - group by `{severity, title}`;
+  - show severity, title, count, representative commands, reason, and step links;
+  - expand group to show all matching commands;
+  - sort Critical, High, Medium, then count descending.
+- Evidence stays compact:
+  - summary strip, files-touched tree, shell-command dense log, searches, and network;
+  - network calls mean real outbound HTTP only;
+  - empty states are muted single lines;
+  - long commands scroll/wrap inside monospace cells without breaking layout.
+- The shared danger classifier is the single source of truth for Replay flagged
+  activity, Live feed danger chips, and risk contributors. It must use shell-token
+  parsing for redirects so quoted strings, regexes, sed expressions, heredocs, and
+  JavaScript/Python comparisons containing `>` do not become false destructive flags.
+
+Latest verification snapshot (2026-05-21): the Replay page has grouped flagged
+findings, tokenized classifier regression tests, unclipped risk marker, clean flowchart
+labels, explicit group expansion, one primary action, no raw JSON, no duplicated file
+panels, and no fabricated network-call counts.
+
 ---
 
 ## 9. Settings & env vars

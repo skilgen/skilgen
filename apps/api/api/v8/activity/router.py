@@ -21,6 +21,7 @@ from apps.api.api.v8.activity.view_model import (
     standalone_replay_html,
     replay_timeline,
 )
+from apps.api.api.services.agent_risk_policy import agent_risk_policy_from_org
 from packages.db.database import get_db
 from packages.db.models import AgentSession, AuditEvent, Org, Repo, Skill, SkillUsageEvent
 
@@ -563,6 +564,8 @@ async def _feed_items(
     filters: dict[str, str | None] | None = None,
 ) -> list[dict[str, Any]]:
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
+    org = await db.get(Org, org_id)
+    risk_policy = agent_risk_policy_from_org(org)
     statement = select(SkillUsageEvent).where(SkillUsageEvent.org_id == org_id, SkillUsageEvent.loaded_at >= cutoff)
     if repo_id:
         statement = statement.where(SkillUsageEvent.repo_id == repo_id)
@@ -616,7 +619,7 @@ async def _feed_items(
         existing_sessions = {str(item.get("session_db_id") or "") for item in items if item.get("session_db_id")}
         compliance = await _compliance_metrics_by_session(db, org_id, [session.session_id for session in sessions])
         session_items = [
-            session_feed_event_view(session, repos.get(session.repo_id), skills, compliance.get(str(session.session_id)))
+            session_feed_event_view(session, repos.get(session.repo_id), skills, compliance.get(str(session.session_id)), risk_policy)
             for session in sessions
             if str(session.id) not in existing_sessions
         ]
@@ -873,7 +876,9 @@ async def activity_sessions(
     repos = await _repos_by_id(db, [session.repo_id for session in sessions])
     skills = await _session_skill_map(db, sessions)
     compliance = await _compliance_metrics_by_session(db, org_id, [session.session_id for session in sessions])
-    items = [session_view(session, repos.get(session.repo_id), skills, compliance.get(str(session.session_id))) for session in sessions]
+    org = await db.get(Org, org_id)
+    risk_policy = agent_risk_policy_from_org(org)
+    items = [session_view(session, repos.get(session.repo_id), skills, compliance.get(str(session.session_id)), risk_policy) for session in sessions]
     if risk_band_filter:
         items = [item for item in items if item["risk_band"] == risk_band_filter]
     return {"sessions": items, "total": total, "rollup": _rollup(items)}
@@ -890,7 +895,9 @@ async def activity_sessions_rollup(
     repos = await _repos_by_id(db, [session.repo_id for session in sessions])
     skills = await _session_skill_map(db, sessions)
     compliance = await _compliance_metrics_by_session(db, org_id, [session.session_id for session in sessions])
-    items = [session_view(session, repos.get(session.repo_id), skills, compliance.get(str(session.session_id))) for session in sessions]
+    org = await db.get(Org, org_id)
+    risk_policy = agent_risk_policy_from_org(org)
+    items = [session_view(session, repos.get(session.repo_id), skills, compliance.get(str(session.session_id)), risk_policy) for session in sessions]
     return _rollup(items)
 
 
@@ -915,7 +922,8 @@ async def activity_session_detail(
     repo = await _repo_in_org(db, org_id, session.repo_id)
     skills = await _session_skill_map(db, [session])
     compliance = await _compliance_metrics_by_session(db, org_id, [session.session_id])
-    return {"session": session_view(session, repo, skills, compliance.get(str(session.session_id)))}
+    org = await db.get(Org, org_id)
+    return {"session": session_view(session, repo, skills, compliance.get(str(session.session_id)), agent_risk_policy_from_org(org))}
 
 
 @router.get("/repos/{repo_id}/activity/sessions/{session_id}/replay")
@@ -953,8 +961,9 @@ async def activity_replay(
             .order_by(AuditEvent.created_at)
         )
     ).scalars().all()
-    payload = session_view(session, repo, await _session_skill_map(db, [session]), compliance.get(str(session.session_id)))
-    timeline = replay_timeline(session, repo)
+    org = await db.get(Org, org_id)
+    payload = session_view(session, repo, await _session_skill_map(db, [session]), compliance.get(str(session.session_id)), agent_risk_policy_from_org(org))
+    timeline = replay_timeline(session, repo, compliance.get(str(session.session_id)))
     return {
         "session": payload,
         "timeline": timeline,
@@ -1023,6 +1032,11 @@ async def activity_heatmap(
                 },
             )
 
+        event_session_keys = {
+            str(_metadata_value(event.metadata_json or {}, "session_id", "agent_session_id", "conversation_id", "thread_id") or event.resource_id or event.id)
+            for event in event_rows
+        }
+
         for session in session_rows:
             when = session.session_start or session.created_at
             if not when:
@@ -1030,6 +1044,8 @@ async def activity_heatmap(
             platform = str(session.agent_runtime or "unknown")
             bucket = bucket_for(platform)
             session_key = str(session.session_id or session.id)
+            if session_key in event_session_keys:
+                continue
             messages = int(session.raw_message_count or 0)
             cell = bucket["cells"][int(when.hour)]
             cell["action_count"] += 1
@@ -1050,7 +1066,7 @@ async def activity_heatmap(
             if not when:
                 continue
             metadata = event.metadata_json or {}
-            provider = _metadata_value(metadata, "provider", "agent_provider", "source_provider") or str(event.resource_type or "unknown")
+            provider = _metadata_value(metadata, "agent_runtime", "runtime", "provider", "agent_provider", "source_provider") or str(event.resource_type or "unknown")
             source_record_types = [item.lower() for item in _metadata_list(metadata, "source_record_types", "source_record_type")]
             if provider.lower() == "openai" and any("codex" in item for item in source_record_types):
                 provider = "codex"

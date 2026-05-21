@@ -95,7 +95,8 @@ def test_replay_contract_returns_timeline_and_export_html() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["session"]["id"] == "sess_db"
-    assert payload["timeline"][0]["action"] == "Write"
+    assert payload["timeline"][0]["type"] == "session_start"
+    assert any(step["type"] == "edit" for step in payload["timeline"])
     assert "<!doctype html>" in payload["export_html"]
 
 

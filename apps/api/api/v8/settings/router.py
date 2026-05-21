@@ -15,6 +15,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from apps.api.api.auth import get_current_org_id
 from apps.api.api.routes import digest as legacy_digest
 from apps.api.api.services import audit
+from apps.api.api.services.agent_risk_policy import DEFAULT_AGENT_RISK_POLICY, agent_risk_policy_from_org, normalize_agent_risk_policy
 from apps.api.api.services.audit import get_actor_login
 from apps.api.api.v8.flags import is_v8, request_flag_cache
 from apps.api.api.v8.settings.anthropic_compliance_adapter import pull_anthropic_compliance_events
@@ -45,6 +46,12 @@ ADMIN_AUDIT_ROLLUP_LIMIT = 5000
 BILLING_UNLIMITED_SEAT_LIMIT = 999999
 BILLING_ATTENTION_STATUSES = {"past_due", "unpaid", "incomplete", "incomplete_expired"}
 PROVIDER_SYNC_CONNECTORS = {"openai-compliance", "anthropic-compliance"}
+DEFAULT_ADMIN_AUDIT_CONFIG = {
+    "default_window_days": 30,
+    "default_severity": "all",
+    "retention_days": 365,
+    "export_event_filter": "warnings",
+}
 
 
 class RolePayload(BaseModel):
@@ -81,6 +88,29 @@ class DigestPreviewPayload(BaseModel):
 
 class AutoJoinDomainPayload(BaseModel):
     enabled: bool = Field(default=True)
+
+
+class AgentRiskPolicyPayload(BaseModel):
+    critical_threshold: int = Field(default=DEFAULT_AGENT_RISK_POLICY["critical_threshold"], ge=0, le=100)
+    high_threshold: int = Field(default=DEFAULT_AGENT_RISK_POLICY["high_threshold"], ge=0, le=100)
+    medium_threshold: int = Field(default=DEFAULT_AGENT_RISK_POLICY["medium_threshold"], ge=0, le=100)
+    critical_requires_danger_signal: bool = True
+    full_access_score_floor: int = Field(default=DEFAULT_AGENT_RISK_POLICY["full_access_score_floor"], ge=0, le=100)
+    dangerous_command_score_floor: int = Field(default=DEFAULT_AGENT_RISK_POLICY["dangerous_command_score_floor"], ge=0, le=100)
+    sensitive_path_score_floor: int = Field(default=DEFAULT_AGENT_RISK_POLICY["sensitive_path_score_floor"], ge=0, le=100)
+    unknown_external_score_floor: int = Field(default=DEFAULT_AGENT_RISK_POLICY["unknown_external_score_floor"], ge=0, le=100)
+    unapproved_mcp_score_floor: int = Field(default=DEFAULT_AGENT_RISK_POLICY["unapproved_mcp_score_floor"], ge=0, le=100)
+    dangerous_command_patterns: list[str] = Field(default_factory=lambda: list(DEFAULT_AGENT_RISK_POLICY["dangerous_command_patterns"]))
+    sensitive_path_patterns: list[str] = Field(default_factory=lambda: list(DEFAULT_AGENT_RISK_POLICY["sensitive_path_patterns"]))
+    approved_external_domains: list[str] = Field(default_factory=lambda: list(DEFAULT_AGENT_RISK_POLICY["approved_external_domains"]))
+    approved_mcp_tools: list[str] = Field(default_factory=lambda: list(DEFAULT_AGENT_RISK_POLICY["approved_mcp_tools"]))
+
+
+class AdminAuditConfigPayload(BaseModel):
+    default_window_days: int = Field(default=DEFAULT_ADMIN_AUDIT_CONFIG["default_window_days"], ge=1, le=365)
+    default_severity: Literal["all", "info", "warning", "critical"] = "all"
+    retention_days: int = Field(default=DEFAULT_ADMIN_AUDIT_CONFIG["retention_days"], ge=30, le=2555)
+    export_event_filter: Literal["all", "warnings", "critical"] = "warnings"
 
 
 class DigestSendNowPayload(BaseModel):
@@ -1820,8 +1850,66 @@ async def get_settings_home(
             "login": org.login,
             "plan": org.plan,
         },
-        "tabs": ["teams", "rbac", "sso", "connectors", "admin-audit", "billing", "notifications"],
+        "tabs": ["teams", "rbac", "sso", "connectors", "risk-policy", "admin-audit", "billing", "notifications"],
     }
+
+
+@router.get("/risk-policy")
+async def get_agent_risk_policy(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    policy = agent_risk_policy_from_org(org)
+    return {
+        **policy,
+        "defaults": DEFAULT_AGENT_RISK_POLICY,
+        "updated_at": (dict(org.settings or {}).get("agent_risk_policy_updated_at") if isinstance(org.settings, dict) else None),
+    }
+
+
+@router.put("/risk-policy", dependencies=[Depends(require_permission("settings.write"))])
+async def update_agent_risk_policy(
+    org_id: str,
+    payload: AgentRiskPolicyPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    policy = normalize_agent_risk_policy(payload.model_dump())
+    settings = dict(org.settings or {}) if isinstance(org.settings, dict) else {}
+    settings["agent_risk_policy"] = policy
+    settings["agent_risk_policy_updated_at"] = datetime.now(UTC).isoformat()
+    org.settings = settings
+    flag_modified(org, "settings")
+    await audit.emit(
+        db,
+        org_id,
+        "settings.agent_risk_policy_updated",
+        "updated",
+        "Updated coding-agent risk criticality policy",
+        actor_login=get_actor_login(request),
+        resource_type="settings",
+        resource_id="agent_risk_policy",
+        metadata={
+            "critical_threshold": policy["critical_threshold"],
+            "critical_requires_danger_signal": policy["critical_requires_danger_signal"],
+            "dangerous_command_patterns": len(policy["dangerous_command_patterns"]),
+            "sensitive_path_patterns": len(policy["sensitive_path_patterns"]),
+            "approved_external_domains": len(policy["approved_external_domains"]),
+            "approved_mcp_tools": len(policy["approved_mcp_tools"]),
+        },
+    )
+    await db.commit()
+    return {**policy, "defaults": DEFAULT_AGENT_RISK_POLICY, "updated_at": settings["agent_risk_policy_updated_at"]}
 
 
 @router.get("/teams")
@@ -2688,6 +2776,83 @@ def _admin_audit_payload(
     }
 
 
+def _normalize_admin_audit_config(raw: Any | None = None) -> dict[str, object]:
+    values = dict(DEFAULT_ADMIN_AUDIT_CONFIG)
+    if isinstance(raw, dict):
+        values.update(raw)
+    try:
+        values["default_window_days"] = max(1, min(365, int(values.get("default_window_days", 30))))
+    except (TypeError, ValueError):
+        values["default_window_days"] = DEFAULT_ADMIN_AUDIT_CONFIG["default_window_days"]
+    try:
+        values["retention_days"] = max(30, min(2555, int(values.get("retention_days", 365))))
+    except (TypeError, ValueError):
+        values["retention_days"] = DEFAULT_ADMIN_AUDIT_CONFIG["retention_days"]
+    if values.get("default_severity") not in {"all", "info", "warning", "critical"}:
+        values["default_severity"] = DEFAULT_ADMIN_AUDIT_CONFIG["default_severity"]
+    if values.get("export_event_filter") not in {"all", "warnings", "critical"}:
+        values["export_event_filter"] = DEFAULT_ADMIN_AUDIT_CONFIG["export_event_filter"]
+    return values
+
+
+def _admin_audit_config_from_org(org: Org | None) -> dict[str, object]:
+    settings = dict(org.settings or {}) if org is not None and isinstance(org.settings, dict) else {}
+    return _normalize_admin_audit_config(settings.get("admin_audit_config"))
+
+
+@router.get("/admin-audit/config", dependencies=[Depends(require_permission("settings.admin_audit.read"))])
+async def get_admin_audit_config(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    return {
+        **_admin_audit_config_from_org(org),
+        "defaults": DEFAULT_ADMIN_AUDIT_CONFIG,
+    }
+
+
+@router.put("/admin-audit/config", dependencies=[Depends(require_permission("settings.write"))])
+async def update_admin_audit_config(
+    org_id: str,
+    payload: AdminAuditConfigPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> dict[str, object]:
+    await _assert_v8_org(org_id, current_org_id, db)
+    org = await db.get(Org, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Org not found")
+    config = _normalize_admin_audit_config(payload.model_dump())
+    settings = dict(org.settings or {}) if isinstance(org.settings, dict) else {}
+    settings["admin_audit_config"] = config
+    settings["admin_audit_config_updated_at"] = datetime.now(UTC).isoformat()
+    org.settings = settings
+    flag_modified(org, "settings")
+    await audit.emit(
+        db,
+        org_id,
+        "settings.admin_audit_config_updated",
+        "updated",
+        "Updated admin audit defaults",
+        actor_login=get_actor_login(request),
+        resource_type="settings",
+        resource_id="admin_audit_config",
+        metadata=config,
+    )
+    await db.commit()
+    return {
+        **config,
+        "defaults": DEFAULT_ADMIN_AUDIT_CONFIG,
+        "updated_at": settings["admin_audit_config_updated_at"],
+    }
+
+
 @router.get("/admin-audit", dependencies=[Depends(require_permission("settings.admin_audit.read"))])
 async def get_admin_audit(
     org_id: str,
@@ -2695,13 +2860,18 @@ async def get_admin_audit(
     event_type: str | None = None,
     resource_type: str | None = None,
     severity: Literal["info", "warning", "critical"] | None = None,
-    window_days: int = 30,
+    window_days: int | None = None,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id),
 ) -> dict[str, object]:
     await _assert_v8_org(org_id, current_org_id, db)
-    window_days = max(1, min(window_days, 180))
+    org = await db.get(Org, org_id)
+    config = _admin_audit_config_from_org(org)
+    window_days = window_days if window_days is not None else int(config["default_window_days"])
+    if severity is None and config.get("default_severity") != "all":
+        severity = str(config["default_severity"])  # type: ignore[assignment]
+    window_days = max(1, min(window_days, 365))
     limit = max(1, min(limit, 100))
     filters: list[Any] = [
         AuditEvent.org_id == org_id,

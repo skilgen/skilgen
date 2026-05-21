@@ -69,9 +69,10 @@ def test_replay_timeline_uses_artifact_steps() -> None:
 
     timeline = replay_timeline(session, repo)
 
-    assert timeline[0]["action"] == "Write"
-    assert timeline[0]["action_class"] == "write"
-    assert timeline[0]["policy_decision"] == "allowed"
+    assert timeline[0]["type"] == "session_start"
+    edit_step = next(step for step in timeline if step["type"] == "edit")
+    assert edit_step["action_class"] == "write"
+    assert edit_step["policy_decision"] == "allowed"
 
 
 def test_risk_score_band_boundaries() -> None:

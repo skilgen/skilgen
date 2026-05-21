@@ -2,6 +2,7 @@ import { Filter, ListChecks, ShieldAlert } from "lucide-react";
 
 import { EmptyPanel, Metric, SettingsShell } from "../_components/settings-shell";
 import { loadSettingsContext, v8Fetch } from "../_components/settings-data";
+import { AdminAuditConfigPanel, type AdminAuditConfig } from "./admin-audit-config-panel";
 
 type AuditEvent = {
   id: string;
@@ -41,6 +42,13 @@ type AdminAuditPayload = {
   events: AuditEvent[];
 };
 
+const fallbackConfig: AdminAuditConfig = {
+  default_window_days: 30,
+  default_severity: "all",
+  retention_days: 365,
+  export_event_filter: "warnings",
+};
+
 function value(params: URLSearchParams, key: string) {
   return params.get(key) ?? "";
 }
@@ -60,10 +68,14 @@ export default async function AdminAuditSettingsPage({ searchParams }: { searchP
     if (current) params.set(key, current);
   }
   const query = params.toString();
-  const payload = await v8Fetch<AdminAuditPayload>(accessToken, org.id, `/admin-audit${query ? `?${query}` : ""}`);
+  const [payload, config] = await Promise.all([
+    v8Fetch<AdminAuditPayload>(accessToken, org.id, `/admin-audit${query ? `?${query}` : ""}`),
+    v8Fetch<AdminAuditConfig>(accessToken, org.id, "/admin-audit/config"),
+  ]);
   const events = payload?.events ?? [];
   const summary = payload?.summary ?? { events: 0, actors: 0, critical: 0, warnings: 0, resource_types: 0 };
   const windowDays = payload?.window_days ?? (Number(value(params, "window_days")) || 30);
+  const auditConfig = config ?? fallbackConfig;
 
   return (
     <SettingsShell active="Admin audit">
@@ -75,6 +87,8 @@ export default async function AdminAuditSettingsPage({ searchParams }: { searchP
         <Metric label="Resources" value={summary.resource_types} sub="Touched settings areas" />
       </div>
 
+      <AdminAuditConfigPanel accessToken={accessToken} initial={auditConfig} orgId={org.id} />
+
       <form className="grid gap-3 rounded-[8px] border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-4 md:grid-cols-[repeat(5,minmax(0,1fr))_auto]" method="get">
         <input className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={value(params, "actor")} name="actor" placeholder="Actor" />
         <input className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={value(params, "event_type")} name="event_type" placeholder="Event type" />
@@ -85,11 +99,12 @@ export default async function AdminAuditSettingsPage({ searchParams }: { searchP
           <option value="warning">Warning</option>
           <option value="critical">Critical</option>
         </select>
-        <select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={value(params, "window_days") || "30"} name="window_days">
+        <select className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={value(params, "window_days") || String(auditConfig.default_window_days)} name="window_days">
           <option value="7">7 days</option>
           <option value="30">30 days</option>
           <option value="90">90 days</option>
           <option value="180">180 days</option>
+          <option value="365">365 days</option>
         </select>
         <button className="inline-flex items-center justify-center gap-2 rounded-md bg-[color:var(--accent-primary)] px-3 py-2 text-sm font-semibold text-[color:var(--bg-base)]" type="submit">
           <Filter className="h-4 w-4" />

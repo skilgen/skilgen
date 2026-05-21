@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { Bell, Building2, CreditCard, ListChecks, LockKeyhole, Plug, ShieldCheck } from "lucide-react";
+import { Bell, Building2, CreditCard, ListChecks, LockKeyhole, Plug, ShieldAlert, ShieldCheck } from "lucide-react";
 
 const tabs = [
   { href: "/settings/teams", label: "Teams", icon: Building2 },
   { href: "/settings/rbac", label: "RBAC", icon: LockKeyhole },
   { href: "/settings/sso", label: "SSO", icon: ShieldCheck },
   { href: "/settings/connectors", label: "Connectors", icon: Plug },
+  { href: "/settings/risk-policy", label: "Risk policy", icon: ShieldAlert },
   { href: "/settings/admin-audit", label: "Admin audit", icon: ListChecks },
   { href: "/settings/billing", label: "Billing", icon: CreditCard },
   { href: "/settings/notifications", label: "Notifications", icon: Bell },

@@ -12,20 +12,15 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.api.auth import get_current_org_id
+from apps.api.api.services.agent_risk_policy import agent_risk_policy_from_org, risk_level_for_score, score_agent_run_risk
 from packages.db.database import get_db
-from packages.db.models import AgentSession, AuditEvent, Commit, PullRequest, Repo
+from packages.db.models import AgentSession, AuditEvent, Commit, Org, PullRequest, Repo
 
 
 router = APIRouter(prefix="/orgs", tags=["agent-runs"])
 
 def _risk_level(score: int) -> str:
-    if score >= 85:
-        return "critical"
-    if score >= 70:
-        return "high"
-    if score >= 35:
-        return "medium"
-    return "low"
+    return risk_level_for_score(score, danger_signal=True)
 
 
 def _compliance_status_from_metadata(metadata: dict[str, Any]) -> str:
@@ -44,55 +39,8 @@ def _compliance_status_from_metadata(metadata: dict[str, Any]) -> str:
 
 
 def _risk_score_from_metadata(metadata: dict[str, Any], *, sensitivity_tier: str = "internal") -> tuple[int, list[str]]:
-    metrics = metadata.get("activity_metrics") if isinstance(metadata.get("activity_metrics"), dict) else {}
-    edited = int(metrics.get("edited_files") or metadata.get("edited_files") or 0)
-    commands = int(metrics.get("commands") or metadata.get("commands") or 0)
-    tool_permissions = metadata.get("tool_permissions") if isinstance(metadata.get("tool_permissions"), list) else []
-    mcp_tools = metadata.get("mcp_tools") if isinstance(metadata.get("mcp_tools"), list) else []
-    file_targets = metadata.get("file_targets") if isinstance(metadata.get("file_targets"), list) else []
-
-    action_class = "write" if edited > 0 or file_targets else "exec" if commands > 0 else "network" if tool_permissions else "read"
-    base = {"read": 8, "write": 34, "exec": 48, "network": 44}.get(action_class, 10)
-    sensitivity = {
-        "public": 0,
-        "internal": 5,
-        "confidential": 18,
-        "restricted": 28,
-        "regulated": 32,
-        "sensitive": 18,
-        "unknown": 5,
-    }.get(str(sensitivity_tier or "internal").lower(), 5)
-    scope = min(20, len({str(path) for path in file_targets if path}) * 3)
-    score = base + sensitivity + scope
-    reasons = [f"{action_class} activity"]
-    if str(sensitivity_tier or "").strip().lower() not in {"", "public"}:
-        reasons.append(f"{str(sensitivity_tier).lower()} repository")
-    if file_targets:
-        reasons.append(f"{len({str(path) for path in file_targets if path})} file targets")
-
-    if bool(metadata.get("full_access")):
-        score = max(score, 90)
-        reasons.append("full filesystem access")
-    if str(metadata.get("access_scope") or "").strip().lower() == "full-access":
-        score = max(score, 85)
-        reasons.append("full access scope")
-    approval_policy = str(metadata.get("approval_policy") or "").strip().lower()
-    sandbox_policy = str(metadata.get("sandbox_policy") or "").strip().lower()
-    policy = f"{approval_policy} {sandbox_policy}".strip()
-    if any(token in policy for token in ("auto", "autonomous")):
-        score += 12
-        reasons.append("auto-review policy")
-    if mcp_tools:
-        score += min(20, 6 + len(mcp_tools) * 2)
-        reasons.append(f"{len(mcp_tools)} MCP tool(s) used")
-    if commands:
-        score += min(15, commands * 2)
-        reasons.append(f"{commands} shell command(s)")
-    if str(metadata.get("github_enrichment_status") or "") == "missing":
-        score += 10
-        reasons.append("missing GitHub join evidence")
-
-    return max(0, min(100, int(score))), reasons
+    score, _level, reasons, _signals = score_agent_run_risk(metadata, sensitivity_tier=sensitivity_tier)
+    return score, reasons
 
 
 class AgentRunAgent(BaseModel):
@@ -189,8 +137,11 @@ def _code_text(payload: AgentRunPayload, artifacts: list[dict[str, Any]]) -> str
 def _metadata_string(metadata: dict[str, Any], *keys: str) -> str | None:
     for key in keys:
         value = metadata.get(key)
-        if value not in {None, ""}:
-            return str(value)
+        if value is None or value == "":
+            continue
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, sort_keys=True)
+        return str(value)
     return None
 
 
@@ -668,12 +619,17 @@ async def ingest_agent_run(
         audit_event = _agent_compliance_audit_event(org_id, payload, repo, session_key, runtime, artifacts, pr_context)
         audit_event.created_at = ended_at or started_at
         compliance_metadata = audit_event.metadata_json if isinstance(getattr(audit_event, "metadata_json", None), dict) else {}
-        risk_score, risk_reasons = _risk_score_from_metadata(
+        org = await db.get(Org, org_id) if hasattr(db, "get") else None
+        risk_policy = agent_risk_policy_from_org(org)
+        risk_score, risk_level, risk_reasons, risk_signals = score_agent_run_risk(
             compliance_metadata,
             sensitivity_tier=str(getattr(repo, "sensitivity_tier", None) or "internal"),
+            policy=risk_policy,
         )
+        compliance_metadata["risk_signals"] = risk_signals
+        compliance_metadata["risk_policy_version"] = "agent-risk-policy-v1"
         session.risk_score = int(risk_score)
-        session.risk_level = _risk_level(int(risk_score))
+        session.risk_level = risk_level
         session.compliance_status = _compliance_status_from_metadata(compliance_metadata)
         session.permission_profile = str(compliance_metadata.get("permission_profile") or "") or None
         session.approval_policy = str(compliance_metadata.get("approval_policy") or "") or None

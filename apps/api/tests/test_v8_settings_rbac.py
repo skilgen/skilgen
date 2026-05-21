@@ -57,6 +57,12 @@ class EventDb:
         self.events = events
         self.statements: list[str] = []
         self.limits: list[int | None] = []
+        self.org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+
+    async def get(self, model: object, row_id: str) -> Org | None:
+        assert model is Org
+        assert row_id == self.org.id
+        return self.org
 
     async def execute(self, stmt: object) -> Result:
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
@@ -178,6 +184,7 @@ def test_v8_settings_router_is_registered() -> None:
     assert "/v8/orgs/{org_id}/settings/notifications/digest/preview" in paths
     assert "/v8/orgs/{org_id}/settings/notifications/digest/send-now" in paths
     assert "/v8/orgs/{org_id}/settings/admin-audit" in paths
+    assert "/v8/orgs/{org_id}/settings/admin-audit/config" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/agent-compliance" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/sync" in paths
     assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/credentials/test" in paths
@@ -398,6 +405,73 @@ def test_admin_audit_exposes_truncated_rollup_metadata() -> None:
 
     assert payload["summary"]["events"] == 5000
     assert payload["rollup"] == {"source_events": 5000, "limit": 5000, "truncated": True}
+
+
+def test_admin_audit_config_defaults_drive_query_when_filters_are_empty(monkeypatch) -> None:
+    events = [
+        AuditEvent(
+            id="evt-1",
+            org_id="org-1",
+            event_type="settings.rbac_role_created",
+            action="created",
+            actor_login="ravi",
+            resource_type="role",
+            resource_id="role-1",
+            summary="Created RBAC role",
+            severity="warning",
+            created_at=datetime(2026, 5, 11, 10, 0, 0),
+        )
+    ]
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    db = EventDb(events)
+    db.org.settings = {"admin_audit_config": {"default_window_days": 90, "default_severity": "warning"}}
+    response = asyncio.run(settings_router.get_admin_audit("org-1", db=db, current_org_id="org-1"))
+
+    assert response["window_days"] == 90
+    assert response["filters"]["severity"] == "warning"
+    assert db.limits == [5001, 50]
+
+
+def test_admin_audit_config_update_persists_and_audits(monkeypatch) -> None:
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    emitted: dict[str, object] = {}
+
+    async def emit(_db, org_id, event_type, action, summary, **kwargs):
+        emitted.update({"org_id": org_id, "event_type": event_type, "action": action, "summary": summary, **kwargs})
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+    monkeypatch.setattr(settings_router, "get_actor_login", lambda _request: "ravi")
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+    db = OrgDb(org)
+    request = Request({"type": "http", "headers": []})
+
+    response = asyncio.run(
+        settings_router.update_admin_audit_config(
+            "org-1",
+            settings_router.AdminAuditConfigPayload(
+                default_window_days=180,
+                default_severity="critical",
+                retention_days=730,
+                export_event_filter="critical",
+            ),
+            request,
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    assert response["default_window_days"] == 180
+    assert response["default_severity"] == "critical"
+    assert org.settings["admin_audit_config"]["retention_days"] == 730
+    assert emitted["event_type"] == "settings.admin_audit_config_updated"
+    assert db.committed is True
 
 
 def test_notifications_digest_preview_and_send_now_wrap_legacy(monkeypatch) -> None:

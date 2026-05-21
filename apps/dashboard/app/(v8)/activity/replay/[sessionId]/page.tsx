@@ -18,7 +18,7 @@ export default async function ActivityReplayPage({ params, searchParams }: { par
   return (
     <div className="space-y-6">
       <ActivityHeader active="replay" />
-      <ReplayClient complianceEvents={payload.compliance_events} exportHtml={payload.export_html} session={payload.session} timeline={payload.timeline} />
+      <ReplayClient exportHtml={payload.export_html} session={payload.session} timeline={payload.timeline} />
     </div>
   );
 }

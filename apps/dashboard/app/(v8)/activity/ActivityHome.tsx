@@ -8,10 +8,10 @@ import { getActivityAgentRepos, getActivityFeed, getActivitySessions, getActivit
 export async function ActivityHome({ searchParams }: { searchParams?: SearchParamsInput }) {
   const params = await normalizeSearchParams(searchParams);
   if (!params.has("hours")) params.set("hours", "24");
-  if (!params.has("limit")) params.set("limit", "25");
+  if (!params.has("limit")) params.set("limit", "50");
   const offset = Number(params.get("offset") ?? 0);
   if (offset > 0) {
-    const limit = Number(params.get("limit") ?? 25);
+    const limit = Number(params.get("limit") ?? 50);
     params.delete("offset");
     params.set("limit", String(offset + limit));
     redirect(`/activity/live-feed?${params.toString()}`);
@@ -38,15 +38,9 @@ export async function ActivityHome({ searchParams }: { searchParams?: SearchPara
       <SetupReadinessBanner setupStatus={setupStatus} />
       <LiveFeedPanel
         events={feed?.events ?? []}
-        feedAvailable={feed !== null}
         orgId={context.org?.id ?? ""}
-        query={Object.fromEntries(params.entries())}
-        repoOptions={repoOptions}
-        sessionCount={sessions?.total ?? 0}
+        searchParams={params}
         streamKey={context.streamKey}
-        hasMore={Boolean(feed?.has_more)}
-        nextOffset={feed?.next_offset ?? null}
-        total={feed?.total ?? feed?.events.length ?? 0}
       />
     </div>
   );
