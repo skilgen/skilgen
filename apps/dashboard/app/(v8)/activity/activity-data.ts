@@ -23,6 +23,13 @@ export type ActivityDetails = {
   tools?: string[];
 };
 
+export type ExternalApiCall = {
+  provider?: string;
+  domain?: string;
+  category?: string;
+  count: number;
+};
+
 export type ActivityEvent = {
   id: string;
   timestamp: string | null;
@@ -135,6 +142,7 @@ export type ActivitySession = {
   tool_permissions?: string[];
   file_targets?: string[];
   external_api_call_count?: number;
+  external_api_calls?: ExternalApiCall[];
   github_enrichment_status?: string | null;
   github_enrichment_gap?: string | null;
   git_url?: string | null;

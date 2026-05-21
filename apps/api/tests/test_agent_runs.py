@@ -82,6 +82,7 @@ def test_agent_run_ingest_creates_session_from_http_payload() -> None:
                 "full_access": True,
                 "activity_metrics": {"edited_files": 1, "explored_files": 4, "searches": 2, "lists": 1, "commands": 5, "tool_calls": 6},
                 "activity_details": {"edited_files": ["apps/api/routes/review.py"], "searches": ["rg TODO apps"], "commands": ["rg TODO apps"], "tools": ["shell"]},
+                "external_api_calls": {"OpenAI/api.openai.com/model": 3, "GitHub/api.github.com/repos": 2},
                 "tool_calls": [{"name": "shell", "parameters": {"command": "cat secret.txt"}, "content": "raw tool payload"}],
             },
             "outcome": "success",
@@ -122,6 +123,11 @@ def test_agent_run_ingest_creates_session_from_http_payload() -> None:
     assert audit.metadata_json["activity_details"]["searches"] == ["rg TODO apps"]
     assert audit.metadata_json["edited_files"] == 1
     assert audit.metadata_json["commands"] == 5
+    assert audit.metadata_json["external_api_call_count"] == 5
+    assert audit.metadata_json["external_api_calls"] == [
+        {"provider": "OpenAI", "domain": "api.openai.com", "category": "model", "count": 3},
+        {"provider": "GitHub", "domain": "api.github.com", "category": "repos", "count": 2},
+    ]
     assert "source_envelope_hash" in audit.metadata_json
     assert "diff" not in audit.metadata_json
     assert "content" not in audit.metadata_json

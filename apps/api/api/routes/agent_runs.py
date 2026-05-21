@@ -327,6 +327,40 @@ def _activity_details(metadata: dict[str, Any], artifacts: list[dict[str, Any]],
     }
 
 
+def _external_api_calls(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = metadata.get("external_api_calls") or metadata.get("external_api_call_breakdown") or []
+    rows: list[dict[str, Any]] = []
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if not isinstance(value, (int, float)):
+                continue
+            parts = [part.strip() for part in str(key).replace("|", "/").split("/") if part.strip()]
+            rows.append(
+                {
+                    "provider": parts[0] if parts else str(key),
+                    "domain": parts[1] if len(parts) > 1 else None,
+                    "category": parts[2] if len(parts) > 2 else None,
+                    "count": int(value),
+                }
+            )
+    elif isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            count = _metadata_int(item, "count", "calls", "request_count")
+            if not count:
+                continue
+            rows.append(
+                {
+                    "provider": _metadata_string(item, "provider", "name"),
+                    "domain": _metadata_string(item, "domain", "host"),
+                    "category": _metadata_string(item, "category", "type"),
+                    "count": int(count),
+                }
+            )
+    return [{key: value for key, value in row.items() if value not in {None, ""}} for row in rows if int(row.get("count") or 0) > 0]
+
+
 async def _resolve_pr_context(db: AsyncSession, repo: Repo, metadata: dict[str, Any]) -> dict[str, Any]:
     pr_number = _metadata_int(metadata, "pr_number", "pull_request_number")
     pr_id = _metadata_string(metadata, "pr_id", "pull_request_id")
@@ -450,11 +484,10 @@ def _agent_compliance_audit_event(org_id: str, payload: AgentRunPayload, repo: R
     provider = _metadata_string(metadata, "provider", "agent_provider", "source_provider") or f"{payload.agent.vendor} {payload.agent.product}".strip()
     access_scope = _metadata_string(metadata, "access_scope", "permission_scope", "grant_scope") or ("full-access" if _metadata_bool(metadata, "full_access", "full_access_granted") else "unspecified")
     external_api_call_count = _metadata_int(metadata, "external_api_call_count", "external_api_calls_count")
-    external_api_calls = metadata.get("external_api_calls")
-    if isinstance(external_api_calls, dict):
-        summed = sum(int(value) for value in external_api_calls.values() if isinstance(value, (int, float)))
-        if summed > 0:
-            external_api_call_count = external_api_call_count or summed
+    external_api_calls = _external_api_calls(metadata)
+    summed_external_calls = sum(int(item.get("count") or 0) for item in external_api_calls)
+    if summed_external_calls > 0:
+        external_api_call_count = external_api_call_count or summed_external_calls
     tool_permissions = _tool_names(artifacts, metadata)
     file_targets = sorted(dict.fromkeys([str(item.get("file_path")) for item in artifacts if item.get("file_path")] + _metadata_list(metadata, "file_targets", "files", "file_scope")))
     activity_metrics = _activity_metrics(metadata, artifacts, tool_permissions)
@@ -481,6 +514,7 @@ def _agent_compliance_audit_event(org_id: str, payload: AgentRunPayload, repo: R
         "mcp_tools": _metadata_list(metadata, "mcp_tools"),
         "file_targets": file_targets,
         "external_api_call_count": external_api_call_count,
+        "external_api_calls": external_api_calls,
         "activity_metrics": activity_metrics,
         "activity_details": activity_details,
         "edited_files": activity_metrics["edited_files"],

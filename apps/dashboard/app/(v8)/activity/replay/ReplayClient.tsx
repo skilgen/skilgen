@@ -52,6 +52,10 @@ export function ReplayClient({ complianceEvents = [], exportHtml, session, timel
   const commands = details.commands ?? [];
   const tools = session.tool_permissions?.length ? session.tool_permissions : details.tools?.length ? details.tools : session.mcp_tools ?? [];
   const fileTargets = session.file_targets?.length ? session.file_targets : editedFiles;
+  const externalApiCalls = (session.external_api_calls ?? []).map((item) => {
+    const label = [item.provider, item.domain, item.category].filter(Boolean).join(" / ") || "external API";
+    return `${label}: ${compactNumber(item.count)}`;
+  });
   const accessSummary = session.full_access ? "full-access" : session.access_scope ?? "scope unknown";
   const runtimeDetails = [session.permission_profile, session.sandbox_policy, session.approval_policy].filter(Boolean).join(" · ");
 
@@ -154,7 +158,7 @@ export function ReplayClient({ complianceEvents = [], exportHtml, session, timel
           <DetailPanel expectedCount={metrics.searches ?? 0} id="activity-searches" title="Searches" items={searches} empty="No search commands captured for this run." />
           <DetailPanel expectedCount={metrics.commands ?? 0} id="activity-commands" title="Commands" items={commands} empty="No shell commands captured for this run." />
           <DetailPanel expectedCount={metrics.tool_calls ?? 0} id="activity-tools" title="Tools" items={tools} empty="No tool calls captured for this run." />
-          <DetailPanel expectedCount={session.external_api_call_count ?? 0} id="activity-external" title="External API calls" items={[]} empty="No external API call evidence was captured for this run." />
+          <DetailPanel expectedCount={session.external_api_call_count ?? 0} id="activity-external" title="External API calls" items={externalApiCalls} empty="No external API call evidence was captured for this run." />
         </div>
       </article>
 

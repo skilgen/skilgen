@@ -182,6 +182,27 @@ def human_next_action(compliance: dict[str, Any] | None, *, risk: int) -> str | 
     return "No action" if risk < 35 else "Review run risk reasons"
 
 
+def external_api_calls(compliance: dict[str, Any] | None) -> list[dict[str, Any]]:
+    raw = (compliance or {}).get("external_api_calls")
+    if not isinstance(raw, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        count = int(item.get("count") or 0)
+        if count <= 0:
+            continue
+        row = {
+            "provider": item.get("provider"),
+            "domain": item.get("domain"),
+            "category": item.get("category"),
+            "count": count,
+        }
+        rows.append({key: value for key, value in row.items() if value not in {None, ""}})
+    return rows
+
+
 def enrich_risk(
     base_score: int,
     base_reasons: list[str],
@@ -313,6 +334,7 @@ def session_feed_event_view(session: object, repo: object | None, skills: dict[s
         "intelligence_tier": (compliance or {}).get("intelligence_tier"),
         "access_scope": (compliance or {}).get("access_scope"),
         "external_api_call_count": int((compliance or {}).get("external_api_call_count") or 0),
+        "external_api_calls": external_api_calls(compliance),
         "full_access": bool((compliance or {}).get("full_access") or False),
         "approval_policy": (compliance or {}).get("approval_policy"),
         "sandbox_policy": (compliance or {}).get("sandbox_policy"),
@@ -320,6 +342,8 @@ def session_feed_event_view(session: object, repo: object | None, skills: dict[s
         "policy_decision": (compliance or {}).get("policy_decision"),
         "tool_permissions": list((compliance or {}).get("tool_permissions") or []),
         "file_targets": list((compliance or {}).get("file_targets") or []),
+        "external_api_call_count": int((compliance or {}).get("external_api_call_count") or 0),
+        "external_api_calls": external_api_calls(compliance),
         "github_enrichment_status": (compliance or {}).get("github_enrichment_status"),
         "github_enrichment_gap": (compliance or {}).get("github_enrichment_gap"),
         "git_url": (compliance or {}).get("git_url"),

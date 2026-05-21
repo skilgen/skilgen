@@ -159,7 +159,7 @@ Run before and after each milestone PR. ✅ = passes today, ◐ = partial, ❌ =
 | Dashboard type-check | ✅ | `npm --workspace apps/dashboard run typecheck` | Verified 2026-05-19 pre-push. |
 | Dashboard build | ✅ | `npm --workspace apps/dashboard run build` | Verified 2026-05-19 pre-push. |
 | API py-compile for touched files | ✅ | `python -m compileall apps/api/api` | Verified 2026-05-19 pre-push. |
-| API pytest (full) | ◐ | `pytest apps/api/tests -q` | Most suites green; run before each milestone PR — see §10 for the gate. |
+| API pytest (full) | ✅ | `pytest apps/api/tests -q` | Verified 2026-05-21; keep `make verify-enterprise` as the CI gate. |
 | Replay / Sessions / Live-feed pagination | ✅ | Manual browser walk (logged 2026-05-19). | Keep the Playwright smoke (`apps/dashboard/e2e/`) for this. |
 | WorkOS SSO sign-in | ◐ | Local `.env` with all four `WORKOS_*` vars, hit `/sign-in`. | Works when configured; routes to `/dashboard/connect`. |
 | Self-serve magic-link sign-up | ◐ | Local `.env` with all four `WORKOS_*` vars, hit `/sign-in` → Send magic link. | UX + JIT provisioning shipped; local preview uses `auth=magic-link-preview` without WorkOS. |
@@ -169,8 +169,8 @@ Run before and after each milestone PR. ✅ = passes today, ◐ = partial, ❌ =
 | Codex CLI import | ✅ | `python -m unittest tests.test_codex_cli_runtime -v` | Codex CLI writes to `~/.codex/sessions` like Codex Desktop. Runtime tagging is verified via `session_meta.client='codex-cli'` (or `originator='Codex CLI'`) → `agent.runtime='codex_cli'`. |
 | Cursor import | ✅ | `python -m unittest tests.test_cursor_importer -v` | `packages.skillayer_agent.local_importer.build_cursor_agent_run_payloads` parses `state.vscdb` metadata, tool calls, commands, edited files, searches, tokens, and Cursor runtime identity without raw prompts/diffs. |
 | Windsurf import | ✅ | `python -m unittest tests.test_windsurf_importer -v` | `packages.skillayer_agent.local_importer.build_windsurf_agent_run_payloads` parses local Windsurf JSONL metadata into the same commands/files/searches/tokens AgentRun evidence shape. |
-| Anthropic compliance pull | ◐ | Settings → Connectors → Anthropic → "Queue sync". | Scaffold only; adapter needs the real API call + cursor persistence. |
-| OpenAI compliance pull | ◐ | Settings → Connectors → OpenAI → "Queue sync". | Same as above. |
+| Anthropic compliance pull | ✅ | Settings → Connectors → Anthropic → "Queue sync"; `python -m unittest tests.test_anthropic_compliance_sync -v`. | Real admin compliance API pull, cursor persistence, retry-after blocked state, and metadata-only normalization are implemented. |
+| OpenAI compliance pull | ✅ | Settings → Connectors → OpenAI → "Queue sync"; `python -m unittest tests.test_openai_compliance_sync -v`. | Real organization audit-log pull, cursor persistence, event filters, and metadata-only normalization are implemented. |
 | Repo attribution from `cwd` | ✅ | Inspect `metadata.cwd` and `repo.full_name` on imported runs. | Works whenever `--project-root` matches the agent's cwd. |
 | Activity / Insights / Audit population from imported runs | ✅ | After import, visit `/activity/replay`, `/insights/developer-track`, `/audit/evidence-packages`. | Already wired; no glue needed. |
 
@@ -440,7 +440,7 @@ policy evidence.
 - ✅ G1: `/dashboard/connect` and `/settings/connectors` surface GitHub enrichment active/pending with PR/commit counts + join gaps.
 - ✅ G2: Provider-compliance ingest and local-agent ingest attach `github_enrichment_status` + `git_url` by joining on repo name/id, PR number/id, branch, and head/commit SHA.
 - ✅ G3: Join gaps show as actionable coverage gaps (not silent misses) in Provider Coverage and Settings → Connectors.
-- ◐ Operational: this branch has the PR-G commits locally, but push/PR-proof is blocked until GitHub auth is refreshed in the automation environment.
+- ✅ Operational: PR-G commits are pushed and PR proof is recorded in PR #11.
 
 ---
 
@@ -542,7 +542,7 @@ see whether the run was compliant, what it had access to, and why it was risky.
 - ✅ `/orgs/{org_id}/agent-runs` now derives and stores `risk_score`, `risk_level`, `compliance_status`, access posture fields, and summarized counts (commands/MCP/file targets) per imported run.
 - ✅ v8 Activity session payloads now include access posture (`approval_policy`, `sandbox_policy`, `permission_profile`, `access_scope`, `full_access`), GitHub join evidence (`git_url`, `github_enrichment_status`, `github_enrichment_gap`), and policy violation summaries where present.
 - ✅ `/activity/replay/:sessionId` first viewport now shows risk level, compliance status, access summary, GitHub join status/link, and a human next action callout before drilling into files/commands/tools evidence.
-- ◐ Remaining for PR-R: external API/provider call breakdown (provider/domain/category) and elevated-permission indicators per MCP server/tool once those sources are wired.
+- ✅ External API/provider call breakdown is preserved as metadata-only provider/domain/category counts and surfaced in the replay drill-down. Per-MCP elevated-permission indicators will expand automatically as source runtimes expose that detail.
 
 ### 7.3 What is intentionally NOT extracted
 
