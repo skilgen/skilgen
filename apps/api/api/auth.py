@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.db.database import get_db
 from packages.db.config import settings
-from packages.db.models import Org, User
+from packages.db.models import DeviceAuthorization, Org, User
 from apps.api.api.services.jit_provisioning import ensure_from_login
 
 
@@ -196,6 +196,16 @@ async def get_current_org_id(
         org = result.scalar_one_or_none()
         if org is not None:
             return org.id
+        result = await db.execute(
+            select(DeviceAuthorization).where(
+                DeviceAuthorization.api_key == token,
+                DeviceAuthorization.status == "approved",
+                DeviceAuthorization.revoked_at.is_(None),
+            )
+        )
+        authorization = result.scalar_one_or_none()
+        if authorization is not None and authorization.org_id:
+            return str(authorization.org_id)
 
     user = await get_current_user(credentials)
     workos_org_id = user.get("org_id") or user.get("organization_id")

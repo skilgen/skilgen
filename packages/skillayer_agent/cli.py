@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import platform
 import stat
 import sys
 import time
+import uuid
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -42,6 +45,8 @@ class AgentConfig:
     windsurf_home: Path
     config_path: Path
     state_path: Path
+    machine_id: str
+    machine_label: str
 
 
 def _json_load(path: Path) -> dict[str, Any]:
@@ -71,6 +76,15 @@ def _providers(value: object) -> tuple[str, ...]:
     if unsupported:
         raise SystemExit(f"error: unsupported provider(s): {', '.join(unsupported)}")
     return tuple(sorted(normalized)) or DEFAULT_PROVIDERS
+
+
+def _default_machine_label() -> str:
+    return platform.node() or "local-machine"
+
+
+def _default_machine_id(label: str | None = None) -> str:
+    seed = f"{label or _default_machine_label()}:{uuid.getnode()}"
+    return "machine-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:20]
 
 
 def _project_roots(config: dict[str, Any], args: argparse.Namespace) -> tuple[ProjectRoot, ...]:
@@ -112,6 +126,8 @@ def load_agent_config(args: argparse.Namespace) -> AgentConfig:
     state_path = Path(getattr(args, "state", None) or os.getenv("SKILLAYER_AGENT_STATE") or STATE_PATH).expanduser()
     config = _json_load(config_path)
     providers_value: object = getattr(args, "providers", None) or os.getenv("SKILLAYER_AGENT_IMPORT_PROVIDERS") or config.get("providers")
+    machine_label = str(getattr(args, "machine_label", None) or os.getenv("SKILLAYER_MACHINE_LABEL") or config.get("machine_label") or _default_machine_label())
+    machine_id = str(getattr(args, "machine_id", None) or os.getenv("SKILLAYER_MACHINE_ID") or config.get("machine_id") or _default_machine_id(machine_label))
     return AgentConfig(
         api_url=str(getattr(args, "api_url", None) or os.getenv("SKILLAYER_API_URL") or config.get("api_url") or DEFAULT_API_URL),
         org_id=str(getattr(args, "org_id", None) or os.getenv("SKILLAYER_ORG_ID") or config.get("org_id") or ""),
@@ -124,6 +140,8 @@ def load_agent_config(args: argparse.Namespace) -> AgentConfig:
         windsurf_home=Path(getattr(args, "windsurf_home", None) or os.getenv("WINDSURF_HOME") or config.get("windsurf_home") or Path.home() / ".codeium" / "windsurf").expanduser(),
         config_path=config_path,
         state_path=state_path,
+        machine_id=machine_id,
+        machine_label=machine_label,
     )
 
 
@@ -251,6 +269,7 @@ def _print(payload: dict[str, Any], *, as_json: bool) -> None:
         print(f"Config: {payload['config_path']}")
         print(f"API: {payload['api_url']}")
         print(f"Org: {payload.get('org_id') or 'not configured'}")
+        print(f"Machine: {payload.get('machine_label') or 'unknown'} ({payload.get('machine_id') or 'unregistered'})")
         print(f"Project roots: {payload['project_root_count']}")
         print(f"Last sync: {payload.get('last_sync_at') or 'never'}")
         for runtime in payload["runtimes"]:
@@ -281,10 +300,14 @@ def _post_json(api_url: str, path: str, payload: dict[str, Any], *, timeout: flo
 def _write_connect_config(args: argparse.Namespace, *, token: str, org_id: str, api_url: str, repo_id: str | None = None, repo_full_name: str | None = None) -> dict[str, Any]:
     config_path = Path(args.config).expanduser()
     providers = list(_providers(args.providers))
+    machine_label = str(getattr(args, "machine_label", None) or os.getenv("SKILLAYER_MACHINE_LABEL") or _default_machine_label())
+    machine_id = str(getattr(args, "machine_id", None) or os.getenv("SKILLAYER_MACHINE_ID") or _default_machine_id(machine_label))
     payload = {
         "api_url": api_url,
         "org_id": org_id,
         "api_key": token,
+        "machine_id": machine_id,
+        "machine_label": machine_label,
         "project_roots": [
             {
                 "path": str(Path(args.project_root).expanduser().resolve()),
@@ -297,7 +320,7 @@ def _write_connect_config(args: argparse.Namespace, *, token: str, org_id: str, 
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)
-    return {"command": "connect", "config_path": str(config_path), "org_id": org_id, "providers": providers}
+    return {"command": "connect", "config_path": str(config_path), "org_id": org_id, "providers": providers, "machine_id": machine_id, "machine_label": machine_label}
 
 
 def command_status(args: argparse.Namespace) -> int:
@@ -309,6 +332,8 @@ def command_status(args: argparse.Namespace) -> int:
         "org_id": config.org_id,
         "config_path": str(config.config_path),
         "state_path": str(config.state_path),
+        "machine_id": config.machine_id,
+        "machine_label": config.machine_label,
         "project_root_count": len(config.project_roots),
         "providers": list(config.providers),
         "runtimes": _runtime_status(config),
@@ -369,6 +394,8 @@ def command_connect(args: argparse.Namespace) -> int:
         return 0
 
     try:
+        machine_label = str(getattr(args, "machine_label", None) or os.getenv("SKILLAYER_MACHINE_LABEL") or _default_machine_label())
+        machine_id = str(getattr(args, "machine_id", None) or os.getenv("SKILLAYER_MACHINE_ID") or _default_machine_id(machine_label))
         code = _post_json(
             args.api_url,
             "/v1/device/code",
@@ -376,6 +403,8 @@ def command_connect(args: argparse.Namespace) -> int:
                 "project_root": str(Path(args.project_root).expanduser().resolve()),
                 "repo_id": args.repo_id,
                 "repo_full_name": args.repo_full_name,
+                "machine_id": machine_id,
+                "machine_label": machine_label,
             },
         )
     except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError, RuntimeError) as exc:
@@ -495,6 +524,8 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--project-root")
         subparser.add_argument("--repo-id")
         subparser.add_argument("--repo-full-name")
+        subparser.add_argument("--machine-id")
+        subparser.add_argument("--machine-label")
         subparser.add_argument("--codex-home")
         subparser.add_argument("--claude-home")
         subparser.add_argument("--cursor-home")
@@ -520,6 +551,8 @@ def build_parser() -> argparse.ArgumentParser:
     connect.add_argument("--project-root", default=".")
     connect.add_argument("--repo-id", default=os.getenv("SKILLAYER_REPO_ID"))
     connect.add_argument("--repo-full-name", default=os.getenv("SKILLAYER_REPO_FULL_NAME"))
+    connect.add_argument("--machine-id", default=os.getenv("SKILLAYER_MACHINE_ID"))
+    connect.add_argument("--machine-label", default=os.getenv("SKILLAYER_MACHINE_LABEL"))
     connect.add_argument("--no-browser", action="store_true", help="Print the device-flow URL without opening a browser.")
     connect.add_argument("--json", action="store_true")
     connect.set_defaults(func=command_connect)

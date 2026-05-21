@@ -41,6 +41,13 @@ class Db:
 
     async def execute(self, stmt):
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        if "device_authorizations.id =" in compiled:
+            authorization_id = compiled.split("device_authorizations.id = '", 1)[-1].split("'", 1)[0]
+            rows = [authorization for authorization in self.authorizations if authorization.id == authorization_id]
+            if "device_authorizations.org_id =" in compiled:
+                org_id = compiled.split("device_authorizations.org_id = '", 1)[-1].split("'", 1)[0]
+                rows = [authorization for authorization in rows if authorization.org_id == org_id]
+            return Result(rows[0] if rows else None)
         if "WHERE device_authorizations.client_ip =" in compiled:
             ip = compiled.split("device_authorizations.client_ip = '", 1)[-1].split("'", 1)[0]
             return Result(
@@ -52,6 +59,10 @@ class Db:
                     and authorization.expires_at > datetime.now(UTC).replace(tzinfo=None)
                 ]
             )
+        if "WHERE device_authorizations.org_id =" in compiled:
+            org_id = compiled.split("device_authorizations.org_id = '", 1)[-1].split("'", 1)[0]
+            rows = [authorization for authorization in self.authorizations if authorization.org_id == org_id]
+            return Result(rows)
         for authorization in self.authorizations:
             if authorization.user_code and f"'{authorization.user_code}'" in compiled:
                 return Result(authorization)
@@ -100,10 +111,12 @@ def test_device_flow_approval_returns_org_api_key() -> None:
 
     assert approved == {"ok": True, "status": "approved", "org_id": "org_1"}
     assert token.error is None
-    assert token.access_token == "sk-existing"
+    assert token.access_token
+    assert token.access_token.startswith("sk-device-")
     assert token.org_id == "org_1"
     assert token.repo_id == "repo_1"
     assert db.authorizations[0].status == "approved"
+    assert db.authorizations[0].api_key == token.access_token
 
 
 def test_device_flow_rate_limits_outstanding_codes_per_ip() -> None:
@@ -132,3 +145,29 @@ def test_device_flow_rate_limits_outstanding_codes_per_ip() -> None:
 
     assert exc.value.status_code == 429
     assert exc.value.detail["error"] == "slow_down"
+
+
+def test_device_flow_lists_and_revokes_single_machine_key() -> None:
+    db = Db(Org(id="org_1", github_org_id=1, login="acme", name="Acme", api_key="sk-existing"))
+    authorization = DeviceAuthorization(
+        id="auth_1",
+        device_code="device-1",
+        user_code="USER-1",
+        org_id="org_1",
+        status="approved",
+        api_key="sk-device-secret",
+        machine_id="machine-123",
+        machine_label="Ravi MacBook",
+        repo_full_name="acme/app",
+        expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=1),
+    )
+    db.authorizations.append(authorization)
+
+    records = asyncio.run(device_flow.list_device_authorizations(db=db, current_org_id="org_1"))
+    revoked = asyncio.run(device_flow.revoke_device_authorization("auth_1", db=db, current_org_id="org_1"))
+
+    assert records[0].machine_id == "machine-123"
+    assert records[0].api_key_hint == "...cret"
+    assert revoked.status == "revoked"
+    assert revoked.revoked_at is not None
+    assert authorization.status == "revoked"

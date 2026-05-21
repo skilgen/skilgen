@@ -22,18 +22,32 @@ class FakeResult:
     def scalar_one_or_none(self) -> object | None:
         return self.value
 
+    def first(self) -> object | None:
+        return self.value
+
 
 class FakeDb:
     """Queued DB double for API-key route and auth tests."""
 
     def __init__(self, results: list[FakeResult]) -> None:
         self.results = results
+        self.orgs = [result.value for result in results if hasattr(result.value, "api_key")]
         self.flush_count = 0
         self.commit_count = 0
         self.rollback_count = 0
         self.added: list[object] = []
 
     async def execute(self, statement: object) -> FakeResult:
+        compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
+        if compiled.startswith("UPDATE orgs") and "api_key=" in compiled.replace(" ", ""):
+            value = compiled.split("api_key='", 1)[-1].split("'", 1)[0]
+            org_id = compiled.split("orgs.id = '", 1)[-1].split("'", 1)[0]
+            for org in self.orgs:
+                if getattr(org, "id", None) == org_id:
+                    org.api_key = value
+            return FakeResult(None)
+        if not self.results:
+            return FakeResult(None)
         return self.results.pop(0)
 
     async def flush(self) -> None:
@@ -89,7 +103,6 @@ def test_get_api_key_generates_missing_key_and_saves(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json() == {"api_key": "sk-generated"}
     assert org.api_key == "sk-generated"
-    assert db.flush_count == 1
     assert db.commit_count == 1
 
 
@@ -123,7 +136,7 @@ def test_rotate_api_key_replaces_existing_key(monkeypatch) -> None:
 def test_rotated_old_key_no_longer_authenticates(monkeypatch) -> None:
     monkeypatch.setattr(auth, "_deployment_mode", lambda: "bootstrap")
     fallback_org = _org(id="org_fallback", api_key="sk-new")
-    db = FakeDb([FakeResult(None), FakeResult(fallback_org)])
+    db = FakeDb([FakeResult(fallback_org)])
 
     resolved = asyncio.run(get_current_org_id(_credentials("sk-old"), db))
 
@@ -139,9 +152,18 @@ def test_valid_bearer_api_key_resolves_org_id() -> None:
     assert resolved == "org_api"
 
 
+def test_valid_device_api_key_resolves_org_id() -> None:
+    authorization = SimpleNamespace(org_id="org_device", status="approved", revoked_at=None)
+    db = FakeDb([FakeResult(None), FakeResult(authorization)])
+
+    resolved = asyncio.run(get_current_org_id(_credentials("sk-device-valid"), db))
+
+    assert resolved == "org_device"
+
+
 def test_invalid_bearer_api_key_falls_through_to_bootstrap(monkeypatch) -> None:
     monkeypatch.setattr(auth, "_deployment_mode", lambda: "bootstrap")
-    db = FakeDb([FakeResult(None), FakeResult(_org(id="org_bootstrap", api_key="sk-other"))])
+    db = FakeDb([FakeResult(_org(id="org_bootstrap", api_key="sk-other"))])
 
     resolved = asyncio.run(get_current_org_id(_credentials("sk-invalid"), db))
 

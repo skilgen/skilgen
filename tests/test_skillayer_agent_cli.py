@@ -52,6 +52,10 @@ class SkillayerAgentCliTests(unittest.TestCase):
                     tmp,
                     "--repo-full-name",
                     "acme/app",
+                    "--machine-id",
+                    "machine-manual",
+                    "--machine-label",
+                    "Manual Laptop",
                     "--json",
                 ]
             )
@@ -61,6 +65,8 @@ class SkillayerAgentCliTests(unittest.TestCase):
             saved = json.loads(config.read_text(encoding="utf-8"))
             self.assertEqual(saved["org_id"], "org_1")
             self.assertEqual(saved["api_key"], "secret-token")
+            self.assertEqual(saved["machine_id"], "machine-manual")
+            self.assertEqual(saved["machine_label"], "Manual Laptop")
             self.assertEqual(saved["project_roots"][0]["repo_full_name"], "acme/app")
             self.assertEqual(oct(config.stat().st_mode & 0o777), "0o600")
 
@@ -99,6 +105,10 @@ class SkillayerAgentCliTests(unittest.TestCase):
                         "https://api.skillayer.test",
                         "--project-root",
                         tmp,
+                        "--machine-id",
+                        "machine-device",
+                        "--machine-label",
+                        "Device Laptop",
                         "--json",
                     ]
                 )
@@ -106,10 +116,14 @@ class SkillayerAgentCliTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertNotIn("device-token", output)
             self.assertEqual([path for path, _ in calls], ["/v1/device/code", "/v1/device/token", "/v1/device/token"])
+            self.assertEqual(calls[0][1]["machine_id"], "machine-device")
+            self.assertEqual(calls[0][1]["machine_label"], "Device Laptop")
             open_browser.assert_called_once_with("https://app.skillayer.com/device?user_code=ABCD-1234")
             saved = json.loads(config.read_text(encoding="utf-8"))
             self.assertEqual(saved["org_id"], "org_device")
             self.assertEqual(saved["api_key"], "device-token")
+            self.assertEqual(saved["machine_id"], "machine-device")
+            self.assertEqual(saved["machine_label"], "Device Laptop")
             self.assertEqual(saved["api_url"], "https://api.skillayer.test")
             self.assertEqual(saved["project_roots"][0]["repo_full_name"], "acme/device")
             self.assertEqual(oct(config.stat().st_mode & 0o777), "0o600")

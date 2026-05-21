@@ -25,6 +25,8 @@ class DeviceCodeRequest(BaseModel):
     project_root: str | None = Field(default=None, max_length=1024)
     repo_id: str | None = Field(default=None, max_length=128)
     repo_full_name: str | None = Field(default=None, max_length=255)
+    machine_id: str | None = Field(default=None, max_length=128)
+    machine_label: str | None = Field(default=None, max_length=255)
 
 
 class DeviceCodeResponse(BaseModel):
@@ -46,15 +48,31 @@ class DeviceTokenRequest(BaseModel):
 
 class DeviceTokenResponse(BaseModel):
     access_token: str | None = None
-    token_type: str = "skillayer_api_key"
+    token_type: str = "skillayer_device_key"
     org_id: str | None = None
     api_url: str | None = None
     project_root: str | None = None
     repo_id: str | None = None
     repo_full_name: str | None = None
+    machine_id: str | None = None
+    machine_label: str | None = None
     error: str | None = None
     error_description: str | None = None
     interval: int = DEVICE_POLL_INTERVAL_SECONDS
+
+
+class DeviceAuthorizationRecord(BaseModel):
+    id: str
+    machine_id: str | None = None
+    machine_label: str | None = None
+    repo_full_name: str | None = None
+    project_root: str | None = None
+    status: str
+    api_key_hint: str | None = None
+    client_ip: str | None = None
+    approved_at: str | None = None
+    last_polled_at: str | None = None
+    revoked_at: str | None = None
 
 
 def _user_code() -> str:
@@ -64,6 +82,36 @@ def _user_code() -> str:
 
 def _verification_base() -> str:
     return "https://app.skillayer.com/device"
+
+
+def _generate_device_api_key() -> str:
+    return f"sk-device-{secrets.token_urlsafe(32)}"
+
+
+def _api_key_hint(value: str | None) -> str | None:
+    if not value:
+        return None
+    return f"...{value[-4:]}" if len(value) >= 4 else "****"
+
+
+def _timestamp(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _authorization_record(authorization: DeviceAuthorization) -> DeviceAuthorizationRecord:
+    return DeviceAuthorizationRecord(
+        id=str(authorization.id),
+        machine_id=authorization.machine_id,
+        machine_label=authorization.machine_label,
+        repo_full_name=authorization.repo_full_name,
+        project_root=authorization.project_root,
+        status=authorization.status,
+        api_key_hint=_api_key_hint(authorization.api_key),
+        client_ip=authorization.client_ip,
+        approved_at=_timestamp(authorization.approved_at),
+        last_polled_at=_timestamp(authorization.last_polled_at),
+        revoked_at=_timestamp(authorization.revoked_at),
+    )
 
 
 def _client_ip(request: Request) -> str:
@@ -116,6 +164,8 @@ async def create_device_code(
         project_root=payload.project_root,
         repo_id=payload.repo_id,
         repo_full_name=payload.repo_full_name,
+        machine_id=payload.machine_id,
+        machine_label=payload.machine_label,
         client_ip=client_ip,
         expires_at=(now + timedelta(minutes=DEVICE_CODE_TTL_MINUTES)).replace(tzinfo=None),
     )
@@ -151,10 +201,8 @@ async def approve_device_code(
     org = await db.get(Org, current_org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="Org not found")
-    if not org.api_key:
-        org.api_key = f"sk-{secrets.token_urlsafe(32)}"
     authorization.org_id = current_org_id
-    authorization.api_key = org.api_key
+    authorization.api_key = authorization.api_key or _generate_device_api_key()
     authorization.status = "approved"
     authorization.approved_at = now
     await db.commit()
@@ -177,6 +225,9 @@ async def poll_device_token(payload: DeviceTokenRequest, db: AsyncSession = Depe
     if authorization.status != "approved" or not authorization.api_key or not authorization.org_id:
         await db.commit()
         return DeviceTokenResponse(error="authorization_pending", error_description="Waiting for browser approval")
+    if authorization.revoked_at is not None:
+        await db.commit()
+        return DeviceTokenResponse(error="access_denied", error_description="Device authorization was revoked")
     await db.commit()
     return DeviceTokenResponse(
         access_token=authorization.api_key,
@@ -185,4 +236,50 @@ async def poll_device_token(payload: DeviceTokenRequest, db: AsyncSession = Depe
         project_root=authorization.project_root,
         repo_id=authorization.repo_id,
         repo_full_name=authorization.repo_full_name,
+        machine_id=authorization.machine_id,
+        machine_label=authorization.machine_label,
     )
+
+
+@router.get("/authorizations", response_model=list[DeviceAuthorizationRecord])
+async def list_device_authorizations(
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> list[DeviceAuthorizationRecord]:
+    rows = (
+        (
+            await db.execute(
+                select(DeviceAuthorization).where(
+                    DeviceAuthorization.org_id == current_org_id,
+                    DeviceAuthorization.status.in_(("approved", "revoked")),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    rows.sort(key=lambda item: (item.revoked_at is not None, item.machine_label or "", item.approved_at or datetime.min), reverse=False)
+    return [_authorization_record(row) for row in rows]
+
+
+@router.post("/authorizations/{authorization_id}/revoke", response_model=DeviceAuthorizationRecord)
+async def revoke_device_authorization(
+    authorization_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id),
+) -> DeviceAuthorizationRecord:
+    authorization = (
+        await db.execute(
+            select(DeviceAuthorization).where(
+                DeviceAuthorization.id == authorization_id,
+                DeviceAuthorization.org_id == current_org_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if authorization is None:
+        raise HTTPException(status_code=404, detail="Device authorization not found")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    authorization.revoked_at = authorization.revoked_at or now
+    authorization.status = "revoked"
+    await db.commit()
+    return _authorization_record(authorization)

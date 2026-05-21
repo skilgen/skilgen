@@ -323,6 +323,8 @@ Config lives at `~/.skillayer/agent.json` (mode `0600`):
   "api_url": "https://api.skillayer.com",
   "org_id": "org_xyz",
   "api_key": "...",
+  "machine_id": "machine_...",
+  "machine_label": "Ravi MacBook Pro",
   "project_roots": [{"path": "/Users/.../customer-repo", "repo_full_name": "acme/customer-repo"}],
   "providers": ["codex", "claude", "cursor", "windsurf"]
 }
@@ -880,7 +882,7 @@ installer are expansion after that core path is working.
 | Q3 | Magic-link domain-auto-join — what about Gmail / personal addresses? | ✅ Implemented: personal-domain emails (`gmail.com`, `outlook.com`, etc.) always create a fresh org and never auto-join; covered by `apps/api/tests/test_jit_provisioning.py`. |
 | Q4 | OAuth device-flow rate limiting. | ✅ Implemented in Slice 31: `/v1/device/code` stores `client_ip`, caps each IP at 10 pending device codes per 5 minutes, and rejects excess requests with `slow_down` per RFC 8628. |
 | Q5 | Provenance of imported cost numbers. | ✅ Implemented: importer metadata uses `cost_source=estimated_from_provider_token_usage`, Insights splits provider-reported vs Skillayer-estimated spend, and evidence docs prohibit billing-grade language for estimates. |
-| Q6 | Multi-machine same user. | The CLI registers the machine ID (`uname -n` + first MAC) under `users.devices`; admin can revoke a single machine's key without rotating the org-wide API key. |
+| Q6 | Multi-machine same user. | ✅ Slice 33 implements per-machine device keys: `skillayer-agent connect` records `machine_id` / `machine_label`, device-flow approval issues a revocable machine key, bearer auth accepts active device keys, and admins can list/revoke one machine via `/v1/device/authorizations`. |
 
 ---
 
