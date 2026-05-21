@@ -368,7 +368,7 @@ OAuth device flow endpoints (new on the API):
 | A6 | Tag Codex CLI runs distinctly from Codex Desktop. | platform | ✅ Codex Desktop now emits `codex_desktop`; Codex CLI emits `codex_cli`. |
 | A7 | `tests/test_cursor_importer.py`, `tests/test_windsurf_importer.py`, `tests/test_codex_cli_runtime.py`. | platform | ✅ Codex CLI, Cursor, and Windsurf parser tests are complete. |
 | A8 | Dashboard: surface per-runtime "last upload" / token / cost counters in `/dashboard/connect`. | dashboard | ✅ `/dashboard/connect` now shows runtime health for Codex Desktop, Codex CLI, Claude Code, Cursor, and Windsurf with uploads, commands, files, tokens, and cost. |
-| A9 | `install.sh` one-liner installer (downloads versioned Skillayer local-helper artifact + writes `skillayer-agent` shim). | platform | new `scripts/install.sh` + release pipeline. |
+| A9 | `install.sh` one-liner installer (downloads versioned Skillayer local-helper artifact + writes `skillayer-agent` shim). | platform | ✅ `scripts/install.sh` creates an isolated helper venv, installs a local checkout or versioned package spec, and writes a `skillayer-agent` shim. Release artifact hosting remains a release-engineering follow-up. |
 
 ---
 
@@ -753,7 +753,9 @@ installer are expansion after that core path is working.
 15. **PR-X3 (watch mode)** — ✅ remaining A2. `skillayer-agent watch` now polls local
     agent stores, posts only newly discovered session IDs, records local state, and
     supports `--once` / `--dry-run` for fleet bootstrap verification.
-16. **PR-X4 (installer)** — Task A9. Ship behind `unlisted` tag until verified.
+16. **PR-X4 (installer)** — ✅ Task A9. `scripts/install.sh` now supports dry-run,
+    local checkout installs, explicit package specs, versioned installs, and a
+    `skillayer-agent` shim under the admin-selected bin directory.
 
 ---
 
