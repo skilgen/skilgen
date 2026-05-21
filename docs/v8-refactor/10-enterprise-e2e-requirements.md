@@ -824,50 +824,50 @@ installer are expansion after that core path is working.
 5. ✅ **PR-A3 (Codex CLI tag + connect UX)** — ✅ Tasks A6, A8. Codex CLI is now
    distinct from Codex Desktop, and `/dashboard/connect` shows per-runtime
    upload/token/cost/command/file health before setup instructions.
-6. **PR-R (run risk/access/compliance detail)** — ✅ §7.2B and §8A. Persisted
+6. ✅ **PR-R (run risk/access/compliance detail)** — ✅ §7.2B and §8A. Persisted
    run-level risk/access/compliance fields (migration `20260520_0005_agent_run_risk_access.py`)
    and upgraded the v8 Activity Replay run-detail UX to surface risk level, compliance
    status, access posture (approval/sandbox/permission profile), GitHub evidence joins,
    policy violations, external API call counts, and human next actions without exposing
    raw prompts/diffs.
-7. **PR-B1 (OpenAI real sync)** — ✅ Task B1. Pull real OpenAI compliance metadata with
+7. ✅ **PR-B1 (OpenAI real sync)** — ✅ Task B1. Pull real OpenAI compliance metadata with
    cursor persistence and idempotency. The OpenAI adapter now calls
    `GET /v1/organization/audit_logs`, forwards event-type filters and resume cursor,
    maps provider usage/cost/risk/access/repo metadata into Skillayer's metadata-only
    compliance event shape, and keeps stable provider event ids so router ingestion can
    skip duplicate replays.
-8. **PR-B2 (Anthropic real sync)** — ✅ Task B2. Pull real Anthropic compliance metadata
+8. ✅ **PR-B2 (Anthropic real sync)** — ✅ Task B2. Pull real Anthropic compliance metadata
    with cursor persistence and idempotency. The Anthropic adapter now calls
    `GET /v1/admin/compliance/api/messages`, forwards workspace/page/cursor settings,
    respects `retry-after` blocked state, maps Claude native token/cache/cost and
    risk/access/repo metadata into Skillayer's metadata-only compliance event shape,
    and keeps stable provider event ids so router ingestion can skip duplicate replays.
-9. **PR-B3 (worker schedule)** — ✅ Task B3. `/worker/agent-compliance/provider-sync`
+9. ✅ **PR-B3 (worker schedule)** — ✅ Task B3. `/worker/agent-compliance/provider-sync`
    now scans connected OpenAI/Anthropic compliance adapters, queues only due jobs,
    waits when a prior provider-sync job is still queued/running, and records the next
    15-minute sync window for connector health.
-10. **PR-B4 (provider status health)** — ✅ Task B4. `/orgs/{org_id}/connect/status`
+10. ✅ **PR-B4 (provider status health)** — ✅ Task B4. `/orgs/{org_id}/connect/status`
    now returns OpenAI/Anthropic provider sync health, and `/dashboard/connect` shows
    compliance API coverage beside local runtime health before setup instructions.
-11. **PR-A4 (device flow + connect command)** — ✅ Task A3 plus remaining A2.
+11. ✅ **PR-A4 (device flow + connect command)** — ✅ Task A3 plus remaining A2.
    `skillayer-agent connect` now starts the browser/device flow, polls for approval,
    and writes `~/.skillayer/agent.json`; `connect --token` remains the air-gapped
    fallback.
-12. **PR-V (verify-enterprise Makefile)** — ✅ §10. `make verify-enterprise` chains
+12. ✅ **PR-V (verify-enterprise Makefile)** — ✅ §10. `make verify-enterprise` chains
     the core API, provider sync, local helper, compile, dashboard type-check, dashboard
     build, and dry-run importer checks so CI can fail closed on the enterprise path.
-13. **PR-X1 (Cursor parser)** — ✅ Tasks A4, A7. `skillayer-agent --providers cursor`
+13. ✅ **PR-X1 (Cursor parser)** — ✅ Tasks A4, A7. `skillayer-agent --providers cursor`
     can now import Cursor `state.vscdb` metadata-only sessions into the same AgentRun
     evidence shape as Codex and Claude, including commands, edits, searches, tokens,
     and runtime identity.
-14. **PR-X2 (Windsurf parser)** — ✅ Tasks A5, A7. `skillayer-agent --providers windsurf`
+14. ✅ **PR-X2 (Windsurf parser)** — ✅ Tasks A5, A7. `skillayer-agent --providers windsurf`
     can now import Windsurf JSONL metadata-only sessions into the same AgentRun
     evidence shape as Codex, Claude, and Cursor, including commands, edits, searches,
     tokens, and runtime identity.
-15. **PR-X3 (watch mode)** — ✅ remaining A2. `skillayer-agent watch` now polls local
+15. ✅ **PR-X3 (watch mode)** — ✅ remaining A2. `skillayer-agent watch` now polls local
     agent stores, posts only newly discovered session IDs, records local state, and
     supports `--once` / `--dry-run` for fleet bootstrap verification.
-16. **PR-X4 (installer)** — ✅ Task A9. `scripts/install.sh` now supports dry-run,
+16. ✅ **PR-X4 (installer)** — ✅ Task A9. `scripts/install.sh` now supports dry-run,
     local checkout installs, explicit package specs, versioned installs, and a
     `skillayer-agent` shim under the admin-selected bin directory.
 
