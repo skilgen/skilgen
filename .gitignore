@@ -17,3 +17,11 @@ pnpm-debug.log*
 *.tsbuildinfo
 .vercel
 .env*.local
+
+# Codex/automation local artifacts (never commit)
+.git_index_tmp
+.git_worktree_fixed/
+.git_writable/
+.tmp_github_known_hosts
+apps/dashboard/.tmp_prr_screenshots.mjs
+readline.py
