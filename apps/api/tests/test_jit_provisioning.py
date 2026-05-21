@@ -157,3 +157,18 @@ def test_jit_provisioning_respects_auto_join_domain_toggle() -> None:
     assert created_org is True
     assert joined_org.id != org.id
     assert joined_user.role == "owner"
+
+
+def test_jit_provisioning_never_auto_joins_personal_email_domains() -> None:
+    db = FakeAsyncSession()
+    first_org, _, first_created = asyncio.run(
+        jit_provisioning.ensure_from_login(db, email="owner@gmail.com", name="Owner", source="magic_link")
+    )
+    second_org, second_user, second_created = asyncio.run(
+        jit_provisioning.ensure_from_login(db, email="dev@gmail.com", name="Dev", source="magic_link")
+    )
+
+    assert first_created is True
+    assert second_created is True
+    assert first_org.id != second_org.id
+    assert second_user.role == "owner"

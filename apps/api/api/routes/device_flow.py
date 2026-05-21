@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,8 @@ router = APIRouter(prefix="/v1/device", tags=["device-flow"])
 
 DEVICE_CODE_TTL_MINUTES = 15
 DEVICE_POLL_INTERVAL_SECONDS = 5
+DEVICE_CODE_IP_LIMIT = 10
+DEVICE_CODE_RATE_LIMIT_MINUTES = 5
 
 
 class DeviceCodeRequest(BaseModel):
@@ -64,15 +66,57 @@ def _verification_base() -> str:
     return "https://app.skillayer.com/device"
 
 
+def _client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+    if forwarded_for:
+        return forwarded_for[:64]
+    if request.client and request.client.host:
+        return request.client.host[:64]
+    return "unknown"
+
+
+async def _enforce_device_code_rate_limit(db: AsyncSession, *, client_ip: str, now: datetime) -> None:
+    cutoff = (now - timedelta(minutes=DEVICE_CODE_RATE_LIMIT_MINUTES)).replace(tzinfo=None)
+    active = (
+        (
+            await db.execute(
+                select(DeviceAuthorization).where(
+                    DeviceAuthorization.client_ip == client_ip,
+                    DeviceAuthorization.status == "pending",
+                    DeviceAuthorization.created_at >= cutoff,
+                    DeviceAuthorization.expires_at > now.replace(tzinfo=None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(active) >= DEVICE_CODE_IP_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "slow_down",
+                "error_description": "Too many pending device authorizations from this network. Try again in a few minutes.",
+            },
+        )
+
+
 @router.post("/code", response_model=DeviceCodeResponse)
-async def create_device_code(payload: DeviceCodeRequest, db: AsyncSession = Depends(get_db)) -> DeviceCodeResponse:
+async def create_device_code(
+    payload: DeviceCodeRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> DeviceCodeResponse:
     now = datetime.now(UTC)
+    client_ip = _client_ip(request)
+    await _enforce_device_code_rate_limit(db, client_ip=client_ip, now=now)
     authorization = DeviceAuthorization(
         device_code=secrets.token_urlsafe(48),
         user_code=_user_code(),
         project_root=payload.project_root,
         repo_id=payload.repo_id,
         repo_full_name=payload.repo_full_name,
+        client_ip=client_ip,
         expires_at=(now + timedelta(minutes=DEVICE_CODE_TTL_MINUTES)).replace(tzinfo=None),
     )
     db.add(authorization)

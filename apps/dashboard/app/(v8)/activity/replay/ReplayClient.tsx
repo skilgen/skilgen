@@ -105,10 +105,6 @@ function stringField(record: LooseRecord | null | undefined, keys: string[]): st
   return null;
 }
 
-function stringValue(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
 function readableValue(value: unknown): string | null {
   if (value == null) return null;
   if (typeof value === "string") return value;
@@ -498,7 +494,7 @@ function EvidenceTriage({ onSelect, session, timeline }: { onSelect: (index: num
           <div className="mt-3 space-y-2">
             {findingGroups.map((group) => (
               <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] p-3" key={group.key}>
-                <button className="flex w-full flex-wrap items-start justify-between gap-3 text-left" onClick={() => setOpenFindingGroups((current) => { const next = new Set(current); next.has(group.key) ? next.delete(group.key) : next.add(group.key); return next; })} type="button">
+                <button className="flex w-full flex-wrap items-start justify-between gap-3 text-left" onClick={() => setOpenFindingGroups((current) => { const next = new Set(current); if (next.has(group.key)) next.delete(group.key); else next.add(group.key); return next; })} type="button">
                   <span className="min-w-0">
                     <span className={`mr-2 rounded-md border px-2 py-1 text-[11px] font-medium capitalize ${severityClass(group.severity)}`}>{group.severity}</span>
                     <span className="text-sm font-medium text-[color:var(--text-primary)]">{group.title} · {group.findings.length} step{group.findings.length === 1 ? "" : "s"}</span>
@@ -533,7 +529,7 @@ function EvidenceTriage({ onSelect, session, timeline }: { onSelect: (index: num
             const open = openDirs.has(dir);
             return (
               <div className="rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)]" key={dir}>
-                <button className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-medium text-[color:var(--text-primary)]" onClick={() => setOpenDirs((current) => { const next = new Set(current); next.has(dir) ? next.delete(dir) : next.add(dir); return next; })} type="button"><span>{dir}</span><ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} /></button>
+                <button className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-medium text-[color:var(--text-primary)]" onClick={() => setOpenDirs((current) => { const next = new Set(current); if (next.has(dir)) next.delete(dir); else next.add(dir); return next; })} type="button"><span>{dir}</span><ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} /></button>
                 {open ? <div className="divide-y divide-[color:var(--bg-border)]">{files.map((file) => {
                   const marker = sensitiveFileMarker(file.path);
                   return <div className="grid gap-2 px-3 py-2 text-xs md:grid-cols-[1fr_auto_auto]" key={file.path}><code className="truncate text-[color:var(--text-secondary)]">{file.path.split("/").pop()}</code><span className={file.wrote ? "text-amber-200" : "text-[color:var(--text-tertiary)]"}>{file.wrote ? "wrote" : "read"}</span><span className="text-[color:var(--text-tertiary)]">steps {file.steps.join(", ")}</span>{marker ? <span className={marker === "sensitive" ? "text-red-200" : "text-[color:var(--accent-primary)]"}>{marker}</span> : null}</div>;
@@ -671,11 +667,12 @@ export function ReplayClient({ exportHtml, session, timeline }: { exportHtml: st
           activeIndex={activeIndex}
           expanded={expandedNodes}
           onSelect={setIndex}
-          onToggleExpand={(id) => setExpandedNodes((current) => {
-            const next = new Set(current);
-            next.has(id) ? next.delete(id) : next.add(id);
-            return next;
-          })}
+	          onToggleExpand={(id) => setExpandedNodes((current) => {
+	            const next = new Set(current);
+	            if (next.has(id)) next.delete(id);
+	            else next.add(id);
+	            return next;
+	          })}
           timeline={typedTimeline}
         />
         <article className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-5">

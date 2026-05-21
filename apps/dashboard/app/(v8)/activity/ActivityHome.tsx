@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { ActivityHeader } from "./ActivityNav";
 import { LiveFeedPanel } from "./LiveFeedPanel";
 import { SetupReadinessBanner } from "./SetupReadinessBanner";
-import { getActivityAgentRepos, getActivityFeed, getActivitySessions, getActivitySetupStatus, loadActivityContext, normalizeSearchParams, type SearchParamsInput } from "./activity-data";
+import { getActivityFeed, getActivitySetupStatus, loadActivityContext, normalizeSearchParams, type SearchParamsInput } from "./activity-data";
 
 export async function ActivityHome({ searchParams }: { searchParams?: SearchParamsInput }) {
   const params = await normalizeSearchParams(searchParams);
@@ -17,20 +17,12 @@ export async function ActivityHome({ searchParams }: { searchParams?: SearchPara
     redirect(`/activity/live-feed?${params.toString()}`);
   }
   const context = await loadActivityContext();
-  const sessionParams = new URLSearchParams();
-  sessionParams.set("limit", "5");
-  for (const key of ["repo_id", "agent_provider", "risk_band"]) {
-    const value = params.get(key);
-    if (value) sessionParams.set(key, value);
-  }
-  const [feed, sessions, setupStatus, repoOptions] = context.org?.id
+  const [feed, setupStatus] = context.org?.id
     ? await Promise.all([
         getActivityFeed(context.accessToken, context.org.id, params),
-        getActivitySessions(context.accessToken, context.org.id, sessionParams),
         getActivitySetupStatus(context.accessToken, context.org.id),
-        getActivityAgentRepos(context.accessToken, context.org.id),
       ])
-    : [null, null, null, []];
+    : [null, null];
 
   return (
     <div className="space-y-6">
