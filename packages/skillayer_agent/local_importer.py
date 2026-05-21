@@ -14,9 +14,12 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from scripts.import_codex_sessions import (
+    _belongs_to_project,
     _new_turn,
+    _parse_timestamp,
     _record_claude_tool,
     _record_claude_usage,
+    _safe_json,
     _turn_payload,
     build_agent_run_payloads,
     build_claude_agent_run_payloads,
@@ -48,23 +51,27 @@ def _sqlite_identifier(value: str) -> str:
 
 def _cursor_rows(db_path: Path) -> dict[str, Any]:
     values: dict[str, Any] = {}
+    connection: sqlite3.Connection | None = None
     try:
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as connection:
-            table_rows = connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-            for (table_name,) in table_rows:
-                table_identifier = _sqlite_identifier(str(table_name))
-                columns = [row[1] for row in connection.execute(f"PRAGMA table_info({table_identifier})").fetchall()]
-                key_column = next((column for column in columns if column.lower() in {"key", "id"}), None)
-                value_column = next((column for column in columns if column.lower() in {"value", "contents"}), None)
-                if not key_column or not value_column:
-                    continue
-                key_identifier = _sqlite_identifier(key_column)
-                value_identifier = _sqlite_identifier(value_column)
-                for key, value in connection.execute(f"SELECT {key_identifier}, {value_identifier} FROM {table_identifier}"):
-                    if isinstance(key, str) and isinstance(value, str):
-                        values[key] = value
+        connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        table_rows = connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        for (table_name,) in table_rows:
+            table_identifier = _sqlite_identifier(str(table_name))
+            columns = [row[1] for row in connection.execute(f"PRAGMA table_info({table_identifier})").fetchall()]
+            key_column = next((column for column in columns if column.lower() in {"key", "id"}), None)
+            value_column = next((column for column in columns if column.lower() in {"value", "contents"}), None)
+            if not key_column or not value_column:
+                continue
+            key_identifier = _sqlite_identifier(key_column)
+            value_identifier = _sqlite_identifier(value_column)
+            for key, value in connection.execute(f"SELECT {key_identifier}, {value_identifier} FROM {table_identifier}"):
+                if isinstance(key, str) and isinstance(value, str):
+                    values[key] = value
     except sqlite3.Error:
         return {}
+    finally:
+        if connection is not None:
+            connection.close()
     return values
 
 
@@ -156,6 +163,17 @@ def _cursor_to_claude_tool(name: str) -> str:
     return name
 
 
+def _local_usage_payload(usage: object) -> dict[str, Any] | None:
+    if not isinstance(usage, dict):
+        return None
+    return {
+        "input_tokens": usage.get("input_tokens") or usage.get("prompt_tokens") or usage.get("tokens_in"),
+        "output_tokens": usage.get("output_tokens") or usage.get("completion_tokens") or usage.get("tokens_out"),
+        "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
+        "cache_read_input_tokens": usage.get("cache_read_input_tokens"),
+    }
+
+
 def build_cursor_agent_run_payloads(
     *,
     cursor_home: Path | None = None,
@@ -195,13 +213,7 @@ def build_cursor_agent_run_payloads(
                     turn["model"] = turn.get("model") or _cursor_model(conversation, message)
                     usage = message.get("usage") if isinstance(message.get("usage"), dict) else None
                     if usage:
-                        _record_claude_usage(
-                            turn,
-                            {
-                                "input_tokens": usage.get("prompt_tokens") or usage.get("input_tokens"),
-                                "output_tokens": usage.get("completion_tokens") or usage.get("output_tokens"),
-                            },
-                        )
+                        _record_claude_usage(turn, _local_usage_payload(usage))
                         turn["token_source"] = "cursor_state_vscdb_message_usage"
                     for call in _cursor_tool_calls(message):
                         tool_name = _cursor_tool_name(call)
@@ -223,9 +235,120 @@ def build_cursor_agent_run_payloads(
     return payloads
 
 
+def _windsurf_session_files(windsurf_home: Path) -> list[Path]:
+    candidates: set[Path] = set()
+    for pattern in ("conversations/**/*.jsonl", "**/conversations/**/*.jsonl", "**/*.jsonl"):
+        candidates.update(path for path in windsurf_home.glob(pattern) if path.is_file())
+    return sorted(candidates)
+
+
+def _windsurf_value(record: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = record.get(key)
+        if value:
+            return value
+    workspace = record.get("workspace") if isinstance(record.get("workspace"), dict) else {}
+    for key in keys:
+        value = workspace.get(key)
+        if value:
+            return value
+    return None
+
+
+def _windsurf_message(record: dict[str, Any]) -> dict[str, Any]:
+    message = record.get("message")
+    return message if isinstance(message, dict) else record
+
+
+def _windsurf_role(record: dict[str, Any], message: dict[str, Any]) -> str:
+    return str(record.get("role") or record.get("type") or message.get("role") or message.get("type") or "").lower()
+
+
+def _windsurf_tool_calls(record: dict[str, Any], message: dict[str, Any]) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    sources = (record,) if message is record else (record, message)
+    for source in sources:
+        for key in ("tool_calls", "toolCalls", "tools"):
+            value = source.get(key)
+            if isinstance(value, list):
+                calls.extend(item for item in value if isinstance(item, dict))
+        content = source.get("content")
+        if isinstance(content, list):
+            calls.extend(item for item in content if isinstance(item, dict) and item.get("type") in {"tool_use", "tool_call", "tool-call"})
+    if record.get("type") in {"tool_use", "tool_call", "tool-call"}:
+        calls.append(record)
+    return calls
+
+
+def _windsurf_tool_name(call: dict[str, Any]) -> str:
+    return str(call.get("name") or call.get("toolName") or call.get("tool") or call.get("type") or "tool")
+
+
+def build_windsurf_agent_run_payloads(
+    *,
+    windsurf_home: Path | None = None,
+    project_root: Path,
+    repo_id: str | None = None,
+    repo_full_name: str | None = None,
+) -> list[dict[str, Any]]:
+    windsurf_home = windsurf_home or Path.home() / ".codeium" / "windsurf"
+    if not windsurf_home.exists():
+        return []
+    payloads: list[dict[str, Any]] = []
+    project_root = project_root.expanduser().resolve()
+    for source_file in _windsurf_session_files(windsurf_home):
+        current: dict[str, Any] | None = None
+        session_id = source_file.stem
+        for line in source_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+            record = _safe_json(line)
+            if not record:
+                continue
+            message = _windsurf_message(record)
+            session_id = str(record.get("sessionId") or record.get("conversationId") or record.get("chatId") or session_id)
+            if current is None:
+                current = _new_turn(f"windsurf-{session_id}-{source_file.stem}", {"id": session_id}, "Windsurf session", source_file)
+                current["thread_id"] = session_id
+            timestamp = _parse_timestamp(record.get("timestamp") or record.get("createdAt") or record.get("time"))
+            if timestamp:
+                current["started_at"] = current.get("started_at") or timestamp
+                current["ended_at"] = timestamp
+            current["cwd"] = str(_windsurf_value(record, "cwd", "workspaceRoot", "workspace_root", "projectPath", "path") or current.get("cwd") or "")
+            current["model"] = str(record.get("model") or message.get("model") or current.get("model") or "") or current.get("model")
+            current["permission_profile"] = str(record.get("permissionMode") or record.get("permissionProfile") or current.get("permission_profile") or "") or current.get("permission_profile")
+            role = _windsurf_role(record, message)
+            if role in {"user", "assistant"}:
+                current["messages"] += 1
+            if role == "assistant":
+                current["agent_messages"] += 1
+            usage = message.get("usage") if isinstance(message.get("usage"), dict) else record.get("usage")
+            usage_payload = _local_usage_payload(usage)
+            if usage_payload:
+                _record_claude_usage(current, usage_payload)
+                current["token_source"] = "windsurf_jsonl_message_usage"
+            for call in _windsurf_tool_calls(record, message):
+                _record_claude_tool(current, _cursor_to_claude_tool(_windsurf_tool_name(call)), _cursor_tool_input(call), project_root)
+        if current and _belongs_to_project(current, project_root):
+            payload = _turn_payload(
+                current,
+                repo_id=repo_id,
+                repo_full_name=repo_full_name,
+                provider="Windsurf",
+                agent_provider="Windsurf",
+                source_provider="windsurf_local",
+                source_record_type="windsurf_jsonl",
+                agent_vendor="Codeium",
+                agent_product="Windsurf",
+                agent_runtime="windsurf",
+            )
+            if payload:
+                payloads.append(payload)
+    return payloads
+
+
 __all__ = [
     "build_agent_run_payloads",
     "build_claude_agent_run_payloads",
     "build_cursor_agent_run_payloads",
+    "build_windsurf_agent_run_payloads",
     "post_payload",
 ]

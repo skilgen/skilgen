@@ -38,10 +38,14 @@ def _write_cursor_fixture(cursor_home: Path, project_root: Path) -> None:
             }
         ]
     }
-    with sqlite3.connect(db_path) as connection:
+    connection = sqlite3.connect(db_path)
+    try:
         connection.execute("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)")
         connection.execute("INSERT INTO ItemTable (key, value) VALUES (?, ?)", ("workspace.folder", f"file://{project_root}"))
         connection.execute("INSERT INTO ItemTable (key, value) VALUES (?, ?)", ("chat-data", json.dumps(chat_data)))
+        connection.commit()
+    finally:
+        connection.close()
 
 
 class CursorImporterTests(unittest.TestCase):
