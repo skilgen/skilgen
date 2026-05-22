@@ -681,9 +681,11 @@ Required design:
   "Agent session - No skill loads recorded", uniform card styling that hides risk, and
   raw event tables as the default grouped experience.
 
-Latest verification snapshot (2026-05-21): the live feed uses the constrained triage
+Latest verification snapshot (2026-05-22): the live feed uses the constrained triage
 layout, alarm KPI tiles, risk rails, verdict columns, highest-risk-first grouped sort,
-quiet Replay buttons, clean danger chips, and compact expanded action lists.
+quiet Replay buttons, clean danger chips, compact expanded action lists, filter chips
+that preserve the canonical `/activity/live-feed` route, and legacy `window=24h` links
+that map cleanly to `hours=24`.
 
 ### 8A.3 Activity Replay enterprise forensic design contract
 

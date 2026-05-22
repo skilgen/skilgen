@@ -7,7 +7,7 @@ import { getActivityFeed, getActivitySetupStatus, loadActivityContext, normalize
 
 export async function ActivityHome({ searchParams }: { searchParams?: SearchParamsInput }) {
   const params = await normalizeSearchParams(searchParams);
-  if (!params.has("hours")) params.set("hours", "24");
+  if (!params.has("hours")) params.set("hours", "168");
   if (!params.has("limit")) params.set("limit", "50");
   const offset = Number(params.get("offset") ?? 0);
   if (offset > 0) {

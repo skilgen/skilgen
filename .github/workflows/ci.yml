@@ -53,6 +53,8 @@ jobs:
         run: npx --workspace apps/dashboard playwright install --with-deps chromium
       - name: Playwright smoke (auth entry)
         run: npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts --browser=chromium
+      - name: Playwright smoke (activity v8 + screenshots)
+        run: npx --workspace apps/dashboard playwright test e2e/activity-v8.spec.ts --browser=chromium
       - name: Upload Playwright artifacts
         if: always()
         uses: actions/upload-artifact@v4

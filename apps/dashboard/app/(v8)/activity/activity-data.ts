@@ -262,6 +262,19 @@ export async function normalizeSearchParams(input?: SearchParamsInput): Promise<
       params.set(key, value);
     }
   }
+  const legacyWindow = params.get("window");
+  if (!params.has("hours") && legacyWindow) {
+    const match = legacyWindow.trim().match(/^(\d+)\s*([hd])?$/i);
+    if (match) {
+      const value = Number(match[1]);
+      const unit = (match[2] ?? "h").toLowerCase();
+      const hours = unit === "d" ? value * 24 : value;
+      if (Number.isFinite(hours) && hours > 0) {
+        params.set("hours", String(hours));
+        params.delete("window");
+      }
+    }
+  }
   return params;
 }
 

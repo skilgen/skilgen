@@ -97,6 +97,29 @@ test("activity tabs render with IA_V8 on", async ({ page }) => {
   }
 });
 
+test("live feed filter chips keep the enterprise route", async ({ page }) => {
+  const response = await page.goto(`${flagOnBaseUrl}/activity/live-feed?agent_provider=codex&window=24h`, { waitUntil: "domcontentloaded" });
+  expect(response?.status()).toBeLessThan(400);
+
+  const chip = page.getByRole("link", { name: /Provider:\s*codex/i });
+  await expect(chip).toBeVisible();
+  await expect(chip).toHaveAttribute("href", /\/activity\/live-feed/);
+});
+
+test("live feed captures desktop and mobile triage layout", async ({ page }) => {
+  const response = await page.goto(`${flagOnBaseUrl}/activity/live-feed`, { waitUntil: "domcontentloaded" });
+  expect(response?.status()).toBeLessThan(400);
+
+  await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
+  await expect(page.locator('select[name="hours"]')).toHaveValue("168");
+  await page.screenshot({ path: "test-results/activity-live-feed-desktop.png", fullPage: true });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${flagOnBaseUrl}/activity/live-feed`, { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
+  await page.screenshot({ path: "test-results/activity-live-feed-mobile.png", fullPage: true });
+});
+
 test("dashboard renders Activity with IA_V8 on and legacy overview with flag off", async ({ page }) => {
   await page.goto(`${flagOnBaseUrl}/dashboard`, { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();

@@ -354,7 +354,7 @@ function removeFilterHref(searchParams: URLSearchParams, key: string): string {
   const next = new URLSearchParams(searchParams);
   next.delete(key);
   const query = next.toString();
-  return query ? `/activity?${query}` : "/activity";
+  return query ? `/activity/live-feed?${query}` : "/activity/live-feed";
 }
 
 function filterChips(searchParams: URLSearchParams): Array<{ key: string; label: string; value: string; href: string }> {
