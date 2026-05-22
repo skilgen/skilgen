@@ -12,7 +12,8 @@ const nextConfig: NextConfig = {
     if (dev) {
       // OneDrive-backed workspaces can leave Next's filesystem pack cache in a
       // half-written state, which shows up locally as missing route chunks.
-      config.cache = false;
+      // Keep cache in memory so Next can still serve its dev CSS/runtime assets.
+      config.cache = { type: "memory" };
     }
     return config;
   },
