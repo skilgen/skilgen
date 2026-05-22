@@ -328,6 +328,10 @@ export async function getActivitySessions(accessToken: string, orgId: string, pa
   return activityFetch<{ sessions: ActivitySession[]; total: number; rollup: ActivityRollup }>(accessToken, `/v8/orgs/${orgId}/activity/sessions${query ? `?${query}` : ""}`);
 }
 
+export async function getActivitySessionDetail(accessToken: string, orgId: string, sessionId: string): Promise<{ session: ActivitySession } | null> {
+  return activityFetch<{ session: ActivitySession }>(accessToken, `/v8/orgs/${orgId}/activity/sessions/${sessionId}`);
+}
+
 export async function getActivityReplay(accessToken: string, orgId: string, repoId: string, sessionId: string): Promise<{ session: ActivitySession; timeline: ReplayStep[]; export_html: string; compliance_events: ActivityComplianceEvent[] } | null> {
   return activityFetch<{ session: ActivitySession; timeline: ReplayStep[]; export_html: string; compliance_events: ActivityComplianceEvent[] }>(accessToken, `/v8/orgs/${orgId}/repos/${repoId}/activity/sessions/${sessionId}/replay`);
 }
