@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 
 const TEST_API_URL = process.env.PLAYWRIGHT_TEST_API_URL || "http://127.0.0.1:59999";
@@ -23,6 +24,31 @@ function dashboardCwd(): string {
     : path.join(process.cwd(), "apps", "dashboard");
 }
 
+function nextCliPath(): string {
+  return path.join(dashboardCwd(), "..", "..", "node_modules", "next", "dist", "bin", "next");
+}
+
+async function ensureDashboardBuilt(): Promise<void> {
+  const buildIdPath = path.join(dashboardCwd(), ".next", "BUILD_ID");
+  if (fs.existsSync(buildIdPath)) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const build = spawn(process.execPath, [nextCliPath(), "build"], {
+      cwd: dashboardCwd(),
+      env: {
+        ...process.env,
+        NEXT_TELEMETRY_DISABLED: "1",
+      },
+      stdio: "ignore",
+    });
+    build.once("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`next build failed with exit code ${code ?? "unknown"}`));
+    });
+    build.once("error", reject);
+  });
+}
+
 async function waitForReady(url: string, server: ManagedServer): Promise<void> {
   const deadline = Date.now() + 60_000;
   let lastError = "";
@@ -41,8 +67,9 @@ async function waitForReady(url: string, server: ManagedServer): Promise<void> {
 }
 
 async function startDashboardServer(name: string, port: number, iaV8Default: "true" | "false"): Promise<string> {
+  await ensureDashboardBuilt();
   const url = `http://127.0.0.1:${port}`;
-  const server = spawn("npx", ["next", "start", "--hostname", "127.0.0.1", "--port", String(port)], {
+  const server = spawn(process.execPath, [nextCliPath(), "start", "--hostname", "127.0.0.1", "--port", String(port)], {
     cwd: dashboardCwd(),
     env: {
       ...process.env,

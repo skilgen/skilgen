@@ -25,4 +25,7 @@ pnpm-debug.log*
 .tmp_github_known_hosts
 apps/dashboard/.tmp_prr_screenshots.mjs
 apps/dashboard/test-results/e2e-*/
+test-results/
+.git-codex/
+.git-worktree/
 readline.py

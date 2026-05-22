@@ -19,6 +19,10 @@ function dashboardCwd(): string {
     : path.join(process.cwd(), "apps", "dashboard");
 }
 
+function nextCliPath(): string {
+  return path.join(dashboardCwd(), "..", "..", "node_modules", "next", "dist", "bin", "next");
+}
+
 async function waitForReady(url: string, server: ManagedServer): Promise<void> {
   const deadline = Date.now() + 60_000;
   let lastError = "";
@@ -47,7 +51,7 @@ async function ensureDashboardBuilt(): Promise<void> {
   if (fs.existsSync(buildIdPath)) return;
 
   await new Promise<void>((resolve, reject) => {
-    const build = spawn("npx", ["next", "build"], {
+    const build = spawn(process.execPath, [nextCliPath(), "build"], {
       cwd: dashboardCwd(),
       env: {
         ...process.env,
@@ -66,7 +70,7 @@ async function ensureDashboardBuilt(): Promise<void> {
 async function startDashboardServer(): Promise<string> {
   await ensureDashboardBuilt();
   const url = `http://127.0.0.1:${PORT}`;
-  const server = spawn("npx", ["next", "start", "--hostname", "127.0.0.1", "--port", String(PORT)], {
+  const server = spawn(process.execPath, [nextCliPath(), "start", "--hostname", "127.0.0.1", "--port", String(PORT)], {
     cwd: dashboardCwd(),
     env: {
       ...process.env,
@@ -92,7 +96,7 @@ async function startDashboardServer(): Promise<string> {
 test.setTimeout(120_000);
 test.describe.configure({ mode: "serial" });
 
-test.beforeAll(async ({}, testInfo) => {
+test.beforeAll(async (_fixtures, testInfo) => {
   testInfo.setTimeout(120_000);
   if (!baseUrl) baseUrl = await startDashboardServer();
 });
