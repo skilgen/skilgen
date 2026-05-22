@@ -687,6 +687,9 @@ quiet Replay buttons, clean danger chips, compact expanded action lists, filter 
 that preserve the canonical `/activity/live-feed` route, and legacy `window=24h` links
 that map cleanly to `hours=24`.
 
+CI proof: `.github/workflows/ci.yml` runs `apps/dashboard/e2e/activity-v8.spec.ts` and
+uploads Playwright screenshots/artifacts from `apps/dashboard/test-results`.
+
 ### 8A.3 Activity Replay enterprise forensic design contract
 
 The Activity Replay page (`/activity/replay/[sessionId]?repo=...`) is the single-run

@@ -532,7 +532,7 @@ export function LiveFeedPanel({ events, orgId, searchParams, streamKey }: { even
             <Filter className="h-4 w-4" />
             Filters
           </label>
-          <select className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={query.hours ?? "24"} name="hours">
+          <select className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={query.hours ?? "168"} name="hours">
             <option value="1">1 hour</option>
             <option value="24">24 hours</option>
             <option value="168">7 days</option>
