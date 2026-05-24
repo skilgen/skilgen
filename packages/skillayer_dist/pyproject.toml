@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skillayer"
+version = "0.6.0"
+description = "Skillayer CLI alias for coding-agent governance telemetry."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Ravi Chandu Ummadisetti" }]
+license = { text = "MIT" }
+keywords = ["ai", "agents", "governance", "compliance", "developer-tools"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = ["skilgen==0.6.0"]
+
+[project.scripts]
+skillayer = "packages.skillayer_agent.cli:console_main"
+skillayer-agent = "packages.skillayer_agent.cli:console_main"
+
+[project.urls]
+Homepage = "https://github.com/skilgen/skilgen"
+Repository = "https://github.com/skilgen/skilgen"
+Issues = "https://github.com/skilgen/skilgen/issues"
+
+[tool.setuptools]
+packages = []
+license-files = []

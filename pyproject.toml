@@ -72,6 +72,7 @@ api = [
 
 [project.scripts]
 skilgen = "skilgen.cli.main:console_main"
+skillayer = "packages.skillayer_agent.cli:console_main"
 skillayer-agent = "packages.skillayer_agent.cli:console_main"
 
 [project.urls]
@@ -84,4 +85,4 @@ Issues = "https://github.com/skilgen/skilgen/issues"
 license-files = ["LICENSE"]
 
 [tool.setuptools.packages.find]
-include = ["skilgen*", "packages*", "apps.api*", "apps.worker*"]
+include = ["skilgen*", "packages*", "apps.api*", "apps.worker*", "scripts*"]

@@ -698,7 +698,7 @@ def command_watch(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="skillayer-agent", description="Skillayer local coding-agent metadata helper.")
+    parser = argparse.ArgumentParser(prog=Path(sys.argv[0]).name or "skillayer", description="Skillayer local coding-agent metadata helper.")
     parser.add_argument("--config", default=str(CONFIG_PATH), help="Path to ~/.skillayer/agent.json.")
     parser.add_argument("--state", default=str(STATE_PATH), help="Path to local sync state.")
     subparsers = parser.add_subparsers(dest="command", required=True)

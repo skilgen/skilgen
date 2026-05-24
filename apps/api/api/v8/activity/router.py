@@ -42,6 +42,11 @@ AGENT_COMPLIANCE_EVENT_TYPES = {
 }
 
 
+def _repo_filter(repo_id: str | None) -> str | None:
+    value = str(repo_id or "").strip()
+    return None if value in {"", "all", "_all"} else value
+
+
 def _estimated_cost_usd(model: str | None, input_tokens: int, output_tokens: int) -> float:
     if input_tokens <= 0 and output_tokens <= 0:
         return 0.0
@@ -563,6 +568,7 @@ async def _feed_items(
     repo_id: str | None = None,
     filters: dict[str, str | None] | None = None,
 ) -> list[dict[str, Any]]:
+    repo_id = _repo_filter(repo_id)
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
     org = await db.get(Org, org_id)
     risk_policy = agent_risk_policy_from_org(org)
@@ -646,6 +652,7 @@ async def activity_feed(
     user: str | None = None,
 ) -> dict[str, Any]:
     await _require_v8(org_id, current_org_id, db)
+    repo_id = _repo_filter(repo_id)
     items = await _feed_items(
         db,
         org_id,

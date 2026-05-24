@@ -150,6 +150,35 @@ def test_feed_includes_agent_sessions_when_skill_load_events_are_absent() -> Non
     assert event["session_db_id"] == "sess_db"
 
 
+def test_feed_treats_all_repo_id_as_cross_repo_filter() -> None:
+    session = SimpleNamespace(
+        id="sess_db",
+        repo_id="repo_1",
+        session_id="sess_ext",
+        org_id="org_1",
+        agent_runtime="codex",
+        engineer_login="ravi",
+        created_at=datetime(2026, 5, 5, 2, 0, 0),
+        session_start=datetime(2026, 5, 5, 2, 0, 0),
+        files_touched=["apps/dashboard/app/page.tsx"],
+        produced_artifacts=[{"tool": "Write", "file_path": "apps/dashboard/app/page.tsx"}],
+        code_produced=None,
+        skills_loaded=[],
+        skill_paths_loaded=[],
+        task_description="Fix activity feed",
+        notes=None,
+        outcome="success",
+    )
+    repo = SimpleNamespace(id="repo_1", org_id="org_1", name="dashboard", full_name="acme/dashboard", sensitivity_tier="internal")
+    client = _client(Db([Result(rows=[]), Result(rows=[session]), Result(rows=[repo]), Result(rows=[])]))
+
+    response = client.get("/v8/orgs/org_1/activity/feed?hours=24&repo_id=all")
+
+    assert response.status_code == 200
+    assert response.json()["events"][0]["repo_id"] == "repo_1"
+    assert response.json()["filters"] == {"hours": 24}
+
+
 def test_feed_contract_echoes_shareable_investigation_filters() -> None:
     event = SimpleNamespace(id="evt_1", org_id="org_1", repo_id="repo_1", skill_id="skill_1", agent_runtime="codex", session_id="sess_ext", loaded_at=datetime(2026, 5, 5, 1, 0, 0))
     repo = SimpleNamespace(id="repo_1", org_id="org_1", name="api", full_name="acme/api", sensitivity_tier="confidential")
