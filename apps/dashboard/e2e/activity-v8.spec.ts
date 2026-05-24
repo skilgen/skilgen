@@ -90,7 +90,8 @@ async function startDashboardServer(name: string, port: number, iaV8Default: "tr
 test.setTimeout(120000);
 test.describe.configure({ mode: "serial" });
 
-test.beforeAll(async () => {
+test.beforeAll(async ({}, testInfo) => {
+  testInfo.setTimeout(120000);
   if (!flagOnBaseUrl) flagOnBaseUrl = await startDashboardServer("activity-ia-v8-on", FLAG_ON_PORT, "true");
   if (!flagOffBaseUrl) flagOffBaseUrl = await startDashboardServer("activity-ia-v8-off", FLAG_OFF_PORT, "false");
 });
