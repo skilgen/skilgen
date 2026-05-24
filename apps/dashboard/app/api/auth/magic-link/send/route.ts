@@ -23,6 +23,24 @@ function workOSReady(): boolean {
   return Boolean(process.env.WORKOS_API_KEY && process.env.WORKOS_CLIENT_ID && process.env.WORKOS_COOKIE_PASSWORD && process.env.WORKOS_COOKIE_PASSWORD.length >= 32);
 }
 
+function workOSClient() {
+  const apiKey = process.env.WORKOS_API_KEY;
+  if (!apiKey) {
+    throw new Error("WORKOS_API_KEY is not configured");
+  }
+
+  const apiHostname = (process.env.WORKOS_API_HOSTNAME || "").trim();
+  const apiPort = Number(process.env.WORKOS_API_PORT || "");
+  const apiHttps = (process.env.WORKOS_API_HTTPS || "").trim().toLowerCase();
+
+  return new WorkOS({
+    apiKey,
+    ...(apiHostname ? { apiHostname } : {}),
+    ...(Number.isFinite(apiPort) && apiPort > 0 ? { port: apiPort } : {}),
+    ...(apiHttps ? { https: apiHttps !== "false" } : {}),
+  });
+}
+
 function signInRedirect(request: NextRequest, params: Record<string, string>): NextResponse {
   const url = new URL("/sign-in", request.url);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
@@ -66,7 +84,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const workos = new WorkOS(process.env.WORKOS_API_KEY);
+    const workos = workOSClient();
     const session = await workos.passwordless.createSession({
       type: "MagicLink",
       email,

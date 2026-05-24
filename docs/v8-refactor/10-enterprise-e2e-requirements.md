@@ -161,8 +161,8 @@ Run before and after each milestone PR. ✅ = passes today, ◐ = partial, ❌ =
 | API py-compile for touched files | ✅ | `python -m compileall apps/api/api` | Verified 2026-05-19 pre-push. |
 | API pytest (full) | ✅ | `pytest apps/api/tests -q` | Verified 2026-05-21; keep `make verify-enterprise` as the CI gate. |
 | Replay / Sessions / Live-feed pagination | ✅ | Manual browser walk (logged 2026-05-19). | Keep the Playwright smoke (`apps/dashboard/e2e/`) for this. |
-| WorkOS SSO sign-in | ◐ | Local `.env` with all four `WORKOS_*` vars, hit `/sign-in`. | Works when configured; routes to `/dashboard/connect`. |
-| Self-serve magic-link sign-up | ◐ | Local `.env` with all four `WORKOS_*` vars, hit `/sign-in` → Send magic link. | UX + JIT provisioning shipped; local preview uses `auth=magic-link-preview` without WorkOS. |
+| WorkOS SSO sign-in | ✅ | `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts --browser=chromium` | CI runs both preview fallback and configured-mode SSO redirect validation. |
+| Self-serve magic-link sign-up | ✅ | `npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts --browser=chromium` | CI uses a stubbed WorkOS passwordless endpoint (via `WORKOS_API_HOSTNAME/PORT/HTTPS`) so the full POST flow can be exercised without real credentials. |
 | GitHub repo/PR/commit enrichment | ✅ | Connect GitHub App, inspect repo/PR links in Insights. | Keep this as the canonical repo evidence backbone. |
 | Codex Desktop import (single dev) | ✅ | `python scripts/import_codex_sessions.py --providers codex --org-id <org> --token <key>` | Verified end-to-end against the local API. |
 | Claude Code import (single dev) | ✅ | `python scripts/import_codex_sessions.py --providers claude --org-id <org> --token <key>` | Same script; uses `~/.claude/projects/**/*.jsonl`. |
