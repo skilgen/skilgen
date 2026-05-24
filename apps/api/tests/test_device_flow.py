@@ -74,6 +74,9 @@ class Db:
         assert model is Org
         return self.org if self.org and self.org.id == row_id else None
 
+    async def flush(self):
+        return None
+
     async def commit(self):
         self.committed = True
 
@@ -95,7 +98,7 @@ def test_device_flow_returns_pending_until_browser_approval() -> None:
     assert pending.interval == device_flow.DEVICE_POLL_INTERVAL_SECONDS
 
 
-def test_device_flow_approval_returns_org_api_key() -> None:
+def test_device_flow_approval_returns_org_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     org = Org(id="org_1", github_org_id=1, login="acme", name="Acme", api_key="sk-existing")
     db = Db(org)
     code = asyncio.run(
@@ -106,7 +109,21 @@ def test_device_flow_approval_returns_org_api_key() -> None:
         )
     )
 
-    approved = asyncio.run(device_flow.approve_device_code(device_flow.DeviceApproveRequest(user_code=code.user_code), db=db, current_org_id="org_1"))
+    async def fake_ensure_from_login(db, *, email, name, source, request=None):  # noqa: ANN001
+        return org, SimpleNamespace(email=email), False
+
+    monkeypatch.setenv("ADMIN_SECRET", "server-secret")
+    monkeypatch.setattr(device_flow, "ensure_from_login", fake_ensure_from_login)
+
+    approved = asyncio.run(
+        device_flow.approve_device_code(
+            device_flow.DeviceApproveRequest(user_code=code.user_code),
+            db=db,
+            credentials=None,
+            x_admin_secret="server-secret",
+            x_skillayer_actor_email="dev@acme.test",
+        )
+    )
     token = asyncio.run(device_flow.poll_device_token(device_flow.DeviceTokenRequest(device_code=code.device_code), db=db))
 
     assert approved == {"ok": True, "status": "approved", "org_id": "org_1"}

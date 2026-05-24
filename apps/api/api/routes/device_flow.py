@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime, timedelta
+import hmac
+import os
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.api.auth import get_current_org_id
+from apps.api.api.auth import get_current_org_id, optional_bearer
+from apps.api.api.services.jit_provisioning import ensure_from_login
+from packages.db.config import settings
 from packages.db.database import get_db
 from packages.db.models import DeviceAuthorization, Org
 
@@ -149,6 +154,28 @@ async def _enforce_device_code_rate_limit(db: AsyncSession, *, client_ip: str, n
         )
 
 
+def _admin_secret_valid(value: str) -> bool:
+    secret = os.getenv("ADMIN_SECRET", "") or settings.ADMIN_SECRET
+    return bool(secret and value and hmac.compare_digest(value, secret))
+
+
+async def _approval_org_id(
+    *,
+    db: AsyncSession,
+    credentials: HTTPAuthorizationCredentials | None,
+    x_admin_secret: str,
+    x_skillayer_actor_email: str,
+) -> str:
+    if _admin_secret_valid(x_admin_secret):
+        email = x_skillayer_actor_email.strip().lower()
+        if not email:
+            raise HTTPException(status_code=401, detail="Missing actor email")
+        org, _, _ = await ensure_from_login(db, email=email, name=None, source="workos")
+        await db.flush()
+        return org.id
+    return await get_current_org_id(credentials, db)
+
+
 @router.post("/code", response_model=DeviceCodeResponse)
 async def create_device_code(
     payload: DeviceCodeRequest,
@@ -186,9 +213,17 @@ async def create_device_code(
 async def approve_device_code(
     payload: DeviceApproveRequest,
     db: AsyncSession = Depends(get_db),
-    current_org_id: str = Depends(get_current_org_id),
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_bearer),
+    x_admin_secret: str = Header(default=""),
+    x_skillayer_actor_email: str = Header(default=""),
 ) -> dict[str, object]:
     now = datetime.now(UTC).replace(tzinfo=None)
+    current_org_id = await _approval_org_id(
+        db=db,
+        credentials=credentials,
+        x_admin_secret=x_admin_secret,
+        x_skillayer_actor_email=x_skillayer_actor_email,
+    )
     authorization = (
         await db.execute(select(DeviceAuthorization).where(DeviceAuthorization.user_code == payload.user_code.upper()))
     ).scalar_one_or_none()

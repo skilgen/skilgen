@@ -35,21 +35,25 @@ async function approveDevice(formData: FormData) {
   }
 
   let accessToken = "";
+  let actorEmail = "";
   try {
     const session = await withAuth({ ensureSignedIn: false });
     accessToken = session?.accessToken || "";
+    actorEmail = session?.user?.email || "";
   } catch {
     accessToken = "";
+    actorEmail = "";
   }
 
-  if (!accessToken) {
+  if (!accessToken || !actorEmail) {
     redirect(cleanReturnTo(userCode));
   }
 
+  const adminSecret = process.env.ADMIN_SECRET || "";
   const response = await fetch(`${API_URL}/v1/device/approve`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      ...(adminSecret ? { "X-Admin-Secret": adminSecret, "X-Skillayer-Actor-Email": actorEmail } : { Authorization: `Bearer ${accessToken}` }),
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ user_code: userCode }),
