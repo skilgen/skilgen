@@ -690,6 +690,10 @@ that map cleanly to `hours=24`.
 CI proof: `.github/workflows/ci.yml` runs `apps/dashboard/e2e/activity-v8.spec.ts` and
 uploads Playwright screenshots/artifacts from `apps/dashboard/test-results`.
 
+Hook sanity: Playwright smoke specs use the required fixture destructuring signature
+(`test.beforeAll(async ({}, testInfo) => ...)`) so they can run in CI without
+loader-time failures.
+
 ### 8A.3 Activity Replay enterprise forensic design contract
 
 The Activity Replay page (`/activity/replay/[sessionId]?repo=...`) is the single-run
