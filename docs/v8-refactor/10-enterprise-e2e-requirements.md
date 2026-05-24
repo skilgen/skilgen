@@ -907,7 +907,3 @@ installer are expansion after that core path is working.
   that lands PR-V.
 - ✅ This document is referenced from `docs/v8-refactor/06-pr-sequence.md` and from the
   root `README.md` quickstart section (2026-05-20).
-
-Latest verification (2026-05-24):
-
-- `make verify-enterprise` (macOS 14.4.1 arm64; node v24.14.0; python 3.12.8).

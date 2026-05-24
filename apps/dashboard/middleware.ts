@@ -16,7 +16,7 @@ const workOSMiddleware = isWorkOSConfigured
       redirectUri: workOSRedirectUri,
       middlewareAuth: {
         enabled: true,
-        unauthenticatedPaths: ["/", "/sign-in", "/callback"],
+        unauthenticatedPaths: ["/", "/sign-in", "/callback", "/device"],
       },
     })
   : null;
@@ -93,6 +93,7 @@ export const config = {
     "/insights/:path*",
     "/settings",
     "/settings/:path*",
+    "/device",
     "/api/admin/:path*",
   ],
 };
