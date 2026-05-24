@@ -1,4 +1,5 @@
 import { getSignInUrl } from "@workos-inc/authkit-nextjs";
+import { NextRequest } from "next/server";
 import { redirect } from "next/navigation";
 
 function workOSRedirectUri(): string {
@@ -15,14 +16,20 @@ function isWorkOSConfigured(): boolean {
   );
 }
 
-export async function GET() {
+function safeReturnTo(value: string | null): string {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/dashboard/connect?auth=sso";
+  return value;
+}
+
+export async function GET(request: NextRequest) {
   if (!isWorkOSConfigured()) {
     redirect("/activity");
   }
 
+  const returnTo = safeReturnTo(request.nextUrl.searchParams.get("returnTo"));
   const signInUrl = await getSignInUrl({
     redirectUri: workOSRedirectUri(),
-    returnTo: "/dashboard/connect?auth=sso",
+    returnTo,
     state: JSON.stringify({ source: "workos", method: "sso" }),
   });
   redirect(signInUrl);
