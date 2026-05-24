@@ -345,9 +345,21 @@ def build_windsurf_agent_run_payloads(
     return payloads
 
 
+def build_copilot_agent_run_payloads(
+    *,
+    project_root: Path,
+    repo_id: str | None = None,
+    repo_full_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """Copilot is ingested through GitHub APIs, not a stable local session store."""
+    _ = (project_root, repo_id, repo_full_name)
+    return []
+
+
 __all__ = [
     "build_agent_run_payloads",
     "build_claude_agent_run_payloads",
+    "build_copilot_agent_run_payloads",
     "build_cursor_agent_run_payloads",
     "build_windsurf_agent_run_payloads",
     "post_payload",

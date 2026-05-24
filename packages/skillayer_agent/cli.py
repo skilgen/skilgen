@@ -5,7 +5,10 @@ import hashlib
 import json
 import os
 import platform
+import plistlib
+import shlex
 import stat
+import subprocess
 import sys
 import time
 import uuid
@@ -17,12 +20,13 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .local_importer import build_agent_run_payloads, build_claude_agent_run_payloads, build_cursor_agent_run_payloads, build_windsurf_agent_run_payloads, post_payload
+from .local_importer import build_agent_run_payloads, build_claude_agent_run_payloads, build_copilot_agent_run_payloads, build_cursor_agent_run_payloads, build_windsurf_agent_run_payloads, post_payload
 
 DEFAULT_API_URL = "https://api.skillayer.com"
-DEFAULT_PROVIDERS = ("codex", "claude")
+DEFAULT_PROVIDERS = ("codex", "claude", "cursor", "windsurf", "copilot")
 CONFIG_PATH = Path.home() / ".skillayer" / "agent.json"
 STATE_PATH = Path.home() / ".skillayer" / "state.json"
+SERVICE_LABEL = "com.skillayer.agent"
 
 
 @dataclass(frozen=True)
@@ -71,7 +75,7 @@ def _providers(value: object) -> tuple[str, ...]:
     normalized = {"claude" if item in {"claude_code", "claude-code"} else item for item in raw}
     if "all" in normalized:
         normalized = set(DEFAULT_PROVIDERS)
-    supported = {"codex", "claude", "cursor", "windsurf"}
+    supported = {"codex", "claude", "cursor", "windsurf", "copilot"}
     unsupported = sorted(normalized - supported)
     if unsupported:
         raise SystemExit(f"error: unsupported provider(s): {', '.join(unsupported)}")
@@ -184,6 +188,14 @@ def discover_payloads(config: AgentConfig) -> list[dict[str, Any]]:
                     repo_full_name=project.repo_full_name,
                 )
             )
+        if "copilot" in config.providers:
+            payloads.extend(
+                build_copilot_agent_run_payloads(
+                    project_root=project.path,
+                    repo_id=project.repo_id,
+                    repo_full_name=project.repo_full_name,
+                )
+            )
     return payloads
 
 
@@ -257,7 +269,167 @@ def _runtime_status(config: AgentConfig) -> list[dict[str, Any]]:
             "detected": (config.windsurf_home / "conversations").exists(),
             "store": str(config.windsurf_home / "conversations"),
         },
+        {
+            "runtime": "copilot",
+            "label": "GitHub Copilot",
+            "configured": "copilot" in config.providers,
+            "detected": False,
+            "store": "GitHub connector: Copilot metrics and audit logs",
+            "capture_mode": "connector",
+        },
     ]
+
+
+def _agent_module_command(config_path: Path, state_path: Path, interval: float) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "packages.skillayer_agent.cli",
+        "--config",
+        str(config_path),
+        "--state",
+        str(state_path),
+        "watch",
+        "--config",
+        str(config_path),
+        "--state",
+        str(state_path),
+        "--interval",
+        str(interval),
+    ]
+
+
+def _service_paths() -> dict[str, Path]:
+    system = platform.system().lower()
+    logs = Path.home() / ".skillayer" / "logs"
+    if system == "darwin":
+        unit = Path.home() / "Library" / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
+    elif system == "windows":
+        unit = Path.home() / ".skillayer" / "skillayer-agent.schtask"
+    else:
+        unit = Path.home() / ".config" / "systemd" / "user" / "skillayer-agent.service"
+    return {
+        "unit": unit,
+        "logs": logs,
+        "stdout": logs / "agent.out.log",
+        "stderr": logs / "agent.err.log",
+    }
+
+
+def _run_service_command(command: list[str]) -> tuple[bool, str]:
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+    output = "\n".join(part for part in [completed.stdout.strip(), completed.stderr.strip()] if part)
+    return completed.returncode == 0, output
+
+
+def _install_macos_launch_agent(command: list[str], paths: dict[str, Path], *, start: bool) -> dict[str, Any]:
+    paths["unit"].parent.mkdir(parents=True, exist_ok=True)
+    paths["logs"].mkdir(parents=True, exist_ok=True)
+    plist = {
+        "Label": SERVICE_LABEL,
+        "ProgramArguments": command,
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "StandardOutPath": str(paths["stdout"]),
+        "StandardErrorPath": str(paths["stderr"]),
+        "WorkingDirectory": str(Path.cwd()),
+    }
+    paths["unit"].write_bytes(plistlib.dumps(plist, sort_keys=True))
+    if not start:
+        return {"installed": True, "running": False, "manager": "launchd", "unit_path": str(paths["unit"])}
+    uid = os.getuid() if hasattr(os, "getuid") else None
+    domain = f"gui/{uid}" if uid is not None else "gui"
+    _run_service_command(["launchctl", "bootout", domain, str(paths["unit"])])
+    bootstrap_ok, bootstrap_output = _run_service_command(["launchctl", "bootstrap", domain, str(paths["unit"])])
+    kick_ok, kick_output = _run_service_command(["launchctl", "kickstart", "-k", f"{domain}/{SERVICE_LABEL}"])
+    return {
+        "installed": True,
+        "running": bootstrap_ok and kick_ok,
+        "manager": "launchd",
+        "unit_path": str(paths["unit"]),
+        "message": "\n".join(part for part in [bootstrap_output, kick_output] if part),
+    }
+
+
+def _install_linux_systemd_service(command: list[str], paths: dict[str, Path], *, start: bool) -> dict[str, Any]:
+    paths["unit"].parent.mkdir(parents=True, exist_ok=True)
+    paths["logs"].mkdir(parents=True, exist_ok=True)
+    unit = "\n".join(
+        [
+            "[Unit]",
+            "Description=Skillayer local coding-agent watcher",
+            "",
+            "[Service]",
+            "Type=simple",
+            f"ExecStart={' '.join(shlex.quote(part) for part in command)}",
+            "Restart=always",
+            "RestartSec=10",
+            f"WorkingDirectory={Path.cwd()}",
+            f"StandardOutput=append:{paths['stdout']}",
+            f"StandardError=append:{paths['stderr']}",
+            "",
+            "[Install]",
+            "WantedBy=default.target",
+            "",
+        ]
+    )
+    paths["unit"].write_text(unit, encoding="utf-8")
+    if not start:
+        return {"installed": True, "running": False, "manager": "systemd", "unit_path": str(paths["unit"])}
+    reload_ok, reload_output = _run_service_command(["systemctl", "--user", "daemon-reload"])
+    enable_ok, enable_output = _run_service_command(["systemctl", "--user", "enable", "--now", "skillayer-agent.service"])
+    return {
+        "installed": True,
+        "running": reload_ok and enable_ok,
+        "manager": "systemd",
+        "unit_path": str(paths["unit"]),
+        "message": "\n".join(part for part in [reload_output, enable_output] if part),
+    }
+
+
+def _install_windows_task(command: list[str], paths: dict[str, Path], *, start: bool) -> dict[str, Any]:
+    paths["unit"].parent.mkdir(parents=True, exist_ok=True)
+    paths["logs"].mkdir(parents=True, exist_ok=True)
+    command_line = subprocess.list2cmdline(command)
+    paths["unit"].write_text(command_line + "\n", encoding="utf-8")
+    if not start:
+        return {"installed": True, "running": False, "manager": "schtasks", "unit_path": str(paths["unit"])}
+    create_ok, create_output = _run_service_command(["schtasks", "/Create", "/TN", "SkillayerAgent", "/TR", command_line, "/SC", "ONLOGON", "/RL", "LIMITED", "/F"])
+    run_ok, run_output = _run_service_command(["schtasks", "/Run", "/TN", "SkillayerAgent"])
+    return {
+        "installed": True,
+        "running": create_ok and run_ok,
+        "manager": "schtasks",
+        "unit_path": str(paths["unit"]),
+        "message": "\n".join(part for part in [create_output, run_output] if part),
+    }
+
+
+def install_background_watcher(config_path: Path, state_path: Path, *, interval: float = 60.0, start: bool = True) -> dict[str, Any]:
+    command = _agent_module_command(config_path.expanduser(), state_path.expanduser(), interval)
+    paths = _service_paths()
+    system = platform.system().lower()
+    if system == "darwin":
+        return _install_macos_launch_agent(command, paths, start=start)
+    if system == "windows":
+        return _install_windows_task(command, paths, start=start)
+    return _install_linux_systemd_service(command, paths, start=start)
+
+
+def watcher_status() -> dict[str, Any]:
+    paths = _service_paths()
+    system = platform.system().lower()
+    if system == "darwin":
+        ok, output = _run_service_command(["launchctl", "print", f"gui/{os.getuid()}/{SERVICE_LABEL}"])
+        return {"manager": "launchd", "status": "running" if ok else ("installed" if paths["unit"].exists() else "not installed"), "unit_path": str(paths["unit"]), "message": output}
+    if system == "windows":
+        ok, output = _run_service_command(["schtasks", "/Query", "/TN", "SkillayerAgent"])
+        return {"manager": "schtasks", "status": "running" if ok else ("installed" if paths["unit"].exists() else "not installed"), "unit_path": str(paths["unit"]), "message": output}
+    ok, output = _run_service_command(["systemctl", "--user", "is-active", "skillayer-agent.service"])
+    return {"manager": "systemd", "status": "running" if ok and output.strip() == "active" else ("installed" if paths["unit"].exists() else "not installed"), "unit_path": str(paths["unit"]), "message": output}
 
 
 def _print(payload: dict[str, Any], *, as_json: bool) -> None:
@@ -272,6 +444,8 @@ def _print(payload: dict[str, Any], *, as_json: bool) -> None:
         print(f"Machine: {payload.get('machine_label') or 'unknown'} ({payload.get('machine_id') or 'unregistered'})")
         print(f"Project roots: {payload['project_root_count']}")
         print(f"Last sync: {payload.get('last_sync_at') or 'never'}")
+        watcher = payload.get("watcher") or {}
+        print(f"Watcher: {watcher.get('status') or 'unknown'}")
         for runtime in payload["runtimes"]:
             marker = "detected" if runtime["detected"] else "not detected"
             configured = "enabled" if runtime["configured"] else "disabled"
@@ -341,6 +515,7 @@ def command_status(args: argparse.Namespace) -> int:
         "last_discovered": state.get("last_discovered", 0),
         "last_posted": state.get("last_posted", 0),
         "last_failed": state.get("last_failed", 0),
+        "watcher": watcher_status(),
         "dry_run": bool(args.dry_run),
     }
     if args.dry_run:
@@ -390,6 +565,13 @@ def command_connect(args: argparse.Namespace) -> int:
         if not args.org_id:
             raise SystemExit("error: --org-id is required")
         result = _write_connect_config(args, token=args.token, org_id=args.org_id, api_url=args.api_url)
+        if not args.no_start:
+            result["watcher"] = install_background_watcher(
+                Path(args.config).expanduser(),
+                Path(args.state).expanduser(),
+                interval=float(args.interval),
+                start=True,
+            )
         _print(result, as_json=args.json)
         return 0
 
@@ -455,6 +637,13 @@ def command_connect(args: argparse.Namespace) -> int:
         repo_id=str(token_response.get("repo_id") or "") or None,
         repo_full_name=str(token_response.get("repo_full_name") or "") or None,
     )
+    if not args.no_start:
+        result["watcher"] = install_background_watcher(
+            Path(args.config).expanduser(),
+            Path(args.state).expanduser(),
+            interval=float(args.interval),
+            start=True,
+        )
     _print(result, as_json=args.json)
     return 0
 
@@ -544,6 +733,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     connect = subparsers.add_parser("connect", help="Write a local Skillayer agent config.")
     connect.add_argument("--config", default=str(CONFIG_PATH))
+    connect.add_argument("--state", default=str(STATE_PATH))
     connect.add_argument("--api-url", default=os.getenv("SKILLAYER_API_URL", DEFAULT_API_URL))
     connect.add_argument("--org-id", default=os.getenv("SKILLAYER_ORG_ID"))
     connect.add_argument("--token", default=os.getenv("SKILLAYER_API_KEY"))
@@ -553,6 +743,8 @@ def build_parser() -> argparse.ArgumentParser:
     connect.add_argument("--repo-full-name", default=os.getenv("SKILLAYER_REPO_FULL_NAME"))
     connect.add_argument("--machine-id", default=os.getenv("SKILLAYER_MACHINE_ID"))
     connect.add_argument("--machine-label", default=os.getenv("SKILLAYER_MACHINE_LABEL"))
+    connect.add_argument("--interval", type=float, default=float(os.getenv("SKILLAYER_AGENT_WATCH_INTERVAL", "60")), help="Seconds between background watch ticks.")
+    connect.add_argument("--no-start", action="store_true", help="Write config without installing or starting the background watcher.")
     connect.add_argument("--no-browser", action="store_true", help="Print the device-flow URL without opening a browser.")
     connect.add_argument("--json", action="store_true")
     connect.set_defaults(func=command_connect)

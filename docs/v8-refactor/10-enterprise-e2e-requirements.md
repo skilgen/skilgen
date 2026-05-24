@@ -295,12 +295,15 @@ needs. Cursor and Windsurf remain expansion runtimes after the core path is gree
 | Claude Code | `~/.claude/projects/**/*.jsonl` | ✅ Core milestone. `build_claude_agent_run_payloads`; move behind Skillayer helper boundary. | platform |
 | Cursor | `~/Library/Application Support/Cursor/User/workspaceStorage/**/state.vscdb` | ✅ Expansion parser. Implemented in `packages.skillayer_agent.local_importer.build_cursor_agent_run_payloads`; gated by selecting provider `cursor`. | platform |
 | Windsurf | `~/.codeium/windsurf/conversations/**/*.jsonl` | ✅ Expansion parser. Implemented in `packages.skillayer_agent.local_importer.build_windsurf_agent_run_payloads`; gated by selecting provider `windsurf`. | platform |
+| GitHub Copilot | GitHub Copilot metrics API + GitHub audit log events | ✅ Connector-backed provider. Included in default `skillayer-agent` provider config and `/dashboard/connect` runtime health; deep IDE/session replay remains a follow-up because GitHub does not expose Codex/Claude-style local tool traces through the admin metrics API. | platform/api |
 
 ### 5.3 Skillayer local helper design
 
 New product-facing helper command: `skillayer-agent`. It imports local Codex Desktop,
 Codex CLI, Claude Code, Cursor, and Windsurf metadata without uploading raw prompts,
-chat text, diffs, file contents, or tool arguments.
+chat text, diffs, file contents, or tool arguments. GitHub Copilot is included as a
+first-class provider through the GitHub connector path for metrics and audit events;
+deep replay requires a dedicated IDE/session capture bridge.
 
 Implementation may initially reuse `scripts/import_codex_sessions.py` for the heavy
 lifting, but the roadmap must not introduce a customer-facing `skilgen` dependency.
@@ -326,7 +329,7 @@ Config lives at `~/.skillayer/agent.json` (mode `0600`):
   "machine_id": "machine_...",
   "machine_label": "Ravi MacBook Pro",
   "project_roots": [{"path": "/Users/.../customer-repo", "repo_full_name": "acme/customer-repo"}],
-  "providers": ["codex", "claude", "cursor", "windsurf"]
+  "providers": ["codex", "claude", "cursor", "windsurf", "copilot"]
 }
 ```
 
@@ -369,8 +372,9 @@ OAuth device flow endpoints (new on the API):
 | A5 | Windsurf parser. | platform | ✅ `packages.skillayer_agent.local_importer.build_windsurf_agent_run_payloads` plus `tests/test_windsurf_importer.py`. |
 | A6 | Tag Codex CLI runs distinctly from Codex Desktop. | platform | ✅ Codex Desktop now emits `codex_desktop`; Codex CLI emits `codex_cli`. |
 | A7 | `tests/test_cursor_importer.py`, `tests/test_windsurf_importer.py`, `tests/test_codex_cli_runtime.py`. | platform | ✅ Codex CLI, Cursor, and Windsurf parser tests are complete. |
-| A8 | Dashboard: surface per-runtime "last upload" / token / cost counters in `/dashboard/connect`. | dashboard | ✅ `/dashboard/connect` now shows runtime health for Codex Desktop, Codex CLI, Claude Code, Cursor, and Windsurf with uploads, commands, files, tokens, and cost. |
+| A8 | Dashboard: surface per-runtime "last upload" / token / cost counters in `/dashboard/connect`. | dashboard | ✅ `/dashboard/connect` now shows runtime health for Codex Desktop, Codex CLI, Claude Code, Cursor, Windsurf, and GitHub Copilot with uploads, commands, files, tokens, and cost where available. |
 | A9 | `install.sh` one-liner installer (downloads versioned Skillayer local-helper artifact + writes `skillayer-agent` shim). | platform | ✅ `scripts/install.sh` creates an isolated helper venv, installs a local checkout or versioned package spec, and writes a `skillayer-agent` shim. Release artifact hosting remains a release-engineering follow-up. |
+| A10 | GitHub Copilot provider enrollment. | platform/api | ✅ `skillayer-agent` accepts/defaults provider `copilot`, reports it as connector-backed status, and keeps local deep replay empty until GitHub/IDE capture is implemented. Follow-up: GitHub Copilot metrics/audit sync job and optional IDE extension bridge. |
 
 ---
 

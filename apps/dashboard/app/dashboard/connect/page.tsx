@@ -251,10 +251,11 @@ function RuntimeHealthPanel({ status }: { status: ConnectStatus | null }) {
       claude_code: {},
       cursor: {},
       windsurf: {},
+      copilot: {},
     };
   const runtimes = Object.entries(runtimeStatus)
     .map(([id, runtime]) => ({ id, ...runtime }))
-    .filter((runtime) => ["codex_desktop", "codex_cli", "claude_code", "cursor", "windsurf"].includes(runtime.id))
+    .filter((runtime) => ["codex_desktop", "codex_cli", "claude_code", "cursor", "windsurf", "copilot"].includes(runtime.id))
     .sort((a, b) => Number(Boolean(b.connected)) - Number(Boolean(a.connected)) || (RUNTIME_LABELS[a.id] ?? a.id).localeCompare(RUNTIME_LABELS[b.id] ?? b.id));
   const totals = runtimes.reduce(
     (acc, runtime) => ({

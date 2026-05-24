@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import json
+import plistlib
 import tempfile
 import unittest
 from unittest import mock
@@ -39,40 +41,72 @@ class SkillayerAgentCliTests(unittest.TestCase):
     def test_connect_writes_private_config_without_echoing_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = Path(tmp) / "agent.json"
-            code, output = _run_cli(
-                [
-                    "connect",
-                    "--config",
-                    str(config),
-                    "--org-id",
-                    "org_1",
-                    "--token",
-                    "secret-token",
-                    "--project-root",
-                    tmp,
-                    "--repo-full-name",
-                    "acme/app",
-                    "--machine-id",
-                    "machine-manual",
-                    "--machine-label",
-                    "Manual Laptop",
-                    "--json",
-                ]
-            )
+            state = Path(tmp) / "state.json"
+            with mock.patch.object(cli, "install_background_watcher", return_value={"installed": True, "running": True, "manager": "test"}) as install:
+                code, output = _run_cli(
+                    [
+                        "connect",
+                        "--config",
+                        str(config),
+                        "--state",
+                        str(state),
+                        "--org-id",
+                        "org_1",
+                        "--token",
+                        "secret-token",
+                        "--project-root",
+                        tmp,
+                        "--repo-full-name",
+                        "acme/app",
+                        "--machine-id",
+                        "machine-manual",
+                        "--machine-label",
+                        "Manual Laptop",
+                        "--json",
+                    ]
+                )
 
             self.assertEqual(code, 0)
             self.assertNotIn("secret-token", output)
+            install.assert_called_once_with(config, state, interval=60.0, start=True)
             saved = json.loads(config.read_text(encoding="utf-8"))
             self.assertEqual(saved["org_id"], "org_1")
             self.assertEqual(saved["api_key"], "secret-token")
             self.assertEqual(saved["machine_id"], "machine-manual")
             self.assertEqual(saved["machine_label"], "Manual Laptop")
             self.assertEqual(saved["project_roots"][0]["repo_full_name"], "acme/app")
+            self.assertEqual(saved["providers"], ["claude", "codex", "copilot", "cursor", "windsurf"])
             self.assertEqual(oct(config.stat().st_mode & 0o777), "0o600")
+
+    def test_connect_can_skip_background_start(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "agent.json"
+            with mock.patch.object(cli, "install_background_watcher") as install:
+                code, output = _run_cli(
+                    [
+                        "connect",
+                        "--config",
+                        str(config),
+                        "--org-id",
+                        "org_1",
+                        "--token",
+                        "secret-token",
+                        "--project-root",
+                        tmp,
+                        "--no-start",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            install.assert_not_called()
+            payload = json.loads(output)
+            self.assertNotIn("watcher", payload)
 
     def test_connect_device_flow_writes_private_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = Path(tmp) / "agent.json"
+            state = Path(tmp) / "state.json"
             calls: list[tuple[str, dict[str, object]]] = []
             responses = [
                 {
@@ -95,12 +129,19 @@ class SkillayerAgentCliTests(unittest.TestCase):
                 calls.append((path, payload))
                 return responses.pop(0)
 
-            with mock.patch.object(cli, "_post_json", side_effect=fake_post), mock.patch.object(cli.time, "sleep"), mock.patch.object(cli.webbrowser, "open") as open_browser:
+            with (
+                mock.patch.object(cli, "_post_json", side_effect=fake_post),
+                mock.patch.object(cli.time, "sleep"),
+                mock.patch.object(cli.webbrowser, "open") as open_browser,
+                mock.patch.object(cli, "install_background_watcher", return_value={"installed": True, "running": True, "manager": "test"}) as install,
+            ):
                 code, output = _run_cli(
                     [
                         "connect",
                         "--config",
                         str(config),
+                        "--state",
+                        str(state),
                         "--api-url",
                         "https://api.skillayer.test",
                         "--project-root",
@@ -115,6 +156,7 @@ class SkillayerAgentCliTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertNotIn("device-token", output)
+            install.assert_called_once_with(config, state, interval=60.0, start=True)
             self.assertEqual([path for path, _ in calls], ["/v1/device/code", "/v1/device/token", "/v1/device/token"])
             self.assertEqual(calls[0][1]["machine_id"], "machine-device")
             self.assertEqual(calls[0][1]["machine_label"], "Device Laptop")
@@ -136,38 +178,69 @@ class SkillayerAgentCliTests(unittest.TestCase):
             (claude_home / "projects").mkdir(parents=True)
             _write_codex_session(root, codex_home)
 
-            code, output = _run_cli(
-                [
-                    "status",
-                    "--config",
-                    str(root / "missing-agent.json"),
-                    "--state",
-                    str(root / "state.json"),
-                    "--project-root",
-                    str(root),
-                    "--codex-home",
-                    str(codex_home),
-                    "--claude-home",
-                    str(claude_home),
-                    "--cursor-home",
-                    str(root / "missing-cursor"),
-                    "--windsurf-home",
-                    str(root / "missing-windsurf"),
-                    "--providers",
-                    "codex,claude",
-                    "--dry-run",
-                    "--json",
-                ]
-            )
+            with mock.patch.object(cli, "watcher_status", return_value={"status": "not installed", "manager": "test"}):
+                code, output = _run_cli(
+                    [
+                        "status",
+                        "--config",
+                        str(root / "missing-agent.json"),
+                        "--state",
+                        str(root / "state.json"),
+                        "--project-root",
+                        str(root),
+                        "--codex-home",
+                        str(codex_home),
+                        "--claude-home",
+                        str(claude_home),
+                        "--cursor-home",
+                        str(root / "missing-cursor"),
+                        "--windsurf-home",
+                        str(root / "missing-windsurf"),
+                        "--providers",
+                        "codex,claude",
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
 
             self.assertEqual(code, 0)
             payload = json.loads(output)
             self.assertEqual(payload["command"], "status")
             self.assertEqual(payload["discoverable_runs"], 1)
+            self.assertEqual(payload["watcher"]["status"], "not installed")
             self.assertEqual(
                 {runtime["runtime"]: runtime["detected"] for runtime in payload["runtimes"]},
-                {"codex_desktop": True, "codex_cli": True, "claude_code": True, "cursor": False, "windsurf": False},
+                {"codex_desktop": True, "codex_cli": True, "claude_code": True, "cursor": False, "windsurf": False, "copilot": False},
             )
+
+    def test_copilot_provider_is_connector_backed_not_local_fake_data(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = cli.load_agent_config(
+                argparse.Namespace(
+                    config=str(root / "missing-agent.json"),
+                    state=str(root / "state.json"),
+                    providers="copilot",
+                    project_root=str(root),
+                    repo_id=None,
+                    repo_full_name=None,
+                    api_url=None,
+                    org_id="org_1",
+                    token=None,
+                    machine_id=None,
+                    machine_label=None,
+                    codex_home=None,
+                    claude_home=None,
+                    cursor_home=None,
+                    windsurf_home=None,
+                )
+            )
+
+            self.assertEqual(config.providers, ("copilot",))
+            self.assertEqual(cli.discover_payloads(config), [])
+            copilot = next(runtime for runtime in cli._runtime_status(config) if runtime["runtime"] == "copilot")
+            self.assertTrue(copilot["configured"])
+            self.assertEqual(copilot["capture_mode"], "connector")
 
     def test_sync_dry_run_uses_skillayer_importer_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -247,6 +320,26 @@ class SkillayerAgentCliTests(unittest.TestCase):
             self.assertEqual(saved["last_new"], 1)
             self.assertEqual(saved["last_posted"], 1)
             self.assertEqual(saved["posted_session_ids"], ["already-posted", "new-run"])
+
+    def test_install_background_watcher_writes_macos_launch_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config = home / ".skillayer" / "agent.json"
+            state = home / ".skillayer" / "state.json"
+
+            with mock.patch.object(cli.platform, "system", return_value="Darwin"), mock.patch.dict("os.environ", {"HOME": str(home)}):
+                result = cli.install_background_watcher(config, state, interval=30.0, start=False)
+
+            plist_path = home / "Library" / "LaunchAgents" / "com.skillayer.agent.plist"
+            plist = plistlib.loads(plist_path.read_bytes())
+            self.assertTrue(result["installed"])
+            self.assertFalse(result["running"])
+            self.assertEqual(plist["Label"], "com.skillayer.agent")
+            self.assertTrue(plist["RunAtLoad"])
+            self.assertTrue(plist["KeepAlive"])
+            self.assertIn("watch", plist["ProgramArguments"])
+            self.assertIn(str(config), plist["ProgramArguments"])
+            self.assertIn(str(state), plist["ProgramArguments"])
 
 
 if __name__ == "__main__":
