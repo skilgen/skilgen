@@ -156,7 +156,7 @@ Run before and after each milestone PR. ✅ = passes today, ◐ = partial, ❌ =
 
 | Flow | Status | What to run | Notes |
 | --- | --- | --- | --- |
-| Dashboard type-check | ✅ | `npm --workspace apps/dashboard run typecheck` | Verified 2026-05-19 pre-push. |
+| Dashboard type-check | ✅ | `npm --workspace apps/dashboard run type-check` | Verified 2026-05-19 pre-push. |
 | Dashboard build | ✅ | `npm --workspace apps/dashboard run build` | Verified 2026-05-19 pre-push. |
 | API py-compile for touched files | ✅ | `python -m compileall apps/api/api` | Verified 2026-05-19 pre-push. |
 | API pytest (full) | ✅ | `pytest apps/api/tests -q` | Verified 2026-05-21; keep `make verify-enterprise` as the CI gate. |
@@ -174,7 +174,7 @@ Run before and after each milestone PR. ✅ = passes today, ◐ = partial, ❌ =
 | Repo attribution from `cwd` | ✅ | Inspect `metadata.cwd` and `repo.full_name` on imported runs. | Works whenever `--project-root` matches the agent's cwd. |
 | Activity / Insights / Audit population from imported runs | ✅ | After import, visit `/activity/replay`, `/insights/developer-track`, `/audit/evidence-packages`. | Already wired; no glue needed. |
 
-`make verify-enterprise` (to be added in §10) should chain the green rows above into one
+`make verify-enterprise` (defined in §10) should chain the green rows above into one
 command. Cursor/Windsurf importers are valuable expansion work, but they are not allowed
 to block the first enterprise-saleable milestone, which is GitHub enrichment + Codex /
 Claude local metadata + OpenAI / Anthropic compliance metadata.
