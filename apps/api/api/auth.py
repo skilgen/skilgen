@@ -136,7 +136,7 @@ async def _verify_workos_token(token: str) -> dict[str, Any]:
         token,
         signing_key,
         algorithms=[header.get("alg", "RS256")],
-        audience=settings.WORKOS_CLIENT_ID,
+        options={"verify_aud": False},
         issuer=issuer if issuer != _workos_api_issuer().rstrip("/") else _workos_api_issuer(),
     )
     return dict(payload)
