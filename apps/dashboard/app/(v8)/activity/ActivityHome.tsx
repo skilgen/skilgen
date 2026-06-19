@@ -31,7 +31,7 @@ export async function ActivityHome({ searchParams }: { searchParams?: SearchPara
       <LiveFeedPanel
         events={feed?.events ?? []}
         orgId={context.org?.id ?? ""}
-        searchParams={params}
+        searchParams={Array.from(params.entries())}
         streamKey={context.streamKey}
       />
     </div>

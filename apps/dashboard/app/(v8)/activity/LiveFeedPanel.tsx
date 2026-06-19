@@ -497,10 +497,11 @@ function SessionCard({ group, defaultOpen }: { group: SessionGroup; defaultOpen:
   );
 }
 
-export function LiveFeedPanel({ events, orgId, searchParams, streamKey }: { events: ActivityEvent[]; orgId: string; searchParams: URLSearchParams; streamKey: string }) {
+export function LiveFeedPanel({ events, orgId, searchParams, streamKey }: { events: ActivityEvent[]; orgId: string; searchParams: Array<[string, string]>; streamKey: string }) {
   const [rows, setRows] = useState<ExtendedActivityEvent[]>(events as ExtendedActivityEvent[]);
   const [status, setStatus] = useState(streamKey ? "connecting" : "offline");
   const [viewMode, setViewMode] = useState<ViewMode>("grouped");
+  const params = useMemo(() => new URLSearchParams(searchParams), [searchParams]);
 
   useEffect(() => setRows(events as ExtendedActivityEvent[]), [events]);
 
@@ -516,9 +517,9 @@ export function LiveFeedPanel({ events, orgId, searchParams, streamKey }: { even
     return () => source.close();
   }, [orgId, streamKey]);
 
-  const query = useMemo(() => Object.fromEntries(searchParams.entries()), [searchParams]);
-  const filterKey = useMemo(() => searchParams.toString(), [searchParams]);
-  const chips = useMemo(() => filterChips(searchParams), [searchParams]);
+  const query = useMemo(() => Object.fromEntries(params.entries()), [params]);
+  const filterKey = useMemo(() => params.toString(), [params]);
+  const chips = useMemo(() => filterChips(params), [params]);
   const groups = useMemo(() => groupEvents(rows), [rows]);
   const chronologicalGroups = useMemo(() => rows.map((event) => buildGroup(`event:${event.id}`, [event])).sort((a, b) => timestampValue(b.latestAt) - timestampValue(a.latestAt)), [rows]);
   const visibleGroups = viewMode === "grouped" ? groups : chronologicalGroups;
