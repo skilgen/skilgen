@@ -517,6 +517,7 @@ export function LiveFeedPanel({ events, orgId, searchParams, streamKey }: { even
   }, [orgId, streamKey]);
 
   const query = useMemo(() => Object.fromEntries(searchParams.entries()), [searchParams]);
+  const filterKey = useMemo(() => searchParams.toString(), [searchParams]);
   const chips = useMemo(() => filterChips(searchParams), [searchParams]);
   const groups = useMemo(() => groupEvents(rows), [rows]);
   const chronologicalGroups = useMemo(() => rows.map((event) => buildGroup(`event:${event.id}`, [event])).sort((a, b) => timestampValue(b.latestAt) - timestampValue(a.latestAt)), [rows]);
@@ -526,7 +527,7 @@ export function LiveFeedPanel({ events, orgId, searchParams, streamKey }: { even
     <section className="mx-auto max-w-[1080px] space-y-3">
       <KpiStrip events={rows} groups={groups} />
 
-      <form className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-2.5" method="get">
+      <form className="rounded-lg border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-2.5" key={filterKey} method="get">
         <div className="grid gap-2 md:grid-cols-[auto_110px_minmax(120px,1fr)_minmax(140px,1fr)_120px_140px_auto] md:items-center">
           <label className="flex items-center gap-2 text-sm font-medium text-[color:var(--text-secondary)]">
             <Filter className="h-4 w-4" />
