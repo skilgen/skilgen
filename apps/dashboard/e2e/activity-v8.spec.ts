@@ -2,9 +2,10 @@ import { expect, test } from "@playwright/test";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 
-const TEST_API_URL = process.env.PLAYWRIGHT_TEST_API_URL || "http://127.0.0.1:59999";
+const CONFIGURED_TEST_API_URL = process.env.PLAYWRIGHT_TEST_API_URL || "";
 const FLAG_ON_URL = process.env.PLAYWRIGHT_FLAG_ON_URL;
 const FLAG_OFF_URL = process.env.PLAYWRIGHT_FLAG_OFF_URL;
 const FLAG_ON_PORT = process.env.PLAYWRIGHT_ACTIVITY_FLAG_ON_PORT ? Number(process.env.PLAYWRIGHT_ACTIVITY_FLAG_ON_PORT) : null;
@@ -17,12 +18,19 @@ type ManagedServer = {
 
 let flagOnBaseUrl = FLAG_ON_URL || "";
 let flagOffBaseUrl = FLAG_OFF_URL || "";
+let testApiUrl = CONFIGURED_TEST_API_URL;
 const managedServers: ManagedServer[] = [];
+
+function repoRoot(): string {
+  return process.cwd().endsWith(`${path.sep}apps${path.sep}dashboard`)
+    ? path.join(process.cwd(), "..", "..")
+    : process.cwd();
+}
 
 function dashboardCwd(): string {
   return process.cwd().endsWith(`${path.sep}apps${path.sep}dashboard`)
     ? process.cwd()
-    : path.join(process.cwd(), "apps", "dashboard");
+    : path.join(repoRoot(), "apps", "dashboard");
 }
 
 function nextCliPath(): string {
@@ -51,6 +59,16 @@ function preferredNodePath(): string {
   }
 
   return process.execPath;
+}
+
+function preferredPythonPath(): string {
+  if (process.env.PLAYWRIGHT_PYTHON_BIN) return process.env.PLAYWRIGHT_PYTHON_BIN;
+  if (process.env.PYTHON_BIN) return process.env.PYTHON_BIN;
+
+  const venvPython = path.join(repoRoot(), ".venv", "bin", "python");
+  if (fs.existsSync(venvPython)) return venvPython;
+
+  return "python3";
 }
 
 function spawnEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -98,6 +116,28 @@ async function waitForReady(url: string, server: ManagedServer): Promise<void> {
   throw new Error(`${server.name} did not become ready at ${url}. ${lastError}`);
 }
 
+async function waitForSeededSessions(url: string, server: ManagedServer): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  let lastError = "";
+  while (Date.now() < deadline) {
+    if (server.process.exitCode !== null) throw new Error(`${server.name} exited before seeded sessions were ready. ${lastError}`);
+    try {
+      const response = await fetch(`${url}/v8/orgs/org_skilgen/activity/sessions?limit=1`);
+      if (response.ok) {
+        const payload = (await response.json()) as { sessions?: Array<{ session_id?: string; replay_url?: string }> };
+        if (payload.sessions?.[0]?.session_id && payload.sessions[0].replay_url) return;
+        lastError = "seeded sessions missing replay candidate";
+      } else {
+        lastError = `status ${response.status}`;
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`${server.name} did not expose seeded sessions at ${url}. ${lastError}`);
+}
+
 async function reservePort(preferred?: number | null): Promise<number> {
   await new Promise<void>((resolve, reject) => {
     const probe = net.createServer();
@@ -128,14 +168,46 @@ async function reservePort(preferred?: number | null): Promise<number> {
   });
 }
 
+async function startSeededApiServer(port: number): Promise<string> {
+  const url = `http://127.0.0.1:${port}`;
+  const dbPath = path.join(os.tmpdir(), `skillayer-activity-e2e-${port}.db`);
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+  execFileSync(preferredPythonPath(), ["scripts/seed_v8_sqlite_demo.py"], {
+    cwd: repoRoot(),
+    env: {
+      ...process.env,
+      SKILLAYER_DEMO_DB: dbPath,
+    },
+    stdio: "ignore",
+  });
+
+  const dbUrlPath = dbPath.replace(/^\/+/, "");
+  const server = spawn(preferredPythonPath(), ["-m", "uvicorn", "apps.api.api.index:app", "--host", "127.0.0.1", "--port", String(port), "--lifespan", "off"], {
+    cwd: repoRoot(),
+    env: {
+      ...process.env,
+      DATABASE_URL: `sqlite:////${dbUrlPath}`,
+      DEPLOYMENT_MODE: "bootstrap",
+      IA_V8_DEFAULT: "1",
+    },
+    stdio: "ignore",
+  });
+  const managed = { name: "activity-seeded-api", process: server };
+  managedServers.push(managed);
+  await waitForReady(`${url}/health`, managed);
+  await waitForSeededSessions(url, managed);
+  return url;
+}
+
 async function startDashboardServer(name: string, port: number, iaV8Default: "true" | "false", readinessPath: string): Promise<string> {
   await ensureDashboardBuilt();
   const url = `http://127.0.0.1:${port}`;
   const server = spawn(preferredNodePath(), ["--preserve-symlinks", "--preserve-symlinks-main", nextCliPath(), "start", "--hostname", "127.0.0.1", "--port", String(port)], {
     cwd: dashboardCwd(),
     env: spawnEnv({
-      API_URL: TEST_API_URL,
-      NEXT_PUBLIC_API_URL: TEST_API_URL,
+      API_URL: testApiUrl,
+      NEXT_PUBLIC_API_URL: testApiUrl,
       IA_V8_DEFAULT: iaV8Default,
       PORT: String(port),
     }),
@@ -152,6 +224,10 @@ test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async ({}, testInfo) => {
   testInfo.setTimeout(120000);
+  if (!testApiUrl) {
+    const port = await reservePort(59_999);
+    testApiUrl = await startSeededApiServer(port);
+  }
   if (!flagOnBaseUrl) {
     const port = await reservePort(FLAG_ON_PORT);
     flagOnBaseUrl = await startDashboardServer("activity-ia-v8-on", port, "true", "/activity/live-feed");
@@ -192,12 +268,12 @@ test("activity tabs render with IA_V8 on", async ({ page }) => {
 });
 
 test("live feed filter chips keep the enterprise route", async ({ page }) => {
-  const response = await page.goto(`${flagOnBaseUrl}/activity/live-feed?agent_provider=codex&window=24h`, { waitUntil: "domcontentloaded" });
+  const response = await page.goto(`${flagOnBaseUrl}/activity/live-feed?hours=24`, { waitUntil: "domcontentloaded" });
   expect(response?.status()).toBeLessThan(400);
 
-  const chip = page.locator('a[href*="/activity/live-feed"]').filter({ hasText: /Provider:\s*codex/i }).first();
+  const chip = page.locator('a[href*="/activity/live-feed"]').filter({ hasText: /Window:\s*24/i }).first();
   await expect(chip).toBeVisible();
-  await expect(chip).toContainText(/Provider:\s*codex/i);
+  await expect(chip).toContainText(/Window:\s*24/i);
   await expect(chip).toHaveAttribute("href", /\/activity\/live-feed/);
 });
 
