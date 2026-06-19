@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 
-ALEMBIC_HEAD = "20260505_0006"
+ALEMBIC_HEAD = "20260520_0005"
 
 
 def _create_schema(cursor: sqlite3.Cursor) -> None:
@@ -50,6 +51,7 @@ def _create_schema(cursor: sqlite3.Cursor) -> None:
           siem_webhook_secret TEXT,
           siem_webhook_enabled BOOLEAN NOT NULL DEFAULT 0,
           siem_event_filter TEXT,
+          auto_join_domain BOOLEAN NOT NULL DEFAULT 1,
           workos_org_id TEXT,
           github_installation_id INTEGER,
           api_key TEXT,
@@ -253,6 +255,19 @@ def _create_schema(cursor: sqlite3.Cursor) -> None:
           last_artifact_at TEXT,
           outcome TEXT,
           notes TEXT,
+          risk_score INTEGER NOT NULL DEFAULT 0,
+          risk_level TEXT NOT NULL DEFAULT 'low',
+          compliance_status TEXT NOT NULL DEFAULT 'unknown',
+          permission_profile TEXT,
+          approval_policy TEXT,
+          sandbox_policy TEXT,
+          access_scope TEXT,
+          full_access BOOLEAN NOT NULL DEFAULT 0,
+          external_api_call_count INTEGER NOT NULL DEFAULT 0,
+          command_count INTEGER NOT NULL DEFAULT 0,
+          mcp_tools_count INTEGER NOT NULL DEFAULT 0,
+          file_targets_count INTEGER NOT NULL DEFAULT 0,
+          policy_violations TEXT NOT NULL DEFAULT '[]',
           created_at TEXT
         );
         """.strip()
@@ -304,11 +319,11 @@ def seed(db_path: Path) -> None:
         skill_id = "skill_activity"
         session_db_id = "sess_skilgen_codex_1"
         api_key = "sk-local-demo"
-        now = "2026-05-12T02:30:00"
+        now = datetime.now(UTC).replace(microsecond=0).isoformat()
 
         cursor.execute(
-            "INSERT INTO orgs (id, github_org_id, login, name, plan, settings, api_key, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (org_id, 1, "Skilgen", "Skilgen", "dev", json.dumps({"feature_flags": {"IA_V8": True}}), api_key, now, now),
+            "INSERT INTO orgs (id, github_org_id, login, name, plan, settings, auto_join_domain, api_key, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (org_id, 1, "Skilgen", "Skilgen", "dev", json.dumps({"feature_flags": {"IA_V8": True}}), 1, api_key, now, now),
         )
         cursor.execute(
             "INSERT INTO roles (id, org_id, name, description, permissions, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
@@ -403,7 +418,7 @@ def seed(db_path: Path) -> None:
             ("evt_load_1", org_id, repo_id, skill_id, "codex", "sess_ext_1", now),
         )
         cursor.execute(
-            "INSERT INTO agent_sessions (id, repo_id, org_id, session_id, agent_runtime, task_description, engineer_login, duration_minutes, files_touched, skill_paths_loaded, transcript_summary, raw_message_count, extraction_status, discoveries_found, session_start, session_end, skills_loaded, code_produced, produced_artifacts, produced_file_hashes, closed_at, inactivity_timeout_minutes, last_artifact_at, outcome, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO agent_sessions (id, repo_id, org_id, session_id, agent_runtime, task_description, engineer_login, duration_minutes, files_touched, skill_paths_loaded, transcript_summary, raw_message_count, extraction_status, discoveries_found, session_start, session_end, skills_loaded, code_produced, produced_artifacts, produced_file_hashes, closed_at, inactivity_timeout_minutes, last_artifact_at, outcome, notes, risk_score, risk_level, compliance_status, permission_profile, approval_policy, sandbox_policy, access_scope, full_access, external_api_call_count, command_count, mcp_tools_count, file_targets_count, policy_violations, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 session_db_id,
                 repo_id,
@@ -452,6 +467,19 @@ def seed(db_path: Path) -> None:
                 now,
                 "success",
                 None,
+                78,
+                "high",
+                "warning",
+                "default",
+                "on-request",
+                "workspace-write",
+                "repo",
+                0,
+                2,
+                3,
+                1,
+                2,
+                json.dumps(["network-capable MCP tool used"]),
                 now,
             ),
         )
