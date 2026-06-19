@@ -16,6 +16,7 @@ from starlette.requests import Request
 
 from apps.api.api.index import app
 from apps.api.api.auth import get_current_org_id, get_current_user
+from apps.api.api.routes import worker
 from apps.api.api.v8.flags import request_flag_cache
 from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, matches_scope_expression, permission_matches
 from packages.db.database import get_db
@@ -198,6 +199,7 @@ class SchedulerDb:
 def test_v8_settings_router_is_registered() -> None:
     paths = _collect_route_paths(app.routes)
     paths.update(_collect_route_paths(settings_router.router.routes, settings_router.router.prefix))
+    paths.update(_collect_route_paths(worker.router.routes, worker.router.prefix))
 
     assert "/v8/orgs/{org_id}/settings/rbac" in paths
     assert "/v8/orgs/{org_id}/settings/notifications/digest" in paths
