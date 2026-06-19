@@ -27,6 +27,25 @@ rbac_migration = importlib.import_module("apps.api.alembic.versions.20260505_000
 settings_router = importlib.import_module("apps.api.api.v8.settings.router")
 
 
+def _collect_route_paths(routes: object, prefix: str = "") -> set[str]:
+    paths: set[str] = set()
+    for route in routes:
+        route_path = getattr(route, "path", None)
+        if route_path:
+            paths.add(route_path)
+            if prefix:
+                paths.add(f"{prefix.rstrip('/')}/{route_path.lstrip('/')}")
+        nested_prefix = f"{prefix.rstrip('/')}/{getattr(route, 'prefix', '').lstrip('/')}".rstrip("/")
+        nested_routes = getattr(route, "routes", None)
+        if nested_routes:
+            paths.update(_collect_route_paths(nested_routes, nested_prefix))
+        nested_router = getattr(route, "router", None)
+        router_routes = getattr(nested_router, "routes", None)
+        if router_routes:
+            paths.update(_collect_route_paths(router_routes, nested_prefix))
+    return paths
+
+
 class Result:
     def __init__(self, rows: list[tuple[object, object]]) -> None:
         self._rows = rows
@@ -177,7 +196,7 @@ class SchedulerDb:
 
 
 def test_v8_settings_router_is_registered() -> None:
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    paths = _collect_route_paths(app.routes)
 
     assert "/v8/orgs/{org_id}/settings/rbac" in paths
     assert "/v8/orgs/{org_id}/settings/notifications/digest" in paths
