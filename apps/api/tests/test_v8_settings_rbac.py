@@ -177,7 +177,7 @@ class SchedulerDb:
 
 
 def test_v8_settings_router_is_registered() -> None:
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
 
     assert "/v8/orgs/{org_id}/settings/rbac" in paths
     assert "/v8/orgs/{org_id}/settings/notifications/digest" in paths
