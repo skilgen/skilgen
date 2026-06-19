@@ -107,7 +107,7 @@ async function waitForReady(url: string, server: ManagedServer): Promise<void> {
     try {
       const response = await fetch(url);
       if (response.status < 500) return;
-      lastError = `status ${response.status}`;
+      lastError = `status ${response.status}: ${(await response.text()).slice(0, 500)}`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
@@ -128,7 +128,7 @@ async function waitForSeededSessions(url: string, server: ManagedServer): Promis
         if (payload.sessions?.[0]?.session_id && payload.sessions[0].replay_url) return;
         lastError = "seeded sessions missing replay candidate";
       } else {
-        lastError = `status ${response.status}`;
+        lastError = `status ${response.status}: ${(await response.text()).slice(0, 500)}`;
       }
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
@@ -191,7 +191,7 @@ async function startSeededApiServer(port: number): Promise<string> {
       DEPLOYMENT_MODE: "bootstrap",
       IA_V8_DEFAULT: "1",
     },
-    stdio: "ignore",
+    stdio: process.env.CI ? "inherit" : "ignore",
   });
   const managed = { name: "activity-seeded-api", process: server };
   managedServers.push(managed);
