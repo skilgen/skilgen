@@ -522,6 +522,11 @@ export function LiveFeedPanel({ events, orgId, searchParams, streamKey }: { even
   const groups = useMemo(() => groupEvents(rows), [rows]);
   const chronologicalGroups = useMemo(() => rows.map((event) => buildGroup(`event:${event.id}`, [event])).sort((a, b) => timestampValue(b.latestAt) - timestampValue(a.latestAt)), [rows]);
   const visibleGroups = viewMode === "grouped" ? groups : chronologicalGroups;
+  const [hoursValue, setHoursValue] = useState(query.hours ?? "168");
+
+  useEffect(() => {
+    setHoursValue(query.hours ?? "168");
+  }, [query.hours]);
 
   return (
     <section className="mx-auto max-w-[1080px] space-y-3">
@@ -533,7 +538,7 @@ export function LiveFeedPanel({ events, orgId, searchParams, streamKey }: { even
             <Filter className="h-4 w-4" />
             Filters
           </label>
-          <select className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" defaultValue={query.hours ?? "168"} name="hours">
+          <select className="min-w-0 rounded-md border border-[color:var(--bg-border)] bg-[color:var(--bg-base)] px-3 py-2 text-sm" name="hours" onChange={(event) => setHoursValue(event.target.value)} value={hoursValue}>
             <option value="1">1 hour</option>
             <option value="24">24 hours</option>
             <option value="168">7 days</option>
