@@ -197,6 +197,7 @@ class SchedulerDb:
 
 def test_v8_settings_router_is_registered() -> None:
     paths = _collect_route_paths(app.routes)
+    paths.update(_collect_route_paths(settings_router.router.routes, settings_router.router.prefix))
 
     assert "/v8/orgs/{org_id}/settings/rbac" in paths
     assert "/v8/orgs/{org_id}/settings/notifications/digest" in paths
