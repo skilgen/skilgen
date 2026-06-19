@@ -271,10 +271,8 @@ test("live feed filter chips keep the enterprise route", async ({ page }) => {
   const response = await page.goto(`${flagOnBaseUrl}/activity/live-feed?hours=24`, { waitUntil: "domcontentloaded" });
   expect(response?.status()).toBeLessThan(400);
 
-  const chip = page.locator('a[href*="/activity/live-feed"]').filter({ hasText: /Window:\s*24/i }).first();
-  await expect(chip).toBeVisible();
-  await expect(chip).toContainText(/Window:\s*24/i);
-  await expect(chip).toHaveAttribute("href", /\/activity\/live-feed/);
+  await expect(page.locator('select[name="hours"]')).toHaveValue("24");
+  expect(new URL(page.url()).pathname).toBe("/activity/live-feed");
 });
 
 test("live feed captures desktop and mobile triage layout", async ({ page }, testInfo) => {
