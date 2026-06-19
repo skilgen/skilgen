@@ -1,0 +1,11 @@
+{
+  "title": "orders",
+  "type": "object",
+  "required": ["id", "customer_id", "updated_at"],
+  "properties": {
+    "id": {"type": "integer", "description": "Order identifier."},
+    "customer_id": {"type": "integer", "description": "Customer identifier."},
+    "status": {"type": "string"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}

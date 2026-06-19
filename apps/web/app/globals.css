@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --bg-base: #020205;
+  --bg-surface: #0d0d14;
+  --bg-elevated: #13131e;
+  --bg-border: #1e1e2e;
+  --bg-hover: #1a1a28;
+  --bg-base-rgb: 2 2 5;
+  --bg-surface-rgb: 13 13 20;
+  --bg-border-rgb: 30 30 46;
+
+  --text-primary: #f0f0ff;
+  --text-secondary: #8888aa;
+  --text-tertiary: #44445a;
+  --text-accent: #c9973a;
+  --text-primary-rgb: 240 240 255;
+  --text-secondary-rgb: 136 136 170;
+
+  --accent-primary: #c9973a;
+  --accent-bright: #e8b84b;
+  --accent-dim: #3d2e15;
+  --accent-glow: rgba(201,151,58,0.15);
+  --accent-green: #3dd68c;
+  --accent-amber: #f5a623;
+  --accent-red: #f25f5c;
+  --pricing-gradient-start: #1a1200;
+  --pricing-gradient-end: #0a0a14;
+  --accent-primary-rgb: 201 151 58;
+  --accent-bright-rgb: 232 184 75;
+  --accent-green-rgb: 61 214 140;
+  --accent-amber-rgb: 245 166 35;
+  --accent-red-rgb: 242 95 92;
+  --node-active: #e8b84b;
+  --node-inactive: rgba(201,151,58,0.25);
+  --edge-color: rgba(201,151,58,0.12);
+
+  --node-auth: #c9973a;
+  --node-billing: #3dd68c;
+  --node-api: #a78bfa;
+  --node-security: #f25f5c;
+  --node-data: #f5a623;
+  --node-infra: #22d3ee;
+  --node-core: #8888aa;
+  --node-tests: #3dd68c;
+  --logo-gold: #f7df7c;
+  --logo-white: #f7f8ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}

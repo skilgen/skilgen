@@ -11,12 +11,19 @@ on:
       - develop
   workflow_dispatch:
 
+env:
+  SKILGEN_SCORE_THRESHOLD: "60"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
-  skilgen-sync:
+  sync:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install Skilgen
@@ -28,34 +35,160 @@ jobs:
           if [ ! -f skilgen.yml ]; then
             python -m skilgen.cli.main init --project-root .
           fi
-      - name: Deliver latest skills
-        run: python -m skilgen.cli.main deliver --project-root .
-      - name: Validate generated outputs
-        run: python -m skilgen.cli.main validate --project-root . > skilgen-validate.json
-      - name: Compute Skilgen Score
-        run: python -m skilgen.cli.main score --project-root . --badge-file skilgen-score.svg > skilgen-score.json
-      - name: Upload score and validation artifacts
-        uses: actions/upload-artifact@v4
+      - name: Resolve planning input
+        run: |
+          if [ -f docs/Skilgen_PRD_v2.docx ]; then
+            echo "SKILGEN_REQUIREMENTS=docs/Skilgen_PRD_v2.docx" >> "$GITHUB_ENV"
+          elif [ -f requirements.md ]; then
+            echo "SKILGEN_REQUIREMENTS=requirements.md" >> "$GITHUB_ENV"
+          elif [ -f README.md ]; then
+            echo "SKILGEN_REQUIREMENTS=README.md" >> "$GITHUB_ENV"
+          fi
+      - name: Refresh the skill tree
+        run: |
+          if [ -n "${SKILGEN_REQUIREMENTS:-}" ]; then
+            python -m skilgen.cli.main deliver --project-root . --requirements "$SKILGEN_REQUIREMENTS"
+          else
+            python -m skilgen.cli.main deliver --project-root .
+          fi
+      - name: Commit refreshed outputs
+        run: |
+          if git diff --quiet -- AGENTS.md ANALYSIS.md ARCHITECTURE.md FEATURES.md REPORT.md TRACEABILITY.md skills; then
+            echo "No refreshed outputs to commit."
+            exit 0
+          fi
+          git config user.name "skilgen-bot"
+          git config user.email "skilgen-bot@users.noreply.github.com"
+          git add AGENTS.md ANALYSIS.md ARCHITECTURE.md FEATURES.md REPORT.md TRACEABILITY.md skills
+          git commit -m "chore: refresh skilgen skill tree"
+          git push
+
+  score:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
         with:
-          name: skilgen-quality
-          path: |
-            skilgen-score.json
-            skilgen-score.svg
-            skilgen-validate.json
-      - name: Append workflow summary
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Skilgen
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+      - name: Initialize config if needed
+        run: |
+          if [ ! -f skilgen.yml ]; then
+            python -m skilgen.cli.main init --project-root .
+          fi
+      - name: Resolve planning input
+        run: |
+          if [ -f docs/Skilgen_PRD_v2.docx ]; then
+            echo "SKILGEN_REQUIREMENTS=docs/Skilgen_PRD_v2.docx" >> "$GITHUB_ENV"
+          elif [ -f requirements.md ]; then
+            echo "SKILGEN_REQUIREMENTS=requirements.md" >> "$GITHUB_ENV"
+          elif [ -f README.md ]; then
+            echo "SKILGEN_REQUIREMENTS=README.md" >> "$GITHUB_ENV"
+          fi
+      - name: Compute diff and score for the PR branch
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HUGGINGFACEHUB_API_TOKEN: ${{ secrets.HUGGINGFACEHUB_API_TOKEN }}
+        run: |
+          if [ -n "${SKILGEN_REQUIREMENTS:-}" ]; then
+            python -m skilgen.cli.main diff --project-root . --requirements "$SKILGEN_REQUIREMENTS" --json > /tmp/skilgen-diff.json
+            python -m skilgen.cli.main deliver --project-root . --requirements "$SKILGEN_REQUIREMENTS"
+          else
+            python -m skilgen.cli.main diff --project-root . --json > /tmp/skilgen-diff.json
+            python -m skilgen.cli.main deliver --project-root .
+          fi
+          python -m skilgen.cli.main score --project-root . > /tmp/skilgen-score.json
+      - name: Compute score for the base branch
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HUGGINGFACEHUB_API_TOKEN: ${{ secrets.HUGGINGFACEHUB_API_TOKEN }}
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          git worktree add "$RUNNER_TEMP/skilgen-base" "origin/${{ github.base_ref }}"
+          if [ ! -f "$RUNNER_TEMP/skilgen-base/skilgen.yml" ]; then
+            python -m skilgen.cli.main init --project-root "$RUNNER_TEMP/skilgen-base"
+          fi
+          BASE_REQUIREMENTS=""
+          if [ -f "$RUNNER_TEMP/skilgen-base/docs/Skilgen_PRD_v2.docx" ]; then
+            BASE_REQUIREMENTS="$RUNNER_TEMP/skilgen-base/docs/Skilgen_PRD_v2.docx"
+          elif [ -f "$RUNNER_TEMP/skilgen-base/requirements.md" ]; then
+            BASE_REQUIREMENTS="$RUNNER_TEMP/skilgen-base/requirements.md"
+          elif [ -f "$RUNNER_TEMP/skilgen-base/README.md" ]; then
+            BASE_REQUIREMENTS="$RUNNER_TEMP/skilgen-base/README.md"
+          fi
+          if [ -n "$BASE_REQUIREMENTS" ]; then
+            python -m skilgen.cli.main deliver --project-root "$RUNNER_TEMP/skilgen-base" --requirements "$BASE_REQUIREMENTS"
+          else
+            python -m skilgen.cli.main deliver --project-root "$RUNNER_TEMP/skilgen-base"
+          fi
+          python -m skilgen.cli.main score --project-root "$RUNNER_TEMP/skilgen-base" > /tmp/skilgen-base-score.json
+      - name: Build PR comment
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          score = json.loads(Path("/tmp/skilgen-score.json").read_text())
+          base_score = json.loads(Path("/tmp/skilgen-base-score.json").read_text())
+          diff = json.loads(Path("/tmp/skilgen-diff.json").read_text())
+
+          delta = round(float(score["score"]) - float(base_score["score"]), 2)
+          direction = "↑" if delta > 0 else ("↓" if delta < 0 else "→")
+          stale_count = len(diff.get("stale_skill_paths", []))
+          quality_gates = score.get("quality_gates", [])
+          lines = [
+              f"## Skilgen Score: {int(round(score['score']))}/100 ({direction}{abs(delta)})",
+              "",
+              f"- Groundedness: {score['subscores']['groundedness']['score']}/25",
+              f"- Coverage: {score['subscores']['coverage']['score']}/25",
+              f"- Freshness: {score['subscores']['freshness']['score']}/25",
+              f"- Structure: {score['subscores']['structure']['score']}/25",
+              f"- Stale skills before refresh: {stale_count}",
+          ]
+          if stale_count:
+              lines.extend(["", "Skilgen refreshed the stale skills for this PR before computing the final score."])
+          if quality_gates:
+              lines.extend(["", "### Active quality gates"])
+              for gate in quality_gates:
+                  lines.append(f"- `{gate['name']}`: {gate['reason']}")
+          if score.get("trend", {}).get("regressions"):
+              lines.extend(["", "### Domain regressions"])
+              for item in score["trend"]["regressions"][:5]:
+                  lines.append(f"- `{item['domain']}`: {item['delta']}")
+          Path("/tmp/skilgen-comment.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+      - name: Comment on the pull request
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require("fs");
+            const body = fs.readFileSync("/tmp/skilgen-comment.md", "utf8");
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+      - name: Enforce score threshold
         run: |
           python - <<'PY'
           import json
           import os
           from pathlib import Path
-          score = json.loads(Path("skilgen-score.json").read_text())
-          validate = json.loads(Path("skilgen-validate.json").read_text())
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
-              handle.write(f"## Skilgen Score: {int(round(score['score']))}/100\n\n")
-              handle.write(f"- Groundedness: {score['subscores']['groundedness']['score']}/25\n")
-              handle.write(f"- Coverage: {score['subscores']['coverage']['score']}/25\n")
-              handle.write(f"- Freshness: {score['subscores']['freshness']['score']}/25\n")
-              handle.write(f"- Structure: {score['subscores']['structure']['score']}/25\n")
-              handle.write(f"- Validation warnings: {len(validate['warnings'])}\n")
-              handle.write(f"- Validation errors: {len(validate['errors'])}\n")
+
+          score = json.loads(Path("/tmp/skilgen-score.json").read_text())
+          threshold = float(os.environ["SKILGEN_SCORE_THRESHOLD"])
+          if float(score["score"]) < threshold:
+              raise SystemExit(f"Skilgen Score {score['score']} is below the required threshold {threshold}.")
           PY

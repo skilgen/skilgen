@@ -1,0 +1,10 @@
+id: production-safety-infra
+title: "Production infrastructure changes require approval"
+scope:
+  action_class: shell_exec
+match:
+  command_regex: "\\b(apply|deploy|restart|delete)\\b"
+  file_glob: ["**/prod/**", "**/production/**"]
+decision: require_approval
+notify: ["#platform-ops"]
+compliance_tags: ["internal:production-safety"]

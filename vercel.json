@@ -1,0 +1,21 @@
+{
+  "builds": [
+    {
+      "src": "apps/api/api/index.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb",
+        "includeFiles": [
+          "packages/**",
+          "apps/api/api/**",
+          "apps/api/alembic/**",
+          "apps/api/alembic.ini",
+          "apps/api/requirements.txt"
+        ]
+      }
+    }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "apps/api/api/index.py" }
+  ]
+}

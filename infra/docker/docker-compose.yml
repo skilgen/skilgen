@@ -1,0 +1,92 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://skillayer:skillayer@postgres:5432/skillayer
+      REDIS_URL: redis://redis:6379/0
+      DEPLOYMENT_MODE: development
+    env_file:
+      - ../../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ../../skilgen:/app/skilgen
+      - ../../apps/api:/app/apps/api
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://skillayer:skillayer@postgres:5432/skillayer
+      REDIS_URL: redis://redis:6379/0
+      DEPLOYMENT_MODE: selfhosted
+    env_file:
+      - ../../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: apps/dashboard/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    env_file:
+      - ../../.env
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: skillayer
+      POSTGRES_PASSWORD: skillayer
+      POSTGRES_DB: skillayer
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skillayer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+
+  # For companies that want fully self-hosted auth without any external IdP.
+  # Only starts if explicitly requested:
+  # docker compose --profile with-keycloak up
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_PASSWORD}
+    command: start-dev
+    ports:
+      - "8080:8080"
+    profiles:
+      - with-keycloak
+
+volumes:
+  postgres_data:
+  redis_data:

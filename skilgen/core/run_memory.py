@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, replace
+from json import JSONDecodeError
 from pathlib import Path
 
 from skilgen.core.models import FreshnessReport, RunMemory
@@ -18,6 +19,40 @@ def _runs_dir(project_root: Path) -> Path:
 
 def _current_run_path(project_root: Path) -> Path:
     return _memory_dir(project_root) / "current_run.json"
+
+
+def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(f"{path.suffix}.tmp")
+    temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def _load_json_recovering(path: Path) -> dict[str, object]:
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+        return payload if isinstance(payload, dict) else {}
+    except JSONDecodeError:
+        decoder = json.JSONDecoder()
+        index = 0
+        last_dict: dict[str, object] | None = None
+        while index < len(raw):
+            while index < len(raw) and raw[index].isspace():
+                index += 1
+            if index >= len(raw):
+                break
+            try:
+                payload, end = decoder.raw_decode(raw, index)
+            except JSONDecodeError:
+                index += 1
+                continue
+            if isinstance(payload, dict):
+                last_dict = payload
+            index = end
+        return last_dict or {}
 
 
 def create_run_memory(
@@ -69,53 +104,23 @@ def save_run_memory(project_root: Path, memory: RunMemory) -> Path:
     runs_dir.mkdir(parents=True, exist_ok=True)
     run_path = runs_dir / f"{memory.run_id}.json"
     payload = asdict(memory)
-    run_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    _current_run_path(project_root).write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    _write_json_atomic(run_path, payload)
+    _write_json_atomic(_current_run_path(project_root), payload)
     return run_path
 
 
 def append_run_event(project_root: Path, memory: RunMemory, message: str) -> RunMemory:
     events = [*memory.recent_events, message][-12:]
-    updated = RunMemory(
-        run_id=memory.run_id,
-        status=memory.status,
-        project_root=memory.project_root,
-        requirements_path=memory.requirements_path,
-        objective=memory.objective,
-        runtime=memory.runtime,
-        impacted_domains=memory.impacted_domains,
-        selected_domains=memory.selected_domains,
-        selected_skill_paths=memory.selected_skill_paths,
-        changed_files=memory.changed_files,
-        generated_files=memory.generated_files,
-        active_file_focus=memory.active_file_focus,
-        unresolved_questions=memory.unresolved_questions,
-        pending_validations=memory.pending_validations,
-        resumable_steps=memory.resumable_steps,
-        recent_events=events,
-    )
+    updated = replace(memory, recent_events=events)
     save_run_memory(Path(memory.project_root), updated)
     return updated
 
 
 def finalize_run_memory(project_root: Path, memory: RunMemory, generated_files: list[Path], status: str = "completed") -> RunMemory:
-    updated = RunMemory(
-        run_id=memory.run_id,
+    updated = replace(
+        memory,
         status=status,
-        project_root=memory.project_root,
-        requirements_path=memory.requirements_path,
-        objective=memory.objective,
-        runtime=memory.runtime,
-        impacted_domains=memory.impacted_domains,
-        selected_domains=memory.selected_domains,
-        selected_skill_paths=memory.selected_skill_paths,
-        changed_files=memory.changed_files,
         generated_files=[str(path.resolve()) for path in generated_files],
-        active_file_focus=memory.active_file_focus,
-        unresolved_questions=memory.unresolved_questions,
-        pending_validations=memory.pending_validations,
-        resumable_steps=memory.resumable_steps,
-        recent_events=memory.recent_events,
     )
     save_run_memory(project_root, updated)
     return updated
@@ -125,7 +130,9 @@ def load_current_run_memory(project_root: Path) -> RunMemory | None:
     path = _current_run_path(project_root)
     if not path.exists():
         return None
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = _load_json_recovering(path)
+    if not payload:
+        return None
     return RunMemory(
         run_id=str(payload.get("run_id", "")),
         status=str(payload.get("status", "unknown")),

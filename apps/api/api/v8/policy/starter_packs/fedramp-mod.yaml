@@ -1,0 +1,10 @@
+id: fedramp-mod-privileged-action
+title: "FedRAMP Moderate routes privileged actions through DLP"
+scope:
+  action_class: shell_exec
+match:
+  command_regex: "\\b(iam|security-group|firewall|kms|secretsmanager)\\b"
+  data_class: "privileged-resource"
+decision: route_to_dlp
+notify: ["#govcloud-review"]
+compliance_tags: ["NIST:AC-2", "NIST:AC-3", "NIST:AU-2", "NIST:CM-3"]

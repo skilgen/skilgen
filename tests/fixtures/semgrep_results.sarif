@@ -1,0 +1,81 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Semgrep",
+          "semanticVersion": "1.75.0",
+          "informationUri": "https://semgrep.dev",
+          "rules": [
+            {
+              "id": "python.lang.security.audit.sql-injection",
+              "name": "SQL injection",
+              "shortDescription": {
+                "text": "Possible SQL injection from formatted query input"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": ["security", "owasp-a03", "CWE-089"],
+                "problem.severity": "ERROR"
+              }
+            },
+            {
+              "id": "python.flask.security.xss.audit.template-autoescape",
+              "name": "Potential XSS from disabled autoescape",
+              "shortDescription": {
+                "text": "Cross-site scripting can occur when autoescape is disabled"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": ["security", "owasp-a03", "CWE-079"]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "python.lang.security.audit.sql-injection",
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/app.py"
+                },
+                "region": {
+                  "startLine": 42,
+                  "snippet": {
+                    "text": "redacted by parser tests"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "python.flask.security.xss.audit.template-autoescape",
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/templates.py"
+                },
+                "region": {
+                  "startLine": 12
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

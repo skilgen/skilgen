@@ -1,0 +1,29 @@
+#!/usr/bin/env sh
+
+set -eu
+
+APP_HOME=$(cd "${0%/*}" && pwd -P)
+PROPERTIES_FILE="$APP_HOME/gradle/wrapper/gradle-wrapper.properties"
+DIST_URL=$(sed -n 's/^distributionUrl=//p' "$PROPERTIES_FILE" | sed 's/\\:/:/g')
+DIST_NAME=$(basename "$DIST_URL" .zip)
+GRADLE_HOME_NAME=$(printf '%s' "$DIST_NAME" | sed 's/-bin$//')
+DIST_DIR="$APP_HOME/.gradle/wrapper/dists/$DIST_NAME"
+GRADLE_BIN="$DIST_DIR/$GRADLE_HOME_NAME/bin/gradle"
+
+if [ ! -x "$GRADLE_BIN" ]; then
+  mkdir -p "$DIST_DIR"
+  ZIP_FILE="$DIST_DIR/$DIST_NAME.zip"
+  if [ ! -f "$ZIP_FILE" ]; then
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$DIST_URL" -o "$ZIP_FILE"
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q "$DIST_URL" -O "$ZIP_FILE"
+    else
+      echo "curl or wget is required to download Gradle." >&2
+      exit 1
+    fi
+  fi
+  unzip -q "$ZIP_FILE" -d "$DIST_DIR"
+fi
+
+exec "$GRADLE_BIN" -p "$APP_HOME" "$@"

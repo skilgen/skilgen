@@ -1,0 +1,18 @@
+blocked_licenses:
+  - AGPL-3.0
+  - GPL-3.0-only
+approved_packages:
+  pip:
+    - requests
+    - django
+  npm:
+    - "@company/design-system"
+forbidden_patterns:
+  - "eval("
+  - "subprocess.Popen(shell=True)"
+required_headers:
+  - Strict-Transport-Security
+  - Content-Security-Policy
+allowed_origins:
+  - https://app.example.com
+  - https://admin.example.com

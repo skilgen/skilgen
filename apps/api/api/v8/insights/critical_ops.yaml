@@ -1,0 +1,81 @@
+product_review_required: false
+product_review_note: Skillayer default critical-operation taxonomy v1.0 for internal, sensitive, and regulated repositories.
+operations:
+  - id: commit-signing
+    label: Signed release and change provenance
+    description: Release branches, protected branches, and regulated repos must have skills that explain commit signing, PR attribution, and change provenance.
+    required_skill_categories:
+      - security_compliance
+      - release_engineering
+      - codebase_architecture
+    repo_sensitivity_tiers:
+      - internal
+      - sensitive
+      - regulated
+    evidence_requirements:
+      - signed commits
+      - PR attribution
+      - policy binding
+    sla_hours: 24
+  - id: privileged-runtime-change
+    label: Privileged runtime and deployment changes
+    description: Agent actions touching deployments, infrastructure, containers, or runtime permissions need operational and security coverage before they are treated as governed.
+    required_skill_categories:
+      - operational_knowledge
+      - infrastructure
+      - security_compliance
+    repo_sensitivity_tiers:
+      - sensitive
+      - regulated
+    evidence_requirements:
+      - deployment runbook
+      - rollback path
+      - policy binding
+    sla_hours: 12
+  - id: production-data-access
+    label: Production data and regulated file access
+    description: Repos that can reach production data, customer data, secrets, or regulated files need privacy, data-flow, and access-control skills.
+    required_skill_categories:
+      - data_governance
+      - security_compliance
+      - operational_knowledge
+    repo_sensitivity_tiers:
+      - sensitive
+      - regulated
+    evidence_requirements:
+      - data classification
+      - access controls
+      - audit trail
+    sla_hours: 8
+  - id: dependency-risk-change
+    label: Dependency, license, and supply-chain changes
+    description: Agent-authored package, lockfile, license, or build pipeline changes need skills covering dependency review and supply-chain risk.
+    required_skill_categories:
+      - supply_chain
+      - security_compliance
+      - codebase_architecture
+    repo_sensitivity_tiers:
+      - internal
+      - sensitive
+      - regulated
+    evidence_requirements:
+      - dependency review
+      - license policy
+      - build provenance
+    sla_hours: 24
+  - id: policy-controlled-agent-action
+    label: Policy-controlled coding-agent actions
+    description: Agent shell, network, file-write, MCP, and autonomous actions need skills that describe policy boundaries and approval rules.
+    required_skill_categories:
+      - ai_governance
+      - security_compliance
+      - operational_knowledge
+    repo_sensitivity_tiers:
+      - internal
+      - sensitive
+      - regulated
+    evidence_requirements:
+      - agent policy binding
+      - approval workflow
+      - violation handling
+    sla_hours: 4

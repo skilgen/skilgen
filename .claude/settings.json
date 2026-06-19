@@ -1,0 +1,13 @@
+{
+  "env": {
+    "SKILLAYER_API_KEY": "sk-WUVBke-CT9Q9ldldojhdzC_eWywpJt6p3jhacoRPCpg",
+    "SKILLAYER_REPO_ID": "65c1eff3-a026-4185-bf2c-e9291ac52eeb"
+  },
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Read",
+      "hooks": [{"type": "command",
+        "command": "python -m skilgen.hooks.claude_code_hook \"$CLAUDE_TOOL_INPUT_FILE_PATH\""}]
+    }]
+  }
+}

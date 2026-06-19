@@ -7,29 +7,49 @@ from pathlib import Path
 from typing import Any, Callable
 
 from skilgen.agents.codebase_signals import analyze_codebase
+from skilgen.agents.domain_graph_planner import _top_level_app_surfaces, detect_repo_archetype
+from skilgen.agents.evidence_graph import build_evidence_graph
 from skilgen.agents.feature_extractor import extract_features, extract_features_native
 from skilgen.agents.framework_fingerprint import fingerprint_project
 from skilgen.agents.model_registry import resolve_model_settings
 from skilgen.agents.relationship_mapper import build_import_graph
 from skilgen.agents.requirements_parser import parse_project_intent, parse_project_intent_native, parse_requirements_file, parse_requirements_file_native
 from skilgen.agents.roadmap_planner import build_roadmap_plan, build_roadmap_plan_native
+from skilgen.agents.workspace_graph import build_workspace_graph
+from skilgen.agents.decision_planner import build_agent_decision
+from skilgen.autoupdate import auto_update_status
 from skilgen.core.config import load_config
 from skilgen.core.context import build_codebase_context
+from skilgen.core.corpus_index import ensure_corpus_index
+from skilgen.core.analytics import analytics_summary
+from skilgen.core.diff import compute_diff
+from skilgen.core.freshness import save_freshness_state, snapshot_freshness_state
 from skilgen.core.requirements import load_project_context, load_requirements
+from skilgen.core.score import compute_skillgen_score, record_score_history, score_comparison_payload, score_history_payload
 from skilgen.core.validation import validate_project
-from skilgen.core.score import compute_skillgen_score
+from skilgen.enterprise_skills import active_enterprise_skills, active_mcp_connectors, list_enterprise_skills, recommend_mcp_connectors
 from skilgen.generators.package import (
+    _analysis_bundle,
     project_doc_paths,
+    render_architecture_graph_html,
+    render_architecture_graph_json,
+    render_architecture_graph_mermaid,
+    render_architecture_report,
     render_analysis_report,
+    render_dashboard_html,
     render_feature_inventory,
     render_project_report,
+    render_dependency_graph_mermaid,
+    render_evidence_graph_mermaid,
+    render_skill_graph_mermaid,
     render_traceability_report,
+    write_dashboard_doc,
     write_project_docs,
 )
 from skilgen.generators.skills import planned_skill_paths, write_skills
 from skilgen.deep_agents_core import _build_chat_model, _close_model, _normalize_json_with_model, deep_agents_unavailable_reason
 from skilgen.deep_agents_core import _classify_model_error, _invoke_with_retry, runtime_diagnostics
-from skilgen.external_skills import ensure_external_skills_for_project
+from skilgen.external_skills import active_external_skills, detect_external_skill_sources, ensure_external_skills_for_project, installed_external_skills, ranked_external_skills
 
 try:
     from deepagents import create_deep_agent
@@ -72,6 +92,39 @@ def _message_text(message: object) -> str:
     if isinstance(content, list):
         return "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content).strip()
     return str(content).strip()
+
+
+def _repo_shape_payload(root: Path, *, repo_archetype: str | None = None) -> dict[str, Any]:
+    workspace_graph = build_workspace_graph(root)
+    if repo_archetype is None:
+        signals = analyze_codebase(root)
+        package_root = None
+        for candidate in sorted(root.iterdir()):
+            if candidate.is_dir() and (candidate / "__init__.py").exists() and candidate.name not in {"tests", "docs", "scripts", "skills"}:
+                package_root = candidate
+                break
+        package_top_level_files = sorted(
+            path.relative_to(root).as_posix()
+            for path in package_root.glob("*.py")
+            if package_root is not None and path.is_file()
+        ) if package_root is not None else []
+        app_surfaces = _top_level_app_surfaces(root)
+        repo_archetype = detect_repo_archetype(
+            root,
+            signals,
+            package_root=package_root,
+            package_top_level_files=package_top_level_files,
+            workspace_graph=workspace_graph,
+            app_surfaces=app_surfaces,
+        )
+    return {
+        "name": repo_archetype or "generic",
+        "workspace_tool": workspace_graph.tool,
+        "package_count": len(workspace_graph.packages),
+        "dependency_count": len(workspace_graph.dependencies),
+        "entrypoints": list(workspace_graph.entrypoints),
+        "detection_evidence": list(workspace_graph.detection_evidence),
+    }
 
 
 class DeepAgentsRuntime:
@@ -142,6 +195,7 @@ class DeepAgentsRuntime:
                 "project_root": str(root),
                 "config_exists": (root / "skilgen.yml").exists(),
                 "analysis_exists": (root / "ANALYSIS.md").exists(),
+                "architecture_exists": (root / "ARCHITECTURE.md").exists(),
                 "report_exists": (root / "REPORT.md").exists(),
                 "traceability_exists": (root / "TRACEABILITY.md").exists(),
                 "agents_exists": (root / "AGENTS.md").exists(),
@@ -268,18 +322,112 @@ def native_analyze_payload(project_root: str | Path, requirements: str | Path | 
     fingerprint = fingerprint_project(root)
     signals = analyze_codebase(root)
     mapping = build_import_graph(root)
+    workspace_graph = build_workspace_graph(root)
     payload: dict[str, Any] = {
         "project_root": str(root),
         "framework_fingerprint": _serialize(fingerprint),
         "signals": _serialize(signals),
         "import_graph": mapping,
+        "workspace_graph": _serialize(workspace_graph),
+        "repo_archetype": _repo_shape_payload(root),
     }
     if requirements is not None:
         context = load_requirements(Path(requirements).resolve())
+        payload["evidence_graph"] = _serialize(build_evidence_graph(root, context))
         codebase_context = build_codebase_context(root, context)
         payload["domain_graph"] = _serialize(codebase_context.domain_graph)
         payload["detected_domains"] = _serialize(codebase_context.detected_domains)
         payload["skill_tree"] = _serialize(codebase_context.skill_tree)
+        payload["repo_archetype"] = _repo_shape_payload(root, repo_archetype=codebase_context.repo_archetype)
+    return payload
+
+
+def native_architecture_payload(
+    project_root: str | Path,
+    requirements: str | Path | None = None,
+    *,
+    skip_index: bool = False,
+) -> dict[str, Any]:
+    root = Path(project_root).resolve()
+    config = load_config(root)
+    if not skip_index and config.corpus.enabled:
+        ensure_corpus_index(root, config)
+    context = load_project_context(root, Path(requirements).resolve() if requirements is not None else None)
+    bundle = _analysis_bundle(context, root)
+    return {
+        "requirements_context": _serialize(context),
+        "evidence_graph": _serialize(bundle.evidence_graph),
+        "architecture": _serialize(bundle.architecture),
+        "workspace_graph": _serialize(bundle.codebase_context.workspace_graph),
+        "repo_archetype": _repo_shape_payload(root, repo_archetype=bundle.codebase_context.repo_archetype),
+        "graph_export": {
+            "mermaid": render_architecture_graph_mermaid(context, root, bundle),
+            "json": render_architecture_graph_json(context, root, bundle),
+            "html": render_architecture_graph_html(context, root, bundle),
+        },
+        "report_markdown": render_architecture_report(context, root, bundle),
+    }
+
+
+def native_dashboard_payload(project_root: str | Path, requirements: str | Path | None = None) -> dict[str, Any]:
+    return native_dashboard_payload_with_progress(project_root, requirements)
+
+
+def native_dashboard_payload_with_progress(
+    project_root: str | Path,
+    requirements: str | Path | None = None,
+    *,
+    progress_callback: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    root = Path(project_root).resolve()
+    context = load_project_context(root, Path(requirements).resolve() if requirements is not None else None)
+    if progress_callback is not None:
+        progress_callback("Refreshing dashboard architecture and evidence graphs from the latest project snapshot.")
+    bundle = _analysis_bundle(context, root)
+    if progress_callback is not None:
+        progress_callback("Computing dashboard score history, diff state, analytics, and agent readiness.")
+    score_bundle = score_history_payload(root, limit=12)
+    decision = build_agent_decision(root, context, bundle.codebase_context.domain_graph, bundle.codebase_context.skill_tree)
+    payload: dict[str, Any] = {
+        "requirements_context": _serialize(context),
+        "status": native_status_payload(root),
+        "score": score_bundle["current"],
+        "score_compare": score_comparison_payload(root, score_bundle["current"]),
+        "score_history": score_bundle["history"],
+        "score_trend": score_bundle["trend"],
+        "diff": compute_diff(root),
+        "analytics": analytics_summary(root),
+        "auto_update": auto_update_status(root),
+        "architecture": _serialize(bundle.architecture),
+        "evidence_graph": _serialize(bundle.evidence_graph),
+        "workspace_graph": _serialize(bundle.codebase_context.workspace_graph),
+        "repo_archetype": _repo_shape_payload(root, repo_archetype=bundle.codebase_context.repo_archetype),
+        "agent_decision": _serialize(decision),
+        "external_skills": {
+            "detected": detect_external_skill_sources(root),
+            "installed": installed_external_skills(root),
+            "active": active_external_skills(root),
+            "ranked": ranked_external_skills(root),
+        },
+        "enterprise_skills": {
+            "installed": list_enterprise_skills(root),
+            "active": active_enterprise_skills(root),
+        },
+        "mcp_connectors": {
+            "recommended": recommend_mcp_connectors(root),
+            "active": active_mcp_connectors(root),
+        },
+        "graph_export": {
+            "architecture": render_architecture_graph_mermaid(context, root, bundle),
+            "evidence": render_evidence_graph_mermaid(context, root, bundle),
+            "dependencies": render_dependency_graph_mermaid(context, root, bundle),
+            "skills": render_skill_graph_mermaid(context, root, bundle),
+            "json": render_architecture_graph_json(context, root, bundle),
+        },
+    }
+    if progress_callback is not None:
+        progress_callback("Rendering the final dashboard HTML surface with graphs, score, freshness, and capability context.")
+    payload["html"] = render_dashboard_html(context, root, payload, bundle)
     return payload
 
 
@@ -346,10 +494,13 @@ def native_status_payload(project_root: str | Path) -> dict[str, Any]:
     skills_root = root / "skills"
     skill_files = sorted(str(path.relative_to(root)) for path in skills_root.rglob("SKILL.md")) if skills_root.exists() else []
     summary_files = sorted(str(path.relative_to(root)) for path in skills_root.rglob("SUMMARY.md")) if skills_root.exists() else []
+    repo_shape = _repo_shape_payload(root)
     return {
         "project_root": str(root),
         "config_exists": (root / "skilgen.yml").exists(),
         "analysis_exists": (root / "ANALYSIS.md").exists(),
+        "architecture_exists": (root / "ARCHITECTURE.md").exists(),
+        "dashboard_exists": (root / "skilgen-dashboard.html").exists(),
         "report_exists": (root / "REPORT.md").exists(),
         "traceability_exists": (root / "TRACEABILITY.md").exists(),
         "agents_exists": (root / "AGENTS.md").exists(),
@@ -360,6 +511,8 @@ def native_status_payload(project_root: str | Path) -> dict[str, Any]:
         "skill_files": skill_files,
         "summary_count": len(summary_files),
         "summary_files": summary_files,
+        "workspace_graph": _serialize(build_workspace_graph(root)),
+        "repo_archetype": repo_shape,
         "runtime_diagnostics": runtime_diagnostics(root),
     }
 
@@ -373,6 +526,8 @@ def native_report_payload(project_root: str | Path) -> dict[str, Any]:
         "status": status,
         "skilgen_score": compute_skillgen_score(root),
         "domains": skill_domains,
+        "workspace_graph": status["workspace_graph"],
+        "repo_archetype": status["repo_archetype"],
         "signal_counts": {
             "backend_routes": len(signals.backend_routes),
             "frontend_routes": len(signals.frontend_routes),
@@ -386,7 +541,11 @@ def native_report_payload(project_root: str | Path) -> dict[str, Any]:
             "state_files": len(signals.state_files),
             "design_system_files": len(signals.design_system_files),
         },
-        "summary": f"Detected {status['skill_count']} skill files and {status['summary_count']} summary files across {len(skill_domains)} domains.",
+        "summary": (
+            f"Detected {status['skill_count']} skill files and {status['summary_count']} summary files across "
+            f"{len(skill_domains)} domains. Repo archetype: {status['repo_archetype']['name']} with "
+            f"{status['repo_archetype']['package_count']} workspace packages."
+        ),
     }
 
 
@@ -408,12 +567,15 @@ def native_run_delivery(
     targets: tuple[str, ...] = ("docs", "skills"),
     domains: tuple[str, ...] = (),
     dry_run: bool = False,
+    skip_index: bool = False,
 ) -> list[Path]:
     root = Path(project_root).resolve()
-    load_config(root)
+    config = load_config(root)
+    if not skip_index and config.corpus.enabled:
+        ensure_corpus_index(root, config)
     context = load_project_context(root, Path(requirements_path).resolve() if requirements_path is not None else None)
     fingerprint_project(root)
-    build_codebase_context(root, context)
+    codebase_context = build_codebase_context(root, context)
     generated: list[Path] = []
     if "docs" in targets:
         if dry_run:
@@ -425,4 +587,10 @@ def native_run_delivery(
             generated.extend(planned_skill_paths(context, root / "skills", set(domains)))
         else:
             generated.extend(write_skills(context, root / "skills", set(domains)))
+    if not dry_run:
+        saved_context = load_project_context(root, Path(requirements_path).resolve() if requirements_path is not None else None)
+        save_freshness_state(root, snapshot_freshness_state(root, saved_context, codebase_context.domain_graph))
+        record_score_history(root, source="delivery")
+        if "docs" in targets:
+            generated.append(write_dashboard_doc(saved_context, root))
     return generated

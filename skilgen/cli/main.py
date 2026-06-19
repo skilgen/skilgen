@@ -2,18 +2,51 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+import threading
+import time
+import uuid
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from skilgen.api.server import run_server
 from skilgen.autoupdate import auto_update_status, ensure_auto_update_worker, run_auto_update_worker, stop_auto_update_worker
-from skilgen.api.service import analyze_payload, decision_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
+from skilgen.api.service import analytics_payload, analyze_payload, architecture_payload, dashboard_payload, decision_payload, diff_payload, doctor_payload, preview_payload, report_payload, score_payload, status_payload, validate_payload
 from skilgen import __version__
 from skilgen.agents import build_import_graph, build_roadmap_plan, extract_features, fingerprint_project
 from skilgen.agents.requirements_parser import parse_project_intent, parse_requirements_file
+from skilgen.commands.check import run_check_command, run_install_hook_command
 from skilgen.deep_agents_core import current_runtime_mode, runtime_diagnostics
+from skilgen.core.analytics import log_skill_usage
+from skilgen.core.dependency_risk import analyze_dependency_risks, render_dependency_risk_report
 from skilgen.core.evals import compare_eval_results, scaffold_eval_framework
-from skilgen.delivery import run_delivery, watch_delivery
+from skilgen.core.corpus_index import build_corpus_index
+from skilgen.core.runtime_data import purge_runtime_data
+from skilgen.core.enterprise_policy import (
+    enterprise_compliance_report,
+    enterprise_policy_checks,
+    render_policy_checks,
+    validate_policy_file,
+    write_default_policy,
+)
+from skilgen.core.score import ci_result, score_badge_markdown
+from skilgen.parsers.runner import run_source_parsers
+from skilgen.parsers.sources import SOURCE_TYPES
+from skilgen.registry_client import (
+    RegistryClientError,
+    import_skill as import_registry_skill,
+    publish_skill as publish_registry_skill,
+    registry_import_file,
+    registry_install,
+    registry_list,
+    registry_publish,
+)
+from skilgen.delivery import run_delivery, sync_to_skillayer_after_delivery, watch_delivery
 from skilgen.core.config import load_config, render_default_config
 from skilgen.enterprise_skills import (
     activate_mcp_connector,
@@ -49,6 +82,389 @@ def emit_progress(message: str) -> None:
     print(f"[skilgen] {message}", file=sys.stderr)
 
 
+def _write_memory_session_template(project_root: Path, output: str | None = None) -> Path:
+    session_id = str(uuid.uuid4())
+    path = Path(output).resolve() if output else project_root / ".skilgen" / "sessions" / f"{session_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "session_id": session_id,
+        "agent_runtime": "claude_code",
+        "task_description": "Implement JWT refresh token rotation",
+        "engineer_login": "janedoe",
+        "duration_minutes": 47,
+        "files_touched": ["src/auth/jwt.py"],
+        "skill_paths_loaded": ["auth/SKILL.md"],
+        "messages": [
+            {"role": "user", "content": "Describe the task the engineer gave the agent."},
+            {"role": "assistant", "content": "Summarize the codebase-specific discovery here."},
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def _memory_session_files(project_root: Path, session_file: str | None) -> list[Path]:
+    if session_file:
+        return [Path(session_file).resolve()]
+    sessions_dir = project_root / ".skilgen" / "sessions"
+    return sorted(sessions_dir.glob("*.json")) if sessions_dir.exists() else []
+
+
+def _upload_memory_sessions(project_root: Path, repo_id: str, api_url: str, session_file: str | None) -> None:
+    api_key = os.getenv("SKILLAYER_API_KEY", "")
+    if not api_key:
+        print("error: SKILLAYER_API_KEY environment variable is required", file=sys.stderr)
+        sys.exit(1)
+    if not repo_id:
+        print("error: --repo-id is required when using --upload", file=sys.stderr)
+        sys.exit(1)
+
+    uploaded = 0
+    skipped = 0
+    for path in _memory_session_files(project_root, session_file):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"✗ Failed: invalid session file {path}: {exc}", file=sys.stderr)
+            continue
+        session_id = str(payload.get("session_id") or path.stem)
+        print(f"↑ Uploading session {session_id}... ", end="")
+        body = json.dumps(payload).encode("utf-8")
+        request = Request(
+            f"{api_url.rstrip('/')}/repos/{repo_id}/sessions",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urlopen(request, timeout=30) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+        except HTTPError as exc:
+            print(f"✗ Failed: {exc.code}")
+            continue
+        except URLError as exc:
+            print(f"✗ Failed: {exc.reason}")
+            continue
+        if result.get("status") == "duplicate":
+            skipped += 1
+            print("— Already uploaded (skipping)")
+        else:
+            uploaded += 1
+            print("✓ Queued for extraction (0 prior discoveries)")
+    print(f"{uploaded} session(s) uploaded, {skipped} skipped.")
+
+
+def _eval_api_request(api_url: str, path: str, api_key: str, *, method: str = "GET", payload: dict[str, object] | None = None) -> dict[str, object] | list[object]:
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = Request(
+        f"{api_url.rstrip('/')}{path}",
+        data=body,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    with urlopen(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _eval_org_id(args: argparse.Namespace) -> str:
+    return getattr(args, "org_id", "") or os.getenv("SKILLAYER_ORG_ID", "current")
+
+
+def _eval_api_url(args: argparse.Namespace) -> str:
+    return getattr(args, "api_url", "") or os.getenv("SKILLAYER_API_URL", "https://api.skillayer.com")
+
+
+def _eval_api_key() -> str:
+    api_key = os.getenv("SKILLAYER_API_KEY", "")
+    if not api_key:
+        print("error: SKILLAYER_API_KEY environment variable is required", file=sys.stderr)
+        sys.exit(1)
+    return api_key
+
+
+def _print_eval_status(payload: dict[str, object]) -> None:
+    total = int(payload.get("total_tasks", 0) or 0)
+    success_rate = payload.get("success_rate")
+    high_rate = payload.get("high_skill_success_rate")
+    low_rate = payload.get("low_skill_success_rate")
+    multiplier = payload.get("multiplier")
+    print(f"Tasks (30d): {total}")
+    print(f"Success rate: {round(float(success_rate) * 100) if success_rate is not None else 0}%")
+    print(f"With high-quality skills (>=70): {round(float(high_rate) * 100) if high_rate is not None else 'n/a'}%")
+    print(f"With low-quality skills (<40):  {round(float(low_rate) * 100) if low_rate is not None else 'n/a'}%")
+    print(f"Multiplier: {multiplier}x better outcomes with high-quality skills" if multiplier else "Multiplier: insufficient data")
+    print("")
+    print("Open skill gaps:")
+    gaps = payload.get("skill_gaps", [])
+    if isinstance(gaps, list) and gaps:
+        for gap in gaps:
+            if isinstance(gap, dict):
+                score = gap.get("existing_score")
+                score_text = f", score: {int(float(score))}/100" if score is not None else ""
+                print(f"- {gap.get('domain')} ({gap.get('failure_count')} failures) - {gap.get('gap_type')}{score_text}")
+    else:
+        print("- none")
+
+
+def _print_eval_gaps(gaps: list[object]) -> None:
+    if not gaps:
+        print("No open skill gaps.")
+        return
+    for gap in gaps:
+        if not isinstance(gap, dict):
+            continue
+        print(f"{gap.get('domain')} - {gap.get('failure_count')} failures - {gap.get('gap_type')}")
+        print(f"  Fix: {gap.get('suggested_action')}")
+
+
+@dataclass(frozen=True)
+class ProgressMilestone:
+    prefix: str
+    percent: int
+
+
+class CliProgressReporter:
+    _brand = "⬡⬢⬡"
+    _bar_width = 24
+    _frames = ("◜", "◠", "◝", "◞", "◡", "◟")
+    _milestones = (
+        ProgressMilestone("Starting delivery", 3),
+        ProgressMilestone("Model-backed runtime is not ready", 6),
+        ProgressMilestone("Reading your", 10),
+        ProgressMilestone("Scanning the repository", 18),
+        ProgressMilestone("Installed matching external skill packs", 24),
+        ProgressMilestone("Using already-installed external skill packs", 24),
+        ProgressMilestone("Ingested configured enterprise skill packs", 26),
+        ProgressMilestone("Using configured enterprise skill packs", 26),
+        ProgressMilestone("Activated recommended MCP connectors", 30),
+        ProgressMilestone("Building project context", 42),
+        ProgressMilestone("Inspecting the codebase", 54),
+        ProgressMilestone("Detected changes in", 64),
+        ProgressMilestone("No source changes were detected", 64),
+        ProgressMilestone("Decision planner selected domains", 72),
+        ProgressMilestone("Previewing the generated project docs", 78),
+        ProgressMilestone("Generating project docs", 78),
+        ProgressMilestone("Previewing the skill tree", 88),
+        ProgressMilestone("Materializing backend, frontend, requirements, and roadmap skills", 88),
+        ProgressMilestone("Decision planner recommends reusing", 88),
+        ProgressMilestone("Decision planner did not identify any concrete domains", 88),
+        ProgressMilestone("Finished delivery", 100),
+    )
+
+    def __init__(self) -> None:
+        self._last_percent = 0
+        self._current_message = ""
+        self._start_time = time.monotonic()
+        self._last_emit_at = 0.0
+        self._frame_index = 0
+        self._is_tty = sys.stderr.isatty()
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._spinner_thread: threading.Thread | None = None
+        if self._is_tty:
+            self._spinner_thread = threading.Thread(target=self._spin, name="skilgen-progress", daemon=True)
+            self._spinner_thread.start()
+
+    def emit(self, message: str) -> None:
+        with self._lock:
+            percent = self._infer_percent(message)
+            self._last_percent = max(self._last_percent, percent)
+            self._current_message = message
+            self._frame_index = (self._frame_index + 1) % len(self._frames)
+            now = time.monotonic()
+            if not self._is_tty and now - self._last_emit_at < 0.5 and percent < 100:
+                return
+            self._last_emit_at = now
+            line = self._render_line(self._last_percent, message, done=percent >= 100)
+        if self._is_tty:
+            print(f"\r{line}", file=sys.stderr, end="", flush=True)
+            if self._last_percent >= 100:
+                print(file=sys.stderr, flush=True)
+        else:
+            print(line, file=sys.stderr)
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._spinner_thread is not None:
+            self._spinner_thread.join(timeout=0.5)
+        if self._is_tty and self._current_message and self._last_percent < 100:
+            with self._lock:
+                print(f"\r{self._render_line(self._last_percent, self._current_message, done=True)}", file=sys.stderr)
+
+    def _infer_percent(self, message: str) -> int:
+        for milestone in self._milestones:
+            if message.startswith(milestone.prefix):
+                return milestone.percent
+        # Keep moving forward a bit for any uncatalogued progress messages.
+        return min(98, self._last_percent + 4)
+
+    def _elapsed(self) -> str:
+        elapsed = int(time.monotonic() - self._start_time)
+        minutes, seconds = divmod(elapsed, 60)
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def _render_line(self, percent: int, message: str, *, done: bool = False) -> str:
+        filled = round((percent / 100) * self._bar_width)
+        bar = "█" * filled + "░" * max(0, self._bar_width - filled)
+        frame = "●" if done else self._frames[self._frame_index]
+        return f"[skilgen {self._brand} {frame} {self._elapsed()}] {percent:>3}% |{bar}| {message}"
+
+    def _spin(self) -> None:
+        while not self._stop_event.wait(0.12):
+            with self._lock:
+                if not self._current_message:
+                    continue
+                self._frame_index = (self._frame_index + 1) % len(self._frames)
+                line = self._render_line(self._last_percent, self._current_message)
+            print(f"\r{line}", file=sys.stderr, end="", flush=True)
+
+def write_ci_workflow(project_root: Path) -> Path:
+    """Write the default GitHub Actions workflow for Skilgen quality gates."""
+    workflow_path = project_root / ".github" / "workflows" / "skilgen.yml"
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(
+        "\n".join(
+            [
+                "name: Skilgen",
+                "",
+                "on:",
+                "  pull_request:",
+                "",
+                "jobs:",
+                "  skilgen:",
+                "    runs-on: ubuntu-latest",
+                "    steps:",
+                "      - uses: actions/checkout@v4",
+                "      - uses: actions/setup-python@v5",
+                "        with:",
+                "          python-version: '3.12'",
+                "      - name: Install Skilgen",
+                "        run: python -m pip install -e .",
+                "      - name: Generate skills",
+                "        run: skilgen deliver --project-root . --auto-detect",
+                "      - name: Enforce Skilgen Score",
+                "        run: skilgen score --ci --min-score 60 --min-groundedness 15 --min-coverage 15 --project-root .",
+                "      - name: Enforce enterprise policy",
+                "        run: skilgen enterprise policy check --project-root .",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return workflow_path
+
+
+def _format_analytics_summary(payload: dict[str, object]) -> str:
+    """Render analytics as readable CLI text instead of raw JSON."""
+    usage_mode = str(payload.get("usage_mode", "none"))
+    live_events = int(payload.get("live_event_count", 0) or 0)
+    planner_events = int(payload.get("planner_event_count", 0) or 0)
+    traced_agents = payload.get("traced_agents", [])
+    if not isinstance(traced_agents, list):
+        traced_agents = []
+    lines = [
+        "Skilgen Analytics",
+        "",
+        f"Usage mode: {usage_mode}",
+        f"Live events: {live_events}",
+        f"Planner warmups ignored: {planner_events}",
+        f"Agents: {', '.join(str(agent) for agent in traced_agents) if traced_agents else 'none'}",
+        "",
+        "Top skills:",
+    ]
+    top_skills = payload.get("top_skills", [])
+    if isinstance(top_skills, list) and top_skills:
+        for index, item in enumerate(top_skills, start=1):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "Skill")
+            skill = str(item.get("skill") or "unknown")
+            loads = int(item.get("loads", 0) or 0)
+            mode = str(item.get("mode") or usage_mode)
+            suffix = "s" if loads != 1 else ""
+            lines.append(f"  {index}. {title} - {skill} - {loads} {mode} load{suffix}")
+    else:
+        lines.append("  No skill usage detected yet.")
+    lines.extend(["", "Least used:"])
+    least_used = payload.get("least_used", [])
+    if isinstance(least_used, list) and least_used:
+        for index, item in enumerate(least_used, start=1):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "Skill")
+            skill = str(item.get("skill") or "unknown")
+            loads = int(item.get("loads", 0) or 0)
+            suffix = "s" if loads != 1 else ""
+            lines.append(f"  {index}. {title} - {skill} - {loads} load{suffix}")
+    else:
+        lines.append("  No low-usage skills detected.")
+    return "\n".join(lines)
+
+
+def _render_source_summary(result: object) -> str:
+    """Render non-code source parser output for CLI users."""
+    analysed = getattr(result, "analysed", {})
+    failures = getattr(result, "failures", {})
+    written_files = getattr(result, "written_files", [])
+    lines = ["Non-code sources analysed:"]
+    if isinstance(analysed, dict) and analysed:
+        for source_type, domains in sorted(analysed.items()):
+            domain_list = ", ".join(str(domain) for domain in domains) if isinstance(domains, list) else str(domains)
+            lines.append(f"  {source_type:<12} -> source_skill ({domain_list})")
+    else:
+        lines.append("  none detected")
+    if isinstance(failures, dict) and failures:
+        lines.extend(["", "Parser warnings:"])
+        lines.extend(f"  {source_type}: {message}" for source_type, message in sorted(failures.items()))
+    count = len(written_files) if isinstance(written_files, list) else 0
+    lines.extend(["", f"Generated {count} additional SKILL.md files from non-code sources."])
+    return "\n".join(lines)
+
+
+def write_ci_workflow(project_root: Path) -> Path:
+    """Write the default GitHub Actions workflow for Skilgen quality gates."""
+    workflow_path = project_root / ".github" / "workflows" / "skilgen.yml"
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(
+        "\n".join(
+            [
+                "name: Skilgen",
+                "",
+                "on:",
+                "  pull_request:",
+                "",
+                "jobs:",
+                "  skilgen:",
+                "    runs-on: ubuntu-latest",
+                "    steps:",
+                "      - uses: actions/checkout@v4",
+                "      - uses: actions/setup-python@v5",
+                "        with:",
+                "          python-version: '3.12'",
+                "      - name: Install Skilgen",
+                "        run: python -m pip install -e .",
+                "      - name: Generate skills",
+                "        run: skilgen deliver --project-root . --auto-detect",
+                "      - name: Enforce Skilgen Score",
+                "        run: skilgen score --ci --min-score 60 --min-groundedness 15 --min-coverage 15 --project-root .",
+                "      - name: Enforce enterprise policy",
+                "        run: skilgen enterprise policy check --project-root .",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return workflow_path
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="skilgen", description="Requirements-driven skill and scaffold generator.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -56,11 +472,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = subparsers.add_parser("init", help="Write a default skilgen.yml to the project root.")
     init.add_argument("--project-root", default=".")
+    init.add_argument("--ci", action="store_true", help="Write a GitHub Actions workflow for Skilgen CI checks.")
     init.add_argument(
         "--provider",
-        choices=["openai", "anthropic", "gemini", "google", "google_genai", "huggingface", "hugging_face", "hf"],
+        choices=[
+            "openai",
+            "anthropic",
+            "gemini",
+            "google",
+            "google_genai",
+            "huggingface",
+            "hugging_face",
+            "hf",
+            "azure_openai",
+            "bedrock",
+            "ollama",
+            "openai_compatible",
+        ],
         help="Optionally scaffold provider-specific model defaults instead of a neutral template.",
     )
+
+    index = subparsers.add_parser("index", help="Build or refresh the full-corpus index used for deep evidence selection.")
+    index.add_argument("--project-root", default=".")
 
     scan = subparsers.add_parser("scan", help="Generate docs and skills from a requirements file.")
     scan.add_argument("--requirements")
@@ -68,13 +501,23 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--target", choices=["all", "docs", "skills"], default="all")
     scan.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     scan.add_argument("--dry-run", action="store_true")
+    scan.add_argument("--skip-index", action="store_true")
 
-    deliver = subparsers.add_parser("deliver", help="Alias for scan for now; intended to grow into full delivery automation.")
+    deliver = subparsers.add_parser(
+        "deliver",
+        help="Generate docs and skills, with optional Skillayer auto-sync when integration env vars are set.",
+        epilog=(
+            "After delivery, set SKILLAYER_API_KEY and SKILLAYER_REPO_ID to enable auto-sync. "
+            "For Claude Code, load tracking is configured automatically in .claude/settings.json."
+        ),
+    )
     deliver.add_argument("--requirements")
     deliver.add_argument("--project-root", default=".")
     deliver.add_argument("--target", choices=["all", "docs", "skills"], default="all")
     deliver.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     deliver.add_argument("--dry-run", action="store_true")
+    deliver.add_argument("--skip-index", action="store_true")
+    deliver.add_argument("--auto-detect", action=argparse.BooleanOptionalAction, default=True, help="Auto-detect non-code source artifacts during delivery.")
 
     update = subparsers.add_parser("update", help="Refresh generated outputs for all or selected domains.")
     update.add_argument("--requirements")
@@ -82,13 +525,16 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--target", choices=["all", "docs", "skills"], default="all")
     update.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     update.add_argument("--dry-run", action="store_true")
+    update.add_argument("--skip-index", action="store_true")
 
-    watch = subparsers.add_parser("watch", help="Watch the project and rerun generation when files change.")
+    watch = subparsers.add_parser("watch", help="Watch the project, or track SKILL.md loads when --repo-id is supplied.")
     watch.add_argument("--requirements")
     watch.add_argument("--project-root", default=".")
     watch.add_argument("--target", choices=["all", "docs", "skills"], default="all")
     watch.add_argument("--domain", action="append", choices=["requirements", "backend", "frontend", "roadmap"])
     watch.add_argument("--interval", type=float, default=2.0)
+    watch.add_argument("--repo-id", help="Skillayer repo UUID for Cursor/agent load tracking mode.")
+    watch.add_argument("--poll-interval", type=int, default=5, help="Polling interval for agent load tracking mode.")
     watch.add_argument("--cycles", type=int, default=0)
     watch.add_argument("--once", action="store_true")
 
@@ -125,6 +571,29 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = subparsers.add_parser("analyze", help="Assemble framework, signal, and relationship analysis for the project.")
     analyze.add_argument("--project-root", default=".")
     analyze.add_argument("--requirements")
+    analyze.add_argument("--deps", action="store_true", help="Show dependency CVE, version drift, and upgrade guidance.")
+    analyze.add_argument("--source", action="append", choices=sorted(SOURCE_TYPES), help="Run one non-code source parser in addition to code analysis. Can be repeated.")
+    analyze.add_argument("--all", action="store_true", help="Run all detected non-code source parsers.")
+    analyze.add_argument("--auto-detect", action=argparse.BooleanOptionalAction, default=True, help="Auto-detect configured non-code source artifacts.")
+
+    diff = subparsers.add_parser("diff", help="Show what changed since the last generation and which skills are stale.")
+    diff.add_argument("--project-root", default=".")
+    diff.add_argument("--requirements")
+    diff.add_argument("--json", action="store_true")
+
+    architecture = subparsers.add_parser("architecture", help="Synthesize an evidence-backed architecture blueprint for the project.")
+    architecture.add_argument("--project-root", default=".")
+    architecture.add_argument("--requirements")
+    architecture.add_argument("--json", action="store_true", help="Emit the raw architecture payload as JSON.")
+    architecture.add_argument("--graph-file", help="Write the architecture graph export to a file.")
+    architecture.add_argument("--graph-format", choices=["mermaid", "json", "html"], default="mermaid")
+    architecture.add_argument("--skip-index", action="store_true")
+
+    dashboard = subparsers.add_parser("dashboard", help="Generate a branded HTML dashboard for the current Skilgen project state.")
+    dashboard.add_argument("--project-root", default=".")
+    dashboard.add_argument("--requirements")
+    dashboard.add_argument("--output", help="Write the dashboard HTML to a file. Defaults to <project-root>/skilgen-dashboard.html.")
+    dashboard.add_argument("--json", action="store_true", help="Emit the raw dashboard payload as JSON instead of writing HTML.")
 
     decide = subparsers.add_parser("decide", help="Recommend whether to refresh skills, which skills to prioritize, and which run memory to load.")
     decide.add_argument("--project-root", default=".")
@@ -180,6 +649,45 @@ def build_parser() -> argparse.ArgumentParser:
     skills_import.add_argument("--project-root", default=".")
     skills_import.add_argument("--limit", type=int, default=5)
     skills_import.add_argument("--activate", action=argparse.BooleanOptionalAction, default=None)
+    skills_import.add_argument("--target-dir", help="Import a Skillayer registry skill into this existing directory as SKILL.md.")
+    skills_import.add_argument("--api-url", default="https://api.skillayer.com")
+
+    skills_publish = skills_subparsers.add_parser("publish", help="Publish a generated SKILL.md to the Skillayer registry.")
+    skills_publish.add_argument("skill_file")
+    skills_publish.add_argument("--project-root", default=".")
+    skills_publish.add_argument("--skill-id", required=True)
+    skills_publish.add_argument("--name", required=True)
+    skills_publish.add_argument("--description", required=True)
+    skills_publish.add_argument("--tag", action="append", default=[])
+    skills_publish.add_argument("--private", action="store_true")
+    skills_publish.add_argument("--api-url", default="https://api.skillayer.com")
+
+    registry = subparsers.add_parser("registry", help="Publish, list, install, and import Skillayer registry entries.")
+    registry_subparsers = registry.add_subparsers(dest="registry_command", required=True)
+    registry_publish_cmd = registry_subparsers.add_parser("publish", help="Publish a skill to the org registry.")
+    registry_publish_cmd.add_argument("--org-id", required=True)
+    registry_publish_cmd.add_argument("--repo-id")
+    registry_publish_cmd.add_argument("--skill-id", required=True)
+    registry_publish_cmd.add_argument("--version", default="1.0.0")
+    registry_publish_cmd.add_argument("--visibility", choices=["private", "org", "public"], default="private")
+    registry_publish_cmd.add_argument("--tags", default="")
+    registry_publish_cmd.add_argument("--description", required=True)
+    registry_publish_cmd.add_argument("--api-url", default="https://api.skillayer.com")
+    registry_list_cmd = registry_subparsers.add_parser("list", help="List org registry entries.")
+    registry_list_cmd.add_argument("--org-id", required=True)
+    registry_list_cmd.add_argument("--visibility")
+    registry_list_cmd.add_argument("--api-url", default="https://api.skillayer.com")
+    registry_install_cmd = registry_subparsers.add_parser("install", help="Install a registry entry into a repo.")
+    registry_install_cmd.add_argument("entry")
+    registry_install_cmd.add_argument("--org-id", required=True)
+    registry_install_cmd.add_argument("--repo-id")
+    registry_install_cmd.add_argument("--api-url", default="https://api.skillayer.com")
+    registry_import_cmd = registry_subparsers.add_parser("import", help="Import a local skill file into the private registry.")
+    registry_import_cmd.add_argument("--file", required=True)
+    registry_import_cmd.add_argument("--org-id", required=True)
+    registry_import_cmd.add_argument("--repo-id", required=True)
+    registry_import_cmd.add_argument("--name", required=True)
+    registry_import_cmd.add_argument("--api-url", default="https://api.skillayer.com")
 
     skills_sync = skills_subparsers.add_parser("sync", help="Sync an installed external skill source with its upstream repository.")
     skills_sync.add_argument("slug", nargs="?")
@@ -204,11 +712,25 @@ def build_parser() -> argparse.ArgumentParser:
     enterprise_list = enterprise_subparsers.add_parser("list", help="List enterprise skill packs installed for this project.")
     enterprise_list.add_argument("--project-root", default=".")
 
+    enterprise_policy = enterprise_subparsers.add_parser("policy", help="Manage enterprise compliance policy.")
+    enterprise_policy_subparsers = enterprise_policy.add_subparsers(dest="policy_command", required=True)
+    enterprise_policy_init = enterprise_policy_subparsers.add_parser("init", help="Create .skilgen/policy.yml with enterprise defaults.")
+    enterprise_policy_init.add_argument("--project-root", default=".")
+    enterprise_policy_validate = enterprise_policy_subparsers.add_parser("validate", help="Validate .skilgen/policy.yml.")
+    enterprise_policy_validate.add_argument("--project-root", default=".")
+    enterprise_policy_check = enterprise_policy_subparsers.add_parser("check", help="Check the project against .skilgen/policy.yml.")
+    enterprise_policy_check.add_argument("--project-root", default=".")
+
+    enterprise_report = enterprise_subparsers.add_parser("report", help="Show the enterprise compliance report.")
+    enterprise_report.add_argument("--project-root", default=".")
+    enterprise_report.add_argument("--json", action="store_true", help="Emit the compliance report as JSON.")
+
     enterprise_ingest = enterprise_subparsers.add_parser("ingest", help="Ingest an existing enterprise skill pack from a local path or git repo.")
     enterprise_ingest.add_argument("--project-root", default=".")
     enterprise_ingest.add_argument("--name", required=True)
     enterprise_ingest.add_argument("--path")
     enterprise_ingest.add_argument("--git-url")
+    enterprise_ingest.add_argument("--url")
     enterprise_ingest.add_argument("--ref")
     enterprise_ingest.add_argument("--kind", default="enterprise")
     enterprise_ingest.add_argument("--activate", action=argparse.BooleanOptionalAction, default=None)
@@ -253,6 +775,13 @@ def build_parser() -> argparse.ArgumentParser:
     score = subparsers.add_parser("score", help="Compute the Skilgen Score quality metric for the current skill tree.")
     score.add_argument("--project-root", default=".")
     score.add_argument("--badge-file")
+    score.add_argument("--badge", action="store_true", help="Print a shields.io Markdown badge instead of JSON.")
+    score.add_argument("--ci", action="store_true", help="Exit non-zero when score thresholds are not met.")
+    score.add_argument("--min-score", type=int, default=60)
+    score.add_argument("--min-groundedness", type=int, default=15)
+    score.add_argument("--min-coverage", type=int, default=15)
+    score.add_argument("--history", action="store_true", help="Show recent score history and score trends instead of only the current score.")
+    score.add_argument("--history-limit", type=int, default=10)
 
     eval_cmd = subparsers.add_parser("eval", help="Scaffold or compare Skilgen evaluation runs.")
     eval_subparsers = eval_cmd.add_subparsers(dest="eval_command", required=True)
@@ -262,12 +791,81 @@ def build_parser() -> argparse.ArgumentParser:
     eval_compare = eval_subparsers.add_parser("compare", help="Compare baseline and Skilgen eval results.")
     eval_compare.add_argument("--baseline", required=True)
     eval_compare.add_argument("--skilgen", required=True)
+    eval_record = eval_subparsers.add_parser("record", help="Record an agent task outcome in Skillayer.")
+    eval_record.add_argument("--outcome", required=True, choices=["success", "failure", "partial", "abandoned"])
+    eval_record.add_argument("--repo-id", required=True)
+    eval_record.add_argument("--org-id", default="")
+    eval_record.add_argument("--api-url", default="")
+    eval_record.add_argument("--task")
+    eval_record.add_argument("--type", choices=["code_generation", "debugging", "refactoring", "documentation", "testing", "review", "other"])
+    eval_record.add_argument("--failure-reason")
+    eval_record.add_argument("--skills-loaded", default="")
+    eval_record.add_argument("--tokens", type=int)
+    eval_record.add_argument("--duration", type=int)
+    eval_record.add_argument("--session-id", default="")
+    eval_record.add_argument("--agent-runtime", default=os.getenv("SKILGEN_AGENT_RUNTIME", "unknown"))
+    eval_status = eval_subparsers.add_parser("status", help="Show Skillayer agent performance ROI.")
+    eval_status.add_argument("--repo-id", required=True)
+    eval_status.add_argument("--org-id", default="")
+    eval_status.add_argument("--api-url", default="")
+    eval_status.add_argument("--days", type=int, default=30)
+    eval_gaps = eval_subparsers.add_parser("gaps", help="List open Skillayer skill gaps.")
+    eval_gaps.add_argument("--repo-id", required=True)
+    eval_gaps.add_argument("--org-id", default="")
+    eval_gaps.add_argument("--api-url", default="")
+
+    check = subparsers.add_parser("check", help="Scan a diff against org skills and fail on violations.")
+    check.add_argument("--project-root", default=".")
+    check.add_argument("--diff", help="Read a unified diff from a file. Reads stdin when omitted.")
+    check.add_argument("--staged", action="store_true", help="Run git diff --cached and check staged changes.")
+    check.add_argument("--api-url", default="", help="Skillayer API base URL. Defaults to config or SKILGEN_API_URL.")
+
+    install_hook = subparsers.add_parser("install-hook", help="Install a pre-commit hook that runs skilgen check --staged.")
+    install_hook.add_argument("--project-root", default=".")
 
     status = subparsers.add_parser("status", help="Show the current generated output status for a project root.")
     status.add_argument("--project-root", default=".")
 
     report = subparsers.add_parser("report", help="Show a summary report for a project root.")
     report.add_argument("--project-root", default=".")
+
+    purge = subparsers.add_parser("purge", help="Delete Skilgen runtime data stored under .skilgen for a project.")
+    purge.add_argument("--project-root", default=".")
+
+    analytics = subparsers.add_parser("analytics", help="Summarize generated skill usage and load history.")
+    analytics.add_argument("--project-root", default=".")
+    analytics.add_argument("--limit", type=int, default=10)
+    analytics.add_argument("--record-skill", action="append", default=[], help="Record a real skill-load event for a repo skill path such as skills/backend/api/SKILL.md.")
+    analytics.add_argument("--event", default="loaded")
+    analytics.add_argument("--agent")
+    analytics.add_argument("--context", default="agent_runtime")
+    analytics.add_argument("--session-id")
+    analytics.add_argument("--task")
+    analytics.add_argument("--json", action="store_true", help="Output the raw analytics JSON payload.")
+    analytics.add_argument(
+        "--upload",
+        action="store_true",
+        help="Sync local skill-load events to the Skillayer API so the dashboard heatmap reflects real usage.",
+    )
+    analytics.add_argument(
+        "--repo-id",
+        default="",
+        help="Skillayer repo UUID (shown in the dashboard URL) — required when using --upload.",
+    )
+    analytics.add_argument(
+        "--api-url",
+        default="",
+        help="Skillayer API base URL. Defaults to SKILLAYER_API_URL env var or https://api.skillayer.com.",
+    )
+
+    memory = subparsers.add_parser("memory", help="Upload coding-agent sessions to Skillayer memory capture.")
+    memory.add_argument("--project-root", default=".")
+    memory.add_argument("--upload", action="store_true")
+    memory.add_argument("--init-session", action="store_true")
+    memory.add_argument("--repo-id", default="")
+    memory.add_argument("--session-file")
+    memory.add_argument("--output")
+    memory.add_argument("--api-url", default="")
 
     validate = subparsers.add_parser("validate", help="Validate generated outputs and skill references.")
     validate.add_argument("--project-root", default=".")
@@ -290,8 +888,35 @@ def main() -> None:
         config_path = project_root / "skilgen.yml"
         if not config_path.exists():
             config_path.write_text(render_default_config(args.provider), encoding="utf-8")
+        ci_workflow_path = write_ci_workflow(project_root) if args.ci else None
+        policy_file = write_default_policy(project_root) if args.ci else None
         worker = ensure_auto_update_worker(project_root)
-        print(json.dumps({"config_path": str(config_path), "auto_update": worker}, indent=2))
+        payload = {"config_path": str(config_path), "auto_update": worker}
+        if ci_workflow_path is not None:
+            payload["ci_workflow_path"] = str(ci_workflow_path)
+        if policy_file is not None:
+            payload["policy_path"] = str(policy_file)
+        print(json.dumps(payload, indent=2))
+        return
+    if args.command == "index":
+        root = Path(args.project_root).resolve()
+        emit_progress("Indexing the full repository corpus so Skilgen can sample architectural hubs, configs, docs, and isolated subsystems.")
+        payload = build_corpus_index(root)
+        counts = {"source": 0, "config": 0, "documentation": 0, "enterprise_document": 0, "other": 0}
+        for entry in payload["entries"]:
+            category = str(entry.get("category", "other"))
+            counts[category] = counts.get(category, 0) + 1
+        print(
+            json.dumps(
+                {
+                    "index_path": payload["cache_path"],
+                    "entry_count": len(payload["entries"]),
+                    "cluster_count": len(payload.get("clusters", {})),
+                    "counts": counts,
+                },
+                indent=2,
+            )
+        )
         return
     if args.command == "autoupdate":
         root = Path(args.project_root).resolve()
@@ -330,7 +955,126 @@ def main() -> None:
         print(json.dumps({"import_graph": build_import_graph(Path(args.project_root).resolve())}, indent=2))
         return
     if args.command == "analyze":
-        print(json.dumps(analyze_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None), indent=2))
+        if args.deps:
+            report = analyze_dependency_risks(Path(args.project_root).resolve())
+            print(render_dependency_risk_report(report))
+            return
+        root = Path(args.project_root).resolve()
+        requested_sources = list(args.source or [])
+        if args.all:
+            requested_sources.append("all")
+        if requested_sources or args.auto_detect:
+            result = run_source_parsers(root, requested_sources or None)
+            if requested_sources or getattr(result, "written_files", []):
+                print(_render_source_summary(result))
+                return
+        print(json.dumps(analyze_payload(root, Path(args.requirements).resolve() if args.requirements else None), indent=2))
+        return
+    if args.command == "diff":
+        payload = diff_payload(Path(args.project_root).resolve(), Path(args.requirements).resolve() if args.requirements else None)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        elif payload["reason"] == "no_source_changes":
+            print(
+                "\n".join(
+                    [
+                        "Skilgen Diff - no source changes detected",
+                        "",
+                        f"  All skills are current. Freshness: {int(round(payload['freshness_score']))}/{payload['freshness_max']}",
+                    ]
+                )
+            )
+        elif payload["reason"] == "missing_freshness_state":
+            print(
+                "\n".join(
+                    [
+                        "Skilgen Diff - no previous generation found",
+                        "",
+                        "  Run `skilgen deliver` first to establish a baseline.",
+                    ]
+                )
+            )
+        else:
+            lines = [f"Skilgen Diff - {payload['changed_file_count']} files changed since last generation", ""]
+            lines.append("  Changed files:")
+            for item in payload["changed_files"]:
+                lines.append(f"    {item['change_type']:<9} {item['path']}")
+            lines.append("")
+            lines.append("  Impacted domains:")
+            for item in payload["impacted_domain_details"]:
+                if item["domain"] not in payload["impacted_domains"]:
+                    continue
+                marker = "STALE" if item["stale"] else "CURRENT"
+                path = item["skill_path"] or "-"
+                lines.append(f"    {item['domain']:<16} -> {path:<36} {marker}")
+            lines.append("")
+            lines.append(f"  Current: {', '.join(payload['current_domains']) or 'none'}")
+            lines.append(f"  Freshness: {int(round(payload['freshness_score']))}/{payload['freshness_max']}")
+            lines.append("")
+            lines.append("  Run `skilgen deliver` to refresh stale skills.")
+            print("\n".join(lines))
+        return
+    if args.command == "architecture":
+        root = Path(args.project_root).resolve()
+        emit_progress(
+            f"Collecting code, config, and requirements evidence with the {current_runtime_mode(root)} runtime before synthesizing the architecture blueprint."
+        )
+        payload = architecture_payload(root, Path(args.requirements).resolve() if args.requirements else None, skip_index=args.skip_index)
+        if args.graph_file:
+            graph_content = payload["graph_export"][args.graph_format]
+            graph_path = Path(args.graph_file).resolve()
+            graph_path.parent.mkdir(parents=True, exist_ok=True)
+            if args.graph_format == "json":
+                graph_path.write_text(json.dumps(graph_content, indent=2), encoding="utf-8")
+            else:
+                graph_path.write_text(str(graph_content), encoding="utf-8")
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(payload["report_markdown"])
+        return
+    if args.command == "dashboard":
+        root = Path(args.project_root).resolve()
+        emit_progress(
+            f"Building the branded Skilgen dashboard with the {current_runtime_mode(root)} runtime so you can inspect score, freshness, graphs, and agent readiness in one place."
+        )
+        payload = dashboard_payload(root, Path(args.requirements).resolve() if args.requirements else None)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+            return
+        output_path = Path(args.output).resolve() if args.output else (root / "skilgen-dashboard.html")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(str(payload["html"]), encoding="utf-8")
+        architecture = payload.get("architecture")
+        headline = f"Dashboard for {root.name}"
+        if isinstance(architecture, dict):
+            headline = str(architecture.get("headline") or headline)
+        score_info = payload.get("score")
+        score_value = 0
+        if isinstance(score_info, dict):
+            score_value = score_info.get("score", 0)
+        elif isinstance(score_info, (int, float)):
+            score_value = score_info
+        diff_info = payload.get("diff")
+        stale_skill_count = 0
+        if isinstance(diff_info, dict):
+            stale_skill_count = len(diff_info.get("stale_skill_paths", []))
+        graph_payload = payload.get("graph_export")
+        if not isinstance(graph_payload, dict):
+            graph_payload = payload.get("graphs")
+        graph_panels = sorted(graph_payload.keys()) if isinstance(graph_payload, dict) else []
+        print(
+            json.dumps(
+                {
+                    "dashboard_file": str(output_path),
+                    "headline": headline,
+                    "score": score_value,
+                    "stale_skill_count": stale_skill_count,
+                    "graph_panels": graph_panels,
+                },
+                indent=2,
+            )
+        )
         return
     if args.command == "decide":
         root = Path(args.project_root).resolve()
@@ -397,9 +1141,51 @@ def main() -> None:
             )
             return
         if args.skills_command == "import":
+            if args.target_dir:
+                try:
+                    emit_progress("Importing a public Skillayer registry skill into the target skill directory.")
+                    print(
+                        json.dumps(
+                            {
+                                "imported_skill": import_registry_skill(
+                                    api_url=args.api_url,
+                                    registry_id=args.slug,
+                                    target_dir=Path(args.target_dir).resolve(),
+                                )
+                            },
+                            indent=2,
+                        )
+                    )
+                    return
+                except RegistryClientError as exc:
+                    print(f"skilgen skills import failed: {exc}", file=sys.stderr)
+                    sys.exit(1)
             emit_progress("Importing downstream repositories from the selected directory-style skill source.")
             print(json.dumps(import_external_skill_candidates(project_root=root, slug=args.slug, limit=args.limit, active=args.activate), indent=2))
             return
+        if args.skills_command == "publish":
+            try:
+                emit_progress("Publishing a generated SKILL.md to the Skillayer registry.")
+                print(
+                    json.dumps(
+                        {
+                            "published_skill": publish_registry_skill(
+                                api_url=args.api_url,
+                                skill_file=Path(args.skill_file).resolve(),
+                                skill_id=args.skill_id,
+                                name=args.name,
+                                description=args.description,
+                                tags=list(args.tag or []),
+                                is_public=not args.private,
+                            )
+                        },
+                        indent=2,
+                    )
+                )
+                return
+            except RegistryClientError as exc:
+                print(f"skilgen skills publish failed: {exc}", file=sys.stderr)
+                sys.exit(1)
         if args.skills_command == "sync":
             if args.all:
                 emit_progress("Syncing all installed external skill sources with their upstream repositories.")
@@ -420,11 +1206,90 @@ def main() -> None:
             emit_progress(f"Deactivating the external skill source '{args.slug}' for agent loading.")
             print(json.dumps({"deactivated_skill": deactivate_external_skill(project_root=root, slug=args.slug)}, indent=2))
             return
+    if args.command == "registry":
+        try:
+            if args.registry_command == "publish":
+                tags = [tag.strip() for tag in str(args.tags or "").split(",") if tag.strip()]
+                result = registry_publish(
+                    api_url=args.api_url,
+                    org_id=args.org_id,
+                    skill_id=args.skill_id,
+                    version=args.version,
+                    visibility=args.visibility,
+                    tags=tags,
+                    description=args.description,
+                )
+                print(f"✓ Published {result.get('name', args.skill_id)} v{result.get('version', args.version)} to {args.visibility} registry")
+                return
+            if args.registry_command == "list":
+                result = registry_list(api_url=args.api_url, org_id=args.org_id, visibility=args.visibility)
+                print("Name | Version | Score | Installs | Decays In")
+                for entry in result.get("entries", []):
+                    if isinstance(entry, dict):
+                        print(
+                            f"{entry.get('name', '—')} | {entry.get('version', '—')} | "
+                            f"{entry.get('score_total', '—')} | {entry.get('install_count', 0)} | "
+                            f"{entry.get('predicted_decay_days', '—')}"
+                        )
+                return
+            if args.registry_command == "install":
+                registry_install(api_url=args.api_url, org_id=args.org_id, entry_id=args.entry, repo_id=args.repo_id)
+                print(f"✓ Installed {args.entry} into repo")
+                return
+            if args.registry_command == "import":
+                result = registry_import_file(
+                    api_url=args.api_url,
+                    org_id=args.org_id,
+                    repo_id=args.repo_id,
+                    name=args.name,
+                    file_path=Path(args.file).resolve(),
+                )
+                entry = result.get("entry") if isinstance(result.get("entry"), dict) else {}
+                score = result.get("score") if isinstance(result.get("score"), dict) else {}
+                print(f"Score: {score.get('total', entry.get('score_total', '—'))}/100")
+                print(f"✓ Imported as private registry entry {entry.get('id', '')}")
+                return
+        except RegistryClientError as exc:
+            print(f"skilgen registry failed: {exc}", file=sys.stderr)
+            sys.exit(1)
     if args.command == "enterprise":
         root = Path(args.project_root).resolve()
         if args.enterprise_command == "list":
             emit_progress("Loading enterprise skill packs installed for this project.")
             print(json.dumps({"skills": list_enterprise_skills(root)}, indent=2))
+            return
+        if args.enterprise_command == "policy":
+            if args.policy_command == "init":
+                policy_file = write_default_policy(root)
+                print(json.dumps({"policy_path": str(policy_file)}, indent=2))
+                return
+            if args.policy_command == "validate":
+                passed, message = validate_policy_file(root)
+                print(message)
+                if not passed:
+                    sys.exit(1)
+                return
+            if args.policy_command == "check":
+                try:
+                    checks = enterprise_policy_checks(root)
+                except ValueError as exc:
+                    print(f"Enterprise policy check failed: {exc}", file=sys.stderr)
+                    sys.exit(1)
+                print(render_policy_checks(checks))
+                if not all(check.passed for check in checks):
+                    sys.exit(1)
+                return
+        if args.enterprise_command == "report":
+            try:
+                payload = enterprise_compliance_report(root)
+            except ValueError as exc:
+                print(f"Enterprise report failed: {exc}", file=sys.stderr)
+                sys.exit(1)
+            if args.json:
+                print(json.dumps(payload, indent=2))
+            else:
+                checks = enterprise_policy_checks(root)
+                print(render_policy_checks(checks))
             return
         if args.enterprise_command == "ingest":
             emit_progress("Ingesting an existing enterprise skill pack into .skilgen/enterprise-skills.")
@@ -436,6 +1301,7 @@ def main() -> None:
                             name=args.name,
                             path=args.path,
                             git_url=args.git_url,
+                            url=args.url,
                             ref=args.ref,
                             activate=args.activate,
                             kind=args.kind,
@@ -535,7 +1401,23 @@ def main() -> None:
         return
     if args.command == "score":
         emit_progress("Computing the Skilgen Score from groundedness, coverage, freshness, and structure signals.")
-        print(json.dumps(score_payload(Path(args.project_root).resolve(), args.badge_file), indent=2))
+        payload = score_payload(Path(args.project_root).resolve(), args.badge_file, history=args.history, history_limit=args.history_limit)
+        score_payload_for_checks = payload["current"] if args.history and isinstance(payload.get("current"), dict) else payload
+        if args.badge:
+            print(score_badge_markdown(score_payload_for_checks))
+            return
+        if args.ci:
+            passed, message = ci_result(
+                score_payload_for_checks,
+                min_score=args.min_score,
+                min_groundedness=args.min_groundedness,
+                min_coverage=args.min_coverage,
+            )
+            print(message)
+            if not passed:
+                sys.exit(1)
+            return
+        print(json.dumps(payload, indent=2))
         return
     if args.command == "eval":
         if args.eval_command == "scaffold":
@@ -546,12 +1428,171 @@ def main() -> None:
             emit_progress("Comparing baseline and Skilgen eval results.")
             print(json.dumps(compare_eval_results(args.baseline, args.skilgen), indent=2))
             return
+        api_key = _eval_api_key()
+        org_id = _eval_org_id(args)
+        api_url = _eval_api_url(args)
+        if args.eval_command == "record":
+            started_at = datetime.now(UTC).isoformat()
+            skills_loaded = [item.strip() for item in str(args.skills_loaded or "").split(",") if item.strip()]
+            payload = {
+                "repo_id": args.repo_id,
+                "session_id": args.session_id or os.getenv("SKILGEN_SESSION_ID") or str(uuid.uuid4()),
+                "agent_runtime": args.agent_runtime,
+                "task_description": args.task,
+                "task_type": args.type,
+                "outcome": args.outcome,
+                "failure_reason": args.failure_reason,
+                "skills_loaded": skills_loaded,
+                "duration_seconds": args.duration,
+                "token_count": args.tokens,
+                "started_at": started_at,
+                "completed_at": datetime.now(UTC).isoformat(),
+            }
+            result = _eval_api_request(api_url, f"/eval/orgs/{org_id}/tasks", api_key, method="POST", payload=payload)
+            gaps = bool(isinstance(result, dict) and result.get("gaps_detected"))
+            if args.outcome == "failure" and gaps:
+                print(f"⚠ Task recorded ({args.outcome}). New skill gap detected.")
+            else:
+                print(f"✓ Task recorded ({args.outcome}). Gap detection: no new gaps.")
+            return
+        if args.eval_command == "status":
+            result = _eval_api_request(api_url, f"/eval/orgs/{org_id}/roi?repo_id={quote(args.repo_id)}&days={args.days}", api_key)
+            if isinstance(result, dict):
+                _print_eval_status(result)
+            return
+        if args.eval_command == "gaps":
+            result = _eval_api_request(api_url, f"/eval/orgs/{org_id}/skill-gaps?status=open", api_key)
+            _print_eval_gaps(result if isinstance(result, list) else [])
+            return
+    if args.command == "check":
+        sys.exit(run_check_command(args))
+    if args.command == "install-hook":
+        sys.exit(run_install_hook_command(args))
     if args.command == "status":
         print(json.dumps(status_payload(Path(args.project_root).resolve()), indent=2))
         return
     if args.command == "report":
         print(json.dumps(report_payload(Path(args.project_root).resolve()), indent=2))
         return
+    if args.command == "purge":
+        print(json.dumps(purge_runtime_data(Path(args.project_root).resolve()), indent=2))
+        return
+    if args.command == "analytics":
+        root = Path(args.project_root).resolve()
+        if args.record_skill:
+            log_skill_usage(
+                root,
+                list(args.record_skill),
+                event=args.event,
+                agent=args.agent,
+                context=args.context,
+                session_id=args.session_id,
+                task=args.task,
+            )
+            print(
+                json.dumps(
+                    {
+                        "recorded": len(args.record_skill),
+                        "skills": list(args.record_skill),
+                        "event": args.event,
+                        "agent": args.agent,
+                        "context": args.context,
+                        "session_id": args.session_id,
+                        "task": args.task,
+                    },
+                    indent=2,
+                )
+            )
+            return
+        if getattr(args, "upload", False):
+            repo_id = getattr(args, "repo_id", "") or os.getenv("SKILLAYER_REPO_ID", "")
+            api_key = os.getenv("SKILLAYER_API_KEY", "")
+            api_url = (getattr(args, "api_url", "") or os.getenv("SKILLAYER_API_URL", "") or "https://api.skillayer.com").rstrip("/")
+            if not repo_id:
+                print("error: --repo-id is required (or set SKILLAYER_REPO_ID env var)", file=sys.stderr)
+                sys.exit(1)
+            if not api_key:
+                print("error: SKILLAYER_API_KEY environment variable is required", file=sys.stderr)
+                sys.exit(1)
+            usage_path = root / ".skilgen" / "analytics" / "usage.jsonl"
+            if not usage_path.exists():
+                print(json.dumps({"synced": 0, "skipped": 0, "error": "No local analytics file found."}))
+                return
+            events: list[dict[str, object]] = []
+            for line in usage_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                    skill = str(entry.get("skill", "")).strip()
+                    if not skill or str(entry.get("context", "")) == "decision_planner":
+                        continue
+                    events.append({
+                        "skill_path": skill,
+                        "agent_runtime": str(entry.get("agent_runtime", "unknown")).strip() or "unknown",
+                        "session_id": str(entry.get("session_id") or ""),
+                        "timestamp": str(entry.get("timestamp", "")),
+                    })
+                except json.JSONDecodeError:
+                    continue
+            body = json.dumps({"repo_id": repo_id, "events": events}).encode("utf-8")
+            request = Request(
+                f"{api_url}/orgs/sync-analytics-direct",  # will be routed via org context server-side
+                data=body,
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-Skilgen-Repo-Id": repo_id,
+                },
+            )
+            # The sync endpoint is under /orgs/{org_id}/sync-analytics but we
+            # need the org_id. Use a convenience endpoint that resolves it from the API key.
+            # For now call /repos/{repo_id}/sync-analytics which we add as an alias.
+            request = Request(
+                f"{api_url}/repos/{repo_id}/sync-analytics",
+                data=body,
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+            )
+            try:
+                with urlopen(request, timeout=15) as resp:
+                    result = json.loads(resp.read().decode("utf-8"))
+                print(json.dumps(result, indent=2))
+            except HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                print(f"error: API returned {exc.code}: {detail}", file=sys.stderr)
+                sys.exit(1)
+            except URLError as exc:
+                print(f"error: Unable to reach API: {exc.reason}", file=sys.stderr)
+                sys.exit(1)
+            return
+        payload = analytics_payload(root, limit=args.limit)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(_format_analytics_summary(payload))
+        return
+    if args.command == "memory":
+        root = Path(args.project_root).resolve()
+        if args.init_session:
+            path = _write_memory_session_template(root, args.output)
+            display_path = path.relative_to(root) if path.is_relative_to(root) else path
+            print(f"Session file created: {display_path}")
+            print("Fill in the messages field with your session transcript and run:")
+            print("SKILLAYER_API_KEY=<key> skilgen memory --upload --repo-id <uuid>")
+            return
+        if args.upload:
+            api_url = args.api_url or os.getenv("SKILLAYER_API_URL", "") or "https://api.skillayer.com"
+            _upload_memory_sessions(root, args.repo_id, api_url, args.session_file)
+            return
+        print("error: specify --init-session or --upload", file=sys.stderr)
+        sys.exit(1)
     if args.command == "doctor":
         payload = doctor_payload(Path(args.project_root).resolve())
         print(json.dumps(payload, indent=2))
@@ -582,44 +1623,87 @@ def main() -> None:
 
     if args.command == "watch":
         root = Path(args.project_root).resolve()
+        if getattr(args, "repo_id", None):
+            api_key = os.getenv("SKILLAYER_API_KEY", "")
+            if not api_key:
+                print("error: SKILLAYER_API_KEY environment variable is required", file=sys.stderr)
+                sys.exit(1)
+            from skilgen.hooks.cursor_watcher import watch_skills
+
+            print("👁  Watching for agent loads. Use this while working with Cursor or any agent.")
+            watch_skills(
+                str(root),
+                args.repo_id,
+                api_key,
+                api_url=os.getenv("SKILLAYER_API_URL", "https://api.skillayer.com"),
+                poll_interval=args.poll_interval,
+            )
+            return
+        watch_progress = CliProgressReporter()
         emit_progress(
             f"Starting watch mode with the {current_runtime_mode(root)} runtime. Skilgen will explain each refresh as changes are detected."
         )
-        runs = watch_delivery(
-            Path(args.requirements).resolve() if args.requirements else None,
-            root,
-            targets=targets,
-            domains=domains,
-            interval_seconds=args.interval,
-            cycles=args.cycles,
-            once=args.once,
-            progress_callback=emit_progress,
-        )
+        try:
+            runs = watch_delivery(
+                Path(args.requirements).resolve() if args.requirements else None,
+                root,
+                targets=targets,
+                domains=domains,
+                interval_seconds=args.interval,
+                cycles=args.cycles,
+                once=args.once,
+                progress_callback=watch_progress.emit,
+            )
+        finally:
+            watch_progress.stop()
         print(json.dumps({"runtime": current_runtime_mode(root), "runs": [[str(path) for path in generated] for generated in runs]}, indent=2))
         return
 
     root = Path(args.project_root).resolve()
     ensure_auto_update_worker(root, requirements_path=Path(args.requirements).resolve() if args.requirements else None)
     diagnostics = runtime_diagnostics(root)
-    emit_progress(
-        f"Starting delivery with the {current_runtime_mode(root)} runtime. This may take a bit while Skilgen builds project context and generates the final skill tree."
-    )
-    if diagnostics["runtime"] != "model_backed":
-        emit_progress(f"Model-backed runtime is not ready: {diagnostics['reason']}")
-    generated = run_delivery(
-        Path(args.requirements).resolve() if args.requirements else None,
-        root,
-        targets=targets,
-        domains=domains,
-        dry_run=args.dry_run,
-        progress_callback=emit_progress,
-    )
+    progress = CliProgressReporter()
+    skillayer_synced = False
+    try:
+        progress.emit(
+            f"Starting delivery with the {current_runtime_mode(root)} runtime. This may take a bit while Skilgen builds project context and generates the final skill tree."
+        )
+        if diagnostics["runtime"] != "model_backed":
+            progress.emit(f"Model-backed runtime is not ready: {diagnostics['reason']}")
+        generated = run_delivery(
+            Path(args.requirements).resolve() if args.requirements else None,
+            root,
+            targets=targets,
+            domains=domains,
+            dry_run=args.dry_run,
+            skip_index=args.skip_index,
+            progress_callback=progress.emit,
+        )
+        source_result = None
+        if getattr(args, "auto_detect", False) and not args.dry_run and "skills" in targets:
+            progress.emit("Scanning non-code sources for API, infrastructure, data, security, and operational knowledge.")
+            source_result = run_source_parsers(root, None)
+        if not args.dry_run:
+            skillayer_synced = sync_to_skillayer_after_delivery(root, generated)
+            if skillayer_synced:
+                print("↑ Synced to Skillayer", file=sys.stderr)
+    finally:
+        progress.stop()
+    source_payload: dict[str, object] | None = None
+    if source_result is not None:
+        source_payload = {
+            "analysed": source_result.analysed,
+            "generated_files": [str(path) for path in source_result.written_files],
+            "failures": source_result.failures,
+        }
     print(
         json.dumps(
             {
                 "runtime": current_runtime_mode(root),
                 "runtime_diagnostics": diagnostics,
                 "generated_files": [str(path) for path in generated],
+                "skillayer_synced": skillayer_synced,
+                "non_code_sources": source_payload,
             },
             indent=2,
         )

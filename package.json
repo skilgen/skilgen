@@ -1,0 +1,19 @@
+{
+  "name": "skillayer",
+  "private": true,
+  "packageManager": "npm@10.9.4",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build": "turbo build",
+    "deploy:api": "python3 scripts/deploy_api.py --prod",
+    "deploy:dashboard": "python3 scripts/deploy_dashboard.py --prod",
+    "deploy:web": "python3 scripts/deploy_web.py --prod",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "type-check": "turbo type-check"
+  },
+  "devDependencies": {
+    "turbo": "latest",
+    "typescript": "^5"
+  }
+}

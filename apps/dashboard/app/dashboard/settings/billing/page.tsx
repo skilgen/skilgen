@@ -1,0 +1,119 @@
+import Link from "next/link";
+import { withAuth } from "@workos-inc/authkit-nextjs";
+
+import { SectionErrorBoundary } from "@/components/section-error-boundary";
+import { ManageBillingButton } from "./manage-billing-button";
+import { API_URL } from "../../../../lib/data";
+
+type BillingPageProps = {
+  searchParams: Promise<{ success?: string | string[]; plan?: string | string[] }>;
+};
+
+type SubscriptionState = {
+  plan: "free" | "team" | "business";
+  status: "active" | "past_due" | "canceled" | null;
+  seat_count: number;
+  seat_limit: number;
+  stripe_customer_id: string | null;
+};
+
+/**
+ * Loads the current org subscription from the Skillayer API.
+ */
+async function getSubscription(accessToken: string): Promise<SubscriptionState | null> {
+  const res = await fetch(`${API_URL}/stripe/subscription`, {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    next: { revalidate: 0 },
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+/**
+ * Formats plan and subscription state labels for display.
+ */
+function label(value: string | null | undefined) {
+  if (!value) return "free";
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+
+/**
+ * Renders the current plan, seat usage, and billing actions for the workspace.
+ */
+export default async function BillingSettingsPage({ searchParams }: BillingPageProps) {
+  const resolvedSearchParams = await searchParams;
+  const success = (Array.isArray(resolvedSearchParams.success) ? resolvedSearchParams.success[0] : resolvedSearchParams.success) === "true";
+  const upgradedPlan = Array.isArray(resolvedSearchParams.plan) ? resolvedSearchParams.plan[0] : resolvedSearchParams.plan;
+  let accessToken = "";
+  let subscription: SubscriptionState | null = null;
+
+  try {
+    const session = await withAuth({ ensureSignedIn: true });
+    accessToken = session.accessToken || "";
+    subscription = await getSubscription(accessToken);
+  } catch {
+    subscription = null;
+  }
+
+  const plan = subscription?.plan ?? "free";
+  const status = subscription?.status ?? null;
+  const seatCount = subscription?.seat_count ?? 0;
+  const seatLimit = subscription?.seat_limit ?? 3;
+
+  return (
+    <div>
+      <div className="mb-8">
+        <h1 className="text-2xl font-semibold text-[color:var(--text-primary)]">Billing</h1>
+        <p className="mt-1 text-sm text-[color:var(--text-secondary)]">Manage your Skillayer plan and seats.</p>
+      </div>
+
+      <SectionErrorBoundary section="billing success message">
+        {success ? (
+          <div className="mb-6 rounded-xl border border-[#C9973A]/40 bg-[#C9973A]/10 px-5 py-4 text-[14px] font-medium text-[#f3d28e]">
+            Welcome to {label(upgradedPlan || plan)}! Your plan has been upgraded.
+          </div>
+        ) : null}
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary section="billing">
+        <section className="rounded-xl border border-[color:var(--bg-border)] bg-[color:var(--bg-surface)] p-6">
+          <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-[18px] font-semibold text-[color:var(--text-primary)]">Current plan</h2>
+              <p className="mt-1 text-[13px] text-[color:var(--text-secondary)]">Billing details update automatically after Stripe events are processed.</p>
+            </div>
+            <span className="rounded-full bg-[#C9973A]/15 px-3 py-1 text-[13px] font-semibold text-[#C9973A]">{label(plan)}</span>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-lg border border-[color:var(--bg-border)] bg-[#08080d] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Seats</div>
+              <div className="mt-2 text-[24px] font-bold text-white">
+                {seatCount}
+                <span className="text-[13px] font-medium text-[color:var(--text-tertiary)]"> / {seatLimit >= 999999 ? "unlimited" : seatLimit}</span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-[color:var(--bg-border)] bg-[#08080d] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Status</div>
+              <div className="mt-2 text-[24px] font-bold text-white">{status ? label(status) : "None"}</div>
+            </div>
+            <div className="rounded-lg border border-[color:var(--bg-border)] bg-[#08080d] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-tertiary)]">Billing account</div>
+              <div className="mt-2 truncate font-mono text-[13px] text-[color:var(--text-secondary)]">{subscription?.stripe_customer_id ?? "Not connected"}</div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <ManageBillingButton accessToken={accessToken} disabled={!subscription?.stripe_customer_id} />
+            <Link className="inline-flex items-center rounded-md bg-[#C9973A] px-4 py-2 text-sm font-semibold text-black transition-colors hover:bg-[#d7aa55]" href="/dashboard/upgrade">
+              Upgrade plan
+            </Link>
+          </div>
+        </section>
+      </SectionErrorBoundary>
+    </div>
+  );
+}

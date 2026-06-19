@@ -1,0 +1,10 @@
+id: license-hygiene-gpl
+title: "GPL and AGPL dependency additions are blocked"
+scope:
+  action_class: file_write
+match:
+  file_glob: ["**/package.json", "**/pyproject.toml", "**/go.mod", "**/Cargo.toml"]
+  command_regex: "(GPL|AGPL|gpl|agpl)"
+decision: deny
+notify: ["#opensource-review"]
+compliance_tags: ["internal:license-hygiene"]

@@ -65,7 +65,7 @@ class CliTests(unittest.TestCase):
             capture_output=True,
             check=True,
         )
-        self.assertIn("0.5.0", result.stdout)
+        self.assertIn("0.6.0", result.stdout)
 
     def test_analyze_outputs_signal_payload(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -184,6 +184,104 @@ class CliTests(unittest.TestCase):
             self.assertIn("raw_score", payload)
             self.assertIn("quality_gates", payload)
 
+    def test_score_history_and_analytics_commands(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "scan.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "deliver", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            history = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "score", "--project-root", str(root), "--history"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            analytics = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "analytics", "--project-root", str(root), "--json"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("history", json.loads(history.stdout))
+            self.assertIn("top_skills", json.loads(analytics.stdout))
+
+    def test_analytics_command_defaults_to_human_readable_summary(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "skills" / "backend").mkdir(parents=True)
+            (root / "skills" / "backend" / "SKILL.md").write_text("# Backend\n\nCore backend skill.\n", encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "analytics",
+                    "--project-root",
+                    str(root),
+                    "--record-skill",
+                    "skills/backend/SKILL.md",
+                    "--agent",
+                    "codex",
+                    "--context",
+                    "codex_live",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            result = subprocess.run(
+                [sys.executable, "-m", "skilgen.cli.main", "analytics", "--project-root", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertIn("Skilgen Analytics", result.stdout)
+            self.assertIn("Usage mode: live", result.stdout)
+            self.assertIn("Top skills:", result.stdout)
+            self.assertIn("skills/backend/SKILL.md", result.stdout)
+
+    def test_analytics_command_can_record_real_skill_load_events(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "skills" / "backend").mkdir(parents=True)
+            (root / "skills" / "backend" / "SKILL.md").write_text("# Backend\n\nCore backend skill.\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "analytics",
+                    "--project-root",
+                    str(root),
+                    "--record-skill",
+                    "skills/backend/SKILL.md",
+                    "--agent",
+                    "codex",
+                    "--context",
+                    "codex_live",
+                    "--session-id",
+                    "session-42",
+                    "--task",
+                    "build feature",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["recorded"], 1)
+            self.assertEqual(payload["skills"], ["skills/backend/SKILL.md"])
+            self.assertEqual(payload["agent"], "codex")
+            self.assertEqual(payload["context"], "codex_live")
+
     def test_features_works_with_codebase_only(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -249,6 +347,33 @@ class CliTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertTrue(payload["generated_files"])
             self.assertTrue((root / "FEATURES.md").exists())
+
+    def test_deliver_emits_branded_progress_with_percentages(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api" / "routes").mkdir(parents=True)
+            (root / "api" / "routes" / "scan.py").write_text("def handler():\n    return {}\n", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "skilgen.cli.main",
+                    "deliver",
+                    "--project-root",
+                    str(root),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("[skilgen ⬡⬢⬡ ", result.stderr)
+            self.assertIn("00:", result.stderr)
+            self.assertIn("% |", result.stderr)
+            self.assertIn("Starting delivery", result.stderr)
+            self.assertIn("Finished delivery", result.stderr)
+            progress_lines = [line for line in result.stderr.splitlines() if "[skilgen ⬡⬢⬡ " in line]
+            self.assertGreaterEqual(len(progress_lines), 2)
+            self.assertLessEqual(len(progress_lines), 4)
 
     def test_deliver_works_with_requirements_only(self) -> None:
         with TemporaryDirectory() as tmp:

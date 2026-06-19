@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import queue
+import threading
 import time
 from typing import Callable
 
@@ -31,26 +33,41 @@ def _provider_docs_url(provider: str | None) -> str:
         "huggingface": "https://huggingface.co/docs",
         "groq": "https://console.groq.com/docs",
         "openrouter": "https://openrouter.ai/docs",
+        "azure_openai": "https://learn.microsoft.com/azure/ai-services/openai/",
+        "bedrock": "https://docs.aws.amazon.com/bedrock/",
+        "ollama": "https://github.com/ollama/ollama",
+        "openai_compatible": "https://docs.langchain.com/oss/python/langchain-models",
     }
     return mapping.get(provider or "openai", "https://platform.openai.com/docs")
 
 
-def _provider_env_hint(provider: str | None, api_key_env: str | None) -> str:
+def _provider_env_hint(provider: str | None, api_key_env: str | None, *, redact_sensitive: bool = False) -> str:
     label = provider or "model provider"
-    env_name = api_key_env or "MODEL_API_KEY"
+    env_name = _redacted_env_name(api_key_env) if redact_sensitive else (api_key_env or "MODEL_API_KEY")
     return f"Export `{env_name}` with valid {label} credentials before running model-backed commands."
 
 
-def _classify_model_error(exc: Exception, provider: str | None, api_key_env: str | None) -> dict[str, object]:
+def _redacted_env_name(api_key_env: str | None) -> str:
+    return "[redacted credential]" if api_key_env else "credential"
+
+
+def _classify_model_error(
+    exc: Exception,
+    provider: str | None,
+    api_key_env: str | None,
+    *,
+    redact_sensitive: bool = False,
+) -> dict[str, object]:
     text = str(exc).lower()
     retryable = False
     category = "unknown_error"
+    env_name = _redacted_env_name(api_key_env) if redact_sensitive else (api_key_env or "MODEL_API_KEY")
     message = (
         f"Skilgen could not complete the model-backed request with provider `{provider or 'openai'}`. "
         f"See {_provider_docs_url(provider)} for provider setup and troubleshooting."
     )
     recommendations = [
-        _provider_env_hint(provider, api_key_env),
+        _provider_env_hint(provider, api_key_env, redact_sensitive=redact_sensitive),
         f"Confirm the configured model name is available for `{provider or 'openai'}`.",
     ]
 
@@ -58,10 +75,10 @@ def _classify_model_error(exc: Exception, provider: str | None, api_key_env: str
         category = "authentication_error"
         message = (
             f"Skilgen could not authenticate with provider `{provider or 'openai'}`. "
-            f"Check `{api_key_env or 'MODEL_API_KEY'}` and verify that the credential is valid."
+            f"Check `{env_name}` and verify that the credential is valid."
         )
         recommendations = [
-            _provider_env_hint(provider, api_key_env),
+            _provider_env_hint(provider, api_key_env, redact_sensitive=redact_sensitive),
             f"Verify the account or project behind `{provider or 'openai'}` still has access to the configured model.",
         ]
     elif any(marker in text for marker in ["rate limit", "429", "too many requests", "insufficient_quota", "quota"]):
@@ -100,7 +117,7 @@ def _classify_model_error(exc: Exception, provider: str | None, api_key_env: str
         "message": message,
         "recommendations": recommendations,
         "provider": provider or "openai",
-        "api_key_env": api_key_env or "MODEL_API_KEY",
+        "api_key_env": env_name,
     }
 
 
@@ -113,7 +130,7 @@ def deep_agents_unavailable_reason(project_root: str | Path = ".") -> str | None
     if not provider_supported(settings.provider):
         return (
             f"Unsupported model provider: {settings.provider}. "
-            "Supported providers are openai, anthropic, google_genai/gemini, huggingface, groq, and openrouter."
+            "Supported providers are openai, anthropic, google_genai/gemini, huggingface, groq, openrouter, azure_openai, bedrock, ollama, and openai_compatible."
         )
     if create_deep_agent is None:
         return (
@@ -125,8 +142,8 @@ def deep_agents_unavailable_reason(project_root: str | Path = ".") -> str | None
             "Chat model initialization is unavailable in this Python environment. "
             "Reinstall Skilgen with the required LangChain provider packages."
         )
-    key_env = settings.api_key_env or "OPENAI_API_KEY"
-    if not os.getenv(key_env):
+    key_env = settings.api_key_env
+    if key_env and not os.getenv(key_env):
         return f"Missing model credential environment variable: {key_env}"
     return None
 
@@ -183,6 +200,7 @@ def runtime_diagnostics(project_root: str | Path = ".") -> dict[str, object]:
         "model": settings.model,
         "api_key_env": settings.api_key_env,
         "api_key_present": settings.api_key_present,
+        "model_endpoint": settings.endpoint,
         "temperature": settings.temperature,
         "max_tokens": settings.max_tokens,
         "retry_attempts": settings.retry_attempts,
@@ -196,24 +214,64 @@ def _build_chat_model(project_root: str | Path = "."):
     if init_chat_model is None:
         raise RuntimeError("Chat model initialization is unavailable")
     settings = _resolved_settings(project_root)
-    if settings.provider == "huggingface":
-        kwargs: dict[str, object] = {
-            "base_url": "https://router.huggingface.co/v1",
-            "api_key": os.getenv(settings.api_key_env or "HUGGINGFACEHUB_API_TOKEN"),
-            "use_responses_api": False,
-        }
-        if settings.temperature is not None:
-            kwargs["temperature"] = settings.temperature
-        if settings.max_tokens is not None:
-            kwargs["max_tokens"] = settings.max_tokens
-        model = settings.model or DEFAULT_CONFIG.model or "meta-llama/Llama-3.1-70B-Instruct"
-        return init_chat_model(f"openai:{model}", **kwargs)
-    model_name = _model_name(project_root)
+    extra_kwargs = dict(settings.extra_kwargs)
     kwargs: dict[str, object] = {}
     if settings.temperature is not None:
         kwargs["temperature"] = settings.temperature
     if settings.max_tokens is not None:
         kwargs["max_tokens"] = settings.max_tokens
+    if settings.provider == "huggingface":
+        huggingface_kwargs: dict[str, object] = {
+            "base_url": "https://router.huggingface.co/v1",
+            "api_key": os.getenv(settings.api_key_env or "HUGGINGFACEHUB_API_TOKEN"),
+            "use_responses_api": False,
+            **extra_kwargs,
+        }
+        huggingface_kwargs.update(kwargs)
+        model = settings.model or DEFAULT_CONFIG.model or "meta-llama/Llama-3.1-70B-Instruct"
+        return init_chat_model(f"openai:{model}", **huggingface_kwargs)
+    if settings.provider == "azure_openai":
+        model = settings.model or DEFAULT_CONFIG.model or "gpt-4o"
+        azure_kwargs = {
+            "model_provider": "azure_openai",
+            "azure_deployment": model,
+            **kwargs,
+            **extra_kwargs,
+        }
+        if settings.endpoint:
+            azure_kwargs["azure_endpoint"] = settings.endpoint
+        if settings.api_key_env:
+            azure_kwargs["api_key"] = os.getenv(settings.api_key_env)
+        api_version = extra_kwargs.get("api_version")
+        if api_version is not None:
+            azure_kwargs["api_version"] = api_version
+        return init_chat_model(model=model, **azure_kwargs)
+    if settings.provider == "bedrock":
+        model = settings.model or "anthropic.claude-3-5-sonnet-20241022-v2:0"
+        region = extra_kwargs.pop("region", None) or extra_kwargs.pop("region_name", None)
+        bedrock_kwargs = {"model_provider": "bedrock", **kwargs, **extra_kwargs}
+        if region is not None:
+            bedrock_kwargs["region_name"] = region
+        return init_chat_model(model=model, **bedrock_kwargs)
+    if settings.provider == "ollama":
+        model = settings.model or "llama3.1:70b"
+        ollama_kwargs = {
+            "model_provider": "ollama",
+            "base_url": settings.endpoint or "http://localhost:11434",
+            **kwargs,
+            **extra_kwargs,
+        }
+        return init_chat_model(model=model, **ollama_kwargs)
+    if settings.provider == "openai_compatible":
+        model = settings.model or DEFAULT_CONFIG.model or "gpt-4.1-mini"
+        compatible_kwargs = {"model_provider": "openai", **kwargs, **extra_kwargs}
+        if settings.endpoint:
+            compatible_kwargs["base_url"] = settings.endpoint
+        if settings.api_key_env:
+            compatible_kwargs["api_key"] = os.getenv(settings.api_key_env)
+        return init_chat_model(model=model, **compatible_kwargs)
+    model_name = _model_name(project_root)
+    kwargs.update(extra_kwargs)
     return init_chat_model(model_name, **kwargs)
 
 
@@ -232,6 +290,29 @@ def _is_transient_error(exc: Exception, provider: str | None = None, api_key_env
     return bool(_classify_model_error(exc, provider, api_key_env)["retryable"])
 
 
+def _invoke_with_timeout(fn: Callable[[], object], timeout_seconds: float) -> object:
+    if timeout_seconds <= 0:
+        return fn()
+
+    result_queue: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
+
+    def runner() -> None:
+        try:
+            result_queue.put((True, fn()))
+        except Exception as exc:  # pragma: no cover - exercised via caller handling
+            result_queue.put((False, exc))
+
+    thread = threading.Thread(target=runner, name="skilgen-model-invoke", daemon=True)
+    thread.start()
+    try:
+        ok, payload = result_queue.get(timeout=timeout_seconds)
+    except queue.Empty as exc:
+        raise TimeoutError(f"Model invocation exceeded {timeout_seconds:.1f}s") from exc
+    if ok:
+        return payload
+    raise payload  # type: ignore[misc]
+
+
 def _invoke_with_retry(
     fn: Callable[[], object],
     *,
@@ -239,11 +320,12 @@ def _invoke_with_retry(
     delay_seconds: float = 1.0,
     provider: str | None = None,
     api_key_env: str | None = None,
+    timeout_seconds: float = 0.0,
 ) -> object:
     last_error: Exception | None = None
     for attempt in range(attempts):
         try:
-            return fn()
+            return _invoke_with_timeout(fn, timeout_seconds)
         except Exception as exc:  # pragma: no cover - exercised in integration paths
             last_error = exc
             if attempt == attempts - 1 or not _is_transient_error(exc, provider, api_key_env):
@@ -285,6 +367,7 @@ def _normalize_json_with_model(task: str, raw_text: str, project_root: str | Pat
             delay_seconds=settings.retry_base_delay_seconds,
             provider=settings.provider,
             api_key_env=settings.api_key_env,
+            timeout_seconds=settings.timeout_seconds,
         )
         return _extract_json(_message_text(response))
     finally:
@@ -344,6 +427,7 @@ def run_deep_json(
             delay_seconds=settings.retry_base_delay_seconds,
             provider=settings.provider,
             api_key_env=settings.api_key_env,
+            timeout_seconds=settings.timeout_seconds,
         )
         messages = result.get("messages", []) if isinstance(result, dict) else []
         if not messages:
@@ -366,7 +450,12 @@ def run_deep_json(
         raise ValueError("No usable agent text found for JSON normalization")
     except Exception as exc:
         if required:
-            error = _classify_model_error(exc, settings.provider, settings.api_key_env)
+            error = _classify_model_error(
+                exc,
+                settings.provider,
+                settings.api_key_env,
+                redact_sensitive=settings.redact_error_secrets,
+            )
             raise RuntimeError(
                 f"{error['message']} Task=`{task}` Provider={_model_name(root)} "
                 f"Category={error['category']} Recommendations={' | '.join(error['recommendations'])}"
@@ -413,6 +502,7 @@ def run_deep_text(
             delay_seconds=settings.retry_base_delay_seconds,
             provider=settings.provider,
             api_key_env=settings.api_key_env,
+            timeout_seconds=settings.timeout_seconds,
         )
         messages = result.get("messages", []) if isinstance(result, dict) else []
         if not messages:
@@ -422,7 +512,12 @@ def run_deep_text(
         return _message_text(messages[-1])
     except Exception as exc:
         if required:
-            error = _classify_model_error(exc, settings.provider, settings.api_key_env)
+            error = _classify_model_error(
+                exc,
+                settings.provider,
+                settings.api_key_env,
+                redact_sensitive=settings.redact_error_secrets,
+            )
             raise RuntimeError(
                 f"{error['message']} Task=`{task}` Provider={_model_name(root)} "
                 f"Category={error['category']} Recommendations={' | '.join(error['recommendations'])}"

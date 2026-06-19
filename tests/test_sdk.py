@@ -15,6 +15,8 @@ from skilgen.sdk import (
     activate_project_mcp_connector,
     activate_skill_source,
     analyze_project,
+    architecture_project,
+    project_dashboard,
     cancel_job,
     deactivate_project_mcp_connector,
     deactivate_skill_source,
@@ -38,6 +40,8 @@ from skilgen.sdk import (
     list_skill_sources,
     rank_skill_sources,
     recommend_project_mcp_connectors,
+    project_analytics,
+    project_diff,
     project_report,
     project_score,
     project_status,
@@ -77,10 +81,26 @@ class SdkTests(unittest.TestCase):
             analysis = analyze_project(root, requirements)
             self.assertIn("signals", analysis)
             self.assertEqual(analysis["api_version"], "1.0")
+            self.assertIn("evidence_graph", analysis)
+
+            architecture = architecture_project(root, requirements)
+            self.assertIn("architecture", architecture)
+            self.assertIn("evidence_graph", architecture)
+            self.assertIn("graph_export", architecture)
+            self.assertTrue(architecture["architecture"]["domains"])
+
+            dashboard = project_dashboard(root, requirements)
+            self.assertIn("html", dashboard)
+            self.assertIn("graph_export", dashboard)
+            self.assertIn("score", dashboard)
 
             decision = decide_project(root, requirements)
             self.assertIn("should_refresh", decision)
             self.assertTrue(decision["prioritized_skill_paths"])
+
+            diff = project_diff(root, requirements)
+            self.assertIn("reason", diff)
+            self.assertIn("git", diff)
 
             preview = preview_project(requirements, root, targets=("docs",))
             self.assertTrue(preview["planned_files"])
@@ -101,7 +121,8 @@ class SdkTests(unittest.TestCase):
             self.assertIn("progress", job)
             job_id = job["job_id"]
             current = {}
-            for _ in range(80):
+            deadline = time.monotonic() + 60.0
+            while time.monotonic() < deadline:
                 current = get_job_status(job_id, root)
                 if current["status"] in {"completed", "failed"}:
                     break
@@ -122,6 +143,12 @@ class SdkTests(unittest.TestCase):
             score = project_score(root)
             self.assertIn("score", score)
             self.assertIn("subscores", score)
+            score_history = project_score(root, history=True)
+            self.assertIn("history", score_history)
+            self.assertIn("trend", score_history)
+
+            analytics = project_analytics(root)
+            self.assertIn("top_skills", analytics)
 
             report = project_report(root)
             self.assertIn("summary", report)
@@ -250,6 +277,35 @@ class SdkTests(unittest.TestCase):
             self.assertEqual(active["connectors"][0]["slug"], "jira")
             deactivated = deactivate_project_mcp_connector("jira", root)
             self.assertFalse(deactivated["connector"]["active"])
+
+    def test_sdk_can_ingest_enterprise_url_and_enforce_policy_pack(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            remote_doc = root / "remote.md"
+            remote_doc.write_text("# Remote Enterprise Skill\n\nUse Confluence for architecture notes.\n", encoding="utf-8")
+            ingested = ingest_enterprise_skill_source("remote source", root, url=remote_doc.as_uri())
+            self.assertEqual(ingested["enterprise_skill"]["source_url"], remote_doc.as_uri())
+
+            policy_pack = root / "policy.json"
+            policy_pack.write_text(
+                json.dumps(
+                    {
+                        "manual_approval_connectors": ["jira"],
+                        "approved_connectors": [],
+                        "skill_tool_bindings": {"incident-response": ["jira", "slack"]},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "skilgen.yml").write_text(
+                f"mcp_policy_pack_path: {policy_pack}\n",
+                encoding="utf-8",
+            )
+            recommended = recommend_project_mcp_connectors(root)
+            jira = next(entry for entry in recommended["connectors"] if entry["slug"] == "jira")
+            self.assertTrue(jira["approval_required"])
+            with self.assertRaises(ValueError):
+                activate_project_mcp_connector("jira", root)
 
     def test_sdk_can_export_and_import_external_skill_lock(self) -> None:
         with TemporaryDirectory() as tmp:

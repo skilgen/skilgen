@@ -1,22 +1,16 @@
 from __future__ import annotations
 
+import json
 import hashlib
-import html
-import re
-import zipfile
 from pathlib import Path
 
+from skilgen.agents.codebase_signals import is_ignored_path_parts, is_internal_skillayer_monorepo
+from skilgen.core.document_ingestion import extract_document_text
 from skilgen.core.models import ProjectIntent, RequirementsContext
 
 
 def extract_text(path: Path) -> str:
-    if path.suffix.lower() == ".docx":
-        with zipfile.ZipFile(path) as archive:
-            xml = archive.read("word/document.xml").decode("utf-8")
-        xml = re.sub(r"</w:p>", "\n", xml)
-        xml = re.sub(r"<[^>]+>", "", xml)
-        return html.unescape(xml)
-    return path.read_text(encoding="utf-8")
+    return extract_document_text(path)
 
 
 def normalize_lines(text: str) -> list[str]:
@@ -105,13 +99,25 @@ def load_requirements(path: Path) -> RequirementsContext:
 
 def synthesize_requirements_context(project_root: Path) -> RequirementsContext:
     root = project_root.resolve()
+    internal_monorepo = is_internal_skillayer_monorepo(root)
     file_tree = sorted(
         path.relative_to(root).as_posix()
         for path in root.rglob("*")
         if path.is_file()
         and ".git/" not in path.as_posix()
         and not path.relative_to(root).as_posix().startswith(("skills/", ".skilgen/"))
-        and path.name not in {"AGENTS.md", "ANALYSIS.md", "FEATURES.md", "REPORT.md", "TRACEABILITY.md"}
+        and not is_ignored_path_parts(path.relative_to(root).parts, internal_monorepo=internal_monorepo)
+        and path.name
+        not in {
+            "AGENTS.md",
+            "ANALYSIS.md",
+            "ARCHITECTURE.md",
+            "FEATURES.md",
+            "REPORT.md",
+            "TRACEABILITY.md",
+            "skilgen-dashboard.html",
+            "skilgen.yml",
+        }
     )
     backend_detected = any(
         marker in path.lower()
@@ -146,7 +152,35 @@ def synthesize_requirements_context(project_root: Path) -> RequirementsContext:
     )
 
 
+def _remembered_requirements_path(project_root: Path) -> Path | None:
+    root = project_root.resolve()
+    run_memory_path = root / ".skilgen" / "memory" / "current_run.json"
+    if run_memory_path.exists():
+        try:
+            payload = json.loads(run_memory_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+        remembered = payload.get("requirements_path")
+        if isinstance(remembered, str) and remembered.strip():
+            candidate = Path(remembered).resolve()
+            if candidate.exists():
+                return candidate
+
+    autoupdate_path = root / ".skilgen" / "state" / "autoupdate-requirements.txt"
+    if autoupdate_path.exists():
+        remembered = autoupdate_path.read_text(encoding="utf-8").strip()
+        if remembered:
+            candidate = Path(remembered).resolve()
+            if candidate.exists():
+                return candidate
+
+    return None
+
+
 def load_project_context(project_root: Path, requirements_path: Path | None = None) -> RequirementsContext:
     if requirements_path is not None:
         return load_requirements(requirements_path.resolve())
+    remembered = _remembered_requirements_path(project_root)
+    if remembered is not None:
+        return load_requirements(remembered)
     return synthesize_requirements_context(project_root.resolve())

@@ -12,6 +12,9 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("model_provider: openai", rendered)
         self.assertIn("# openai / gpt-4.1-mini / OPENAI_API_KEY", rendered)
         self.assertIn("update_trigger: auto", rendered)
+        self.assertIn("model_extra_kwargs: {}", rendered)
+        self.assertIn("corpus:", rendered)
+        self.assertIn("redact_model_error_secrets: true", rendered)
 
     def test_render_default_config_can_scaffold_provider_defaults(self) -> None:
         rendered = render_default_config("gemini")
@@ -37,10 +40,19 @@ class ConfigTests(unittest.TestCase):
                         "model_provider: gemini",
                         "model: gpt-5",
                         "api_key_env: CUSTOM_OPENAI_KEY",
+                        "model_endpoint: https://models.internal/v1",
+                        "model_extra_kwargs:",
+                        "  api_version: 2024-05-01-preview",
+                        "  region: us-east-1",
                         "model_temperature: 0.2",
                         "model_max_tokens: 2048",
                         "model_retry_attempts: 5",
                         "model_retry_base_delay_seconds: 2.5",
+                        "corpus:",
+                        "  budget: 72",
+                        "  cluster_budget: 14",
+                        "  exclude_patterns:",
+                        "    - generated/**",
                         "external_skills_policy_mode: review_required",
                     ]
                 ),
@@ -56,11 +68,22 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.model_provider, "gemini")
             self.assertEqual(config.model, "gpt-5")
             self.assertEqual(config.api_key_env, "CUSTOM_OPENAI_KEY")
+            self.assertEqual(config.model_endpoint, "https://models.internal/v1")
+            self.assertEqual(config.model_extra_kwargs["api_version"], "2024-05-01-preview")
+            self.assertEqual(config.model_extra_kwargs["region"], "us-east-1")
             self.assertEqual(config.model_temperature, 0.2)
             self.assertEqual(config.model_max_tokens, 2048)
             self.assertEqual(config.model_retry_attempts, 5)
             self.assertEqual(config.model_retry_base_delay_seconds, 2.5)
+            self.assertEqual(config.corpus.budget, 72)
+            self.assertEqual(config.corpus.cluster_budget, 14)
+            self.assertEqual(config.corpus.exclude_patterns, ["generated/**"])
             self.assertEqual(config.external_skills_policy_mode, "review_required")
+
+    def test_load_config_defaults_to_redacting_model_error_secrets(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = load_config(Path(tmp))
+        self.assertTrue(config.redact_model_error_secrets)
 
 
 if __name__ == "__main__":

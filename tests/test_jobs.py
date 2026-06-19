@@ -1,8 +1,11 @@
+from contextlib import closing
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 import time
 import unittest
 
+from skilgen.api import jobs as jobs_module
 from skilgen.api.jobs import get_job, request_cancel, submit_job
 from skilgen.api.service import create_deliver_job, job_status_payload, jobs_payload, resume_job_payload
 
@@ -27,8 +30,8 @@ class JobPersistenceTests(unittest.TestCase):
 
             self.assertEqual(current["status"], "completed")
             self.assertEqual(current["progress"], 100)
-            job_file = root / ".skilgen" / "jobs" / f"{job['job_id']}.json"
-            self.assertTrue(job_file.exists())
+            job_db = root / ".skilgen" / "jobs" / "jobs.sqlite"
+            self.assertTrue(job_db.exists())
 
             listed = jobs_payload(root)
             self.assertTrue(listed["jobs"])
@@ -68,6 +71,54 @@ class JobPersistenceTests(unittest.TestCase):
                     break
                 time.sleep(0.05)
             self.assertIn(current_resumed["status"], {"completed", "failed"})
+
+    def test_running_job_recovers_as_interrupted_after_runtime_reset(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requirements = root / "requirements.md"
+            requirements.write_text("Backend endpoint\n", encoding="utf-8")
+            job = create_deliver_job(requirements, root)
+            job_db = root / ".skilgen" / "jobs" / "jobs.sqlite"
+
+            deadline = time.monotonic() + 5.0
+            current = job
+            while time.monotonic() < deadline:
+                current = job_status_payload(job["job_id"], root)
+                if current["status"] in {"completed", "failed"}:
+                    break
+                time.sleep(0.05)
+            self.assertIn(current["status"], {"completed", "failed"})
+
+            with closing(sqlite3.connect(job_db)) as connection, connection:
+                connection.execute(
+                    "UPDATE jobs SET status = ?, message = ?, finished_at = NULL, error = NULL WHERE job_id = ?",
+                    ("running", "running", job["job_id"]),
+                )
+
+            jobs_module._runtime_jobs.clear()
+            jobs_module._recovered_roots.clear()
+
+            recovered = get_job(job["job_id"], root)
+            self.assertIsNotNone(recovered)
+            assert recovered is not None
+            self.assertEqual(recovered.status, "interrupted")
+            self.assertEqual(recovered.message, "interrupted")
+            self.assertEqual(recovered.error, "job interrupted after restart")
+
+            resumed = resume_job_payload(job["job_id"], root)
+            self.assertEqual(resumed["api_version"], "1.0")
+            self.assertEqual(resumed["job_type"], "deliver")
+            resumed_id = resumed["job_id"]
+
+            current_resumed = resumed
+            deadline = time.monotonic() + 20.0
+            while time.monotonic() < deadline:
+                current = job_status_payload(resumed_id, root)
+                if current["status"] in {"completed", "failed", "cancelled"}:
+                    current_resumed = current
+                    break
+                time.sleep(0.05)
+            self.assertIn(current_resumed["status"], {"completed", "failed", "cancelled"})
 
 
 if __name__ == "__main__":

@@ -1,0 +1,37 @@
+{
+  "checked_at": "2026-05-12T05:02:32.381Z",
+  "org": "Skilgen",
+  "repo": "ravichanduummadisetti/skilgen",
+  "routes": [
+    {
+      "name": "insights-intelligence-usage",
+      "route": "/insights/intelligence-usage",
+      "url": "http://127.0.0.1:4325/insights/intelligence-usage",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/insights-intelligence-usage.png"
+    },
+    {
+      "name": "activity-heatmap-useful",
+      "route": "/activity/heatmap?repo_id=all&hours=720&include_deny_rate=false",
+      "url": "http://127.0.0.1:4325/activity/heatmap?repo_id=all&hours=720&include_deny_rate=false",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/activity-heatmap-useful.png"
+    },
+    {
+      "name": "policy-rules",
+      "route": "/policy",
+      "url": "http://127.0.0.1:4325/policy",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/policy-rules.png"
+    }
+  ]
+}

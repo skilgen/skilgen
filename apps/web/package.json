@@ -1,0 +1,29 @@
+{
+  "name": "skillayer-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "lint": "eslint .",
+    "type-check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@skillayer/config": "*",
+    "@skillayer/types": "*",
+    "@skillayer/ui": "*",
+    "autoprefixer": "^10.4.21",
+    "next": "15.5.15",
+    "postcss": "^8.5.3",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "tailwindcss": "^3.4.17"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.0.12",
+    "@types/react-dom": "^19.0.5",
+    "eslint": "^9.25.0",
+    "typescript": "^5.8.3"
+  }
+}

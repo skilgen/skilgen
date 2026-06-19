@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "skillayer.fullname" . }}-worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      app: {{ include "skillayer.fullname" . }}-worker
+  template:
+    metadata:
+      labels:
+        app: {{ include "skillayer.fullname" . }}-worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "skillayer.fullname" . }}-config
+            - secretRef:
+                name: {{ include "skillayer.fullname" . }}-secret
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - celery -A apps.worker.worker.celery_app inspect ping -d "celery@${HOSTNAME}" --timeout=5
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - celery -A apps.worker.worker.celery_app inspect ping -d "celery@${HOSTNAME}" --timeout=5
+            initialDelaySeconds: 45
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+{{ toYaml .Values.worker.resources | indent 12 }}

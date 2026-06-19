@@ -9,7 +9,9 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from skilgen.agents.codebase_signals import is_ignored_path_parts, is_internal_skillayer_monorepo
 from skilgen.core.config import load_config
+from skilgen.core.generated_outputs import is_generated_output_path
 from skilgen.core.repo_state import classify_repo_change, git_repo_state
 from skilgen.delivery import run_delivery
 
@@ -85,13 +87,15 @@ def _record_requirements_path(project_root: Path, requirements_path: str | Path 
 
 def _file_snapshot(project_root: Path) -> dict[str, int]:
     tracked: dict[str, int] = {}
+    internal_monorepo = is_internal_skillayer_monorepo(project_root)
     for path in project_root.rglob("*"):
         if not path.is_file():
             continue
         relative = path.relative_to(project_root).as_posix()
-        if relative.startswith((".git/", ".skilgen/", "skills/", "__pycache__/")):
+        relative_parts = Path(relative).parts
+        if is_ignored_path_parts(relative_parts, internal_monorepo=internal_monorepo):
             continue
-        if path.name in {"AGENTS.md", "ANALYSIS.md", "FEATURES.md", "REPORT.md", "TRACEABILITY.md"}:
+        if is_generated_output_path(relative):
             continue
         tracked[relative] = path.stat().st_mtime_ns
     return tracked
@@ -99,6 +103,7 @@ def _file_snapshot(project_root: Path) -> dict[str, int]:
 
 def _snapshot(project_root: Path) -> dict[str, object]:
     return {
+        "project_root": str(project_root.resolve()),
         "files": _file_snapshot(project_root),
         "git": git_repo_state(project_root),
     }
@@ -167,6 +172,19 @@ def stop_auto_update_worker(project_root: str | Path) -> dict[str, object]:
             os.kill(pid, signal.SIGTERM)
         except OSError:
             pass
+        else:
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    break
+                time.sleep(0.05)
+            else:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
     payload = {
         **status,
         "running": False,
@@ -194,6 +212,8 @@ def run_auto_update_worker(project_root: str | Path, *, interval_seconds: float 
     previous = _snapshot(root)
     while True:
         time.sleep(interval_seconds)
+        if not root.exists() or not (root / "skilgen.yml").exists():
+            return
         current = _snapshot(root)
         if current == previous:
             continue

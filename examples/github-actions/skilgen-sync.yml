@@ -1,0 +1,157 @@
+name: Skilgen Sync
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  SKILGEN_SCORE_THRESHOLD: "60"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  sync:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Skilgen
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install skilgen
+      - name: Refresh the skill tree
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HUGGINGFACEHUB_API_TOKEN: ${{ secrets.HUGGINGFACEHUB_API_TOKEN }}
+        run: |
+          if [ ! -f skilgen.yml ]; then
+            skilgen init --project-root .
+          fi
+          if [ -f docs/Skilgen_PRD_v2.docx ]; then
+            skilgen deliver --project-root . --requirements docs/Skilgen_PRD_v2.docx
+          elif [ -f requirements.md ]; then
+            skilgen deliver --project-root . --requirements requirements.md
+          elif [ -f README.md ]; then
+            skilgen deliver --project-root . --requirements README.md
+          else
+            skilgen deliver --project-root .
+          fi
+      - name: Commit refreshed outputs
+        run: |
+          if git diff --quiet -- AGENTS.md ANALYSIS.md ARCHITECTURE.md FEATURES.md REPORT.md TRACEABILITY.md skills; then
+            echo "No refreshed outputs to commit."
+            exit 0
+          fi
+          git config user.name "skilgen-bot"
+          git config user.email "skilgen-bot@users.noreply.github.com"
+          git add AGENTS.md ANALYSIS.md ARCHITECTURE.md FEATURES.md REPORT.md TRACEABILITY.md skills
+          git commit -m "chore: refresh skilgen skill tree"
+          git push
+
+  score:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Skilgen
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install skilgen
+      - name: Compute diff and score
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HUGGINGFACEHUB_API_TOKEN: ${{ secrets.HUGGINGFACEHUB_API_TOKEN }}
+        run: |
+          if [ ! -f skilgen.yml ]; then
+            skilgen init --project-root .
+          fi
+          if [ -f docs/Skilgen_PRD_v2.docx ]; then
+            skilgen diff --project-root . --requirements docs/Skilgen_PRD_v2.docx --json > /tmp/skilgen-diff.json
+            skilgen deliver --project-root . --requirements docs/Skilgen_PRD_v2.docx
+          elif [ -f requirements.md ]; then
+            skilgen diff --project-root . --requirements requirements.md --json > /tmp/skilgen-diff.json
+            skilgen deliver --project-root . --requirements requirements.md
+          elif [ -f README.md ]; then
+            skilgen diff --project-root . --requirements README.md --json > /tmp/skilgen-diff.json
+            skilgen deliver --project-root . --requirements README.md
+          else
+            skilgen diff --project-root . --json > /tmp/skilgen-diff.json
+            skilgen deliver --project-root .
+          fi
+          skilgen score --project-root . > /tmp/skilgen-score.json
+      - name: Post PR comment
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require("fs");
+            const diff = JSON.parse(fs.readFileSync("/tmp/skilgen-diff.json", "utf8"));
+            const score = JSON.parse(fs.readFileSync("/tmp/skilgen-score.json", "utf8"));
+            const staleCount = Array.isArray(diff.stale_skill_paths) ? diff.stale_skill_paths.length : 0;
+            const impacted = Array.isArray(diff.impacted_domains) ? diff.impacted_domains.slice(0, 6).join(", ") : "";
+            const gates = Array.isArray(score.quality_gates) ? score.quality_gates : [];
+            const gateLines = gates.length
+              ? gates.map((gate) => `- ${gate.name}: ${gate.reason}`).join("\n")
+              : "- none";
+            const body = [
+              "## Skilgen PR Check",
+              "",
+              `**Skilgen Score:** ${Number(score.score).toFixed(2)}/100`,
+              "",
+              `- Groundedness: ${Number(score.subscores.groundedness.score).toFixed(2)}/25`,
+              `- Coverage: ${Number(score.subscores.coverage.score).toFixed(2)}/25`,
+              `- Freshness: ${Number(score.subscores.freshness.score).toFixed(2)}/25`,
+              `- Structure: ${Number(score.subscores.structure.score).toFixed(2)}/25`,
+              `- Stale skills before refresh: ${staleCount}`,
+              `- Impacted domains before refresh: ${impacted || "none"}`,
+              "",
+              "**Quality gates**",
+              gateLines,
+              "",
+              staleCount > 0
+                ? "Skilgen refreshed stale skills for this PR before computing the final score."
+                : "No stale skills were detected before refresh.",
+            ].join("\n");
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+      - name: Enforce score threshold
+        env:
+          SKILGEN_SCORE_THRESHOLD: ${{ env.SKILGEN_SCORE_THRESHOLD }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          score_path = Path("/tmp/skilgen-score.json")
+          payload = json.loads(score_path.read_text(encoding="utf-8"))
+          score = float(payload["score"])
+          threshold = float(os.environ["SKILGEN_SCORE_THRESHOLD"])
+          if score < threshold:
+              print(f"Skilgen Score {score:.2f} is below the required threshold {threshold:.1f}.")
+              sys.exit(1)
+          print(f"Skilgen Score {score:.2f} meets the required threshold {threshold:.1f}.")
+          PY

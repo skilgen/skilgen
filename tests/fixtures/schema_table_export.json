@@ -1,0 +1,36 @@
+{
+  "tables": [
+    {
+      "name": "public.order_items",
+      "comment": "Line items for submitted orders",
+      "primary_key": ["order_item_id"],
+      "columns": [
+        {"name": "order_item_id", "type": "bigint", "nullable": false},
+        {"name": "order_id", "type": "bigint", "nullable": false},
+        {"name": "sku", "type": "varchar(64)", "nullable": false},
+        {"name": "updated_at", "type": "timestamp", "nullable": false}
+      ],
+      "foreign_keys": [
+        {
+          "name": "fk_order_items_order_id",
+          "columns": ["order_id"],
+          "references": "public.orders(order_id)"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "uq_order_items_order_id_sku",
+          "kind": "unique",
+          "columns": ["order_id", "sku"]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_order_items_order_id",
+          "columns": ["order_id"],
+          "unique": false
+        }
+      ]
+    }
+  ]
+}

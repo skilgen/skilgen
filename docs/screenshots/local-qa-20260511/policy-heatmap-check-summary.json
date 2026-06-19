@@ -1,0 +1,67 @@
+{
+  "checked_at": "2026-05-12T04:55:22.918Z",
+  "org": "Skilgen",
+  "repo": "ravichanduummadisetti/skilgen",
+  "routes": [
+    {
+      "name": "activity-heatmap-useful",
+      "route": "/activity/heatmap?repo_id=all&hours=720&include_deny_rate=false",
+      "url": "http://127.0.0.1:4325/activity/heatmap?repo_id=all&hours=720&include_deny_rate=false",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/activity-heatmap-useful.png"
+    },
+    {
+      "name": "policy-rules",
+      "route": "/policy",
+      "url": "http://127.0.0.1:4325/policy",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/policy-rules.png"
+    },
+    {
+      "name": "policy-violations",
+      "route": "/policy/violations",
+      "url": "http://127.0.0.1:4325/policy/violations",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/policy-violations.png"
+    },
+    {
+      "name": "policy-approvals",
+      "route": "/policy/approvals",
+      "url": "http://127.0.0.1:4325/policy/approvals",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/policy-approvals.png"
+    },
+    {
+      "name": "policy-agent-events",
+      "route": "/policy/agent-events",
+      "url": "http://127.0.0.1:4325/policy/agent-events",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/policy-agent-events.png"
+    },
+    {
+      "name": "policy-quarantine",
+      "route": "/policy/quarantine",
+      "url": "http://127.0.0.1:4325/policy/quarantine",
+      "http_status": 200,
+      "status": "pass",
+      "missing": [],
+      "forbidden": [],
+      "screenshot": "/Users/ravichanduummadisetti/Library/CloudStorage/OneDrive-Personal/skilgen/skilgen-v8-integration/docs/screenshots/local-qa-20260511/policy-quarantine.png"
+    }
+  ]
+}

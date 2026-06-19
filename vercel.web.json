@@ -1,0 +1,5 @@
+{
+  "buildCommand": "npm ci --include=dev && npx turbo build --filter=skillayer-web",
+  "installCommand": "echo 'installed at root'",
+  "outputDirectory": "apps/web/.next"
+}

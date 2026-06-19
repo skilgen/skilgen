@@ -1,0 +1,20 @@
+{
+  "name": "@skillayer/types",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./api": "./src/api.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "type-check": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@skillayer/config": "*",
+    "@types/node": "^22.15.3",
+    "eslint": "^9.25.0",
+    "typescript": "^5.8.3"
+  }
+}

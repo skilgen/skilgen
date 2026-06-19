@@ -1,0 +1,5 @@
+{
+  "buildCommand": "npm ci --include=dev && npx turbo build --filter=skillayer-dashboard --force",
+  "outputDirectory": "apps/dashboard/.next",
+  "installCommand": "echo 'installed at root'"
+}

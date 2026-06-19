@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "skillayer.fullname" . }}-api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      app: {{ include "skillayer.fullname" . }}-api
+  template:
+    metadata:
+      labels:
+        app: {{ include "skillayer.fullname" . }}-api
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.api.service.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "skillayer.fullname" . }}-config
+            - secretRef:
+                name: {{ include "skillayer.fullname" . }}-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.api.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.api.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+{{ toYaml .Values.api.resources | indent 12 }}

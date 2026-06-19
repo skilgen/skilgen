@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor
+import sqlite3
+import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import dataclass, field
-from itertools import count
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Callable
-from datetime import datetime, timezone
+
+from skilgen.core.audit import append_audit_event
 
 
 @dataclass
@@ -32,51 +36,172 @@ class JobCancelledError(RuntimeError):
 
 
 _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="skilgen-job")
-_job_counter = count(1)
 _job_lock = Lock()
-_jobs: dict[str, JobRecord] = {}
+_runtime_jobs: dict[str, JobRecord] = {}
+_runtime_futures: dict[str, Future[dict[str, object]]] = {}
+_recovered_roots: set[Path] = set()
+_STATUS_POLL_FLUSH_SECONDS = 0.5
 
 
-def _job_storage_dir(payload: dict[str, object]) -> Path | None:
+def _job_root(payload: dict[str, object]) -> Path | None:
     project_root = payload.get("project_root")
     if not isinstance(project_root, str):
         return None
-    return Path(project_root).resolve() / ".skilgen" / "jobs"
+    return Path(project_root).resolve()
 
 
-def _persist_job(job: JobRecord) -> None:
-    storage_dir = _job_storage_dir(job.payload)
-    if storage_dir is None:
-        return
-    storage_dir.mkdir(parents=True, exist_ok=True)
-    job_path = storage_dir / f"{job.job_id}.json"
-    job_path.write_text(json.dumps(job_payload(job), indent=2), encoding="utf-8")
+def _db_path(project_root: str | Path) -> Path:
+    root = Path(project_root).resolve()
+    return root / ".skilgen" / "jobs" / "jobs.sqlite"
 
 
-def _load_job_from_disk(job_id: str, project_root: str | Path) -> JobRecord | None:
-    job_path = Path(project_root).resolve() / ".skilgen" / "jobs" / f"{job_id}.json"
-    if not job_path.exists():
-        return None
-    payload = json.loads(job_path.read_text(encoding="utf-8"))
+def _connect(project_root: str | Path) -> sqlite3.Connection:
+    path = _db_path(project_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jobs (
+            job_id TEXT PRIMARY KEY,
+            project_root TEXT NOT NULL,
+            job_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            result_json TEXT,
+            error TEXT,
+            progress INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            cancel_requested INTEGER NOT NULL,
+            events_json TEXT NOT NULL
+        )
+        """
+    )
+    return connection
+
+
+def _row_to_job(row: sqlite3.Row) -> JobRecord:
     return JobRecord(
-        job_id=payload["job_id"],
-        job_type=payload["job_type"],
-        status=payload["status"],
-        payload=payload["payload"],
-        result=payload.get("result"),
-        error=payload.get("error"),
-        progress=int(payload.get("progress", 0)),
-        message=str(payload.get("message", "")),
-        created_at=payload.get("created_at"),
-        started_at=payload.get("started_at"),
-        finished_at=payload.get("finished_at"),
-        cancel_requested=bool(payload.get("cancel_requested", False)),
-        events=list(payload.get("events", [])),
+        job_id=str(row["job_id"]),
+        job_type=str(row["job_type"]),
+        status=str(row["status"]),
+        payload=json.loads(row["payload_json"]),
+        result=json.loads(row["result_json"]) if row["result_json"] else None,
+        error=str(row["error"]) if row["error"] is not None else None,
+        progress=int(row["progress"]),
+        message=str(row["message"]),
+        created_at=str(row["created_at"]),
+        started_at=str(row["started_at"]) if row["started_at"] is not None else None,
+        finished_at=str(row["finished_at"]) if row["finished_at"] is not None else None,
+        cancel_requested=bool(row["cancel_requested"]),
+        events=json.loads(row["events_json"]) if row["events_json"] else [],
     )
 
 
+def _persist_job(job: JobRecord) -> None:
+    root = _job_root(job.payload)
+    if root is None:
+        return
+    with closing(_connect(root)) as connection, connection:
+        connection.execute(
+            """
+            INSERT INTO jobs (
+                job_id, project_root, job_type, status, payload_json, result_json, error,
+                progress, message, created_at, started_at, finished_at, cancel_requested, events_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+                project_root=excluded.project_root,
+                job_type=excluded.job_type,
+                status=excluded.status,
+                payload_json=excluded.payload_json,
+                result_json=excluded.result_json,
+                error=excluded.error,
+                progress=excluded.progress,
+                message=excluded.message,
+                created_at=excluded.created_at,
+                started_at=excluded.started_at,
+                finished_at=excluded.finished_at,
+                cancel_requested=excluded.cancel_requested,
+                events_json=excluded.events_json
+            """,
+            (
+                job.job_id,
+                str(root),
+                job.job_type,
+                job.status,
+                json.dumps(job.payload, sort_keys=True),
+                json.dumps(job.result, sort_keys=True) if job.result is not None else None,
+                job.error,
+                job.progress,
+                job.message,
+                job.created_at,
+                job.started_at,
+                job.finished_at,
+                int(job.cancel_requested),
+                json.dumps(job.events, sort_keys=True),
+            ),
+        )
+
+
+def _recover_persisted_jobs(project_root: str | Path) -> None:
+    root = Path(project_root).resolve()
+    with _job_lock:
+        if root in _recovered_roots:
+            return
+        active_runtime_jobs = [
+            job
+            for job in _runtime_jobs.values()
+            if _job_root(job.payload) == root and job.status in {"queued", "running"}
+        ]
+        if active_runtime_jobs:
+            _recovered_roots.add(root)
+            return
+        interrupted_at = datetime.now(timezone.utc).isoformat()
+        with closing(_connect(root)) as connection, connection:
+            rows = connection.execute(
+                "SELECT job_id, events_json FROM jobs WHERE status = 'running'"
+            ).fetchall()
+            for row in rows:
+                events = json.loads(row["events_json"]) if row["events_json"] else []
+                events.append(
+                    {
+                        "timestamp": interrupted_at,
+                        "message": "Job interrupted after server restart.",
+                        "progress": 100,
+                    }
+                )
+                connection.execute(
+                    """
+                    UPDATE jobs
+                    SET status = ?, message = ?, finished_at = ?, error = ?, events_json = ?
+                    WHERE job_id = ?
+                    """,
+                    (
+                        "interrupted",
+                        "interrupted",
+                        interrupted_at,
+                        "job interrupted after restart",
+                        json.dumps(events, sort_keys=True),
+                        row["job_id"],
+                    ),
+                )
+        _recovered_roots.add(root)
+
+
+def _load_job_from_disk(job_id: str, project_root: str | Path) -> JobRecord | None:
+    _recover_persisted_jobs(project_root)
+    with closing(_connect(project_root)) as connection:
+        row = connection.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+    if row is None:
+        return None
+    return _row_to_job(row)
+
+
 def _next_job_id() -> str:
-    return f"job-{next(_job_counter)}"
+    return f"job-{uuid.uuid4().hex[:12]}"
 
 
 def update_job(job: JobRecord, *, status: str | None = None, progress: int | None = None, message: str | None = None) -> None:
@@ -91,6 +216,7 @@ def update_job(job: JobRecord, *, status: str | None = None, progress: int | Non
             job.progress = max(0, min(100, progress))
         if message is not None:
             job.message = message
+        _runtime_jobs[job.job_id] = job
         _persist_job(job)
 
 
@@ -103,11 +229,12 @@ def append_job_event(job: JobRecord, message: str, progress: int | None = None) 
         event["progress"] = max(0, min(100, progress))
     with _job_lock:
         job.events.append(event)
+        _runtime_jobs[job.job_id] = job
         _persist_job(job)
 
 
 def request_cancel(job_id: str, project_root: str | Path | None = None) -> JobRecord | None:
-    job = get_job(job_id, project_root)
+    job = get_job(job_id, project_root, flush_future=False)
     if job is None:
         return None
     with _job_lock:
@@ -121,7 +248,11 @@ def request_cancel(job_id: str, project_root: str | Path | None = None) -> JobRe
             job.finished_at = datetime.now(timezone.utc).isoformat()
         else:
             job.message = "cancel requested"
+        _runtime_jobs[job.job_id] = job
         _persist_job(job)
+    root = _job_root(job.payload)
+    if root is not None:
+        append_audit_event(root, action="job_cancel", outcome="success", source="jobs", job_id=job.job_id)
     return job
 
 
@@ -131,8 +262,11 @@ def submit_job(
     fn: Callable[[Callable[[int, str], None]], dict[str, object]],
 ) -> JobRecord:
     job = JobRecord(job_id=_next_job_id(), job_type=job_type, status="queued", payload=payload)
+    root = _job_root(payload)
     with _job_lock:
-        _jobs[job.job_id] = job
+        if root is not None:
+            _recovered_roots.add(root)
+        _runtime_jobs[job.job_id] = job
         _persist_job(job)
 
     def runner() -> dict[str, object]:
@@ -150,30 +284,60 @@ def submit_job(
 
             result = fn(report)
             job.result = result
-            update_job(job, status="completed", progress=100, message="completed")
             append_job_event(job, "Finished delivery.", 100)
-            _persist_job(job)
+            root = _job_root(job.payload)
+            if root is not None:
+                append_audit_event(root, action="job_complete", outcome="success", source="jobs", job_id=job.job_id)
+            update_job(job, status="completed", progress=100, message="completed")
             return result
         except JobCancelledError:
             job.error = "job cancelled"
-            update_job(job, status="cancelled", progress=100, message="cancelled")
             append_job_event(job, "Job cancelled.", 100)
-            _persist_job(job)
+            update_job(job, status="cancelled", progress=100, message="cancelled")
             raise
         except Exception as exc:  # noqa: BLE001
             job.error = str(exc)
-            update_job(job, status="failed", progress=100, message="failed")
             append_job_event(job, f"Job failed: {exc}", 100)
-            _persist_job(job)
+            root = _job_root(job.payload)
+            if root is not None:
+                append_audit_event(root, action="job_complete", outcome="failed", source="jobs", job_id=job.job_id)
+            update_job(job, status="failed", progress=100, message="failed")
             raise
 
-    _executor.submit(runner)
+    future = _executor.submit(runner)
+    with _job_lock:
+        _runtime_futures[job.job_id] = future
+
+    def _forget_future(_future: Future[dict[str, object]]) -> None:
+        with _job_lock:
+            _runtime_futures.pop(job.job_id, None)
+
+    future.add_done_callback(_forget_future)
     return job
 
 
-def get_job(job_id: str, project_root: str | Path | None = None) -> JobRecord | None:
+def get_job(job_id: str, project_root: str | Path | None = None, *, flush_future: bool = True) -> JobRecord | None:
+    if flush_future:
+        with _job_lock:
+            future = _runtime_futures.get(job_id)
+        if future is not None:
+            try:
+                future.result(timeout=_STATUS_POLL_FLUSH_SECONDS)
+            except TimeoutError:
+                pass
+            except Exception:
+                pass
     with _job_lock:
-        job = _jobs.get(job_id)
+        future = _runtime_futures.get(job_id)
+    if future is not None:
+        try:
+            future.result(timeout=0.05)
+        except TimeoutError:
+            pass
+        except Exception:
+            pass
+    with _job_lock:
+        job = _runtime_jobs.get(job_id)
     if job is not None:
         return job
     if project_root is None:
@@ -182,20 +346,13 @@ def get_job(job_id: str, project_root: str | Path | None = None) -> JobRecord | 
 
 
 def list_jobs(project_root: str | Path | None = None) -> list[JobRecord]:
-    with _job_lock:
-        jobs = list(_jobs.values())
     if project_root is None:
-        return jobs
-    root = Path(project_root).resolve()
-    filtered = [job for job in jobs if Path(str(job.payload.get("project_root", ""))).resolve() == root]
-    jobs_dir = root / ".skilgen" / "jobs"
-    if jobs_dir.exists():
-        seen = {job.job_id for job in filtered}
-        for path in sorted(jobs_dir.glob("job-*.json")):
-            record = _load_job_from_disk(path.stem, root)
-            if record is not None and record.job_id not in seen:
-                filtered.append(record)
-    return sorted(filtered, key=lambda record: record.job_id)
+        with _job_lock:
+            return sorted(_runtime_jobs.values(), key=lambda record: record.created_at)
+    _recover_persisted_jobs(project_root)
+    with closing(_connect(project_root)) as connection:
+        rows = connection.execute("SELECT * FROM jobs ORDER BY created_at").fetchall()
+    return [_row_to_job(row) for row in rows]
 
 
 def job_payload(job: JobRecord) -> dict[str, object]:

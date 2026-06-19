@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from skilgen.agents.codebase_signals import analyze_codebase
+from skilgen.agents.codebase_signals import (
+    analyze_codebase,
+    collect_code_evidence,
+    collect_structural_evidence,
+    is_internal_skillayer_monorepo,
+)
 from skilgen.agents.requirements_parser import parse_project_intent_native
+from skilgen.agents.workspace_graph import build_workspace_graph
 from skilgen.deep_agents_core import run_deep_json
-from skilgen.core.models import CodebaseSignals, DomainGraph, DomainGraphNode, RequirementsContext
+from skilgen.core.models import CodebaseSignals, DomainGraph, DomainGraphNode, RequirementsContext, WorkspaceGraph, WorkspacePackage
 
 
 def _node(
@@ -39,6 +45,147 @@ def _top_file(paths: list[str], fallback: list[str], limit: int = 4) -> list[str
     return fallback
 
 
+def _python_package_root(project_root: Path) -> Path | None:
+    if is_internal_skillayer_monorepo(project_root) and (project_root / "skilgen" / "__init__.py").exists():
+        return project_root / "skilgen"
+    candidates = [
+        path
+        for path in sorted(project_root.iterdir())
+        if path.is_dir()
+        and (path / "__init__.py").exists()
+        and path.name not in {"tests", "docs", "scripts", "skills", "apps", "packages", "infra"}
+    ]
+    if candidates:
+        return candidates[0]
+    src_root = project_root / "src"
+    if not src_root.exists():
+        return None
+    src_candidates = [
+        path
+        for path in sorted(src_root.iterdir())
+        if path.is_dir()
+        and (path / "__init__.py").exists()
+        and path.name not in {"tests", "docs", "scripts", "skills"}
+    ]
+    return src_candidates[0] if src_candidates else None
+
+
+def _relative_py_files(project_root: Path, directory: Path, *, top_level_only: bool = False, limit: int = 6) -> list[str]:
+    if not directory.exists():
+        return []
+    pattern = "*.py" if top_level_only else "**/*.py"
+    files = [
+        path.relative_to(project_root).as_posix()
+        for path in sorted(directory.glob(pattern))
+        if path.is_file()
+    ]
+    return files[:limit]
+
+
+def _relative_code_files(project_root: Path, directory: Path, *, limit: int = 24) -> list[str]:
+    if not directory.exists():
+        return []
+    files = [
+        path.relative_to(project_root).as_posix()
+        for path in sorted(directory.rglob("*"))
+        if path.is_file() and path.suffix.lower() in {".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".java", ".rs"}
+    ]
+    return files[:limit]
+
+
+def _top_level_app_surfaces(project_root: Path) -> list[tuple[str, Path, list[str]]]:
+    surfaces: list[tuple[str, Path, list[str]]] = []
+    ignored = {
+        "skills",
+        "docs",
+        "node_modules",
+        "dist",
+        "build",
+        "coverage",
+        "vendor",
+        "__pycache__",
+    }
+    if is_internal_skillayer_monorepo(project_root):
+        ignored.update({"apps", "packages", "infra"})
+    for directory in sorted(path for path in project_root.iterdir() if path.is_dir() and not path.name.startswith(".")):
+        if directory.name in ignored:
+            continue
+        files = _relative_code_files(project_root, directory, limit=48)
+        if len(files) < 3 and directory.name not in {"config", "e2e"}:
+            continue
+        surfaces.append((directory.name.replace("_", "-"), directory, files))
+    return surfaces
+
+
+def detect_repo_archetype(
+    project_root: Path,
+    signals: CodebaseSignals,
+    *,
+    package_root: Path | None,
+    package_top_level_files: list[str],
+    workspace_graph: WorkspaceGraph,
+    app_surfaces: list[tuple[str, Path, list[str]]],
+) -> str:
+    if is_internal_skillayer_monorepo(project_root) and package_root is not None and package_root.name == "skilgen":
+        return "skilgen-platform"
+    if workspace_graph.packages and workspace_graph.tool is not None:
+        return f"{workspace_graph.tool}-workspace"
+    if workspace_graph.packages and workspace_graph.tool is None:
+        return "python-monorepo"
+    if package_root is not None and package_root.name == "skilgen":
+        return "skilgen-platform"
+    if (
+        package_root is not None
+        and len(package_top_level_files) >= 4
+        and not signals.backend_routes
+        and not signals.services
+        and not signals.frontend_routes
+        and not signals.components
+        and not signals.data_models
+        and not signals.persistence_layers
+        and not signals.legacy_programs
+        and not signals.copybooks
+    ):
+        return "python-package"
+    if len(app_surfaces) >= 3 and {name for name, _, _ in app_surfaces} & {"api", "client", "packages"}:
+        return "repo-native-app"
+    if len(app_surfaces) >= 2:
+        return "folder-native"
+    return "generic"
+
+
+def _workspace_parent_name(root_path: str) -> str | None:
+    parts = [part for part in Path(root_path).parts if part]
+    if len(parts) < 2:
+        return None
+    head = parts[0].replace("_", "-").strip("-")
+    return head or None
+
+
+def _workspace_domain_name(package: WorkspacePackage) -> str:
+    return package.root_path.replace("/", "-").replace("_", "-").strip("-") or package.id
+
+
+def _workspace_summary(package: WorkspacePackage, tool: str | None) -> str:
+    package_kind = package.package_type or "workspace package"
+    package_label = package.name or package.root_path
+    if tool:
+        return (
+            f"{package_label} guidance for the `{package.root_path}` workspace package, keeping edits aligned "
+            f"to the detected {tool} monorepo boundary and its internal dependency edges."
+        )
+    return (
+        f"{package_label} guidance for the `{package.root_path}` package surface inferred from the fallback "
+        "Python libs layout."
+    )
+
+
+def _workspace_group_summary(group_name: str, tool: str | None) -> str:
+    if tool:
+        return f"Workspace group guidance for `{group_name}/`, preserving the top-level {tool} monorepo boundary as a parent domain."
+    return f"Workspace group guidance for `{group_name}/`, preserving the inferred package family boundary as a parent domain."
+
+
 def _confidence_value(raw: object) -> float:
     if isinstance(raw, (int, float)):
         return float(raw)
@@ -60,19 +207,110 @@ def _confidence_value(raw: object) -> float:
         return 0.5
 
 
+def _package_module_slug(path: str) -> str:
+    stem = Path(path).stem
+    if stem == "__main__":
+        return "cli"
+    if stem == "__init__":
+        return "core"
+    return stem.replace("_", "-").strip("-") or "module"
+
+
+def _package_module_summary(package_name: str, path: str) -> str:
+    slug = _package_module_slug(path)
+    labels = {
+        "analyze": "Graph analysis and insight guidance for metrics, surprising connections, and code understanding queries.",
+        "benchmark": "Benchmarking guidance for measuring context reduction, performance, and token efficiency.",
+        "build": "Graph construction guidance for assembling extracted artifacts into connected graph structures.",
+        "cache": "Cache guidance for skipping unchanged files and preserving extraction performance.",
+        "cluster": "Clustering guidance for community detection, cohesion scoring, and graph partitioning.",
+        "detect": "Detection guidance for file discovery, corpus classification, and repository health checks.",
+        "export": "Export guidance for turning graph data into HTML, JSON, SVG, GraphML, or other delivery surfaces.",
+        "extract": "Extraction guidance for parsing files, symbols, and relationships from repository inputs.",
+        "hooks": "Hook and automation guidance for install-time or git-integrated Graphify workflows.",
+        "ingest": "Ingestion guidance for bringing code, docs, and repo signals into the graph pipeline.",
+        "manifest": "Manifest guidance for graph metadata, packaging, and generated surface coordination.",
+        "report": "Reporting guidance for narrative summaries and consumable graph insights.",
+        "security": "Security guidance for URL validation, path safety, and defensive runtime boundaries.",
+        "serve": "Serving guidance for local dashboard or API-style delivery of graph outputs.",
+        "transcribe": "Transcription guidance for converting external artifacts into repo-usable graph inputs.",
+        "validate": "Validation guidance for integrity checks, graph sanity checks, and delivery guardrails.",
+        "watch": "Watch-mode guidance for incremental rebuilds, file watching, and refresh loops.",
+        "wiki": "Knowledge-surface guidance for wiki or docs-oriented graph publishing.",
+        "cli": "CLI guidance for command-line entrypoints and operator workflows exposed through the package.",
+        "core": f"Core {package_name} package guidance for shared entrypoints and package-level contracts.",
+    }
+    return labels.get(slug, f"{package_name} module guidance for `{Path(path).name}` and its closely related implementation seams.")
+
+
+def _library_summary(library_name: str, relative_root: str) -> str:
+    labels = {
+        "core": "Shared LangChain core abstractions for runnables, prompts, messages, tools, outputs, and execution plumbing.",
+        "langchain": "Primary LangChain library guidance for chains, agents, retrieval, memory, and higher-level orchestration.",
+        "langchain-v1": "Versioned LangChain v1 package guidance for the modern public API surface and migration-friendly entrypoints.",
+        "text-splitters": "Text splitting guidance for chunking, token-aware segmentation, and document preparation flows.",
+        "model-profiles": "Model profile guidance for provider capability metadata, compatibility, and runtime selection surfaces.",
+        "standard-tests": "Shared testing guidance for package-level conformance, integration baselines, and reusable validation fixtures.",
+        "partners": "Partner integration guidance for provider-specific packages shipped within the LangChain monorepo.",
+    }
+    return labels.get(library_name, f"Monorepo library guidance for `{relative_root}` and its package-specific implementation boundaries.")
+
+
+def _subpackage_summary(library_name: str, subpackage_name: str) -> str:
+    return f"{library_name.replace('-', ' ').title()} guidance for the `{subpackage_name}` subpackage and its closely related implementation seams."
+
+
+def _app_surface_summary(surface_name: str, relative_root: str) -> str:
+    labels = {
+        "api": "Backend application guidance for API routes, services, persistence, auth, and runtime orchestration under the repo's `api/` surface.",
+        "client": "Frontend application guidance for the user-facing client, routes, UI composition, and client-side runtime behavior.",
+        "packages": "Shared package guidance for reusable internal packages that support the app runtime and product surfaces.",
+        "config": "Configuration guidance for runtime configuration, feature flags, translation setup, and environment-driven behavior.",
+        "e2e": "End-to-end testing guidance for browser workflows, setup, and cross-surface regression coverage.",
+        "helm": "Deployment guidance for Helm charts, release packaging, and cluster-facing operational configuration.",
+        "utils": "Utility guidance for shared scripts, support code, and operational helpers that sit outside the main app surfaces.",
+        "src": "Source-surface guidance for repo-level source files that do not live under a more specific package boundary.",
+    }
+    return labels.get(surface_name, f"Repo-native app guidance for the `{relative_root}` surface and its closely related implementation seams.")
+
+
+def _app_child_summary(parent_name: str, child_name: str) -> str:
+    return f"{parent_name.replace('-', ' ').title()} guidance for the `{child_name}` surface and its closely related implementation seams."
+
+
 def build_domain_graph_native(project_root: Path, requirements: RequirementsContext) -> DomainGraph:
     root = project_root.resolve()
     signals = analyze_codebase(root)
     requirements_path = requirements.requirements_path if requirements.requirements_path.exists() else None
     intent = parse_project_intent_native(root, requirements_path)
+    workspace_graph = build_workspace_graph(root)
+    package_root = _python_package_root(root)
+    package_runtime_files = _relative_py_files(root, package_root, top_level_only=False, limit=100) if package_root is not None else []
+    package_top_level_files = _relative_py_files(root, package_root, top_level_only=True, limit=100) if package_root is not None else []
+    app_surfaces = _top_level_app_surfaces(root)
+    repo_archetype = detect_repo_archetype(
+        root,
+        signals,
+        package_root=package_root,
+        package_top_level_files=package_top_level_files,
+        workspace_graph=workspace_graph,
+        app_surfaces=app_surfaces,
+    )
+    package_focused_repo = repo_archetype == "python-package"
+    workspace_focused_repo = repo_archetype.endswith("-workspace") or repo_archetype == "python-monorepo"
+    app_native_repo = repo_archetype == "repo-native-app"
+    folder_native_repo = repo_archetype == "folder-native"
+    generic_repo = repo_archetype == "generic"
 
     backend_children = ["backend-api", "backend-testing"]
     if signals.backend_routes:
         backend_children.append("backend-routes")
-    if signals.services:
+    if signals.services or signals.legacy_programs:
         backend_children.append("backend-services")
     if signals.data_models or signals.persistence_layers:
         backend_children.append("backend-data")
+    if signals.copybooks:
+        backend_children.append("backend-copybooks")
     if signals.auth_files:
         backend_children.append("backend-auth")
     if signals.background_jobs:
@@ -102,16 +340,31 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
         )
 
     backend_detected = any(
-        [signals.backend_routes, signals.services, signals.data_models, signals.persistence_layers, signals.auth_files]
+        [
+            signals.backend_routes,
+            signals.services,
+            signals.data_models,
+            signals.persistence_layers,
+            signals.auth_files,
+            signals.legacy_programs,
+            signals.copybooks,
+        ]
     )
-    if requirements.domains.get("backend") or backend_detected:
+    if generic_repo and (requirements.domains.get("backend") or backend_detected):
         nodes.append(
             _node(
                 "backend",
                 summary="Server-side delivery domain covering route handlers, services, persistence, and verification of backend changes.",
                 confidence=0.88,
                 key_files=_top_file(
-                    [*signals.backend_routes, *signals.services, *signals.data_models, *signals.auth_files],
+                    [
+                        *signals.backend_routes,
+                        *signals.services,
+                        *signals.data_models,
+                        *signals.auth_files,
+                        *signals.legacy_programs,
+                        *signals.copybooks,
+                    ],
                     ["api/", "services/"],
                 ),
                 key_patterns=["endpoint quality gate", "service boundaries", "transport-to-domain separation"],
@@ -124,7 +377,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
     frontend_detected = any(
         [signals.frontend_routes, signals.components, signals.state_files, signals.design_system_files]
     )
-    if requirements.domains.get("frontend") or frontend_detected:
+    if generic_repo and (requirements.domains.get("frontend") or frontend_detected):
         nodes.append(
             _node(
                 "frontend",
@@ -141,6 +394,379 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
+    platform_areas: list[tuple[str, str, list[str], list[str], str]] = []
+    if package_root is not None and package_root.name == "skilgen":
+        runtime_files = _relative_py_files(root, package_root, top_level_only=True)
+        agents_files = _relative_py_files(root, package_root / "agents")
+        cli_files = _relative_py_files(root, package_root / "cli")
+        core_files = _relative_py_files(root, package_root / "core")
+        generator_files = _relative_py_files(root, package_root / "generators")
+        script_files = _relative_py_files(root, root / "scripts")
+        if runtime_files:
+            if (root / "setup.py").exists():
+                runtime_files = [*runtime_files[:5], "setup.py"]
+            platform_areas.append(
+                (
+                    "platform-runtime",
+                    "Runtime orchestration guidance for package-level entrypoints, delivery orchestration, and repo-wide integration surfaces.",
+                    runtime_files,
+                    ["runtime orchestration", "repo-wide coordination", "package entrypoints"],
+                    "skills/platform/runtime/SKILL.md",
+                )
+            )
+        if agents_files:
+            platform_areas.append(
+                (
+                    "platform-agents",
+                    "Planner and inference guidance for domain graphing, architecture synthesis, and decision intelligence.",
+                    agents_files,
+                    ["domain inference", "architecture synthesis", "agent planning logic"],
+                    "skills/platform/agents/SKILL.md",
+                )
+            )
+        if cli_files:
+            platform_areas.append(
+                (
+                    "platform-cli",
+                    "Operator-facing CLI guidance for command surfaces, progress reporting, and repo-local execution flows.",
+                    cli_files,
+                    ["command surfaces", "operator UX", "progress orchestration"],
+                    "skills/platform/cli/SKILL.md",
+                )
+            )
+        if core_files:
+            platform_areas.append(
+                (
+                    "platform-core",
+                    "Shared core guidance for scoring, freshness, diffing, context loading, and validation primitives.",
+                    core_files,
+                    ["shared models", "freshness and scoring", "validation primitives"],
+                    "skills/platform/core/SKILL.md",
+                )
+            )
+        if generator_files:
+            platform_areas.append(
+                (
+                    "platform-generators",
+                    "Artifact materialization guidance for docs, skills, dashboards, and output rendering flows.",
+                    generator_files,
+                    ["artifact rendering", "materialization flow", "repo-local outputs"],
+                    "skills/platform/generators/SKILL.md",
+                )
+            )
+        if script_files:
+            platform_areas.append(
+                (
+                    "platform-scripts",
+                    "Maintenance automation guidance for release helpers and repo scripts that support the generation pipeline.",
+                    script_files,
+                    ["maintenance automation", "release helpers", "pipeline scripts"],
+                    "skills/platform/scripts/SKILL.md",
+                )
+            )
+
+    if len(platform_areas) >= 2:
+        platform_children = [name for name, *_ in platform_areas]
+        platform_key_files: list[str] = []
+        for _, _, files, _, _ in platform_areas:
+            platform_key_files.extend(files[:2])
+        platform_parent_files = list(dict.fromkeys(platform_key_files))[:8]
+        if not platform_parent_files:
+            platform_parent_files = [f"{package_root.name}/"] if package_root is not None else ["scripts/"]
+        nodes.append(
+            _node(
+                "platform",
+                summary="Tooling and runtime domain covering Skilgen's internal engine, CLI, planners, generators, and maintenance scripts.",
+                confidence=0.9,
+                key_files=platform_parent_files,
+                key_patterns=["tooling platform", "generation engine", "repo-local operating surface"],
+                child_domains=platform_children,
+                related_domains=["requirements", "backend", "roadmap", "frontend"],
+                skill_path="skills/platform/SKILL.md",
+            )
+        )
+        for name, summary, key_files, key_patterns, skill_path in platform_areas:
+            nodes.append(
+                _node(
+                    name,
+                    summary=summary,
+                    confidence=0.84,
+                    key_files=key_files,
+                    key_patterns=key_patterns,
+                    parent_domain="platform",
+                    related_domains=["requirements", "roadmap", "backend"],
+                    skill_path=skill_path,
+                )
+            )
+
+    if package_focused_repo and package_root is not None:
+        package_name = package_root.name.replace("_", "-")
+        package_parent = f"{package_name}-core"
+        module_paths = [path for path in package_top_level_files if not path.endswith("__init__.py")]
+        worked_paths = _relative_code_files(root, root / "worked", limit=12)
+        example_paths = _relative_code_files(root, root / "examples", limit=12)
+        script_paths = _relative_code_files(root, root / "scripts", limit=12)
+        e2e_paths = _relative_code_files(root, root / "e2e-tests", limit=12)
+        child_domains: list[str] = []
+        nodes.append(
+            _node(
+                package_parent,
+                summary=f"Primary {package_root.name} package domain covering the repo's core runtime modules, operator flows, and graph-processing seams.",
+                confidence=0.93,
+                key_files=package_runtime_files[:16],
+                key_patterns=["package-level runtime", "module-oriented tooling", "repo-native graph workflows"],
+                child_domains=child_domains,
+                related_domains=["roadmap", "requirements", "testing"] if requirements.requirements_path.exists() else ["roadmap", "testing"],
+                skill_path=f"skills/{package_parent}/SKILL.md",
+            )
+        )
+        for relative in module_paths[:16]:
+            slug = _package_module_slug(relative)
+            child_name = f"{package_name}-{slug}"
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=_package_module_summary(package_root.name, relative),
+                    confidence=0.84,
+                    key_files=[relative],
+                    key_patterns=[f"{package_root.name} module: {Path(relative).name}", "Stay close to the module boundary before widening scope."],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/{slug}/SKILL.md",
+                )
+            )
+        for child_dir in sorted(path for path in package_root.iterdir() if path.is_dir() and not path.name.startswith(".")):
+            child_files = _relative_code_files(root, child_dir, limit=12)
+            if len(child_files) < 2:
+                continue
+            child_slug = child_dir.name.replace("_", "-").strip("-") or "module"
+            child_name = f"{package_name}-{child_slug}"
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=f"{package_root.name} subpackage guidance for `{child_dir.name}` internals and its closely related implementation seams.",
+                    confidence=0.81,
+                    key_files=child_files,
+                    key_patterns=[f"{package_root.name} subpackage: {child_dir.name}", "Stay close to the package submodule boundary before widening scope."],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/{child_slug}/SKILL.md",
+                )
+            )
+        unit_test_paths = _relative_code_files(root, root / "tests", limit=12)
+        if unit_test_paths or signals.tests:
+            child_name = f"{package_name}-testing"
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=f"Testing guidance for {package_root.name}, including repo-local verification, regression checks, and module-level confidence work.",
+                    confidence=0.82,
+                    key_files=(unit_test_paths or signals.tests)[:12],
+                    key_patterns=["module verification", "regression coverage", "repo-native test discipline"],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/testing/SKILL.md",
+                )
+            )
+        if e2e_paths:
+            child_name = f"{package_name}-e2e"
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=f"End-to-end testing guidance for {package_root.name}, including integration scenarios, permissions, hooks, and SDK behavior coverage.",
+                    confidence=0.8,
+                    key_files=e2e_paths,
+                    key_patterns=["end-to-end verification", "SDK behavior coverage", "integration guardrails"],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/e2e/SKILL.md",
+                )
+            )
+        if worked_paths or example_paths:
+            child_name = f"{package_name}-examples"
+            example_key_files = [*worked_paths, *example_paths]
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=f"Example and worked-corpus guidance for {package_root.name}, including sample inputs, fixtures, and demonstration flows.",
+                    confidence=0.78,
+                    key_files=example_key_files[:12],
+                    key_patterns=["worked examples", "sample corpus", "fixture-backed exploration"],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/examples/SKILL.md",
+                )
+            )
+        if script_paths:
+            child_name = f"{package_name}-scripts"
+            child_domains.append(child_name)
+            nodes.append(
+                _node(
+                    child_name,
+                    summary=f"Maintenance script guidance for {package_root.name}, including build helpers, release automation, and package support workflows.",
+                    confidence=0.77,
+                    key_files=script_paths,
+                    key_patterns=["maintenance scripts", "release helpers", "package support automation"],
+                    parent_domain=package_parent,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{package_root.name}/scripts/SKILL.md",
+                )
+            )
+
+    if workspace_focused_repo and workspace_graph.packages:
+        parent_children: dict[str, list[str]] = {}
+        package_names = {_workspace_domain_name(package): package for package in workspace_graph.packages}
+        dependencies_by_source: dict[str, list[str]] = {}
+        for edge in workspace_graph.dependencies:
+            dependencies_by_source.setdefault(edge.source, []).append(edge.target)
+        for package in workspace_graph.packages:
+            parent_name = _workspace_parent_name(package.root_path)
+            child_name = _workspace_domain_name(package)
+            if parent_name is not None:
+                parent_children.setdefault(parent_name, []).append(child_name)
+
+        for parent_name, child_domains in sorted(parent_children.items()):
+            if len(child_domains) < 2:
+                continue
+            parent_files: list[str] = []
+            for child_domain in child_domains:
+                package = package_names[child_domain]
+                parent_files.extend(package.config_evidence[:2] or [package.root_path])
+            nodes.append(
+                _node(
+                    parent_name,
+                    summary=_workspace_group_summary(parent_name, workspace_graph.tool),
+                    confidence=0.84,
+                    key_files=list(dict.fromkeys(parent_files))[:12],
+                    key_patterns=["workspace parent boundary", "package family grouping", "monorepo capability cluster"],
+                    child_domains=child_domains,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{parent_name}/SKILL.md",
+                )
+            )
+
+        for package in workspace_graph.packages:
+            package_domain = _workspace_domain_name(package)
+            parent_name = _workspace_parent_name(package.root_path)
+            if parent_name is not None and len(parent_children.get(parent_name, [])) < 2:
+                parent_name = None
+            related_domains = [
+                _workspace_domain_name(target)
+                for target in workspace_graph.packages
+                if target.id in dependencies_by_source.get(package.id, [])
+            ]
+            key_files = _relative_code_files(root, root / package.root_path, limit=24)
+            if not key_files:
+                key_files = package.config_evidence or [package.root_path]
+            key_patterns = [
+                f"workspace tool: {workspace_graph.tool or 'python-libs'}",
+                f"package path: {package.root_path}",
+            ]
+            if package.package_type:
+                key_patterns.append(f"package type: {package.package_type}")
+            if related_domains:
+                key_patterns.append(f"internal package deps: {', '.join(related_domains[:4])}")
+            nodes.append(
+                _node(
+                    package_domain,
+                    summary=_workspace_summary(package, workspace_graph.tool),
+                    confidence=0.88 if workspace_graph.tool else 0.74,
+                    key_files=key_files,
+                    key_patterns=key_patterns,
+                    parent_domain=parent_name,
+                    related_domains=related_domains or ["roadmap"],
+                    skill_path=f"skills/{package_domain}/SKILL.md",
+                )
+            )
+
+    if app_native_repo:
+        for surface_name, surface_dir, key_files in app_surfaces:
+            child_domains: list[str] = []
+            nodes.append(
+                _node(
+                    surface_name,
+                    summary=_app_surface_summary(surface_name, surface_dir.relative_to(root).as_posix()),
+                    confidence=0.87,
+                    key_files=key_files[:24],
+                    key_patterns=["repo-native app surface", "top-level implementation boundary", "folder-driven capability map"],
+                    child_domains=child_domains,
+                    related_domains=["roadmap"],
+                    skill_path=f"skills/{surface_name}/SKILL.md",
+                )
+            )
+            child_entries: list[tuple[str, list[str], str]] = []
+            for child_dir in sorted(path for path in surface_dir.iterdir() if path.is_dir() and not path.name.startswith(".")):
+                child_files = _relative_code_files(root, child_dir, limit=12)
+                if len(child_files) < 3:
+                    continue
+                child_entries.append((child_dir.name.replace("_", "-"), child_files, child_dir.name))
+            seen_child_names: set[str] = set()
+            for child_slug, child_files, child_label in child_entries[:8]:
+                if child_slug in seen_child_names:
+                    continue
+                seen_child_names.add(child_slug)
+                child_name = f"{surface_name}-{child_slug}"
+                child_domains.append(child_name)
+                nodes.append(
+                    _node(
+                        child_name,
+                        summary=_app_child_summary(surface_name, child_label),
+                        confidence=0.79,
+                        key_files=child_files,
+                        key_patterns=[f"{surface_name} surface: {child_label}", "Stay close to the repo-native folder seam before widening scope."],
+                        parent_domain=surface_name,
+                        related_domains=["roadmap"],
+                        skill_path=f"skills/{surface_name}/{child_slug}/SKILL.md",
+                    )
+                )
+
+    if folder_native_repo:
+        for surface_name, surface_dir, key_files in app_surfaces:
+            child_domains: list[str] = []
+            relative_root = surface_dir.relative_to(root).as_posix()
+            nodes.append(
+                _node(
+                    surface_name,
+                    summary=f"Folder-native guidance for the repo's `{relative_root}` surface, using its own implementation boundary instead of a static backend/frontend assumption.",
+                    confidence=0.82,
+                    key_files=key_files[:24],
+                    key_patterns=["folder-native repo shape", "top-level code surface", "safe unknown-repo mapping"],
+                    child_domains=child_domains,
+                    related_domains=["roadmap", "requirements"] if requirements.requirements_path.exists() else ["roadmap"],
+                    skill_path=f"skills/{surface_name}/SKILL.md",
+                )
+            )
+            child_entries: list[tuple[str, list[str], str]] = []
+            for child_dir in sorted(path for path in surface_dir.iterdir() if path.is_dir() and not path.name.startswith(".")):
+                child_files = _relative_code_files(root, child_dir, limit=12)
+                if len(child_files) < 2:
+                    continue
+                child_entries.append((child_dir.name.replace("_", "-").strip("-") or "surface", child_files, child_dir.name))
+            seen_child_names: set[str] = set()
+            for child_slug, child_files, child_label in child_entries[:8]:
+                if child_slug in seen_child_names:
+                    continue
+                seen_child_names.add(child_slug)
+                child_name = f"{surface_name}-{child_slug}"
+                child_domains.append(child_name)
+                nodes.append(
+                    _node(
+                        child_name,
+                        summary=f"{surface_name.replace('-', ' ').title()} guidance for `{child_label}` and its nearest repo-native implementation seam.",
+                        confidence=0.76,
+                        key_files=child_files,
+                        key_patterns=[f"{surface_name} folder surface: {child_label}", "Stay close to the folder-native seam before widening scope."],
+                        parent_domain=surface_name,
+                        related_domains=["roadmap"],
+                        skill_path=f"skills/{surface_name}/{child_slug}/SKILL.md",
+                    )
+                )
+
     nodes.append(
         _node(
             "roadmap",
@@ -154,7 +780,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
         )
     )
 
-    if signals.design_system_files and not (signals.frontend_routes or signals.components):
+    if signals.design_system_files and generic_repo and not (signals.frontend_routes or signals.components):
         nodes.append(
             _node(
                 "design-system",
@@ -167,7 +793,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
-    if signals.auth_files and not (signals.backend_routes or signals.services):
+    if signals.auth_files and generic_repo and not (signals.backend_routes or signals.services):
         nodes.append(
             _node(
                 "security",
@@ -180,7 +806,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
-    if signals.background_jobs and not (signals.backend_routes or signals.services):
+    if signals.background_jobs and generic_repo and not (signals.backend_routes or signals.services or signals.legacy_programs):
         nodes.append(
             _node(
                 "operations",
@@ -193,13 +819,15 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             )
         )
 
-    if (signals.data_models or signals.persistence_layers) and not (signals.backend_routes or signals.services):
+    if generic_repo and (signals.data_models or signals.persistence_layers or signals.copybooks) and not (
+        signals.backend_routes or signals.services or signals.legacy_programs
+    ):
         nodes.append(
             _node(
                 "data-platform",
                 summary="Standalone data platform domain inferred from data models, schemas, or persistence layers without a stronger application-service boundary.",
                 confidence=0.8,
-                key_files=_top_file([*signals.data_models, *signals.persistence_layers], ["models/", "db/"]),
+                key_files=_top_file([*signals.data_models, *signals.persistence_layers, *signals.copybooks], ["models/", "db/"]),
                 key_patterns=["schema discipline", "repository boundaries", "data contracts"],
                 related_domains=["roadmap", "requirements"],
                 skill_path="skills/data-platform/SKILL.md",
@@ -230,17 +858,24 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
         ),
         (
             "backend-services",
-            "Service and use-case guidance for existing orchestration and business logic modules.",
-            _top_file(signals.services, ["services/"]),
-            ["service boundaries", "orchestration separation", "reusable business logic"],
+            "Service and use-case guidance for existing orchestration, business logic modules, and legacy programs.",
+            _top_file([*signals.services, *signals.legacy_programs], ["services/", "cobol/"]),
+            ["service boundaries", "orchestration separation", "reusable business logic", "legacy program boundaries"],
             "skills/backend/services/SKILL.md",
         ),
         (
             "backend-data",
             "Data models, repositories, and persistence guidance inferred from backend storage layers.",
-            _top_file([*signals.data_models, *signals.persistence_layers], ["models/", "db/"]),
+            _top_file([*signals.data_models, *signals.persistence_layers, *signals.copybooks], ["models/", "db/"]),
             ["data contracts", "repository boundaries", "schema-to-domain alignment"],
             "skills/backend/data/SKILL.md",
+        ),
+        (
+            "backend-copybooks",
+            "Copybook and record-layout guidance inferred from COBOL copybooks and shared record definitions.",
+            _top_file(signals.copybooks, ["copybooks/"]),
+            ["copybook contracts", "record layouts", "shared data definitions"],
+            "skills/backend/copybooks/SKILL.md",
         ),
         (
             "backend-auth",
@@ -257,7 +892,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             "skills/backend/jobs/SKILL.md",
         ),
     ]:
-        if name in backend_children:
+        if generic_repo and name in backend_children:
             nodes.append(
                 _node(
                     name,
@@ -301,7 +936,7 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
             "skills/frontend/design-system/SKILL.md",
         ),
     ]:
-        if name in frontend_children:
+        if generic_repo and name in frontend_children:
             nodes.append(
                 _node(
                     name,
@@ -330,9 +965,15 @@ def build_domain_graph_native(project_root: Path, requirements: RequirementsCont
         )
 
     recommendations = [
+        f"Repo archetype detected as `{repo_archetype}`; keep generated skills aligned to that repo shape before applying generic labels.",
         "Use the inferred domain graph to decide which parent and child skills need regeneration.",
         "Refresh AGENTS.md whenever parent skill entry points or core domain relationships change.",
     ]
+    if workspace_graph.packages:
+        tool_label = workspace_graph.tool or "python-libs"
+        recommendations.append(
+            f"Detected `{tool_label}` workspace metadata with {len(workspace_graph.packages)} packages and {len(workspace_graph.dependencies)} internal package edges; keep package domains distinct from file import analysis."
+        )
     if signals.tests:
         recommendations.append("Keep endpoint and flow validation coupled to the inferred domains when code changes.")
     if intent.features:
@@ -345,7 +986,10 @@ def build_domain_graph(project_root: Path, requirements: RequirementsContext) ->
     native_graph = build_domain_graph_native(root, requirements)
     requirements_path = requirements.requirements_path if requirements.requirements_path.exists() else None
     signals = analyze_codebase(root)
+    code_evidence = collect_code_evidence(root)
+    structural_evidence = collect_structural_evidence(root)
     intent = parse_project_intent_native(root, requirements_path)
+    workspace_graph = build_workspace_graph(root)
     payload = run_deep_json(
         "dynamic domain graph planning",
         (
@@ -362,6 +1006,9 @@ def build_domain_graph(project_root: Path, requirements: RequirementsContext) ->
             f"Requirements domains: {requirements.domains}\n"
             f"Intent JSON: {intent.__dict__}\n"
             f"Signals JSON: {signals.__dict__}\n"
+            f"Workspace graph JSON: {workspace_graph.__dict__ | {'packages': [package.__dict__ for package in workspace_graph.packages], 'dependencies': [edge.__dict__ for edge in workspace_graph.dependencies]}}\n"
+            f"Code evidence JSON: {code_evidence}\n"
+            f"Structural evidence JSON: {structural_evidence}\n"
             f"Native graph JSON: { {'nodes': [node.__dict__ for node in native_graph.nodes], 'recommendations': native_graph.recommendations} }\n"
         ),
         lambda: {

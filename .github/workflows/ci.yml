@@ -20,20 +20,55 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install package
-        run: python -m pip install --upgrade pip && python -m pip install .
+        run: python -m pip install --upgrade pip && python -m pip install . pytest
       - name: Run test suite
         run: python -m unittest discover -s tests
+
+  verify-enterprise:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pytest
+      - name: Verify enterprise path
+        run: make verify-enterprise
+      - name: Install Playwright (Chromium)
+        run: npx --workspace apps/dashboard playwright install --with-deps chromium
+      - name: Playwright smoke (auth entry)
+        run: npx --workspace apps/dashboard playwright test e2e/auth-entry.spec.ts --browser=chromium
+      - name: Playwright smoke (activity v8 + screenshots)
+        run: npx --workspace apps/dashboard playwright test e2e/activity-v8.spec.ts --browser=chromium
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: |
+            apps/dashboard/test-results
+            apps/dashboard/playwright-results
 
   packaging:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Build distributions

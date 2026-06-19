@@ -1,0 +1,2185 @@
+from __future__ import annotations
+
+import asyncio
+import base64
+import importlib
+import json
+from datetime import datetime
+from types import SimpleNamespace
+
+import sqlalchemy as sa
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from fastapi import BackgroundTasks
+from fastapi.testclient import TestClient
+from starlette.requests import Request
+
+from apps.api.api.index import app
+from apps.api.api.auth import get_current_org_id, get_current_user
+from apps.api.api.routes import worker
+from apps.api.api.v8.flags import request_flag_cache
+from apps.api.api.v8.settings.rbac import PERMISSIONS, has_permission, matches_scope_expression, permission_matches
+from packages.db.database import get_db
+from packages.db.llm_key import decrypt_key
+from packages.db.models import AuditEvent, Commit, DigestConfig, Job, Org, PullRequest, Repo, SourceConnection
+
+
+rbac_migration = importlib.import_module("apps.api.alembic.versions.20260505_0002_settings_rbac")
+settings_router = importlib.import_module("apps.api.api.v8.settings.router")
+
+
+def _collect_route_paths(routes: object, prefix: str = "") -> set[str]:
+    paths: set[str] = set()
+    for route in routes:
+        route_path = getattr(route, "path", None)
+        if route_path:
+            paths.add(route_path)
+            if prefix:
+                paths.add(f"{prefix.rstrip('/')}/{route_path.lstrip('/')}")
+        nested_prefix = f"{prefix.rstrip('/')}/{getattr(route, 'prefix', '').lstrip('/')}".rstrip("/")
+        nested_routes = getattr(route, "routes", None)
+        if nested_routes:
+            paths.update(_collect_route_paths(nested_routes, nested_prefix))
+        nested_router = getattr(route, "router", None)
+        router_routes = getattr(nested_router, "routes", None)
+        if router_routes:
+            paths.update(_collect_route_paths(router_routes, nested_prefix))
+    return paths
+
+
+class Result:
+    def __init__(self, rows: list[tuple[object, object]]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[tuple[object, object]]:
+        return self._rows
+
+    def scalar_one_or_none(self) -> object | None:
+        if not self._rows:
+            return None
+        first = self._rows[0]
+        return first[0] if isinstance(first, tuple) else first
+
+    def scalars(self):
+        return self
+
+
+class Db:
+    def __init__(self, rows: list[tuple[object, object]]) -> None:
+        self.rows = rows
+
+    async def execute(self, _stmt: object) -> Result:
+        return Result(self.rows)
+
+
+class EventDb:
+    def __init__(self, events: list[AuditEvent]) -> None:
+        self.events = events
+        self.statements: list[str] = []
+        self.limits: list[int | None] = []
+        self.org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+
+    async def get(self, model: object, row_id: str) -> Org | None:
+        assert model is Org
+        assert row_id == self.org.id
+        return self.org
+
+    async def execute(self, stmt: object) -> Result:
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        limit_clause = getattr(stmt, "_limit_clause", None)
+        limit = getattr(limit_clause, "value", None)
+        rows = self.events
+        if "audit_events.severity = 'warning'" in compiled:
+            rows = [event for event in rows if event.severity == "warning"]
+        if "audit_events.actor_login" in compiled and "ravi" in compiled:
+            rows = [event for event in rows if event.actor_login and "ravi" in event.actor_login]
+        self.statements.append(compiled)
+        self.limits.append(limit)
+        return Result(rows[:limit] if limit is not None else rows)
+
+
+class OrgDb:
+    def __init__(
+        self,
+        org: Org,
+        connections: list[SourceConnection] | None = None,
+        repos: list[Repo] | None = None,
+        pull_requests: list[PullRequest] | None = None,
+        commits: list[Commit] | None = None,
+    ) -> None:
+        self.org = org
+        self.connections = list(connections or [])
+        self.repos = list(repos or [])
+        self.pull_requests = list(pull_requests or [])
+        self.commits = list(commits or [])
+        self.committed = False
+        self.added: list[object] = []
+        self.flushed = False
+
+    async def get(self, model: object, row_id: str) -> Org | None:
+        assert model is Org
+        assert row_id == self.org.id
+        return self.org
+
+    def add(self, item: object) -> None:
+        self.added.append(item)
+
+    async def execute(self, _stmt: object) -> Result:
+        compiled = str(_stmt.compile(compile_kwargs={"literal_binds": True}))
+        if "source_connections" in compiled:
+            rows = [*self.connections, *[item for item in self.added if isinstance(item, SourceConnection)]]
+            for connection in list(rows):
+                if connection.source_type and f"'{connection.source_type}'" in compiled:
+                    rows = [item for item in rows if item.source_type == connection.source_type]
+                    break
+            return Result([(connection, None) for connection in rows])
+        if "FROM repos" in compiled:
+            rows = self.repos
+            if "repos.id =" in compiled:
+                rows = [repo for repo in rows if repo.id and f"'{repo.id}'" in compiled]
+            if "repos.full_name =" in compiled or "repos.name =" in compiled:
+                rows = [repo for repo in rows if (repo.full_name and f"'{repo.full_name}'" in compiled) or (repo.name and f"'{repo.name}'" in compiled)]
+            return Result([(repo, None) for repo in rows])
+        if "FROM pull_requests" in compiled:
+            rows = self.pull_requests
+            if "pull_requests.github_pr_number =" in compiled:
+                rows = [pr for pr in rows if str(pr.github_pr_number) in compiled]
+            if "pull_requests.id =" in compiled:
+                rows = [pr for pr in rows if pr.id and f"'{pr.id}'" in compiled]
+            if "pull_requests.head_sha =" in compiled:
+                rows = [pr for pr in rows if pr.head_sha and f"'{pr.head_sha}'" in compiled]
+            if "pull_requests.head_branch =" in compiled:
+                rows = [pr for pr in rows if getattr(pr, "head_branch", None) and f"'{getattr(pr, 'head_branch', None)}'" in compiled]
+            return Result([(pr, None) for pr in rows])
+        if "FROM commits" in compiled:
+            rows = self.commits
+            if "commits.repo_id =" in compiled:
+                rows = [commit for commit in rows if commit.repo_id and f"'{commit.repo_id}'" in compiled]
+            if "commits.sha =" in compiled:
+                rows = [commit for commit in rows if commit.sha and f"'{commit.sha}'" in compiled]
+            if "commits.pr_id =" in compiled:
+                rows = [commit for commit in rows if commit.pr_id and f"'{commit.pr_id}'" in compiled]
+            return Result([(commit, None) for commit in rows])
+        return Result([])
+
+    async def flush(self) -> None:
+        self.flushed = True
+
+    async def commit(self) -> None:
+        self.committed = True
+
+
+class ScalarResult:
+    def __init__(self, rows: list[object]) -> None:
+        self._rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self) -> list[object]:
+        return self._rows
+
+
+class SchedulerDb:
+    def __init__(self, orgs: list[Org]) -> None:
+        self.orgs = orgs
+        self.added: list[object] = []
+        self.committed = False
+
+    async def execute(self, _stmt: object) -> ScalarResult:
+        return ScalarResult(self.orgs)
+
+    def add(self, item: object) -> None:
+        self.added.append(item)
+
+    async def commit(self) -> None:
+        self.committed = True
+
+
+def test_v8_settings_router_is_registered() -> None:
+    paths = _collect_route_paths(app.routes)
+    paths.update(_collect_route_paths(settings_router.router.routes, settings_router.router.prefix))
+    paths.update(_collect_route_paths(worker.router.routes, worker.router.prefix))
+
+    assert "/v8/orgs/{org_id}/settings/rbac" in paths
+    assert "/v8/orgs/{org_id}/settings/notifications/digest" in paths
+    assert "/v8/orgs/{org_id}/settings/notifications/digest/preview" in paths
+    assert "/v8/orgs/{org_id}/settings/notifications/digest/send-now" in paths
+    assert "/v8/orgs/{org_id}/settings/admin-audit" in paths
+    assert "/v8/orgs/{org_id}/settings/admin-audit/config" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/agent-compliance" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/sync" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/credentials/test" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-events" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/ingest-jobs/{job_id}" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/sync-jobs" in paths
+    assert "/v8/orgs/{org_id}/settings/connectors/{connector_id}/sync-jobs/{job_id}" in paths
+    assert "/worker/agent-compliance/provider-sync" in paths
+    assert "settings.admin_audit.read" in PERMISSIONS
+    assert "settings.billing.read" in PERMISSIONS
+    assert "settings.notifications.read" in PERMISSIONS
+    assert "settings.sso.read" in PERMISSIONS
+
+
+def test_agent_compliance_connector_endpoint_returns_metadata_state(monkeypatch) -> None:
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={
+        "v8_agent_compliance_connectors": {
+            "codex-cli": {
+                "enabled": True,
+                "source_types": ["agent sessions", "model tier"],
+                "scopes": ["audit.read"],
+                "last_sync_status": "pending",
+                "content_retention": "metadata-only",
+                "updated_at": "2026-05-10T19:10:00",
+            }
+        }
+    })
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def db_override():
+        yield OrgDb(org)
+
+    app.dependency_overrides[get_current_org_id] = lambda: "org-1"
+    app.dependency_overrides[get_db] = db_override
+    app.dependency_overrides[request_flag_cache] = lambda: None
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    try:
+        response = TestClient(app).get("/v8/orgs/org-1/settings/connectors/agent-compliance")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    codex = next(item for item in payload["connectors"] if item["id"] == "codex-cli")
+    assert payload["content_retention_default"] == "metadata-only"
+    assert payload["configured_count"] == 1
+    assert payload["enterprise_setup"]["setup_complete"] is False
+    assert any(gap["id"] == "github-app" for gap in payload["enterprise_setup"]["coverage_gaps"])
+    assert codex["enabled"] is True
+    assert codex["content_retention"] == "metadata-only"
+
+
+def test_agent_compliance_connector_endpoint_returns_enterprise_setup_complete(monkeypatch) -> None:
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={
+        "v8_agent_compliance_connectors": {
+            "openai-compliance": {
+                "enabled": True,
+                "source_types": ["audit logs"],
+                "scopes": ["audit.read"],
+                "last_sync_status": "success",
+                "last_success_at": "2026-05-19T06:00:00+00:00",
+                "content_retention": "metadata-only",
+            },
+            "anthropic-compliance": {
+                "enabled": True,
+                "source_types": ["audit logs"],
+                "scopes": ["audit.read"],
+                "last_sync_status": "success",
+                "last_success_at": "2026-05-19T06:05:00+00:00",
+                "content_retention": "metadata-only",
+            },
+        }
+    })
+    now = datetime(2026, 5, 19, 6, 0, 0)
+    connections = [
+        SourceConnection(org_id="org-1", source_type="github", status="connected", encrypted_params="{}", last_tested_at=now, last_connected_at=now),
+        SourceConnection(
+            org_id="org-1",
+            source_type=settings_router._agent_connection_source_type("openai-compliance"),
+            status="configured",
+            encrypted_params="{}",
+            last_tested_at=now,
+            last_connected_at=now,
+            params_hint={"credential_kind": "api_token"},
+        ),
+        SourceConnection(
+            org_id="org-1",
+            source_type=settings_router._agent_connection_source_type("anthropic-compliance"),
+            status="configured",
+            encrypted_params="{}",
+            last_tested_at=now,
+            last_connected_at=now,
+            params_hint={"credential_kind": "api_token"},
+        ),
+    ]
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def db_override():
+        yield OrgDb(org, connections=connections)
+
+    app.dependency_overrides[get_current_org_id] = lambda: "org-1"
+    app.dependency_overrides[get_db] = db_override
+    app.dependency_overrides[request_flag_cache] = lambda: None
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    try:
+        response = TestClient(app).get("/v8/orgs/org-1/settings/connectors/agent-compliance")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    setup = response.json()["enterprise_setup"]
+    assert setup["setup_complete"] is True
+    assert setup["github_connected"] is True
+    assert setup["coverage_gaps"] == []
+    assert [step["status"] for step in setup["steps"]] == ["complete", "pending", "complete", "complete", "complete", "complete", "complete"]
+
+
+def test_admin_audit_returns_operator_rollups(monkeypatch) -> None:
+    events = [
+        AuditEvent(
+            id="evt-1",
+            org_id="org-1",
+            event_type="settings.rbac_role_created",
+            action="created",
+            actor_login="ravi",
+            resource_type="role",
+            resource_id="role-1",
+            summary="Created RBAC role Admin",
+            severity="info",
+            created_at=datetime(2026, 5, 11, 10, 0, 0),
+        ),
+        AuditEvent(
+            id="evt-2",
+            org_id="org-1",
+            event_type="settings.agent_compliance_connector_configured",
+            action="updated",
+            actor_login="maya",
+            resource_type="connector",
+            resource_id="codex-cli",
+            summary="Configured connector",
+            severity="warning",
+            created_at=datetime(2026, 5, 11, 9, 0, 0),
+        ),
+        AuditEvent(
+            id="evt-3",
+            org_id="org-1",
+            event_type="member.invited",
+            action="invited",
+            actor_login="maya",
+            resource_type="member",
+            resource_id="member-1",
+            summary="Invited member",
+            severity="warning",
+            created_at=datetime(2026, 5, 11, 8, 0, 0),
+        ),
+    ]
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+
+    db = EventDb(events)
+    response = asyncio.run(
+        settings_router.get_admin_audit(
+            "org-1",
+            severity="warning",
+            limit=1,
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    assert response["summary"] == {"events": 2, "actors": 1, "critical": 0, "warnings": 2, "resource_types": 2}
+    assert response["filters"]["severity"] == "warning"
+    assert response["filters"]["limit"] == 1
+    assert response["rollup"] == {"source_events": 2, "limit": 5000, "truncated": False}
+    assert response["severity_counts"] == {"info": 0, "warning": 2, "critical": 0}
+    assert {"key": "connector", "label": "connector", "count": 1} in response["resource_types"]
+    assert len(response["events"]) == 1
+    assert response["events"][0]["event_type"] == "settings.agent_compliance_connector_configured"
+    assert db.limits == [5001, 1]
+    assert all("audit_events.severity = 'warning'" in statement for statement in db.statements)
+
+
+def test_admin_audit_exposes_truncated_rollup_metadata() -> None:
+    events = [
+        AuditEvent(
+            id=f"evt-{index}",
+            org_id="org-1",
+            event_type="settings.rbac_role_created",
+            action="created",
+            actor_login="ravi",
+            resource_type="role",
+            resource_id=f"role-{index}",
+            summary="Created RBAC role",
+            severity="warning",
+            created_at=datetime(2026, 5, 11, 10, 0, 0),
+        )
+        for index in range(5000)
+    ]
+    payload = settings_router._admin_audit_payload(
+        events=events,
+        page_events=events[:1],
+        rollup_truncated=True,
+        window_days=30,
+        actor=None,
+        event_type=None,
+        resource_type=None,
+        severity="warning",
+        limit=1,
+    )
+
+    assert payload["summary"]["events"] == 5000
+    assert payload["rollup"] == {"source_events": 5000, "limit": 5000, "truncated": True}
+
+
+def test_admin_audit_config_defaults_drive_query_when_filters_are_empty(monkeypatch) -> None:
+    events = [
+        AuditEvent(
+            id="evt-1",
+            org_id="org-1",
+            event_type="settings.rbac_role_created",
+            action="created",
+            actor_login="ravi",
+            resource_type="role",
+            resource_id="role-1",
+            summary="Created RBAC role",
+            severity="warning",
+            created_at=datetime(2026, 5, 11, 10, 0, 0),
+        )
+    ]
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    db = EventDb(events)
+    db.org.settings = {"admin_audit_config": {"default_window_days": 90, "default_severity": "warning"}}
+    response = asyncio.run(settings_router.get_admin_audit("org-1", db=db, current_org_id="org-1"))
+
+    assert response["window_days"] == 90
+    assert response["filters"]["severity"] == "warning"
+    assert db.limits == [5001, 50]
+
+
+def test_admin_audit_config_update_persists_and_audits(monkeypatch) -> None:
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    emitted: dict[str, object] = {}
+
+    async def emit(_db, org_id, event_type, action, summary, **kwargs):
+        emitted.update({"org_id": org_id, "event_type": event_type, "action": action, "summary": summary, **kwargs})
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+    monkeypatch.setattr(settings_router, "get_actor_login", lambda _request: "ravi")
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+    db = OrgDb(org)
+    request = Request({"type": "http", "headers": []})
+
+    response = asyncio.run(
+        settings_router.update_admin_audit_config(
+            "org-1",
+            settings_router.AdminAuditConfigPayload(
+                default_window_days=180,
+                default_severity="critical",
+                retention_days=730,
+                export_event_filter="critical",
+            ),
+            request,
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    assert response["default_window_days"] == 180
+    assert response["default_severity"] == "critical"
+    assert org.settings["admin_audit_config"]["retention_days"] == 730
+    assert emitted["event_type"] == "settings.admin_audit_config_updated"
+    assert db.committed is True
+
+
+def test_notifications_digest_preview_and_send_now_wrap_legacy(monkeypatch) -> None:
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def preview(org_id: str, _db: object, config: object | None = None) -> dict:
+        assert org_id == "org-1"
+        if config is not None:
+            assert getattr(config, "title") == "Custom digest"
+        return {"week": "2026-W20", "recipients": ["security@example.com"], "html": "<html>preview</html>"}
+
+    async def send(payload: dict, recipient: str) -> dict:
+        assert payload["week"] == "2026-W20"
+        return {"sent": False, "to": recipient, "preview": payload["html"]}
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.legacy_digest, "_preview", preview)
+    monkeypatch.setattr(settings_router.legacy_digest, "_send_payload", send)
+
+    db = OrgDb(Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={}))
+    preview_payload = asyncio.run(
+        settings_router.preview_notifications_digest(
+            "org-1",
+            settings_router.DigestPreviewPayload(
+                config=settings_router.DigestConfigPayload(
+                    title="Custom digest",
+                    subject="Subject",
+                    frequency="weekly",
+                    recipients=[],
+                    widgets=[],
+                    layout={},
+                )
+            ),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+    assert preview_payload["week"] == "2026-W20"
+
+    send_payload = asyncio.run(
+        settings_router.send_notifications_digest_now(
+            "org-1",
+            settings_router.DigestSendNowPayload(recipient_email="owner@example.com", config=None),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+    assert send_payload["sent"] is False
+    assert send_payload["to"] == "owner@example.com"
+
+
+def test_get_notifications_digest_commits_and_returns_config(monkeypatch) -> None:
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def load_or_create(db, org_id: str):
+        assert org_id == "org-1"
+        return DigestConfig(
+            id="cfg-1",
+            org_id=org_id,
+            title="Weekly digest",
+            subject="Digest subject",
+            frequency="weekly",
+            recipients=["security@example.com"],
+            widgets=["memory_score"],
+            layout={"theme": "neutral"},
+        )
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router, "_load_or_create_digest_config", load_or_create)
+
+    db = OrgDb(Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={}))
+    payload = asyncio.run(settings_router.get_notifications_digest("org-1", db=db, current_org_id="org-1"))
+
+    assert payload["id"] == "cfg-1"
+    assert payload["title"] == "Weekly digest"
+    assert payload["frequency"] == "weekly"
+    assert db.committed is True
+
+
+def test_update_notifications_digest_emits_audit_and_persists_payload(monkeypatch) -> None:
+    config = DigestConfig(
+        id="cfg-1",
+        org_id="org-1",
+        title="Old",
+        subject="Old",
+        frequency="weekly",
+        recipients=["owner@example.com"],
+        widgets=["memory_score"],
+        layout={},
+    )
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def load_or_create(db, org_id: str):
+        assert org_id == "org-1"
+        return config
+
+    emitted: dict[str, object] = {}
+
+    async def emit(
+        _db: object,
+        org_id: str,
+        event_type: str,
+        action: str,
+        summary: str,
+        *,
+        actor_login: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        emitted.update(
+            {
+                "org_id": org_id,
+                "event_type": event_type,
+                "action": action,
+                "summary": summary,
+                "actor_login": actor_login,
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+                "metadata": metadata,
+            }
+        )
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router, "_load_or_create_digest_config", load_or_create)
+    monkeypatch.setattr(settings_router, "get_actor_login", lambda _request: "ravi")
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    db = OrgDb(Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={}))
+    payload = asyncio.run(
+        settings_router.update_notifications_digest(
+            "org-1",
+            settings_router.DigestConfigPayload(
+                title="New digest",
+                subject="New subject",
+                frequency="monthly",
+                recipients=[" security@example.com ", ""],
+                widgets=["roi_multiplier"],
+                layout={"density": "compact"},
+            ),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    assert payload["title"] == "New digest"
+    assert payload["frequency"] == "monthly"
+    assert payload["recipients"] == ["security@example.com"]
+    assert payload["widgets"] == ["roi_multiplier"]
+    assert emitted["event_type"] == "settings.notifications_updated"
+    assert emitted["actor_login"] == "ravi"
+    assert emitted["resource_id"] == "cfg-1"
+    assert db.committed is True
+
+
+def test_configure_agent_compliance_connector_persists_metadata_only_state(monkeypatch) -> None:
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    request = Request({"type": "http", "headers": []})
+    response = asyncio.run(
+        settings_router.configure_agent_compliance_connector(
+            "org-1",
+            settings_router.AgentComplianceConnectorPayload(
+                connector_id="codex-cli",
+                enabled=True,
+                source_types=["agent sessions", "model tier"],
+                scopes=["audit.read", "policy.evaluate"],
+            ),
+            request,
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    stored = org.settings["v8_agent_compliance_connectors"]["codex-cli"]
+    assert response["configured_count"] == 1
+    assert stored["enabled"] is True
+    assert stored["content_retention"] == "metadata-only"
+    assert "secret" not in stored
+    assert db.committed is True
+
+
+def test_configure_agent_compliance_connector_stores_credentials_encrypted(monkeypatch) -> None:
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.configure_agent_compliance_connector(
+            "org-1",
+            settings_router.AgentComplianceConnectorPayload(
+                connector_id="openai-compliance",
+                enabled=True,
+                source_types=["audit logs", "model usage"],
+                scopes=["audit.read"],
+                credential_kind="api_token",
+                credentials={"api_key": "sk-real-secret", "organization_id": "org_ext"},
+            ),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    connection = next(item for item in db.added if isinstance(item, SourceConnection))
+    assert response["configured_count"] == 1
+    assert stored["credential_state"] == "encrypted"
+    assert "api_key" not in stored
+    assert connection.source_type == "agent_compliance:openai-compliance"
+    assert "sk-real-secret" not in connection.encrypted_params
+    assert decrypt_key(connection.encrypted_params)
+    assert json.loads(decrypt_key(connection.encrypted_params))["api_key"] == "sk-real-secret"
+    assert connection.params_hint["api_key_hint"] == "...cret"
+    assert connection.params_hint["organization_id"] == "org_ext"
+    assert db.committed is True
+
+
+def test_agent_compliance_connector_response_migrates_legacy_credentials(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "anthropic-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "api_key": "anthropic-secret",
+                    "base_url": "https://api.anthropic.com",
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    payload = asyncio.run(settings_router._agent_connector_response(db, org))
+
+    stored = org.settings["v8_agent_compliance_connectors"]["anthropic-compliance"]
+    connection = next(item for item in db.added if isinstance(item, SourceConnection))
+    anthropic = next(item for item in payload["connectors"] if item["id"] == "anthropic-compliance")
+    assert stored["credential_migrated_at"]
+    assert "api_key" not in stored
+    assert "anthropic-secret" not in connection.encrypted_params
+    assert json.loads(decrypt_key(connection.encrypted_params))["api_key"] == "anthropic-secret"
+    assert anthropic["connected"] is True
+    assert anthropic["credential_state"] == "encrypted"
+    assert anthropic["credential_hint"]["api_key_hint"] == "...cret"
+
+
+def test_agent_compliance_credential_test_uses_encrypted_connection(monkeypatch) -> None:
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+    connection = SourceConnection(
+        org_id="org-1",
+        source_type="agent_compliance:openai-compliance",
+        display_name="OpenAI Compliance Platform",
+        status="configured",
+        encrypted_params=settings_router._encrypt_agent_credentials({"api_key": "sk-live", "organization_id": "org_ext"}),
+        params_hint={"api_key_hint": "...live", "credential_kind": "api_token"},
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db = OrgDb(org, connections=[connection])
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.test_agent_compliance_connector_credentials(
+            "org-1",
+            "openai-compliance",
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    assert response.success is True
+    assert response.status == "configured"
+    assert response.credential_state == "encrypted"
+    assert response.credential_hint["api_key_hint"] == "...live"
+    assert connection.last_error is None
+    assert db.committed is True
+
+
+def test_request_agent_compliance_connector_sync_updates_cursor_state(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "codex-cli": {
+                    "enabled": True,
+                    "source_types": ["agent sessions"],
+                    "scopes": ["audit.read"],
+                    "cursor": "old-cursor",
+                    "last_sync_status": "success",
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.request_agent_compliance_connector_sync(
+            "org-1",
+            "codex-cli",
+            settings_router.AgentComplianceSyncPayload(cursor="next-cursor", dry_run=True),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    stored = org.settings["v8_agent_compliance_connectors"]["codex-cli"]
+    assert stored["cursor"] == "next-cursor"
+    assert stored["last_sync_status"] == "pending"
+    assert stored["last_sync_mode"] == "dry-run"
+    assert stored["last_sync_plan"]["pagination_strategy"] == "cursor-resume"
+    assert stored["last_sync_plan"]["provider_adapter_required"] is True
+    assert stored["last_sync_plan"]["source_record_type"] == "operational-telemetry"
+    assert response.connector_id == "codex-cli"
+    assert response.cursor == "next-cursor"
+    assert response.next_cursor_required is True
+    assert response.ready_for_provider_pull is True
+    assert response.content_retention == "metadata-only"
+    assert db.committed is True
+
+
+def test_request_agent_compliance_connector_sync_marks_formal_compliance_retention(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.request_agent_compliance_connector_sync(
+            "org-1",
+            "openai-compliance",
+            settings_router.AgentComplianceSyncPayload(dry_run=True),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    assert response.source_record_type == "formal-compliance"
+    assert response.retention_window_days == 30
+    assert response.pagination_strategy == "cursor-resume"
+    assert "30-day compliance-log retention window" in " ".join(response.next_actions)
+    assert stored["last_sync_plan"]["content_retention"] == "metadata-only"
+
+
+def test_openai_compliance_sync_ingests_seeded_provider_reported_events(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "cursor": "old-cursor",
+                    "content_retention": "metadata-only",
+                    "total_ingested_count": 0,
+                }
+            }
+        },
+    )
+    connection = SourceConnection(
+        org_id="org-1",
+        source_type=settings_router._agent_connection_source_type("openai-compliance"),
+        encrypted_params=settings_router._encrypt_agent_credentials(
+            {"api_key": "sk-seeded", "mock_openai_compliance_fixture": True}
+        ),
+        params_hint={"api_key_hint": "...eded", "credential_kind": "api_token"},
+        status="configured",
+    )
+    db = OrgDb(org, connections=[connection])
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.request_agent_compliance_connector_sync(
+            "org-1",
+            "openai-compliance",
+            settings_router.AgentComplianceSyncPayload(cursor="old-cursor", dry_run=False),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    events = [item for item in db.added if isinstance(item, AuditEvent)]
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    assert response.status == "success"
+    assert response.mode == "fixture"
+    assert response.ingested_count == 2
+    assert response.metrics["tokens_input"] == 1470000
+    assert response.metrics["cost_usd"] == 3.61
+    assert stored["last_sync_status"] == "success"
+    assert stored["last_sync_mode"] == "fixture"
+    assert stored["last_error"] is None
+    assert stored["last_sync_plan"]["provider_adapter_required"] is False
+    assert len(events) == 2
+    assert events[0].event_type == "agent.compliance"
+    assert events[0].metadata_json["provider"] == "OpenAI Compliance Platform"
+    assert events[0].metadata_json["cost_source"] == "provider_reported"
+    assert events[0].metadata_json["token_source"] == "openai_compliance_api"
+    assert events[0].metadata_json["content_retention"] == "metadata-only"
+    assert "prompt" not in events[0].metadata_json
+    assert db.committed is True
+
+
+def test_openai_compliance_sync_reports_missing_credentials(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.request_agent_compliance_connector_sync(
+            "org-1",
+            "openai-compliance",
+            settings_router.AgentComplianceSyncPayload(dry_run=False),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    assert response.status == "failed"
+    assert response.mode == "provider-pull"
+    assert response.ingested_count == 0
+    assert response.blocked_reason == "Missing OpenAI Compliance API credential."
+    assert "Store an encrypted OpenAI Compliance API key" in " ".join(response.next_actions)
+    assert stored["last_sync_status"] == "failed"
+    assert stored["last_error"] == "Missing OpenAI Compliance API credential."
+    assert db.committed is True
+
+
+def test_anthropic_compliance_sync_ingests_seeded_provider_reported_events(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "anthropic-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs", "chat metadata"],
+                    "scopes": ["audit.read"],
+                    "cursor": "old-cursor",
+                    "content_retention": "metadata-only",
+                    "total_ingested_count": 0,
+                }
+            }
+        },
+    )
+    connection = SourceConnection(
+        org_id="org-1",
+        source_type=settings_router._agent_connection_source_type("anthropic-compliance"),
+        encrypted_params=settings_router._encrypt_agent_credentials(
+            {"api_key": "sk-ant-seeded", "mock_anthropic_compliance_fixture": True}
+        ),
+        params_hint={"api_key_hint": "...eded", "credential_kind": "api_token"},
+        status="configured",
+    )
+    db = OrgDb(org, connections=[connection])
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.request_agent_compliance_connector_sync(
+            "org-1",
+            "anthropic-compliance",
+            settings_router.AgentComplianceSyncPayload(cursor="old-cursor", dry_run=False),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    events = [item for item in db.added if isinstance(item, AuditEvent)]
+    stored = org.settings["v8_agent_compliance_connectors"]["anthropic-compliance"]
+    assert response.status == "success"
+    assert response.mode == "fixture"
+    assert response.ingested_count == 2
+    assert response.metrics["tokens_input"] == 452000
+    assert response.metrics["tokens_output"] == 93000
+    assert response.metrics["cost_usd"] == 5.98
+    assert stored["last_sync_status"] == "success"
+    assert stored["last_sync_mode"] == "fixture"
+    assert stored["last_error"] is None
+    assert len(events) == 2
+    assert events[0].metadata_json["provider"] == "Anthropic Compliance API"
+    assert events[0].metadata_json["cost_source"] == "provider_reported"
+    assert events[0].metadata_json["token_source"] == "anthropic_compliance_api"
+    assert events[0].metadata_json["tokens_base_input"] == 260000
+    assert events[0].metadata_json["tokens_cache_creation_input"] == 90000
+    assert events[0].metadata_json["tokens_cache_read_input"] == 70000
+    assert events[0].metadata_json["provider_native_token_buckets"]["cache_creation_input_tokens"] == 90000
+    assert events[0].metadata_json["content_retention"] == "metadata-only"
+    assert "chat" not in events[0].metadata_json
+    assert db.committed is True
+
+
+def test_anthropic_compliance_sync_reports_missing_credentials(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "anthropic-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.request_agent_compliance_connector_sync(
+            "org-1",
+            "anthropic-compliance",
+            settings_router.AgentComplianceSyncPayload(dry_run=False),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    stored = org.settings["v8_agent_compliance_connectors"]["anthropic-compliance"]
+    assert response.status == "failed"
+    assert response.mode == "provider-pull"
+    assert response.blocked_reason == "Missing Anthropic Compliance API credential."
+    assert "Enable the Anthropic Compliance API" in " ".join(response.next_actions)
+    assert stored["last_sync_status"] == "failed"
+    assert stored["last_error"] == "Missing Anthropic Compliance API credential."
+    assert db.committed is True
+
+
+def test_agent_compliance_catalog_covers_required_coding_agent_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router._agent_compliance_registry()}
+
+    for connector_id in {"cursor", "windsurf", "github-copilot", "gitlab-duo", "codex-cli", "claude-code", "aider"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "coding-agent"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert {"agent sessions", "model usage"} & set(connector["capabilities"])
+
+    internal_mcp = connectors["internal-mcp"]
+    assert internal_mcp["category"] == "runtime"
+    assert "mcp calls" in internal_mcp["capabilities"]
+    assert "approval decisions" in internal_mcp["capabilities"]
+
+    for connector_id in {"github-actions", "gitlab-ci", "circleci"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "ci-cd"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert "jobs" in connector["capabilities"]
+        assert "test outcomes" in connector["capabilities"]
+
+
+def test_connector_catalog_covers_required_git_provider_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
+
+    for connector_id in {"github", "gitlab", "bitbucket"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "source-control"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert "webhooks" in connector["capabilities"]
+        assert "commit signatures" in connector["capabilities"]
+        assert "AI attribution headers" in connector["capabilities"]
+
+    assert "merge requests" in connectors["gitlab"]["capabilities"]
+    assert "pull requests" in connectors["bitbucket"]["capabilities"]
+
+
+def test_connector_catalog_covers_required_work_management_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
+
+    for connector_id in {"jira", "linear"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "work-management"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert "issues" in connector["capabilities"]
+        assert "projects" in connector["capabilities"]
+        assert "incident triggers" in connector["capabilities"]
+        assert "external ticket links" in connector["capabilities"]
+
+    assert "change tickets" in connectors["jira"]["capabilities"]
+    assert "cycles" in connectors["linear"]["capabilities"]
+
+
+def test_connector_catalog_covers_required_notification_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
+
+    for connector_id in {"slack", "email-digest", "notification-webhook"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "notifications"
+        assert connector["source_type"]
+        assert connector["description"]
+
+    assert connectors["slack"]["source_type"] == "slack"
+    assert "chat routing" in connectors["slack"]["capabilities"]
+    assert "slash commands" in connectors["slack"]["capabilities"]
+    assert "digest delivery" in connectors["slack"]["capabilities"]
+    assert connectors["email-digest"]["source_type"] == "email_digest"
+    assert "scheduled summaries" in connectors["email-digest"]["capabilities"]
+    assert "compliance summaries" in connectors["email-digest"]["capabilities"]
+    assert connectors["notification-webhook"]["source_type"] == "notification_webhook"
+    assert "webhook delivery" in connectors["notification-webhook"]["capabilities"]
+    assert "delivery retries" in connectors["notification-webhook"]["capabilities"]
+
+
+def test_connector_catalog_covers_required_siem_export_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
+
+    for connector_id in {"splunk", "datadog", "sentinel"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "siem"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert "audit events" in connector["capabilities"]
+        assert {"policy decisions", "policy violations"} & set(connector["capabilities"])
+        assert {"agent activity", "agent actions"} & set(connector["capabilities"])
+
+    assert "HEC exports" in connectors["splunk"]["capabilities"]
+    assert "cloud SIEM exports" in connectors["datadog"]["capabilities"]
+    assert "sentinel exports" in connectors["sentinel"]["capabilities"]
+
+
+def test_connector_catalog_covers_required_worm_storage_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
+
+    for connector_id in {"s3-worm", "gcs-worm", "azure-worm"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "worm-store"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert "immutable roots" in connector["capabilities"]
+        assert "Merkle proofs" in connector["capabilities"]
+        assert "audit chain roots" in connector["capabilities"]
+        assert "customer-owned storage" in connector["capabilities"]
+
+    assert connectors["s3-worm"]["source_type"] == "s3_object_lock"
+    assert connectors["gcs-worm"]["source_type"] == "gcs_bucket_lock"
+    assert connectors["azure-worm"]["source_type"] == "azure_immutable_blob"
+
+
+def test_connector_catalog_covers_required_provenance_sources() -> None:
+    connectors = {str(item["id"]): item for item in settings_router.connector_registry()}
+
+    for connector_id in {"sigstore", "slsa-attestations", "github-artifact-attestations"}:
+        connector = connectors[connector_id]
+        assert connector["category"] == "provenance"
+        assert connector["source_type"]
+        assert connector["description"]
+        assert {"release evidence", "artifact attestations", "build provenance"} & set(connector["capabilities"])
+
+    assert connectors["sigstore"]["source_type"] == "sigstore"
+    assert "transparency log" in connectors["sigstore"]["capabilities"]
+    assert "certificate identity" in connectors["sigstore"]["capabilities"]
+    assert connectors["slsa-attestations"]["source_type"] == "slsa_attestations"
+    assert "builder identity" in connectors["slsa-attestations"]["capabilities"]
+    assert "artifact digest" in connectors["slsa-attestations"]["capabilities"]
+    assert connectors["github-artifact-attestations"]["source_type"] == "github_artifact_attestations"
+    assert "workflow identity" in connectors["github-artifact-attestations"]["capabilities"]
+    assert "commit SHA" in connectors["github-artifact-attestations"]["capabilities"]
+
+
+def test_billing_response_adds_readiness_state() -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        plan="team",
+        seat_count=8,
+        plan_seat_limit=10,
+        stripe_customer_id="cus_123",
+        stripe_subscription_id="sub_123",
+        stripe_subscription_status="active",
+    )
+
+    payload = settings_router._billing_response(org)
+
+    assert payload["seat_count"] == 8
+    assert payload["seat_limit"] == 10
+    assert payload["seat_limit_label"] == "10"
+    assert payload["available_seats"] == 2
+    assert payload["seat_utilization_pct"] == 80
+    assert payload["subscription_state"] == "active"
+    assert payload["billing_account_connected"] is True
+    assert payload["portal_available"] is True
+    assert payload["needs_attention"] is False
+    assert payload["next_actions"] == ["monitor_usage"]
+
+
+def test_billing_response_flags_payment_and_seat_attention() -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        plan="team",
+        seat_count=3,
+        plan_seat_limit=3,
+        stripe_subscription_status="past_due",
+    )
+
+    payload = settings_router._billing_response(org)
+
+    assert payload["available_seats"] == 0
+    assert payload["seat_utilization_pct"] == 100
+    assert payload["billing_account_connected"] is False
+    assert payload["needs_attention"] is True
+    assert payload["next_actions"] == ["connect_stripe_customer", "review_payment_method", "increase_seat_limit"]
+
+
+def test_billing_endpoint_requires_billing_read_permission() -> None:
+    async def db_override():
+        yield Db([])
+
+    app.dependency_overrides[get_current_org_id] = lambda: "org-1"
+    app.dependency_overrides[get_current_user] = lambda: {"email": "viewer@example.com"}
+    app.dependency_overrides[get_db] = db_override
+    app.dependency_overrides[request_flag_cache] = lambda: None
+    try:
+        response = TestClient(app).get("/v8/orgs/org-1/settings/billing")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "RBAC permission denied"
+
+
+def test_sso_response_adds_readiness_state() -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        workos_org_id="org_workos",
+        settings={"oidc_enabled": True, "scim_enabled": True},
+    )
+
+    payload = settings_router._sso_response(org)
+
+    assert payload["ready"] is True
+    assert payload["connection_state"] == "linked"
+    assert payload["protocols_enabled"] == ["SAML", "OIDC"]
+    assert payload["provisioning_state"] == "enabled"
+    assert payload["next_actions"] == ["monitor_identity_sync"]
+
+
+def test_sso_response_flags_missing_identity_setup() -> None:
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+
+    payload = settings_router._sso_response(org)
+
+    assert payload["ready"] is False
+    assert payload["connection_state"] == "not_linked"
+    assert payload["protocols_enabled"] == []
+    assert payload["provisioning_state"] == "not_configured"
+    assert payload["next_actions"] == ["link_workos_organization", "configure_identity_protocol"]
+
+
+def test_sso_endpoint_requires_sso_read_permission() -> None:
+    async def db_override():
+        yield Db([])
+
+    app.dependency_overrides[get_current_org_id] = lambda: "org-1"
+    app.dependency_overrides[get_current_user] = lambda: {"email": "viewer@example.com"}
+    app.dependency_overrides[get_db] = db_override
+    app.dependency_overrides[request_flag_cache] = lambda: None
+    try:
+        response = TestClient(app).get("/v8/orgs/org-1/settings/sso")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "RBAC permission denied"
+
+
+def test_request_agent_compliance_connector_sync_requires_enabled_connector(monkeypatch) -> None:
+    org = Org(id="org-1", github_org_id=1, login="acme", name="Acme", settings={})
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+
+    try:
+        asyncio.run(
+            settings_router.request_agent_compliance_connector_sync(
+                "org-1",
+                "codex-cli",
+                settings_router.AgentComplianceSyncPayload(),
+                Request({"type": "http", "headers": []}),
+                db=db,
+                current_org_id="org-1",
+            )
+        )
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 409
+    else:
+        raise AssertionError("Expected sync request to require enabled connector")
+
+
+def test_request_agent_compliance_connector_sync_rejects_ingestion_mode(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "codex-cli": {
+                    "enabled": True,
+                    "source_types": ["agent sessions"],
+                    "scopes": ["audit.read"],
+                    "cursor": "old-cursor",
+                    "last_sync_status": "success",
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+
+    try:
+        asyncio.run(
+            settings_router.request_agent_compliance_connector_sync(
+                "org-1",
+                "codex-cli",
+                settings_router.AgentComplianceSyncPayload(dry_run=False),
+                Request({"type": "http", "headers": []}),
+                db=db,
+                current_org_id="org-1",
+            )
+        )
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 400
+    else:
+        raise AssertionError("Expected sync readiness to reject ingestion mode")
+
+
+def test_ingest_agent_compliance_events_normalizes_every_metric_metadata_only(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "codex-cli": {
+                    "enabled": True,
+                    "source_types": ["agent sessions"],
+                    "scopes": ["audit.read"],
+                    "cursor": "old-cursor",
+                    "last_sync_status": "success",
+                    "content_retention": "metadata-only",
+                    "total_ingested_count": 2,
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.ingest_agent_compliance_events(
+            "org-1",
+            "codex-cli",
+            settings_router.AgentComplianceIngestPayload(
+                cursor="old-cursor",
+                next_cursor="new-cursor",
+                events=[
+                    settings_router.AgentComplianceEventPayload(
+                        provider_event_id="evt-1",
+                        actor_login="ravi",
+                        provider="OpenAI Compliance Platform",
+                        model="gpt-5.2",
+                        intelligence_tier="very-high",
+                        access_scope="full-access",
+                        full_access=True,
+                        autonomous_access=True,
+                        tool_permissions=["shell", "apply_patch"],
+                        tool_calls=3,
+                        mcp_tools=["github"],
+                        repo_id="repo-1",
+                        repo_name="skillayer/api",
+                        file_targets=["apps/api/api/v8/settings/router.py"],
+                        policy_decision="require_approval",
+                        approval_status="approved",
+                        violations=["raw-content-retention-disabled"],
+                        warnings=2,
+                        tokens_input=1200,
+                        tokens_output=450,
+                        cost_usd=0.042,
+                        latency_ms=881,
+                        error_count=1,
+                        session_id="session-1",
+                        metadata={"prompt": "do not store", "safe_metric": "kept"},
+                    )
+                ],
+            ),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    event = next(item for item in db.added if isinstance(item, AuditEvent))
+    stored = org.settings["v8_agent_compliance_connectors"]["codex-cli"]
+    assert response.ingested_count == 1
+    assert response.next_cursor == "new-cursor"
+    assert response.metrics["tokens_input"] == 1200
+    assert response.metrics["tokens_output"] == 450
+    assert response.metrics["cost_usd"] == 0.042
+    assert response.metrics["full_access_events"] == 1
+    assert response.metrics["autonomous_access_events"] == 1
+    assert response.metrics["tool_permission_events"] == 6
+    assert stored["last_ingested_count"] == 1
+    assert stored["total_ingested_count"] == 3
+    assert stored["last_provider_event_id"] == "evt-1"
+    assert event.event_type == "agent.compliance"
+    assert event.severity == "critical"
+    assert event.metadata_json["content_retention"] == "metadata-only"
+    assert event.metadata_json["redaction_state"] == "raw-content-dropped"
+    assert event.metadata_json["safe_metric"] == "kept"
+    assert "prompt" not in event.metadata_json
+    assert "source_envelope_hash" in event.metadata_json
+
+
+def test_ingest_agent_compliance_events_enriches_provider_github_context(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "content_retention": "metadata-only",
+                    "total_ingested_count": 0,
+                }
+            }
+        },
+    )
+    repo = Repo(id="repo-1", org_id="org-1", github_repo_id=101, full_name="ravichanduummadisetti/skilgen", name="skilgen")
+    pr = PullRequest(id="pr-42", repo_id="repo-1", github_pr_number=42, title="Enterprise provider ingestion", head_sha="abc123")
+    db = OrgDb(org, repos=[repo], pull_requests=[pr])
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.ingest_agent_compliance_events(
+            "org-1",
+            "openai-compliance",
+            settings_router.AgentComplianceIngestPayload(
+                events=[
+                    settings_router.AgentComplianceEventPayload(
+                        provider_event_id="evt-github-1",
+                        actor_login="ravi",
+                        provider="OpenAI Compliance Platform",
+                        model="gpt-5.5",
+                        repo_name="ravichanduummadisetti/skilgen",
+                        tokens_input=100,
+                        tokens_output=25,
+                        cost_usd=0.012,
+                        metadata={"pr_number": 42, "head_sha": "abc123", "branch": "v8/provider-enrichment"},
+                    )
+                ],
+            ),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    event = next(item for item in db.added if isinstance(item, AuditEvent))
+    assert response.ingested_count == 1
+    assert event.repo_id == "repo-1"
+    assert event.repo_name == "ravichanduummadisetti/skilgen"
+    assert event.metadata_json["github_enrichment_status"] == "matched"
+    assert event.metadata_json["github_enrichment_source"] == "pull_requests"
+    assert event.metadata_json["pr_id"] == "pr-42"
+    assert event.metadata_json["pr_number"] == 42
+    assert event.metadata_json["pr_title"] == "Enterprise provider ingestion"
+    assert event.metadata_json["git_url"] == "https://github.com/ravichanduummadisetti/skilgen/pull/42"
+
+
+def test_ingest_agent_compliance_events_labels_missing_github_join(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "anthropic-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "content_retention": "metadata-only",
+                    "total_ingested_count": 0,
+                }
+            }
+        },
+    )
+    repo = Repo(id="repo-1", org_id="org-1", github_repo_id=101, full_name="ravichanduummadisetti/skilgen", name="skilgen")
+    db = OrgDb(org, repos=[repo])
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.ingest_agent_compliance_events(
+            "org-1",
+            "anthropic-compliance",
+            settings_router.AgentComplianceIngestPayload(
+                events=[
+                    settings_router.AgentComplianceEventPayload(
+                        provider_event_id="evt-github-gap-1",
+                        actor_login="ravi",
+                        provider="Anthropic Compliance API",
+                        model="claude-opus-4-7",
+                        repo_name="ravichanduummadisetti/skilgen",
+                        tokens_input=100,
+                        tokens_output=25,
+                        cost_usd=0.012,
+                        metadata={"commit_sha": "def456"},
+                    )
+                ],
+            ),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    event = next(item for item in db.added if isinstance(item, AuditEvent))
+    assert response.ingested_count == 1
+    assert event.metadata_json["github_enrichment_status"] == "missing"
+    assert event.metadata_json["github_enrichment_gap"] == "Provider event included GitHub metadata, but no matching PR/commit record was found."
+    assert event.metadata_json["git_url"] == "https://github.com/ravichanduummadisetti/skilgen/commit/def456"
+
+
+def test_ingest_agent_compliance_events_matches_commit_sha_to_commit_row(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "anthropic-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "content_retention": "metadata-only",
+                    "total_ingested_count": 0,
+                }
+            }
+        },
+    )
+    repo = Repo(id="repo-1", org_id="org-1", github_repo_id=101, full_name="ravichanduummadisetti/skilgen", name="skilgen")
+    commit = Commit(repo_id="repo-1", sha="def456")
+    db = OrgDb(org, repos=[repo], commits=[commit])
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.ingest_agent_compliance_events(
+            "org-1",
+            "anthropic-compliance",
+            settings_router.AgentComplianceIngestPayload(
+                events=[
+                    settings_router.AgentComplianceEventPayload(
+                        provider_event_id="evt-github-commit-match-1",
+                        actor_login="ravi",
+                        provider="Anthropic Compliance API",
+                        model="claude-opus-4-7",
+                        repo_name="ravichanduummadisetti/skilgen",
+                        tokens_input=100,
+                        tokens_output=25,
+                        cost_usd=0.012,
+                        metadata={"commit_sha": "def456"},
+                    )
+                ],
+            ),
+            Request({"type": "http", "headers": []}),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    event = next(item for item in db.added if isinstance(item, AuditEvent))
+    assert response.ingested_count == 1
+    assert event.metadata_json["github_enrichment_status"] == "matched"
+    assert event.metadata_json["github_enrichment_source"] == "commits"
+    assert event.metadata_json["commit_sha"] == "def456"
+    assert event.metadata_json["git_url"] == "https://github.com/ravichanduummadisetti/skilgen/commit/def456"
+
+
+def test_ingest_agent_compliance_events_falls_back_to_request_actor(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "codex-cli": {
+                    "enabled": True,
+                    "source_types": ["agent sessions"],
+                    "scopes": ["audit.read"],
+                    "cursor": None,
+                    "content_retention": "metadata-only",
+                    "total_ingested_count": 0,
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    def token_for(actor: str) -> str:
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode()).decode().rstrip("=")
+        payload = base64.urlsafe_b64encode(json.dumps({"preferred_username": actor}).encode()).decode().rstrip("=")
+        return f"{header}.{payload}.x"
+
+    actor_login = "ravi@example.com"
+    request = Request(
+        {
+            "type": "http",
+            "headers": [(b"authorization", f"Bearer {token_for(actor_login)}".encode())],
+        }
+    )
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.ingest_agent_compliance_events(
+            "org-1",
+            "codex-cli",
+            settings_router.AgentComplianceIngestPayload(
+                cursor=None,
+                next_cursor=None,
+                events=[
+                    settings_router.AgentComplianceEventPayload(
+                        provider_event_id="evt-actor-fallback",
+                        provider="Codex CLI",
+                        actor_login=None,
+                        access_scope="full-access",
+                    )
+                ],
+            ),
+            request,
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    event = next(item for item in db.added if isinstance(item, AuditEvent))
+    assert response.ingested_count == 1
+    assert event.actor_login == actor_login
+    assert event.metadata_json["actor_login"] == actor_login
+
+
+def test_queue_agent_compliance_ingest_job_tracks_cursor_page_state(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "cursor": "cursor-1",
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.queue_agent_compliance_ingest_job(
+            "org-1",
+            "openai-compliance",
+            settings_router.AgentComplianceIngestPayload(
+                cursor="cursor-1",
+                next_cursor="cursor-2",
+                events=[
+                    settings_router.AgentComplianceEventPayload(
+                        provider_event_id="evt-job-1",
+                        provider="OpenAI Compliance Platform",
+                    )
+                ],
+            ),
+            Request({"type": "http", "headers": []}),
+            BackgroundTasks(),
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    job = next(item for item in db.added if isinstance(item, Job))
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    assert response.queued is True
+    assert response.event_count == 1
+    assert response.cursor == "cursor-1"
+    assert response.next_cursor == "cursor-2"
+    assert job.type == "agent_compliance.ingest"
+    assert job.status == "queued"
+    assert job.result_json["pagination_strategy"] == "cursor-resume"
+    assert job.result_json["content_retention"] == "metadata-only"
+    assert stored["last_sync_status"] == "queued"
+    assert stored["last_sync_mode"] == "ingest-job"
+    assert stored["last_ingest_job"]["job_id"] == job.id
+    assert stored["last_ingest_job"]["event_count"] == 1
+
+
+def test_agent_compliance_ingest_job_status_is_connector_scoped(monkeypatch) -> None:
+    job = Job(
+        id="job-1",
+        org_id="org-1",
+        type="agent_compliance.ingest",
+        status="completed",
+        result_json={
+            "connector_id": "openai-compliance",
+            "ingested_count": 3,
+            "content_retention": "metadata-only",
+        },
+        created_at=datetime(2026, 5, 11, 8, 30, 0),
+    )
+
+    class JobDb:
+        async def get(self, model: object, row_id: str) -> object | None:
+            assert model is Job
+            assert row_id == "job-1"
+            return job
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+
+    response = asyncio.run(
+        settings_router.get_agent_compliance_ingest_job(
+            "org-1",
+            "openai-compliance",
+            "job-1",
+            db=JobDb(),
+            current_org_id="org-1",
+        )
+    )
+
+    assert response.job_id == "job-1"
+    assert response.status == "completed"
+    assert response.result["ingested_count"] == 3
+
+
+def test_queue_agent_compliance_provider_sync_job_tracks_schedule_state(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "anthropic-compliance": {
+                    "enabled": True,
+                    "source_types": ["audit logs"],
+                    "scopes": ["audit.read"],
+                    "cursor": "anthropic-cursor-1",
+                    "content_retention": "metadata-only",
+                }
+            }
+        },
+    )
+    db = OrgDb(org)
+    background_tasks = BackgroundTasks()
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    async def emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.queue_agent_compliance_provider_sync_job(
+            "org-1",
+            "anthropic-compliance",
+            Request({"type": "http", "headers": []}),
+            background_tasks,
+            db=db,
+            current_org_id="org-1",
+        )
+    )
+
+    job = next(item for item in db.added if isinstance(item, Job))
+    stored = org.settings["v8_agent_compliance_connectors"]["anthropic-compliance"]
+    assert response.queued is True
+    assert response.cursor == "anthropic-cursor-1"
+    assert response.next_sync_at
+    assert job.type == "agent_compliance.provider_sync"
+    assert job.status == "queued"
+    assert job.result_json["pagination_strategy"] == "cursor-resume"
+    assert job.result_json["content_retention"] == "metadata-only"
+    assert stored["last_sync_status"] == "queued"
+    assert stored["last_sync_mode"] == "provider-sync-job"
+    assert stored["next_sync_at"]
+    assert stored["last_provider_sync_job"]["job_id"] == job.id
+
+
+def test_worker_queues_due_provider_sync_and_skips_running_connector(monkeypatch) -> None:
+    org = Org(
+        id="org-1",
+        github_org_id=1,
+        login="acme",
+        name="Acme",
+        settings={
+            "v8_agent_compliance_connectors": {
+                "openai-compliance": {
+                    "enabled": True,
+                    "cursor": "openai-cursor-1",
+                    "content_retention": "metadata-only",
+                    "next_sync_at": "2026-05-20T14:45:00+00:00",
+                },
+                "anthropic-compliance": {
+                    "enabled": True,
+                    "cursor": "anthropic-cursor-1",
+                    "content_retention": "metadata-only",
+                    "last_provider_sync_job": {"status": "running", "job_id": "job-running"},
+                },
+            }
+        },
+    )
+    db = SchedulerDb([org])
+    background_tasks = BackgroundTasks()
+    emitted: list[dict[str, object]] = []
+
+    async def credential_connection(db, org_id, connector_id):
+        assert org_id == "org-1"
+        assert connector_id == "openai-compliance"
+        return SimpleNamespace(id="connection-1")
+
+    async def emit(db, org_id, event_type, action, summary, **kwargs):
+        emitted.append({"org_id": org_id, "event_type": event_type, "action": action, "summary": summary, **kwargs})
+
+    monkeypatch.setattr(settings_router, "_agent_credential_connection", credential_connection)
+    monkeypatch.setattr(settings_router.audit, "emit", emit)
+
+    response = asyncio.run(
+        settings_router.queue_due_agent_compliance_provider_sync_jobs(
+            db,
+            background_tasks,
+            actor_login="worker:agent-compliance-provider-sync",
+            now=datetime.fromisoformat("2026-05-20T15:00:00+00:00"),
+        )
+    )
+
+    job = next(item for item in db.added if isinstance(item, Job))
+    stored = org.settings["v8_agent_compliance_connectors"]["openai-compliance"]
+    assert response["queued_count"] == 1
+    assert response["skipped_count"] == 1
+    assert response["skipped"][0]["connector_id"] == "anthropic-compliance"
+    assert response["skipped"][0]["reason"] == "previous_sync_still_running"
+    assert job.type == "agent_compliance.provider_sync"
+    assert job.status == "queued"
+    assert job.result_json["scheduled_by"] == "worker"
+    assert job.result_json["cursor"] == "openai-cursor-1"
+    assert stored["last_sync_status"] == "queued"
+    assert stored["last_sync_mode"] == "provider-sync-worker"
+    assert stored["last_provider_sync_job"]["job_id"] == job.id
+    assert len(background_tasks.tasks) == 1
+    assert emitted[0]["org_id"] == "org-1"
+    assert db.committed is True
+
+
+def test_agent_compliance_provider_sync_job_status_is_connector_scoped(monkeypatch) -> None:
+    job = Job(
+        id="job-sync-1",
+        org_id="org-1",
+        type="agent_compliance.provider_sync",
+        status="completed",
+        result_json={
+            "connector_id": "anthropic-compliance",
+            "ingested_count": 2,
+            "content_retention": "metadata-only",
+        },
+        created_at=datetime(2026, 5, 11, 8, 30, 0),
+    )
+
+    class JobDb:
+        async def get(self, model: object, row_id: str) -> object | None:
+            assert model is Job
+            assert row_id == "job-sync-1"
+            return job
+
+    async def ensure_v8(org_id, current_org_id, db):
+        assert org_id == current_org_id == "org-1"
+
+    monkeypatch.setattr(settings_router, "_assert_v8_org", ensure_v8)
+
+    response = asyncio.run(
+        settings_router.get_agent_compliance_provider_sync_job(
+            "org-1",
+            "anthropic-compliance",
+            "job-sync-1",
+            db=JobDb(),
+            current_org_id="org-1",
+        )
+    )
+
+    assert response.job_id == "job-sync-1"
+    assert response.status == "completed"
+    assert response.result["ingested_count"] == 2
+
+
+def test_scope_expression_positive_for_payments_repo() -> None:
+    expression = {"all": [{"surface": "policy"}, {"repo": "payments/*"}]}
+    context = {"surface": "policy", "repo": "payments/api"}
+
+    assert matches_scope_expression(expression, context) is True
+
+
+def test_scope_expression_negative_for_wrong_repo() -> None:
+    expression = "surface:policy && repo:payments/*"
+    context = {"surface": "policy", "repo": "growth/site"}
+
+    assert matches_scope_expression(expression, context) is False
+
+
+def test_scope_expression_supports_any_and_not() -> None:
+    expression = {"all": [{"any": [{"team": "security"}, {"team": "platform"}]}, {"not": {"repo": "sandbox/*"}}]}
+
+    assert matches_scope_expression(expression, {"team": "platform", "repo": "payments/api"}) is True
+    assert matches_scope_expression(expression, {"team": "platform", "repo": "sandbox/demo"}) is False
+
+
+def test_permission_wildcards_match_nested_permissions() -> None:
+    assert permission_matches("settings.*", "settings.rbac.manage") is True
+    assert permission_matches("settings.read", "settings.rbac.manage") is False
+
+
+def test_has_permission_allows_matching_permission_and_scope() -> None:
+    role = SimpleNamespace(permissions=["policy.approvals.approve"])
+    binding = SimpleNamespace(scope_expression={"repo": "payments/*"})
+
+    allowed = asyncio.run(
+        has_permission(
+            Db([(role, binding)]),
+            org_id="org_1",
+            principal_id="reviewer@example.com",
+            permission="policy.approvals.approve",
+            scope={"repo": "payments/api"},
+        )
+    )
+
+    assert allowed is True
+
+
+def test_has_permission_denies_out_of_scope_binding() -> None:
+    role = SimpleNamespace(permissions=["policy.approvals.approve"])
+    binding = SimpleNamespace(scope_expression={"repo": "payments/*"})
+
+    allowed = asyncio.run(
+        has_permission(
+            Db([(role, binding)]),
+            org_id="org_1",
+            principal_id="reviewer@example.com",
+            permission="policy.approvals.approve",
+            scope={"repo": "growth/site"},
+        )
+    )
+
+    assert allowed is False
+
+
+def test_rbac_migration_up_and_down() -> None:
+    engine = sa.create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(sa.text("create table orgs (id varchar primary key)"))
+        context = MigrationContext.configure(connection)
+        ops = Operations(context)
+        original_op = rbac_migration.op
+        rbac_migration.op = ops
+        try:
+            rbac_migration.upgrade()
+            inspector = sa.inspect(connection)
+            assert "roles" in inspector.get_table_names()
+            assert "role_bindings" in inspector.get_table_names()
+
+            rbac_migration.downgrade()
+            inspector = sa.inspect(connection)
+            assert "roles" not in inspector.get_table_names()
+            assert "role_bindings" not in inspector.get_table_names()
+        finally:
+            rbac_migration.op = original_op
